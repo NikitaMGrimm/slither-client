@@ -164,5 +164,18 @@ export function presentationSmoke(wasm) {
       assert.equal(boundary.snapshot(), stable);
       assert.deepEqual(boundary.samples(), stableSamples);
     }
+    boundary.apply_setup(1000);
+    boundary.set_target(1e-14);
+    const tiny = JSON.parse(boundary.snapshot());
+    assert.equal(tiny.displayed, 1000);
+    assert.equal(tiny.target, 1e-14);
+    assert.equal(boundary.samples()[(tiny.index + 55) % 56], 0,
+      'retain subtraction/addition cancellation instead of replacing the final sample with the target');
+    for (let index = 0; index < 12; index++) advanceBoundary(40);
+    assert.equal(JSON.parse(boundary.snapshot()).displayed, 0);
+    assert.deepEqual(boundary.samples(), new Float64Array(56).fill(1e-14));
+    const exhausted = boundary.snapshot();
+    assert.throws(() => boundary.set_target(0));
+    assert.equal(boundary.snapshot(), exhausted, 'computed zero does not admit zero input');
   } finally { boundary.free(); boundaryClock.free(); }
 }

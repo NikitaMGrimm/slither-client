@@ -98,6 +98,24 @@ fn weights_and_samples_keep_double_precision() {
 }
 
 #[test]
+fn tiny_positive_target_keeps_rounded_zero_sample_without_an_endpoint_shortcut() {
+    let mut boundary = BoundaryRadius::new(1000.).unwrap();
+    boundary.set_target(1e-14).unwrap();
+    assert_eq!(boundary.target(), 1e-14);
+    assert_eq!(boundary.displayed(), 1000.);
+    assert_eq!(boundary.samples()[BOUNDARY_SAMPLES - 1], 0.);
+    boundary.advance(56, true);
+    assert_eq!(boundary.displayed(), 0.);
+    assert_eq!(boundary.samples(), &[1e-14; BOUNDARY_SAMPLES]);
+    let exhausted = boundary.clone();
+    assert!(boundary.set_target(0.).is_err());
+    assert_eq!(boundary, exhausted);
+    boundary.set_target(1000.).unwrap();
+    boundary.advance(56, true);
+    assert_eq!(boundary.displayed(), 1000.);
+}
+
+#[test]
 fn invalid_radii_preserve_the_complete_ring() {
     let mut boundary = BoundaryRadius::new(600.).unwrap();
     boundary.set_target(300.).unwrap();

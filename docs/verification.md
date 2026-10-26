@@ -122,9 +122,10 @@ draw received anchors; `/animated` connects the model to sampled body drawing.
 
 ## Standalone boundary-radius checks
 
-Six native synthetic tests cover target scheduling, connection and whole-step
+Seven native synthetic tests cover target scheduling, connection and whole-step
 gating, overlapping/equal updates, absolute samples, wrap, deferred cleanup,
-setup cadence, double-precision storage and atomic rejection. The real Wasm
+setup cadence, double-precision storage, cancellation to zero for a tiny positive
+target and atomic rejection. The real Wasm
 presentation smoke checks the copied arrays, current-host cosine weights,
 borrowed-step gating, setup behavior, exhaustion and invalid inputs through
 `BoundarySmoother`. These establish the standalone numeric API; scene packet
