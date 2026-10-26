@@ -226,9 +226,10 @@ pub enum PresentationEvent {
         /// Optional received fractional mass.
         fam: Option<f64>,
     },
-    /// Remove a known snake, retaining whether death presentation was requested.
+    /// Request removal by ID, even when absent from the received-state map.
+    /// Each request can reach a retained duplicate presentation object.
     SnakeRemoved {
-        /// Removed wire identifier.
+        /// Wire identifier requested for removal.
         id: u16,
         /// True only when the wire removal flag equals one.
         died: bool,
@@ -331,9 +332,11 @@ impl ClientState {
     /// Atomically apply a frame and return every supported presentation change.
     ///
     /// Events retain wire order, including replacements and mid-frame resets.
-    /// Unknown explicit IDs and food commands emit no events. Compact own
-    /// commands retain `Own` targeting after received-state removal, until setup.
-    /// Elapsed headers never advance presentation here.
+    /// Removal requests always emit, including unknown or already removed IDs,
+    /// so retained presentation duplicates remain reachable. Other unknown
+    /// explicit-ID updates and food commands emit no events. Compact own commands
+    /// retain `Own` targeting after received-state removal, until setup. Elapsed
+    /// headers never advance presentation here.
     pub fn apply_frame_with_events(
         &mut self,
         bytes: &[u8],
@@ -519,9 +522,8 @@ impl ClientState {
         let id = word(p, 1)?;
         if p.len() <= 7 {
             require(p, matches!(p.len(), 3 | 4))?;
-            if self.snakes.remove(&id).is_some()
-                && let Some(events) = events
-            {
+            self.snakes.remove(&id);
+            if let Some(events) = events {
                 events.push(PresentationEvent::SnakeRemoved {
                     id,
                     died: p.get(3) == Some(&1),

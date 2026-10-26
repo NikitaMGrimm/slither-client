@@ -64,11 +64,12 @@ direction and an optional absolute position, so the presentation layer can
 reconstruct relative anchors with its own absolute geometry.
 
 `SnakeTarget::Own` addresses the retained own presentation object independently
-of the visible ID map; explicit unknown IDs emit no events. Removal distinguishes
-death from immediate disappearance. Radius events change a target, leaving
-display easing to presentation. Neither elapsed headers nor event application
-advance an animation clock. The existing browser preview still uses received
-state; these native inputs are not yet connected to its render loop.
+of the visible ID map; explicit unknown updates emit no events except removal
+requests. Every validated removal reaches presentation, allowing repeated IDs to
+remove surviving duplicate appearances. Removal distinguishes death from
+immediate disappearance. Radius events change a target, leaving display easing
+to presentation. Neither elapsed headers nor event application advance an
+animation clock.
 
 ## Presentation timing primitives
 
@@ -107,9 +108,9 @@ corrections and fade tails, retaining the three newest dying records. Logical
 count is capped at 4096 and physical retention at 8192 per body. This module does
 not sample curves, draw sprites or implement authoritative physics.
 
-Wasm trigonometry uses the current host's `Math.sin`/`Math.cos`, preserving browser
-rounding in geometry and correction weights. Native builds use standard-library
-trigonometry; no cross-platform bit-equality claim follows from that fallback.
+Wasm presentation math uses the current host's `Math.sin`, `Math.cos`, `Math.pow`
+and `Math.atan2`, preserving browser rounding at those boundaries. Native builds
+use standard-library math; no cross-platform bit-equality claim follows.
 
 Wasm exports `AnimationClock`, owned `AnimationStep` values, and `HeadPredictor`.
 Free a step after its consumers advance, and free clocks/predictors when finished.
@@ -120,13 +121,46 @@ distance. Packet validation, body changes and camera corrections remain separate
 
 Standalone `LengthSmoother` and `CameraSmoother` bindings expose those two clocks
 and copied sample/weight arrays. Segment counts are checked as exact unsigned
-integers before conversion at the JavaScript boundary. `BodyGeometry` currently
-has a native Rust API; it is not a browser body renderer.
+integers before conversion at the JavaScript boundary. `BodyGeometry` also feeds
+the coupled client described below.
 
-These primitives are not yet connected to the scene's packet or render loop.
-Applying ordered events to a complete snake, sampled curves, following-camera
-integration, eyes, complete skins and HQ/LQ rendering still require implementation
-and comparison. The visible scene remains a received-anchor preview.
+## Coupled animation
+
+`SnakePresentation` couples motion, body, head/angle/length corrections, size,
+visual speed, spawn and death progress. `AnimatedClient` applies ordered events
+atomically with received state. Updates advance the explicit frame clock; draws
+advance camera samples, automatic zoom, corrected-body visibility and point
+spacing. Packet application advances neither clock. Elapsed headers do not add
+anchor extrapolation time.
+
+Retained objects preserve duplicate appearances and original own identity through
+death, draw expiry and wire-ID reuse. Explicit lookup addresses the newest
+appearance; removals scan surviving drawn objects oldest first. Input uses the
+original own object's active lifecycle independently of lookup reuse. Retention
+is capped at 512 objects and 131,072 physical anchors across all objects. Team
+mode 2 is rejected atomically because normalized-skin grouping is unimplemented.
+
+`sample_curve` accepts corrected absolute geometry and returns ordered Float32
+positions/tangents with read-only Float64 diagnostics. Redistribution precedes
+tangent calculation and Float32 storage. Finite signed corrected edge widths are
+retained. Each curve is capped at 65,536 samples; entering a zero divisor or
+producing nonfinite geometry fails. Bodies with fewer than two anchors remain
+valid received/presentation state but are omitted from curve drawing until
+another anchor arrives.
+
+The Wasm `AnimatedScene` owns this model. `advance` returns an owned step to free;
+`render` prepares one draw internally and commits numeric state after successful
+drawing. `prepare_draw` is a numeric-only alternative: do not call it immediately
+before `render` for the same draw. Own body, correction and curve diagnostics are
+copied arrays. `snapshot` separates the active input head from retained own
+diagnostics; nested own and explicit camera absolute fields use absolute units.
+
+`web/animated.mjs` runs update then render once per animation callback, applying
+incoming packets immediately. It frees steps and the session, cancels callbacks
+on pagehide, and continues animation after local transport disconnection. The
+separate `/animated` page draws sampled bodies with three generated palettes.
+Complete skins, eyes, effects, attachments, HQ/LQ drawing and radius easing remain
+unimplemented. This preview does not establish visual or gameplay equivalence.
 
 ## Browser rendering
 

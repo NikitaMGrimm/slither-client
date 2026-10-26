@@ -5,6 +5,7 @@ import { HandshakeSession } from '../web/handshake-session.mjs';
 import { bundle, syntheticScene, syntheticSetup, syntheticStep } from '../web/synthetic-scene.mjs';
 import { denseScene, DENSE_SCENE_PROFILES } from '../web/dense-scene.mjs';
 import { presentationSmoke } from './presentation-smoke.mjs';
+import { animatedSmoke } from './animated-smoke.mjs';
 
 // Entirely synthetic ABI integration; no reference files or network are used.
 const wasm = await loadWasm();
@@ -56,3 +57,5 @@ for (const [name, profile] of Object.entries(DENSE_SCENE_PROFILES)) {
 console.log('Synthetic dense fixture presets passed the real Wasm ABI.');
 presentationSmoke(wasm);
 console.log('Synthetic presentation clock, prediction and correction Wasm ABI passed.');
+animatedSmoke(wasm);
+console.log('Synthetic coupled animation, curve and lifecycle Wasm ABI passed.');

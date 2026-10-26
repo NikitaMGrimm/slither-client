@@ -23,9 +23,10 @@
 ## Status
 
 Version `0.1.0-alpha.0` is unreleased. The client provides bounded handshake
-primitives, atomic protocol-19 scene state, and a Rust/Wasm Canvas2D preview
-with a camera and three palettes. A deterministic synthetic scene runs offline;
-an optional loopback simulator connection adds pointer heading and Space boost.
+primitives, atomic protocol-19 scene state, and Rust/Wasm Canvas2D previews
+with three stand-in palettes. The animated preview connects prediction, body
+corrections, sampled curves and a following camera. Deterministic synthetic scenes
+run offline; an optional loopback simulator connection adds pointer heading and Space boost.
 There is no fully playable game or installed browser extension.
 See [architecture](docs/architecture.md) for supported inputs and limits.
 
@@ -68,6 +69,11 @@ After building, run `npm run scene` and open `http://127.0.0.1:18884/` for the
 synthetic scene. **Step** advances a received anchor; **Palette**, **Zoom**, and
 **Follow** change the preview. For local simulator controls, see
 [the loopback procedure](docs/verification.md#offline-scene-and-local-simulator).
+
+Open `http://127.0.0.1:18884/animated` for continuous prediction and corrected
+body sampling. It uses original stand-in artwork; full skins, eyes, attachments
+and quality-dependent drawing are still pending. The received-anchor preview
+at `/` remains available for comparison.
 
 CI checks native Rust on Linux and Windows and runs a real Wasm ABI smoke test
 on Linux. Release-plz remains dormant; ordinary pushes do not publish artifacts.
