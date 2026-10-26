@@ -38,7 +38,7 @@ async function fixture(t) {
   await fs.writeFile(path.join(root, 'site/assets-manifest.json'), JSON.stringify(manifest));
   await fs.writeFile(path.join(root, 'site/s/synthetic.png'), image);
   await fs.writeFile(path.join(root, 'site/s/unlisted.png'), 'SYNTHETIC unlisted');
-  for (const name of ['prototype.mjs', 'asset-bridge.mjs', 'network-fence.js', 'prototype.css']) {
+  for (const name of ['prototype.mjs', 'synthetic-scene.mjs', 'asset-bridge.mjs', 'network-fence.js', 'prototype.css']) {
     await fs.writeFile(path.join(project, 'web', name), `/* SYNTHETIC ${name} */`);
   }
   for (const name of ['slither_client.js', 'slither_client_bg.wasm']) {

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add atomic protocol-19 setup, snake and food scene state with bounded retention,
+  synthetic transition/rejection tests and a real Wasm scene ABI smoke test.
+- Add a Rust/Wasm Canvas2D received-anchor preview with camera/palette controls,
+  borrowed sprites, viewport culling and one scheduled paint per network burst.
+- Add an offline synthetic page and an optional loopback simulator connection
+  with pointer heading, Space boost, ping and session teardown.
 - Add bounded Rust login encoding, strict challenge parsing, whole-frame structural
   validation, and setup-version extraction with synthetic regression tests.
 - Add wasm32 browser bindings and an original bridge that borrows existing canvas

@@ -22,6 +22,7 @@ const csp = [
 
 const ownRoutes = new Map([
   ['/prototype/prototype.mjs', ['web/prototype.mjs', 'text/javascript; charset=utf-8']],
+  ['/prototype/synthetic-scene.mjs', ['web/synthetic-scene.mjs', 'text/javascript; charset=utf-8']],
   ['/prototype/asset-bridge.mjs', ['web/asset-bridge.mjs', 'text/javascript; charset=utf-8']],
   ['/prototype/network-fence.js', ['web/network-fence.js', 'text/javascript; charset=utf-8']],
   ['/prototype/prototype.css', ['web/prototype.css', 'text/css; charset=utf-8']],

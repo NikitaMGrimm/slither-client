@@ -1,6 +1,7 @@
 # Documentation
 
-The current prototypes cover bounded protocol primitives and a browser asset draw.
+The current client covers bounded protocol primitives, atomic scene state,
+Canvas2D rendering and an optional local simulator connection.
 
 - [Architecture](architecture.md): modules, supported inputs, and browser scope.
 - [Verification](verification.md): builds, tests, optional comparisons, and results.

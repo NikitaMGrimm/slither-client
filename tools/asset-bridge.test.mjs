@@ -54,6 +54,19 @@ test('import, borrowing, and description do not load, create, render, or export 
 
 const { borrowReferenceAssets, describeBorrowedAssets } = await import('../web/asset-bridge.mjs');
 
+test('three scene palettes borrow their exact existing source and reject other selections', () => {
+  const scope = syntheticRealm();
+  scope.per_color_imgs.push({ kmcs: [new scope.HTMLCanvasElement()] }, { kmcs: [new scope.HTMLCanvasElement()] });
+  for (const palette of [0, 1, 2]) {
+    const assets = borrowReferenceAssets(scope, palette);
+    assert.equal(assets.generated, scope.per_color_imgs[palette].kmcs[0]);
+    assert.equal(assets.downloaded, scope.bg_hex);
+  }
+  for (const palette of [-1, 3, 0.5, NaN, '1']) assert.throws(() => borrowReferenceAssets(scope, palette), /palettes/);
+  delete scope.per_color_imgs[2].kmcs[0];
+  assert.throws(() => borrowReferenceAssets(scope, 2), /per_color_imgs\[2\]/);
+});
+
 test('preserves exact element identity and leaves frozen source objects unchanged', () => {
   const scope = syntheticRealm();
   const generated = scope.per_color_imgs[0].kmcs[0];

@@ -1,5 +1,6 @@
-import init, { render_borrowed_assets } from './pkg/slither_client.js';
+import init, { render_borrowed_assets, Scene } from './pkg/slither_client.js';
 import { borrowReferenceAssets, describeBorrowedAssets } from './asset-bridge.mjs';
+import { syntheticScene } from './synthetic-scene.mjs';
 
 const panel = document.createElement('section');
 panel.id = 'slither-prototype';
@@ -46,6 +47,15 @@ try {
   window.slitherPrototypeReport = report;
   status.textContent = `Wasm draw: passed\nObject identity: ${report.sourceObjectsReused}\nPixel comparison: ${pixelsEqual}\nGame connections: 0`;
   if (!pixelsEqual || !report.sourceObjectsReused) throw new Error('Borrowed asset comparison failed');
+  const palettes = [0, 1, 2].map(index => borrowReferenceAssets(window, index).generated);
+  const world = new Scene();
+  world.apply_frame(syntheticScene(), false);
+  const sceneTarget = document.createElement('canvas'); sceneTarget.width = 385; sceneTarget.height = 240;
+  world.render(sceneTarget, ...palettes, borrowed.downloaded, 0, 0, 1);
+  panel.appendChild(sceneTarget);
+  report.scene = { ...JSON.parse(world.snapshot()),
+    sourceObjectsReused: palettes.every((source, index) => source === window.per_color_imgs[index].kmcs[0]) };
+  world.free();
 } catch (error) {
   window.slitherPrototypeReport = { error: String(error) };
   status.textContent = `Prototype failed: ${String(error)}`;
