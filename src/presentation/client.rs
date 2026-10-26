@@ -410,6 +410,10 @@ impl AnimatedClient {
                         setup.radius = radius;
                     }
                 }
+                // Owned food integration is separate from the received-food preview.
+                PresentationEvent::FoodSpawn(_)
+                | PresentationEvent::FoodConsume { .. }
+                | PresentationEvent::FoodSectorClear { .. } => {}
             }
         }
         next.received = received;

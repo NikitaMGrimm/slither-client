@@ -3,8 +3,8 @@
 use slither_client::{
     protocol::ElapsedHeader,
     state::{
-        AppliedFrame, ClientState, Direction, FrameReport, MAX_BODY_POINTS, MAX_FOODS, MAX_SNAKES,
-        Point, PresentationEvent, SnakeTarget, StateError,
+        AppliedFrame, ClientState, Direction, FoodSpawnInput, FrameReport, MAX_BODY_POINTS,
+        MAX_FOODS, MAX_SNAKES, Point, PresentationEvent, SnakeTarget, StateError,
     },
 };
 use std::f64::consts::TAU;
@@ -621,7 +621,7 @@ fn synthetic_bundled_removal_requests_preserve_order_and_all_or_nothing_publicat
             ignored: 1
         }
     );
-    assert_eq!(applied.events.len(), 5);
+    assert_eq!(applied.events.len(), 7);
     assert!(
         matches!(&applied.events[0], PresentationEvent::SnakeAppearance(appearance) if appearance.id == 7 && appearance.wire_direction == Direction::Decreasing)
     );
@@ -634,6 +634,8 @@ fn synthetic_bundled_removal_requests_preserve_order_and_all_or_nothing_publicat
             PresentationEvent::SnakeRemoved { id: 7, died: false },
             PresentationEvent::SnakeRemoved { id: 7, died: false },
             PresentationEvent::SnakeRemoved { id: 99, died: true },
+            food_spawn((9, 8), (7, 6), 5, 255, false),
+            food_consume([7, 6, 5, 4], None),
         ]
     );
     assert_eq!(
@@ -826,6 +828,13 @@ fn synthetic_equal_repeated_changes_are_not_coalesced() {
         vec![b'h', 0, 0, 0, 0, 0],
         vec![b'z', 0, 3, 32],
         vec![b'=', 0, 0, 3, 232, 3, 232],
+        vec![b'F', 1, 2, 9, 3, 4, 5],
+        vec![b'f', 1, 2, 3, 4, 18, 5],
+        vec![b'b', 1, 2, 3, 4, 255, 5],
+        vec![b'c', 1, 2, 3, 4],
+        vec![b'C', 3, 4],
+        vec![b'<', 1, 2, 3, 4, 0, 0],
+        vec![b'w', 1, 2],
     ] {
         let result = apply(&mut state, &bundle(&[packet.clone(), packet]));
         assert_eq!(result.events.len(), 2);
@@ -991,36 +1000,405 @@ fn synthetic_unknown_entity_updates_emit_only_removal_requests_and_do_not_advanc
     assert_eq!(state.last_elapsed_ms, Some(u16::MAX));
 }
 
+fn food_spawn(
+    sector: (u8, u8),
+    offset: (u8, u8),
+    size: u8,
+    color: u8,
+    rapid: bool,
+) -> PresentationEvent {
+    PresentationEvent::FoodSpawn(FoodSpawnInput {
+        key: u32::from_be_bytes([sector.0, sector.1, offset.0, offset.1]),
+        sector,
+        absolute_position: Point {
+            x: f64::from(offset.0) * (100. / 256.) + f64::from(sector.0) * 100.,
+            y: f64::from(offset.1) * (100. / 256.) + f64::from(sector.1) * 100.,
+        },
+        size_byte: size,
+        base_size: f64::from(size) / 5.,
+        raw_color: color,
+        rapid,
+    })
+}
+
+fn food_consume(bytes: [u8; 4], eater_id: Option<u16>) -> PresentationEvent {
+    PresentationEvent::FoodConsume {
+        key: u32::from_be_bytes(bytes),
+        eater_id,
+    }
+}
+
 #[test]
-fn synthetic_all_food_families_change_received_state_without_events() {
+fn synthetic_food_spawn_lengths_share_raw_color_but_not_consume_sectors() {
+    for code in *b"fb" {
+        for color in [0, 9, 10, 18, 255] {
+            let mut state = playing();
+            let commands = [
+                vec![code, 1, 2, 10, 11, color, 0], // Explicit sector and color.
+                vec![b'c', 8, 9, 1, 2],             // Consume sector must not affect spawn.
+                vec![b'F', 6, 7, 42, 1, 2, 255],    // Nor may F change either cache.
+                vec![b'F', 4, 5],
+                vec![b'W', 99, 100],
+                vec![if code == b'f' { b'b' } else { b'f' }, 12, 13, 255],
+                vec![code, 14, 15, color, 25], // Compact sector, explicit color.
+                vec![code, 3, 4, 16, 17, 30],  // Explicit sector, cached color.
+                vec![b'C', 3, 4],              // Still consume sector (8,9), absent eater.
+            ];
+            let result = apply(&mut state, &bundle(&commands));
+            assert_eq!(
+                result.report,
+                FrameReport {
+                    commands: 9,
+                    ignored: 1
+                }
+            );
+            assert_eq!(
+                result.events,
+                [
+                    food_spawn((1, 2), (10, 11), 0, color, code == b'b'),
+                    food_consume([8, 9, 1, 2], None),
+                    food_spawn((6, 7), (1, 2), 255, 42, true),
+                    food_spawn((1, 2), (12, 13), 255, color, code != b'b'),
+                    food_spawn((1, 2), (14, 15), 25, color, code == b'b'),
+                    food_spawn((3, 4), (16, 17), 30, color, code == b'b'),
+                    food_consume([8, 9, 3, 4], None),
+                ]
+            );
+            for offset in [(10, 11), (12, 13), (14, 15)] {
+                let food = &state.foods[&u32::from_be_bytes([1, 2, offset.0, offset.1])];
+                assert_eq!(
+                    food.color, color,
+                    "cache stores raw colors, including 9 and 255"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn synthetic_food_consume_lengths_cache_ids_including_unknown_and_zero() {
+    for eater in [0_u16, 17, u16::MAX] {
+        let mut state = playing();
+        let [high, low] = eater.to_be_bytes();
+        let result = apply(
+            &mut state,
+            &bundle(&[
+                vec![b'C', 1, 2, 10, 11], // No prior eater.
+                vec![b'c', 12, 13],
+                vec![b'<', 3, 4, 14, 15, high, low], // Unknown food must still cache ID.
+                vec![b'C', 16, 17],
+                vec![b'c', 5, 6, 18, 19], // Immediate consume preserves eater cache.
+                vec![b'C', 7, 8, 20, 21],
+                vec![b'<', 22, 23, high, low],
+                vec![b'f', 9, 10, 24, 25, 255, 5],
+                vec![b'F', 11, 12, 18, 1, 2, 5],
+                vec![b'w', 7, 8],
+                vec![b'C', 26, 27],
+            ]),
+        );
+        assert_eq!(
+            result.events,
+            [
+                food_consume([1, 2, 10, 11], None),
+                food_consume([1, 2, 12, 13], None),
+                food_consume([3, 4, 14, 15], Some(eater)),
+                food_consume([3, 4, 16, 17], Some(eater)),
+                food_consume([5, 6, 18, 19], None),
+                food_consume([7, 8, 20, 21], Some(eater)),
+                food_consume([7, 8, 22, 23], Some(eater)),
+                food_spawn((9, 10), (24, 25), 5, 255, false),
+                food_spawn((11, 12), (1, 2), 5, 18, true),
+                PresentationEvent::FoodSectorClear { sector: (7, 8) },
+                food_consume([7, 8, 26, 27], Some(eater)),
+            ]
+        );
+    }
+}
+
+#[test]
+fn synthetic_food_both_explicit_color_layouts_update_the_shared_raw_cache() {
     let mut state = playing();
-    for packet in [
-        vec![b'F', 1, 2, 7, 10, 11, 5],
-        vec![b'f', 1, 2, 12, 13, 6, 10],
-        vec![b'b', 14, 15, 20],
+    for (packet, expected) in [
+        (
+            vec![b'f', 1, 2, 3, 4, 9, 5],
+            food_spawn((1, 2), (3, 4), 5, 9, false),
+        ),
+        (
+            vec![b'b', 5, 6, 10, 5],
+            food_spawn((1, 2), (5, 6), 5, 10, true),
+        ),
+        (
+            vec![b'f', 7, 8, 5],
+            food_spawn((1, 2), (7, 8), 5, 10, false),
+        ),
+        (
+            vec![b'b', 3, 4, 9, 10, 255, 5],
+            food_spawn((3, 4), (9, 10), 5, 255, true),
+        ),
+        (
+            vec![b'f', 5, 6, 11, 12, 5],
+            food_spawn((5, 6), (11, 12), 5, 255, false),
+        ),
+        (
+            vec![b'b', 13, 14, 0, 5],
+            food_spawn((5, 6), (13, 14), 5, 0, true),
+        ),
+        (
+            vec![b'f', 15, 16, 5],
+            food_spawn((5, 6), (15, 16), 5, 0, false),
+        ),
     ] {
-        assert!(apply(&mut state, &packet).events.is_empty());
+        assert_eq!(apply(&mut state, &packet).events, [expected]);
     }
-    assert_eq!(state.foods.len(), 3);
-    for packet in [
-        vec![b'c', 1, 2, 10, 11],
-        vec![b'C', 12, 13],
-        vec![b'<', 14, 15, 0, 0],
-    ] {
-        assert!(apply(&mut state, &packet).events.is_empty());
-    }
+}
+
+#[test]
+fn synthetic_food_events_preserve_duplicates_wire_order_and_latest_map_information() {
+    let commands = [
+        vec![b'F', 1, 2, 7, 20, 21, 5, 8, 10, 11, 10, 9, 20, 21, 15],
+        vec![b'f', 1, 2, 20, 21, 10, 20],
+        vec![b'b', 20, 21, 25],
+        vec![b'<', 1, 2, 20, 21, 0, 0],
+        vec![b'C', 20, 21],
+        vec![b'c', 20, 21],
+        vec![b'w', 1, 2],
+        vec![b'w', 1, 2],
+        vec![b'F', 1, 2],
+        vec![b'W', 1, 2],
+    ];
+    let mut state = playing();
+    let creations = apply(&mut state, &bundle(&commands[..3]));
+    assert_eq!(state.foods.len(), 2);
+    let latest = &state.foods[&u32::from_be_bytes([1, 2, 20, 21])];
+    assert_eq!((latest.color, latest.size), (10, 5.));
+    assert_eq!(
+        creations.events,
+        [
+            food_spawn((1, 2), (20, 21), 5, 7, true),
+            food_spawn((1, 2), (10, 11), 10, 8, true),
+            food_spawn((1, 2), (20, 21), 15, 9, true),
+            food_spawn((1, 2), (20, 21), 20, 10, false),
+            food_spawn((1, 2), (20, 21), 25, 10, true),
+        ]
+    );
+    // The decoder publishes requests; newest-match lookup and swap order belong
+    // to the presentation owner, even after the received projection is empty.
+    let tail = apply(&mut state, &bundle(&commands[3..]));
+    assert_eq!(
+        tail.events,
+        [
+            food_consume([1, 2, 20, 21], Some(0)),
+            food_consume([1, 2, 20, 21], Some(0)),
+            food_consume([1, 2, 20, 21], None),
+            PresentationEvent::FoodSectorClear { sector: (1, 2) },
+            PresentationEvent::FoodSectorClear { sector: (1, 2) },
+        ]
+    );
     assert!(state.foods.is_empty());
-    assert!(apply(&mut state, &[b'f', 16, 17, 5]).events.is_empty());
+
+    let mut bundled = playing();
+    let all = apply(&mut bundled, &bundle(&commands));
+    let mut split = playing();
+    let separate: Vec<_> = commands
+        .iter()
+        .flat_map(|packet| apply(&mut split, packet).events)
+        .collect();
+    assert_eq!(all.events, separate);
+    assert_eq!(all.events, [creations.events, tail.events].concat());
+    split.frames_applied = bundled.frames_applied;
+    assert_eq!(
+        bundled, split,
+        "all caches, counters except frame count, and received state agree"
+    );
+}
+
+#[test]
+fn synthetic_first_own_appearance_resets_all_food_caches_with_or_without_events() {
+    for collect in [false, true] {
+        let mut state = ClientState::default();
+        apply(&mut state, &setup());
+        apply(
+            &mut state,
+            &bundle(&[
+                vec![b'f', 1, 2, 3, 4, 255, 5],
+                vec![b'<', 6, 7, 8, 9, 0, 17],
+            ]),
+        );
+        let own = appearance(0, b'0', 123, 2);
+        if collect {
+            apply(&mut state, &own);
+        } else {
+            state.apply_frame(&own, ElapsedHeader::Absent).unwrap();
+        }
+        assert_eq!(
+            state.foods.len(),
+            1,
+            "first own appearance resets caches, not received foods"
+        );
+        for packet in [
+            vec![b'f', 3, 4, 5],
+            vec![b'b', 3, 4, 255, 5],
+            vec![b'c', 8, 9],
+            vec![b'C', 8, 9],
+            vec![b'<', 8, 9, 0, 0],
+        ] {
+            let before = state.clone();
+            assert_eq!(
+                state.apply_frame_with_events(&packet, ElapsedHeader::Absent),
+                Err(StateError::MissingSector)
+            );
+            assert_eq!(state, before);
+        }
+        assert_eq!(
+            apply(&mut state, &[b'f', 10, 11, 12, 13, 5]).events,
+            [food_spawn((10, 11), (12, 13), 5, 0, false)]
+        );
+        assert_eq!(
+            apply(&mut state, &[b'C', 14, 15, 16, 17]).events,
+            [food_consume([14, 15, 16, 17], None)]
+        );
+
+        apply(&mut state, &[b'f', 1, 2, 3, 4, 18, 5]);
+        apply(&mut state, &[b'<', 6, 7, 8, 9, 0, 0]);
+        apply(&mut state, &appearance(17, b'0', 123, 2));
+        apply(&mut state, &appearance(0, b'0', 123, 2));
+        assert_eq!(
+            apply(&mut state, &[b'b', 10, 11, 5]).events,
+            [food_spawn((1, 2), (10, 11), 5, 18, true)]
+        );
+        assert_eq!(
+            apply(&mut state, &[b'C', 12, 13]).events,
+            [food_consume([6, 7, 12, 13], Some(0))]
+        );
+
+        // Keep the existing setup-as-clear contract in this preparatory slice.
+        apply(&mut state, &setup());
+        assert!(state.foods.is_empty());
+        assert_eq!(
+            apply(&mut state, &[b'f', 1, 2, 3, 4, 5]).events,
+            [food_spawn((1, 2), (3, 4), 5, 0, false)]
+        );
+        assert_eq!(
+            apply(&mut state, &[b'C', 6, 7, 8, 9]).events,
+            [food_consume([6, 7, 8, 9], None)]
+        );
+    }
+}
+
+#[test]
+fn synthetic_food_empty_listing_and_occupancy_never_prime_compact_streams() {
+    let mut state = playing();
+    assert!(
+        apply(&mut state, &bundle(&[vec![b'W', 1, 2], vec![b'F', 1, 2],]))
+            .events
+            .is_empty()
+    );
+    apply(&mut state, &[b'F', 1, 2, 255, 3, 4, 5]);
+    for packet in [vec![b'f', 3, 4, 5], vec![b'C', 3, 4]] {
+        let before = state.clone();
+        assert_eq!(
+            state.apply_frame_with_events(&packet, ElapsedHeader::Absent),
+            Err(StateError::MissingSector)
+        );
+        assert_eq!(state, before);
+    }
     assert_eq!(state.foods.len(), 1);
-    assert!(apply(&mut state, &[b'w', 1, 2]).events.is_empty());
-    assert!(state.foods.is_empty());
+    assert!(apply(&mut state, &[b'F', 1, 2]).events.is_empty());
+    assert_eq!(state.foods.len(), 1);
+}
+
+#[test]
+fn synthetic_food_absolute_geometry_and_every_size_byte_preserve_wire_arithmetic() {
+    let mut state = ClientState::default();
+    let mut configuration = setup();
+    configuration[6..8].copy_from_slice(&u16::MAX.to_be_bytes());
+    apply(&mut state, &configuration);
+    for size in 0..=u8::MAX {
+        let color = [0, 9, 10, 18, 255][usize::from(size) % 5];
+        let result = apply(&mut state, &[b'F', 255, 254, color, size, 255, size]);
+        let PresentationEvent::FoodSpawn(input) = result.events[0] else {
+            panic!()
+        };
+        assert_eq!(input.key, u32::from_be_bytes([255, 254, size, 255]));
+        assert_eq!(input.sector, (255, 254));
+        assert_eq!(input.size_byte, size);
+        assert_eq!(input.base_size.to_bits(), (f64::from(size) / 5.).to_bits());
+        assert_eq!(input.raw_color, color);
+        assert!(input.rapid);
+        // Independent exact dyadic expression over the bounded wire integers.
+        let x = f64::from((255 * 256 + u32::from(size)) * 65_535) / 256.;
+        let y = f64::from((254 * 256 + 255) * 65_535_u32) / 256.;
+        assert_eq!(input.absolute_position.x.to_bits(), x.to_bits());
+        assert_eq!(input.absolute_position.y.to_bits(), y.to_bits());
+        assert_eq!(
+            state.foods[&input.key].position,
+            Point {
+                x: x - 1000.,
+                y: y - 1000.
+            }
+        );
+    }
+}
+
+#[test]
+fn synthetic_food_invalid_lengths_and_late_first_own_failure_preserve_all_caches() {
+    for code in *b"FfbcC<w" {
+        for length in 1..=12 {
+            let valid = match code {
+                b'F' => length >= 3 && (length - 3) % 4 == 0,
+                b'f' | b'b' => (4..=7).contains(&length),
+                b'c' | b'C' => matches!(length, 3 | 5),
+                b'<' => matches!(length, 5 | 7),
+                b'w' => length == 3,
+                _ => unreachable!(),
+            };
+            if !valid {
+                let mut packet = vec![0; length];
+                packet[0] = code;
+                assert_rollback(
+                    &mut cached_state(),
+                    &bundle(&[
+                        vec![b'f', 9, 8, 7, 6, 18, 5],
+                        vec![b'<', 6, 5, 4, 3, 0, 0],
+                        packet,
+                    ]),
+                );
+            }
+        }
+    }
+    let mut before_own = ClientState::default();
+    apply(&mut before_own, &setup());
+    apply(
+        &mut before_own,
+        &bundle(&[
+            vec![b'f', 1, 2, 3, 4, 255, 5],
+            vec![b'<', 6, 7, 8, 9, 0, 17],
+        ]),
+    );
+    let before = before_own.clone();
+    assert_rollback(
+        &mut before_own,
+        &bundle(&[appearance(0, b'0', 123, 2), vec![b'z', 0, 0, 0]]),
+    );
+    assert_eq!(before_own, before);
+    assert_eq!(
+        apply(&mut before_own, &[b'b', 10, 11, 5]).events,
+        [food_spawn((1, 2), (10, 11), 5, 255, true)]
+    );
+    assert_eq!(
+        apply(&mut before_own, &[b'C', 12, 13]).events,
+        [food_consume([6, 7, 12, 13], Some(17))]
+    );
 }
 
 fn cached_state() -> ClientState {
     let mut state = playing();
     apply(
         &mut state,
-        &bundle(&[vec![b'f', 1, 2, 10, 11, 5], vec![b'c', 3, 4, 12, 13]]),
+        &bundle(&[
+            vec![b'f', 1, 2, 10, 11, 255, 5],
+            vec![b'<', 3, 4, 12, 13, 0, 17],
+        ]),
     );
     state
 }
@@ -1039,7 +1417,7 @@ fn assert_rollback(state: &mut ClientState, bytes: &[u8]) {
     );
     assert!(state.apply_frame(bytes, ElapsedHeader::Absent).is_err());
     assert_eq!(*state, before);
-    let probes = bundle(&[vec![b'f', 20, 21, 5], vec![b'c', 22, 23], vec![b'G']]);
+    let probes = bundle(&[vec![b'f', 20, 21, 5], vec![b'C', 22, 23], vec![b'G']]);
     let mut expected = before.clone();
     let mut actual = state.clone();
     assert_eq!(
@@ -1082,8 +1460,8 @@ fn synthetic_all_supported_truncations_and_malformed_tails_are_atomic() {
         vec![b'q'],
         vec![b'G', 64, 0],
         vec![b'd', 10, 20, 30],
-        vec![b'f', 9, 8, 7, 6, 5],
-        vec![b'c', 7, 6, 5, 4],
+        vec![b'f', 9, 8, 7, 6, 18, 5],
+        vec![b'<', 7, 6, 5, 4, 0, 0],
     ];
     for packet in &packets {
         for length in 0..=packet.len() {
@@ -1190,9 +1568,19 @@ fn synthetic_semantic_failures_and_retention_limits_discard_all_events() {
     // The cached fixture also has a key outside 0..MAX_FOODS.
     state.foods.remove(&0);
     assert_eq!(state.foods.len(), MAX_FOODS);
+    assert_eq!(
+        apply(&mut state, &[b'F', 1, 2, 18, 10, 11, 5]).events,
+        [food_spawn((1, 2), (10, 11), 5, 18, true)],
+        "a duplicate creation still emits at the received unique-key capacity"
+    );
     assert_rollback(
         &mut state,
-        &bundle(&[vec![b'G'], vec![b'f', 9, 8, 7, 6, 5]]),
+        &bundle(&[
+            vec![b'G'],
+            vec![b'<', 7, 6, 5, 4, 0, 0],
+            vec![b'f', 1, 2, 10, 11, 18, 5],
+            vec![b'f', 9, 8, 7, 6, 9, 5],
+        ]),
     );
 
     let mut state = cached_state();
