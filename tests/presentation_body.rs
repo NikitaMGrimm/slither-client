@@ -259,6 +259,71 @@ fn tail_removal_and_fading_keep_three_newest_dying_records() {
 }
 
 #[test]
+fn exhausted_non_growth_preserves_protocol_count_and_negative_removal_is_atomic() {
+    for count in [1, 2] {
+        for relative in [false, true] {
+            let mut b = body(count);
+            for _ in 0..count {
+                assert!(b.remove_tail().unwrap());
+            }
+            let exhausted = b.clone();
+            assert!(!b.remove_tail().unwrap());
+            assert_eq!(b, exhausted);
+            let front = b.points()[0].position();
+            b.apply_anchor(
+                (!relative).then_some(Point {
+                    x: front.x + 10.,
+                    y: front.y + 2.,
+                }),
+                None,
+                false,
+                front,
+                false,
+            )
+            .unwrap();
+            assert_eq!(b.logical_segments(), 0);
+            assert_eq!(b.points().len(), count + 1);
+            assert_eq!(b.points().iter().filter(|p| !p.dying()).count(), 1);
+            for _ in 0..2 {
+                let before = b.clone();
+                assert!(b.remove_tail().is_err());
+                assert_eq!(b, before);
+            }
+        }
+    }
+}
+
+#[test]
+fn exhausted_growth_restores_one_logical_point_for_later_removal() {
+    for count in [1, 2] {
+        for relative in [false, true] {
+            let mut b = body(count);
+            for _ in 0..count {
+                assert!(b.remove_tail().unwrap());
+            }
+            let front = b.points()[0].position();
+            b.apply_anchor(
+                (!relative).then_some(Point {
+                    x: front.x + 10.,
+                    y: front.y + 2.,
+                }),
+                None,
+                true,
+                front,
+                false,
+            )
+            .unwrap();
+            assert_eq!(b.logical_segments(), 1);
+            assert_eq!(b.points().iter().filter(|p| !p.dying()).count(), 1);
+            assert!(b.remove_tail().unwrap());
+            assert_eq!(b.logical_segments(), 0);
+            assert!(b.points().iter().all(|p| p.dying()));
+            assert!(!b.remove_tail().unwrap());
+        }
+    }
+}
+
+#[test]
 fn relative_anchors_use_wire_angle_and_preserve_cache_when_omitted() {
     let mut b = body(4);
     let start = b.points()[0].position();

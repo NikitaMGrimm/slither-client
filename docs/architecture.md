@@ -107,6 +107,13 @@ corrections and fade tails, retaining the three newest dying records. Logical
 count is capped at 4096 and physical retention at 8192 per body. This module does
 not sample curves, draw sprites or implement authoritative physics.
 
+Logical count is nonnegative protocol state, not a recount of living points.
+After all points are marked dying, a non-growing anchor still leaves the count
+at zero while adding a living point. A later tail removal requiring a negative
+count fails without changing the body. Growth directly from an exhausted body
+increments the count and permits later removal. Negative logical counts are
+outside this API's supported domain.
+
 Wasm trigonometry uses the current host's `Math.sin`/`Math.cos`, preserving browser
 rounding in geometry and correction weights. Native builds use standard-library
 trigonometry; no cross-platform bit-equality claim follows from that fallback.
