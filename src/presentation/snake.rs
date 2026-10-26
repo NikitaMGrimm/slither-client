@@ -1,8 +1,9 @@
 //! Ordered packet, update, and draw transitions for one absolute presentation snake.
 
 use super::{
-    AngleCorrections, BodyGeometry, FrameStep, HeadCorrections, HeadMotion, LengthPresentation,
-    PresentationError, Turn, finite,
+    AngleCorrections, BodyGeometry, CurveInput, CurveOutput, FrameStep, HeadCorrections,
+    HeadMotion, LengthPresentation, PresentationError, StandardEyeGeometry, StandardEyeState, Turn,
+    curve::single_anchor_eye_target, finite, sample_curve_with_heading,
 };
 use crate::{
     math,
@@ -83,7 +84,7 @@ pub struct SnakeMetrics {
 ///
 /// Fallible transitions stage the entire snake, including every correction ring.
 /// Packet methods can still update an expired retained own object; `advance`
-/// remains stopped after expiry. No camera, curve, eye, or skin rendering is done.
+/// remains stopped after expiry. No camera or skin rendering is done.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SnakePresentation {
     id: u16,
@@ -93,6 +94,8 @@ pub struct SnakePresentation {
     angle_corrections: AngleCorrections,
     body: BodyGeometry,
     length: LengthPresentation,
+    eyes: StandardEyeState,
+    eye_geometry: StandardEyeGeometry,
     turn_rate: f64,
     speed_angle_divisor: f64,
     base_cruise_speed: f64,
@@ -190,6 +193,8 @@ impl SnakePresentation {
             angle_corrections: AngleCorrections::default(),
             body,
             length,
+            eyes: StandardEyeState::new(appearance.heading, appearance.wanted_heading)?,
+            eye_geometry: StandardEyeGeometry::default(),
             turn_rate: setup.mamu,
             speed_angle_divisor: setup.spangdv,
             base_cruise_speed: setup.nsp1,
@@ -364,7 +369,19 @@ impl SnakePresentation {
 
     /// Retain caller-computed visibility for subsequent packet and draw operations.
     pub fn set_visible(&mut self, visible: bool) {
+        if visible && !self.visible {
+            // Every head transition validates this private heading before commit.
+            self.eyes
+                .visible_entry(self.head.heading)
+                .expect("snake heading is finite");
+        }
         self.visible = visible;
+    }
+
+    /// Replace independent gaze without changing wanted steering or correction rings.
+    /// The client owns pointer/remote routing; motion fields alone do not set gaze.
+    pub fn set_gaze_heading(&mut self, heading: f64) -> Result<(), PresentationError> {
+        self.eyes.set_gaze(heading)
     }
 
     /// Advance one explicit update atomically; return false after death expiry.
@@ -418,6 +435,8 @@ impl SnakePresentation {
                 next.speed_turn_factor,
                 next.alive,
             )?;
+            next.eyes
+                .advance(step, next.alive, next.eye_geometry.pupil_travel)?;
             next.body.advance(step.whole_steps);
             next.head_corrections.advance(step.whole_steps);
             next.angle_corrections.advance(step.whole_steps);
@@ -462,6 +481,53 @@ impl SnakePresentation {
     /// Begin death once; repeated calls do not restart or resurrect an object.
     pub fn mark_dead(&mut self) {
         self.alive = false;
+        self.eyes.mark_dead();
+    }
+
+    /// Prepare a visible body's spacing and sample it once, freezing that spacing
+    /// inside the sampler. The returned face heading precedes this draw's target.
+    pub(crate) fn prepare_curve(
+        &mut self,
+        quality_scale: f64,
+        detailed_style: bool,
+    ) -> Result<(Option<CurveOutput>, f64), PresentationError> {
+        let mut next = self.clone();
+        next.prepare_draw()?;
+        let metrics = next.metrics();
+        let input = CurveInput {
+            corrected_head: metrics.corrected_head,
+            head_fraction: metrics.corrected_head_fraction,
+            body: next.body.points(),
+            displayed_length: metrics.displayed_length,
+            segment_length: next.body.segment_length(),
+            point_spacing: metrics.point_spacing,
+            target_point_spacing: metrics.point_spacing,
+            quality_scale,
+            detailed_style,
+        };
+        let (curve, target) = match input.body.len() {
+            0 => (None, metrics.heading),
+            1 => (None, single_anchor_eye_target(input, metrics.heading)?),
+            _ => {
+                let curve = sample_curve_with_heading(input, metrics.heading)?;
+                let target = curve.target_eye_heading;
+                (Some(curve), target)
+            }
+        };
+        let face_heading = next.eyes.commit_draw_target(target)?;
+        next.validate_observation()?;
+        *self = next;
+        Ok((curve, face_heading))
+    }
+
+    /// Read-only retained face, target, turn, gaze and pupil state.
+    pub fn eyes(&self) -> &StandardEyeState {
+        &self.eyes
+    }
+
+    /// Standard paired-eye geometry; special topologies are not inferred from skin IDs.
+    pub fn eye_geometry(&self) -> &StandardEyeGeometry {
+        &self.eye_geometry
     }
 
     /// Observe all coupled numeric channels without advancing them.

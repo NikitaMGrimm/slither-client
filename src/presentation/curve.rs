@@ -60,7 +60,8 @@ pub struct CurveOutput {
     pub samples: Vec<CurveSample>,
     /// Point spacing after exactly one draw transition.
     pub point_spacing: f64,
-    /// Eye target derived from the already-rounded second tangent plus pi.
+    /// Eye target from the rounded second tangent plus pi, or the supplied raw
+    /// heading when `sample_curve_with_heading` emits fewer than two samples.
     pub target_eye_heading: f64,
     vertices: Vec<CurveVertex>,
     redistribution_count: usize,
@@ -203,7 +204,11 @@ impl Scratch {
     }
 
     fn redistribute(&mut self) -> Result<usize, PresentationError> {
-        let count = self.measured.saturating_sub(1).min(self.vertices.len());
+        self.redistribute_prefix(self.measured.saturating_sub(1))
+    }
+
+    fn redistribute_prefix(&mut self, count: usize) -> Result<usize, PresentationError> {
+        let count = count.min(self.vertices.len());
         if count < 3 {
             return Ok(0);
         }
@@ -258,6 +263,20 @@ fn positive(value: f64) -> Result<(), PresentationError> {
 /// Sample one visible curve, preserving retained geometry and draw arithmetic.
 /// Call this exactly once per visible draw; no animation clock advances here.
 pub fn sample_curve(input: CurveInput<'_>) -> Result<CurveOutput, PresentationError> {
+    sample_curve_inner(input, None)
+}
+
+/// Sample with the raw head heading needed when fewer than two samples are emitted.
+/// A single sample retains its zero tangent; only the eye target uses this heading.
+pub fn sample_curve_with_heading(
+    input: CurveInput<'_>,
+    raw_heading: f64,
+) -> Result<CurveOutput, PresentationError> {
+    finite(&[raw_heading])?;
+    sample_curve_inner(input, Some(raw_heading))
+}
+
+fn sampling_parameters(input: CurveInput<'_>) -> Result<(f64, f64), PresentationError> {
     finite(&[
         input.corrected_head.x,
         input.corrected_head.y,
@@ -272,7 +291,7 @@ pub fn sample_curve(input: CurveInput<'_>) -> Result<CurveOutput, PresentationEr
     ] {
         positive(value)?;
     }
-    if input.body.len() < 2 || input.body.len() > MAX_RETAINED_BODY_POINTS {
+    if input.body.is_empty() || input.body.len() > MAX_RETAINED_BODY_POINTS {
         return Err(PresentationError);
     }
     for body in input.body {
@@ -303,9 +322,24 @@ pub fn sample_curve(input: CurveInput<'_>) -> Result<CurveOutput, PresentationEr
         density *= 2.;
     }
     positive(density)?;
-    let base_density = density;
-    let mut increment = 1. / density;
-    let mut world_step = input.segment_length / density;
+    Ok((spacing, density))
+}
+
+struct HeadLead {
+    scratch: Scratch,
+    budget: LengthBudget,
+    front: Point,
+    start: Point,
+    scale: f64,
+    length: f64,
+    cursor: f64,
+}
+
+fn sample_head_lead(
+    input: CurveInput<'_>,
+    increment: f64,
+    world_step: f64,
+) -> Result<HeadLead, PresentationError> {
     positive(increment)?;
     positive(world_step)?;
     let mut scratch = Scratch {
@@ -318,7 +352,6 @@ pub fn sample_curve(input: CurveInput<'_>) -> Result<CurveOutput, PresentationEr
     };
     let head = input.corrected_head;
     let front = corrected(&input.body[0])?;
-    let following = corrected(&input.body[1])?;
     let gap = distance(head, front)?;
     // At coincidence the direction is unused: the straight lead-in has zero extent.
     let direction = if gap == 0. {
@@ -341,7 +374,6 @@ pub fn sample_curve(input: CurveInput<'_>) -> Result<CurveOutput, PresentationEr
         start.x += (capped.x - start.x) * (1. - scale);
         start.y += (capped.y - start.y) * (1. - scale);
     }
-    let end = midpoint(following, front)?;
     let lead_length = distance(head, start)?;
     scratch.push(head, true, Some(0.))?;
     let mut walked = world_step;
@@ -368,8 +400,82 @@ pub fn sample_curve(input: CurveInput<'_>) -> Result<CurveOutput, PresentationEr
         }
         finite(&[multiplier, walked])?;
     }
-    let mut cursor = (walked - lead_length) / input.segment_length;
+    let cursor = (walked - lead_length) / input.segment_length;
     finite(&[cursor])?;
+    Ok(HeadLead {
+        scratch,
+        budget,
+        front,
+        start,
+        scale,
+        length: lead_length,
+        cursor,
+    })
+}
+
+/// One anchor has no independent quadratic or tail geometry. Use only a finite
+/// lead whose eye target cannot depend on a missing following anchor; otherwise
+/// retain the raw heading as an explicit unsupported-geometry fallback.
+pub(super) fn single_anchor_eye_target(
+    input: CurveInput<'_>,
+    raw_heading: f64,
+) -> Result<f64, PresentationError> {
+    finite(&[raw_heading])?;
+    if input.body.len() != 1 {
+        return Err(PresentationError);
+    }
+    let (_, density) = sampling_parameters(input)?;
+    let mut lead = sample_head_lead(input, 1. / density, input.segment_length / density)?;
+    lead.budget.settle();
+    if !lead.budget.continues() {
+        lead.scratch.redistribute()?;
+    } else if lead.budget.phase == Phase::Terminal {
+        let extent = 0.5 + lead.scale - lead.length / input.segment_length;
+        finite(&[extent])?;
+        if lead.cursor < 0. || lead.cursor >= extent {
+            return Ok(raw_heading);
+        }
+        // A single terminal quadratic sample would be excluded from this
+        // prefix. Its missing coordinates and incoming distance are never used.
+        lead.scratch.redistribute_prefix(lead.scratch.measured)?;
+    } else {
+        return Ok(raw_heading);
+    }
+    let [first, second, ..] = lead.scratch.vertices.as_slice() else {
+        return Ok(raw_heading);
+    };
+    let delta = point(
+        second.position.x - first.position.x,
+        second.position.y - first.position.y,
+    )?;
+    let angle = math::atan2(delta.y, delta.x) as f32;
+    finite(&[f64::from(angle)])?;
+    Ok(f64::from(angle) + PI)
+}
+
+fn sample_curve_inner(
+    input: CurveInput<'_>,
+    raw_heading: Option<f64>,
+) -> Result<CurveOutput, PresentationError> {
+    if input.body.len() < 2 {
+        return Err(PresentationError);
+    }
+    let (spacing, mut density) = sampling_parameters(input)?;
+    let base_density = density;
+    let mut increment = 1. / density;
+    let mut world_step = input.segment_length / density;
+    let HeadLead {
+        mut scratch,
+        mut budget,
+        front,
+        start,
+        scale,
+        length: lead_length,
+        mut cursor,
+    } = sample_head_lead(input, increment, world_step)?;
+    let head = input.corrected_head;
+    let following = corrected(&input.body[1])?;
+    let end = midpoint(following, front)?;
     if budget.phase != Phase::Finished {
         budget.settle();
         if budget.continues() {
@@ -508,7 +614,7 @@ pub fn sample_curve(input: CurveInput<'_>) -> Result<CurveOutput, PresentationEr
         samples[0].angle = samples[1].angle;
         f64::from(samples[1].angle) + PI
     } else {
-        return Err(PresentationError);
+        raw_heading.ok_or(PresentationError)?
     };
     Ok(CurveOutput {
         samples,

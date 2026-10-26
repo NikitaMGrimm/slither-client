@@ -1,7 +1,9 @@
 //! Original synthetic curve fixtures. No external reference inputs or network use.
 
 use slither_client::{
-    presentation::{BodyGeometry, CurveInput, MAX_CURVE_SAMPLES, sample_curve},
+    presentation::{
+        BodyGeometry, CurveInput, MAX_CURVE_SAMPLES, sample_curve, sample_curve_with_heading,
+    },
     state::{Appearance, Direction, Point, Setup},
 };
 use std::f64::consts::PI;
@@ -68,6 +70,32 @@ fn input(body: &BodyGeometry) -> CurveInput<'_> {
         quality_scale: 1.,
         detailed_style: false,
     }
+}
+
+#[test]
+fn explicit_heading_supports_one_sample_without_hiding_other_failures() {
+    let body = geometry(vec![Point { x: 0., y: 0. }, Point { x: -10., y: 0. }], 0.);
+    let mut args = input(&body);
+    args.corrected_head = Point::default();
+    args.displayed_length = -0.6;
+    let before = body.clone();
+    assert!(sample_curve(args).is_err());
+    let out = sample_curve_with_heading(args, 7.).unwrap();
+    assert_eq!(out.samples.len(), 1);
+    assert_eq!(out.samples[0].angle, 0.);
+    assert_eq!(out.target_eye_heading, 7.);
+    assert_eq!(out.vertices()[0].position, Point::default());
+    assert_eq!(out.redistribution_count(), 0);
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert!(sample_curve_with_heading(args, bad).is_err());
+    }
+    args.corrected_head.x = f64::MAX;
+    assert!(sample_curve_with_heading(args, 7.).is_err());
+    args = input(&body);
+    args.point_spacing = 1e-5;
+    args.target_point_spacing = 1e-5;
+    assert!(sample_curve_with_heading(args, 7.).is_err());
+    assert_eq!(body, before);
 }
 
 #[test]

@@ -22,8 +22,9 @@ state, presentation state and drawing distinct, using idiomatic Rust types.
 
 The separate animated preview now connects ordered events, head/body/length
 corrections, following camera, draw-driven spacing and sampled curves. Synthetic
-native/Wasm and Windows browser checks exercise this path. Full skins, eyes,
-quality effects, radius easing, HUD, prey and team-mode drawing remain pending.
+native/Wasm and Windows browser checks exercise this path. Standard paired eyes
+now retain gaze, pupil motion and deferred draw targets. Full skins, special
+faces, quality effects, radius easing, HUD, prey and team-mode drawing remain pending.
 
 ## 3. Measure dense scenes
 

@@ -15,6 +15,7 @@ mod body;
 mod camera;
 mod client;
 mod curve;
+mod eyes;
 mod follow_camera;
 mod length;
 mod quality;
@@ -23,11 +24,14 @@ mod snake;
 pub use body::{BODY_SAMPLES, BodyGeometry, BodyPoint, MAX_RETAINED_BODY_POINTS};
 pub use camera::{CAMERA_SAMPLES, CameraCorrections};
 pub use client::{
-    AnimatedClient, ClientPresentationError, MAX_RETAINED_SNAKES, MAX_RETAINED_TOTAL_BODY_POINTS,
+    AnimatedClient, ClientPresentationError, MAX_DRAW_SAMPLES, MAX_RETAINED_SNAKES,
+    MAX_RETAINED_TOTAL_BODY_POINTS, PreparedSnake,
 };
 pub use curve::{
     CurveInput, CurveOutput, CurveSample, CurveVertex, MAX_CURVE_SAMPLES, sample_curve,
+    sample_curve_with_heading,
 };
+pub use eyes::{EyeLayoutInput, EyePair, StandardEyeGeometry, StandardEyeLayout, StandardEyeState};
 pub use follow_camera::{FollowCamera, INITIAL_ZOOM};
 pub use length::LengthPresentation;
 pub use quality::{QualityMode, QualitySnapshot, QualityState};

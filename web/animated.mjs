@@ -14,6 +14,7 @@ let simulatorUrl;
 let mode = 'synthetic';
 let anchorStep = 0;
 let heading = 0;
+let gazeHeading = 0;
 let boost = false;
 let renders = 0;
 let lastReadout = -Infinity;
@@ -96,6 +97,7 @@ async function start() {
     if (disposed) return;
     try {
       // Rust advances all presentation state and owns timestamp clamping.
+      animated.set_gaze_heading(gazeHeading);
       const step = animated.advance(nowMs, false);
       step.free();
       // render prepares exactly one draw, including camera corrections.
@@ -160,13 +162,16 @@ async function start() {
   listen(control('disconnect'), 'click', disconnect);
   listen(target, 'pointerdown', () => target.focus());
   listen(target, 'pointermove', event => {
+    const bounds = target.getBoundingClientRect();
+    if (!bounds.width || !bounds.height) return;
+    const x = (event.clientX - bounds.left) * target.width / bounds.width;
+    const y = (event.clientY - bounds.top) * target.height / bounds.height;
+    // Visual gaze follows the canvas center independently of transport steering.
+    gazeHeading = Math.atan2(y - target.height / 2, x - target.width / 2);
     if (!connection || !renderedCamera) return;
     const head = JSON.parse(animated.snapshot()).ownHead;
     if (!head) return;
-    const bounds = target.getBoundingClientRect();
-    if (!bounds.width || !bounds.height) return;
-    heading = sceneHeading({ x: (event.clientX - bounds.left) * target.width / bounds.width,
-      y: (event.clientY - bounds.top) * target.height / bounds.height,
+    heading = sceneHeading({ x, y,
       width: target.width, height: target.height, camera: renderedCamera, zoom: renderedCamera.zoom, head });
     input();
   });

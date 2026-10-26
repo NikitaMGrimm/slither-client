@@ -70,10 +70,11 @@ synthetic scene. **Step** advances a received anchor; **Palette**, **Zoom**, and
 **Follow** change the preview. For local simulator controls, see
 [the loopback procedure](docs/verification.md#offline-scene-and-local-simulator).
 
-Open `http://127.0.0.1:18884/animated` for continuous prediction and corrected
-body sampling. It uses original stand-in artwork; full skins, eyes, attachments
-and quality-dependent drawing are still pending. The received-anchor preview
-at `/` remains available for comparison.
+Open `http://127.0.0.1:18884/animated` for continuous prediction, corrected
+body sampling and standard paired eyes. Pointer motion controls visual gaze,
+including in the synthetic preview. It uses original stand-in artwork; full
+skins, special faces, attachments and quality-dependent drawing remain pending.
+The received-anchor preview at `/` remains available for comparison.
 
 CI checks native Rust on Linux and Windows and runs a real Wasm ABI smoke test
 on Linux. Release-plz remains dormant; ordinary pushes do not publish artifacts.

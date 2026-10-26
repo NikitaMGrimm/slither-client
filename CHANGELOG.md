@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Couple standard paired-eye motion, independent pointer gaze and per-snake
+  Canvas painting to the animated preview. Preserve fractional pupil updates,
+  deferred curve targets, visibility resets and death fading. Special faces,
+  skin-supplied geometry and attachment rendering remain pending. One-anchor
+  eyes preserve a defined finite head-lead target while unsupported suffix
+  geometry retains an explicit raw-heading fallback and no body curve.
 - Select web-build Wasm from Cargo's artifact report, including configured target
   directories, and reject missing or ambiguous artifacts before binding.
 - Add a separate trusted host recipe provider with bounded metadata, explicit
@@ -14,7 +20,7 @@
   and bounded curve sampling in a separate animated Canvas2D preview. Preserve
   retained own identity through removal/ID reuse and repeated duplicate removals;
   test synthetic native, Wasm, Chrome and Firefox transitions. Full skins,
-  eyes, quality effects and team-mode drawing remain pending.
+  quality effects and team-mode drawing remain pending.
 - Add retained body contraction/correction state, logical visual length and
   draw-driven camera correction primitives, including standalone length/camera
   Wasm bindings and host presentation math.

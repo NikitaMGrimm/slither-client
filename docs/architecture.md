@@ -155,19 +155,50 @@ producing nonfinite geometry fails. Bodies with fewer than two anchors remain
 valid received/presentation state but are omitted from curve drawing until
 another anchor arrives.
 
+For one retained anchor, eye targeting uses only a completed finite head lead,
+or a lead followed by one terminal sample whose coordinates stay outside the
+redistribution prefix. Body drawing remains omitted. Geometry requiring the
+missing following anchor uses the raw head heading as an explicit finite fallback.
+No general one-anchor curve or eye parity is claimed for that unsupported geometry.
+
+`sample_curve_with_heading` additionally accepts the raw head heading for a
+valid traversal that emits only one sample. That sample keeps its zero tangent;
+the eye target uses the supplied heading. Numeric and capacity errors still fail.
+
+`StandardEyeState` retains face heading, the previous draw's target, turn,
+independent gaze and double-precision pupil offsets. Whole steps select Float32
+easing coefficients; pupils approach each world-axis target by fractional delta
+divided by six. Visible entry resets face/target to raw heading. Death clears
+face turning while pupils keep moving until expiry. Own gaze is caller-owned;
+remote wanted-heading packets update the remote gaze.
+
+`prepare_draw_with_style` samples each visible body once and returns ordered
+`PreparedSnake` values. It captures the current face heading before committing
+the new curve target for a later update. Spacing advances once; sampling uses that
+frozen spacing. Short appearances still prepare a face without a body curve.
+The entire numeric draw rolls back on failure, including camera and eye targets.
+
 The Wasm `AnimatedScene` owns this model. `advance` returns an owned step to free;
 `render` prepares one draw internally and commits numeric state after successful
 drawing. `prepare_draw` is a numeric-only alternative: do not call it immediately
 before `render` for the same draw. Own body, correction and curve diagnostics are
 copied arrays. `snapshot` separates the active input head from retained own
 diagnostics; nested own and explicit camera absolute fields use absolute units.
+`set_gaze_heading` changes the retained original own gaze independently of live
+input eligibility. `drawn_snakes` returns copied numeric snapshots with original
+own identity and draw ordinals; `drawn_eyes` observes current paired-eye layouts
+without advancing any clock. A style-aware numeric preparation is also exposed.
 
 `web/animated.mjs` runs update then render once per animation callback, applying
 incoming packets immediately. It frees steps and the session, cancels callbacks
 on pagehide, and continues animation after local transport disconnection. The
 separate `/animated` page draws sampled bodies with three generated palettes.
-Complete skins, eyes, effects, attachments, HQ/LQ drawing and radius easing remain
-unimplemented. This preview does not establish visual or gameplay equivalence.
+Standard eyes are laid out from the f64 corrected head and painted after each
+snake's body, with square-root death fading and no spawn/boost opacity factor.
+All layouts validate before canvas reset. Pointer gaze uses full radians from
+canvas-center offsets before each update, separately from quantized live steering.
+Complete skins, special faces, effects, attachments, HQ/LQ drawing and radius
+easing remain unimplemented. This preview does not establish visual or gameplay equivalence.
 
 ## Browser rendering
 

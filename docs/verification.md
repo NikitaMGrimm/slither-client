@@ -109,8 +109,8 @@ smoke test also exercises owned animation steps, predictor motion/corrections,
 rejection of invalid JavaScript directions before integer narrowing, copied
 sample arrays and atomic failure. These checks use original synthetic inputs.
 
-Those checks isolate the primitives. Coupled event/render checks are described
-below; eyes, quality-dependent drawing and full skins remain separate work.
+Those checks isolate the primitives. Coupled animation and standard-eye checks
+are described below; quality-dependent drawing and full skins remain separate work.
 
 `tests/presentation_geometry.rs` verifies length/camera ring overlap, distinct
 clock and cleanup rules, mass scheduling, copied samples and atomic errors.
@@ -229,6 +229,76 @@ samples exactly, including immediate injection, overlap, wrap, clearing and
 deferred cleanup. The head-only comparison supplied body-derived turn factors
 from the reference and used zero packet-extrapolation time. It does not verify
 body, camera, curves, skins, rendering or entity death lifetime.
+
+## Standard paired eyes
+
+Synthetic native checks cover effective/wanted heading initialization, Float32
+easing, shortest arcs, fractional pupils, visibility entry, deferred draw-target
+feedback, death/expiry and per-eye layout arithmetic. Coupling checks include
+remote gaze versus original-own pointer gaze through wire-ID reuse, spacing
+cadence, prepared sample limits and complete rollback. A drained two-anchor body
+that emits one render sample retains its raw-heading eye target.
+
+One-anchor tests separately cover a finite sampled head-lead target, predecessor
+independence, detailed style and negative displayed length. Coincident or longer
+geometry requiring a missing following anchor keeps a finite raw-heading
+fallback and no body curve. This policy does not claim general one-anchor parity;
+the external runtime can consume scratch coordinates from a preceding snake,
+produce nonfinite geometry or fail on that missing anchor.
+
+The integrated build passes 176 native tests, formatting, doctests and native/Wasm
+Clippy. The real Wasm smoke checks independent gaze, copied eye diagnostics,
+input rejection, style-aware preparation, fractional pupil motion, death fading
+and short-curve output. These are synthetic numeric checks; full skin geometry,
+special faces and complete renderer fidelity are outside this layer.
+
+All 97 Node tests pass, including 14 mocked-page cases for full-radian gaze,
+CSS-to-backing coordinate conversion, separate quantized steering, RAF ordering,
+retained gaze through death/disconnect/reset, boost release and teardown. These
+page doubles do not establish browser input or raster behavior.
+
+Stock Windows Firefox 158.0.1 headless passed 614 direct Canvas/ABI assertions
+and 889 assertions on the unchanged authored page. Nine matched synthetic
+checkpoints reproduced the saved baseline pixels exactly before testing the
+new build; its changes were confined to the eye/pupil bounds. Existing numeric
+head/body/camera fields and the received Scene pixels remained unchanged.
+Checks included fractional pupils, death alpha, per-snake paint order,
+short-body recovery, retained-own identity, hostile context reset and rollback.
+The page checks covered CSS-scaled full-radian gaze, reset/death/disconnect
+retention, native RAF ordering and pagehide cleanup. Deterministic checkpoints
+and native real-time RAF observations were recorded separately. All test
+processes, listeners and temporary profiles were removed.
+
+The bounded one-anchor correction subsequently passed 324 ABI/Canvas assertions
+and 13 native-page assertions in the same stock Firefox version. These checked
+finite lead targets, predecessor independence, raw-heading fallback, fractional
+updates, continued native animation and rollback, while body/curve diagnostics
+remain omitted for one anchor. All nine normal-fixture pixel hashes matched the
+earlier eye build exactly. Existing media retains its original build label;
+these checkpoints do not compare every frame of the native-timed recording.
+
+A corrected-build Wasm rerun against hash-verified, frozen observations from
+the complete pinned runtime matched all supported numeric comparisons exactly:
+
+| Comparison | Cases | Operations | Exact comparisons |
+| --- | ---: | ---: | ---: |
+| Unchanged coupled core | 10 | 508 | 2,037,174 |
+| Coupled eyes | 9 | 263 | 78,213 |
+| Focused continuation | 1 | 5 | 1,598 |
+| Supported one-anchor targets | 6 | 80 | 12,783 |
+
+All 2,129,768 executed comparisons had zero mismatches and maximum error zero,
+using signed-zero-aware equality without a tolerance. The continuation overlaps
+a primary case; these are executed comparisons, not independent features.
+Five unsupported one-anchor policy cases passed 51 separate assertions; their
+eight intentional source-target differences are recorded and excluded from
+parity totals. These numerical results cover standard eye state and layout
+arguments, with quality/style supplied externally, not full one-anchor body
+geometry, renderer quality integration or raster equivalence.
+
+These browser checks use original synthetic packets and stand-in artwork.
+They do not establish original-client pixels, full skins, connected transport,
+desktop performance or official-server acceptance.
 
 ## Standalone quality state
 
