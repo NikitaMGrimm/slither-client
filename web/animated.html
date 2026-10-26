@@ -12,13 +12,14 @@
     <label>Palette <select id="skin" disabled><option value="0">Mint</option><option value="1">Amber</option><option value="2">Blue</option></select></label>
     <label>Zoom <select id="zoom" disabled><option value="1">1×</option><option value="1.5" selected>1.5×</option><option value="2">2×</option></select></label>
     <label><input id="follow" type="checkbox" checked disabled>Follow</label>
+    <label>Connection quality <select id="quality" title="Preference applies when connecting; synthetic reset starts in HQ" disabled><option value="1" selected>High</option><option value="0">Low</option></select></label>
     <button id="connect" disabled>Connect local simulator</button>
     <button id="disconnect" disabled>Disconnect</button>
   </div>
   <canvas id="scene" width="960" height="540" tabindex="0" aria-label="Animated geometry preview"></canvas>
   <output id="counts" aria-label="Scene diagnostics"></output>
   <p id="status" role="status">Loading Wasm…</p>
-  <p class="hint">Synthetic geometry preview · Original stand-in artwork · Pointer moves eyes · Local mode: pointer steers, hold Space to boost</p>
+  <p class="hint">Synthetic body effects · Original stand-ins · Pointer moves eyes · Local mode: basic stand-ins, pointer steers, hold Space to boost</p>
 </main>
 <script type="module" src="/scene/animated.mjs"></script>
 </html>

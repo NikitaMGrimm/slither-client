@@ -1,12 +1,14 @@
 import init, * as wasm from './pkg/slither_client.js';
 import { syntheticScene, syntheticStep } from './synthetic-scene.mjs';
 import { connectLoopback, loopbackEndpoint, sceneHeading } from './loopback-session.mjs';
+import { createSyntheticBodyResolver } from './synthetic-body.mjs';
 
 const control = id => document.querySelector(`#${id}`);
 const target = control('scene');
 const lifecycle = new AbortController();
 const listen = (element, type, handler) => element.addEventListener(type, handler, { signal: lifecycle.signal });
 let animated;
+let quality;
 let connection;
 let pendingFrame;
 let disposed = false;
@@ -17,13 +19,14 @@ let heading = 0;
 let gazeHeading = 0;
 let boost = false;
 let renders = 0;
+let drawsSinceStatistics = 0;
 let lastReadout = -Infinity;
 let renderedCamera;
 
 function setStatus(text) { control('status').textContent = text; }
 function updateControls() {
   const ready = Boolean(animated) && !disposed;
-  for (const id of ['reset', 'zoom', 'follow']) control(id).disabled = !ready;
+  for (const id of ['reset', 'zoom', 'follow', 'quality']) control(id).disabled = !ready;
   control('step').disabled = !ready || mode !== 'synthetic';
   control('skin').disabled = !ready || Boolean(connection);
   control('connect').disabled = !ready || Boolean(connection) || !simulatorUrl;
@@ -46,6 +49,8 @@ function teardown() {
   disconnect();
   animated?.free();
   animated = undefined;
+  quality?.free();
+  quality = undefined;
 }
 function fail(error) {
   teardown();
@@ -56,6 +61,7 @@ listen(window, 'pagehide', teardown);
 function reset() {
   disconnect();
   animated.reset(performance.now());
+  quality.begin_skin_preview();
   animated.apply_frame(syntheticScene(Number(control('skin').value)), false);
   animated.set_follows(control('follow').checked);
   animated.set_zoom(Number(control('zoom').value));
@@ -90,7 +96,10 @@ async function start() {
   background.src = tile.toDataURL();
   await background.decode();
   if (disposed) return;
-  animated = new wasm.AnimatedScene(performance.now());
+  const startMs = performance.now();
+  animated = new wasm.AnimatedScene(startMs);
+  quality = new wasm.DesktopQuality(Number(control('quality').value), startMs);
+  const resolveSynthetic = createSyntheticBodyResolver(palettes, globalThis);
 
   function frame(nowMs) {
     pendingFrame = undefined;
@@ -99,17 +108,22 @@ async function start() {
       // Rust advances all presentation state and owns timestamp clamping.
       animated.set_gaze_heading(gazeHeading);
       const step = animated.advance(nowMs, false);
-      step.free();
-      // render prepares exactly one draw, including camera corrections.
-      animated.render(target, ...palettes, background, 1, false);
+      try { quality.advance(step, true); } finally { step.free(); }
+      // Each RAF is an active preview update. Observe prior successful draws;
+      // a statistics transition affects interpolation on the following update.
+      if (quality.update_statistics(nowMs, drawsSinceStatistics, true)) drawsSinceStatistics = 0;
+      const qualityView = JSON.parse(quality.snapshot());
+      if (mode === 'synthetic') animated.render_standard(target, ...palettes, background, resolveSynthetic, quality);
+      else animated.render(target, ...palettes, background, qualityView.qualityScale, false);
+      drawsSinceStatistics++;
+      renders++;
       const view = JSON.parse(animated.snapshot());
       renderedCamera = { x: view.camera.x, y: view.camera.y, zoom: view.camera.zoom };
-      renders++;
       if (nowMs - lastReadout >= 100) {
         lastReadout = nowMs;
         const count = (value, width) => String(value).padStart(width);
-        control('counts').textContent = `Snakes ${count(view.snakes, 3)}   Retained ${count(view.retainedSnakes, 3)}   Drawn ${count(view.drawnSnakes, 3)}\nFood ${count(view.foods, 5)}   Frames ${count(view.frames, 8)}   Ignored ${count(view.ignored, 8)}`;
-        window.slitherAnimatedSceneReport = { ...view, wasmExecuted: true, renders, mode, connected: Boolean(connection) };
+        control('counts').textContent = `Snakes ${count(view.snakes, 3)}   Retained ${count(view.retainedSnakes, 3)}   Drawn ${count(view.drawnSnakes, 3)}\nFood ${count(view.foods, 5)}   Frames ${count(view.frames, 8)}   Ignored ${count(view.ignored, 8)}\nQuality ${qualityView.highQuality ? 'HQ' : 'LQ'}   Blend ${qualityView.qualityBlend.toFixed(4)}   Spacing ${qualityView.qualityScale.toFixed(5)}`;
+        window.slitherAnimatedSceneReport = { ...view, quality: qualityView, wasmExecuted: true, renders, mode, connected: Boolean(connection) };
       }
       pendingFrame = requestAnimationFrame(frame);
     } catch (error) { fail(error); }
@@ -125,6 +139,7 @@ async function start() {
   listen(control('skin'), 'change', () => { if (!connection) reset(); });
   listen(control('zoom'), 'change', () => animated.set_zoom(Number(control('zoom').value)));
   listen(control('follow'), 'change', () => animated.set_follows(control('follow').checked));
+  listen(control('quality'), 'change', () => quality.set_requested_mode(Number(control('quality').value)));
   listen(control('connect'), 'click', () => {
     if (connection || !simulatorUrl) return;
     mode = 'local';
@@ -135,6 +150,7 @@ async function start() {
       const scene = {
         reset: () => {
           animated.reset(performance.now());
+          quality.begin_connection();
           animated.set_follows(control('follow').checked);
           animated.set_zoom(Number(control('zoom').value));
           renderedCamera = undefined;

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Submit ordered standard-body plans through an opt-in borrowed-asset renderer.
+  The synthetic animated page exercises authored body effects and adaptive
+  quality; local simulator mode retains basic stand-ins. Full skins remain pending.
 - Capture ordered body-painter geometry with original sample ordinals, retained
   culling flags and the sampler's unrounded distance seed. Reuse staged draw
   preparation while preserving transactional model rollback and draw commands.

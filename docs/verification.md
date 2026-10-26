@@ -314,7 +314,7 @@ The integrated real Wasm bindings also matched those six frozen runtime traces:
 private evidence documents JSON's signed-zero limitation. Seven Chrome/Electron
 assertions separately checked preference application, interpolation ordering and
 atomic input rejection through the browser ABI. These remain standalone checks;
-the animated page does not yet apply quality state to its rendering passes.
+page integration has separate synthetic checks described below.
 
 Stock Windows Firefox 158.0.1 headless separately passed 224 standalone quality
 assertions on that build. This checked the numerical ABI and input rejection;
@@ -384,6 +384,13 @@ external-runtime production comparisons, performance, all-skin support and page
 quality cadence remain unverified. See the [API contract](standard-body-renderer.md).
 
 ## Dense-scene benchmark
+
+The animated page's synthetic body resolver and mocked-page tests separately
+check the three authored recipes, exact source identity, unsupported appearances,
+shared-step quality ordering, raw draw counts at the strict statistics boundary,
+deferred connection preference, reset cadence and cleanup after quality errors.
+These are synthetic Node checks; they do not establish browser pixels or
+production collection parity with an external runtime.
 
 Native collector tests cover the unrounded sampler seed, original ordinals,
 inclusive culling, shared retained flags, detailed cadence, short-curve omission

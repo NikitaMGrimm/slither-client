@@ -190,8 +190,10 @@ Standard eyes are laid out from the f64 corrected head and painted after each
 snake's body, with square-root death fading and no spawn/boost opacity factor.
 All layouts validate before canvas reset. Pointer gaze uses full radians from
 canvas-center offsets before each update, separately from quantized live steering.
-Complete skins, special faces, effects, attachments, HQ/LQ drawing and radius
-easing remain unimplemented. This preview does not establish visual or gameplay equivalence.
+The synthetic fixture uses ordered body effects and applied HQ/LQ state. Local
+simulator mode retains the basic stand-ins. Complete skins, special faces,
+attachments and radius easing remain unimplemented. This preview does not
+establish visual or gameplay equivalence.
 
 ## Ordered body paint planning
 
@@ -215,11 +217,13 @@ asset entries and 524,304 image commands. Fewer than two active samples,
 coincident stored geometry, absent style metadata and unready referenced assets
 fail explicitly. The provider's opt-in `bodyStyle` and per-palette `boostGlow`
 describe these inputs without distributing host mappings or stock recipes.
-The animated preview still uses its existing stand-in renderer. The separate
-opt-in [`AnimatedScene.render_standard`](standard-body-renderer.md) consumes
+The opt-in [`AnimatedScene.render_standard`](standard-body-renderer.md) consumes
 trusted normalized borrowed recipes, prepares production geometry with each
 recipe's detailed style, and submits these commands using borrowed applied quality.
-It does not evolve quality or change the page's cadence.
+It does not evolve quality. The synthetic animated page supplies authored
+stand-in recipes and advances quality before statistics, counting successful
+draws independently of its throttled readout. Its connection preference applies
+on socket open; synthetic reset starts HQ without resetting the statistics clock.
 
 Numeric draw preparation also captures owned `PreparedBodyGeometry` snapshots
 for eligible curves. Each keeps original sample ordinals, effective flags and
@@ -239,7 +243,8 @@ transition. Statistics use the raw draw count over a strictly greater than
 1000-ms interval, retaining fallback/recovery history and its negative residual.
 The caller owns that draw counter. `DesktopQuality` exposes this same state to
 Wasm, validates numeric modes/counts before narrowing, and borrows an owned
-animation step. It does not change the animated preview's renderer or effects.
+animation step. The animated page owns the shared-step cadence and draw counter;
+the renderer borrows its applied snapshot.
 
 `web/asset-bridge.mjs` borrows the exact existing canvas and loaded image objects
 from a supplied trusted page realm. It validates their types and readiness

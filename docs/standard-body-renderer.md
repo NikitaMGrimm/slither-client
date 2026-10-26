@@ -2,8 +2,8 @@
 
 `AnimatedScene.render_standard` prepares production body geometry, calls
 `plan_standard_body`, then submits its ordered Canvas2D commands. The existing
-`render` API and animated page keep their stand-in artwork and uniform sampling
-style. This API creates no artwork, loads no assets and starts no animation loop.
+`render` API keeps its stand-in artwork and uniform sampling style. This API
+creates no artwork, loads no assets and starts no animation loop.
 
 ```js
 // Caller-owned, already initialized DesktopQuality and trusted skin provider.
@@ -106,3 +106,18 @@ recorder checks after building; `tools/wasm-smoke.mjs` includes them. These chec
 the ABI and modeled Canvas calls/state. They do not establish native browser
 pixels, external-runtime production collection parity, performance, arbitrary
 skins, extension realms or official-server acceptance.
+
+The `/animated` synthetic preview uses this API with three original flat-color
+recipes and generated stand-in effects from `synthetic-body.mjs`. That resolver
+supports only the authored appearances with empty custom data and no cosmetic;
+it does not map arbitrary stock skins. Local simulator mode explicitly uses the
+existing basic renderer, including after disconnection until synthetic reset.
+
+The page advances `DesktopQuality` with the same owned animation step, before
+statistics and before drawing. Its raw counter counts successful Canvas draws,
+including those between readout refreshes. A consumed statistics interval resets
+the counter before the current draw. Each active preview RAF supplies `playing:
+true`; this is a preview policy, not a reconstruction of server game-over state.
+Synthetic reset starts HQ; the connection-quality preference applies on socket
+open. Resets preserve the quality statistics clock and current draw count. Both
+Wasm owners and each temporary step are freed on their lifecycle boundaries.
