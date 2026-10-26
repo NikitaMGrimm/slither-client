@@ -24,7 +24,8 @@ mod snake;
 pub use body::{BODY_SAMPLES, BodyGeometry, BodyPoint, MAX_RETAINED_BODY_POINTS};
 pub use camera::{CAMERA_SAMPLES, CameraCorrections};
 pub use client::{
-    AnimatedClient, ClientPresentationError, MAX_RETAINED_SNAKES, MAX_RETAINED_TOTAL_BODY_POINTS,
+    AnimatedClient, ClientPresentationError, MAX_DRAW_SAMPLES, MAX_RETAINED_SNAKES,
+    MAX_RETAINED_TOTAL_BODY_POINTS, PreparedSnake,
 };
 pub use curve::{
     CurveInput, CurveOutput, CurveSample, CurveVertex, MAX_CURVE_SAMPLES, sample_curve,

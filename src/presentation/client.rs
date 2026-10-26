@@ -3,7 +3,8 @@
 use std::{error::Error, fmt};
 
 use super::{
-    AnchorView, FollowCamera, FrameClock, FrameStep, PresentationError, SnakePresentation, finite,
+    AnchorView, CurveOutput, FollowCamera, FrameClock, FrameStep, PresentationError, SnakeMetrics,
+    SnakePresentation, StandardEyeGeometry, finite,
 };
 use crate::{
     protocol::ElapsedHeader,
@@ -17,6 +18,28 @@ use crate::{
 pub const MAX_RETAINED_SNAKES: usize = MAX_SNAKES * 2;
 /// Aggregate physical anchors, including retained dying body points and undrawn own geometry.
 pub const MAX_RETAINED_TOTAL_BODY_POINTS: usize = MAX_TOTAL_BODY_POINTS * 2;
+/// Aggregate active curve samples permitted in one prepared numeric draw.
+pub const MAX_DRAW_SAMPLES: usize = MAX_RETAINED_TOTAL_BODY_POINTS * 2;
+
+/// One visible snake's complete numeric draw data, in current draw-collection order.
+/// Finish this body's eye/pupil pairs before painting the next prepared snake.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreparedSnake {
+    /// Index in the full draw collection, including culled entries before this one.
+    pub draw_ordinal: usize,
+    /// Whether this is the retained original own object, independently of wire ID.
+    pub own: bool,
+    /// Existing numeric metrics after this draw's single spacing transition.
+    pub metrics: SnakeMetrics,
+    /// Sampled body, or none when fewer than two retained anchors exist.
+    pub curve: Option<CurveOutput>,
+    /// Face heading captured before committing this draw's new curve target.
+    pub face_heading: f64,
+    /// World-axis pupil displacement, before entity scale and zoom.
+    pub pupil: Point,
+    /// Caller-ready standard paired-eye geometry and style.
+    pub eye_geometry: StandardEyeGeometry,
+}
 
 /// A failed received, numeric, or retention transition; the entire client is preserved.
 #[derive(Clone, Debug, PartialEq)]
@@ -25,7 +48,7 @@ pub enum ClientPresentationError {
     State(StateError),
     /// A presentation input or arithmetic result is invalid.
     Presentation(PresentationError),
-    /// The retained presentation world would exceed its object or physical-anchor bound.
+    /// The presentation world or prepared draw would exceed a retention/sample bound.
     Limit,
     /// Presentation requires an unimplemented mode-specific skin/color ordering.
     UnsupportedMode(u8),
@@ -75,7 +98,7 @@ struct Entry {
     snake: SnakePresentation,
 }
 
-/// Bounded native animation world. No sockets, prediction timestamps, or curve sampling.
+/// Bounded native animation world with transactional numeric draws. No sockets.
 ///
 /// Entries are stored in update/paint order, oldest appearance first. The own
 /// object is retained independently of the packet lookup and draw collection.
@@ -191,12 +214,18 @@ impl AnimatedClient {
                     speed_per_32ms,
                 } => {
                     if let Some(index) = next.target_index(target) {
-                        next.entries[index].snake.set_motion(
+                        let entry = &mut next.entries[index];
+                        entry.snake.set_motion(
                             heading,
                             wanted_heading,
                             direction,
                             speed_per_32ms,
                         )?;
+                        if !entry.own
+                            && let Some(wanted) = wanted_heading
+                        {
+                            entry.snake.set_gaze_heading(wanted)?;
+                        }
                     }
                 }
                 PresentationEvent::SnakeAnchor {
@@ -292,10 +321,27 @@ impl AnimatedClient {
         Ok(step)
     }
 
-    /// Prepare one draw: own camera/zoom, inclusive corrected-anchor culling,
-    /// then spacing for visible snakes. This does not advance the update clock.
+    /// Prepare a default-style numeric draw and discard its paint data.
+    /// This commits the same camera, spacing and eye targets as a real draw;
+    /// do not call immediately before another preparation for the same draw.
     pub fn prepare_draw(&mut self, width: u32, height: u32) -> Result<(), ClientPresentationError> {
-        if width == 0 || height == 0 {
+        self.prepare_draw_with_style(width, height, 1., false)?;
+        Ok(())
+    }
+
+    /// Stage camera/zoom, corrected-anchor culling, spacing and one curve per
+    /// visible snake, then commit every eye target together. Outputs retain the
+    /// existing oldest-first draw order and original ordinals without resampling.
+    /// Invalid style is rejected even for an empty or entirely culled world.
+    pub fn prepare_draw_with_style(
+        &mut self,
+        width: u32,
+        height: u32,
+        quality_scale: f64,
+        detailed_style: bool,
+    ) -> Result<Vec<PreparedSnake>, ClientPresentationError> {
+        finite(&[quality_scale])?;
+        if width == 0 || height == 0 || quality_scale <= 0. {
             return Err(PresentationError.into());
         }
         let mut next = self.clone();
@@ -322,10 +368,45 @@ impl AnimatedClient {
             });
             entry.snake.set_visible(visible);
         }
-        for entry in next.entries.iter_mut().filter(|entry| entry.drawn) {
-            entry.snake.prepare_draw()?;
+        let mut prepared = Vec::new();
+        let mut samples = 0_usize;
+        for (draw_ordinal, entry) in next
+            .entries
+            .iter_mut()
+            .filter(|entry| entry.drawn)
+            .enumerate()
+        {
+            let metrics = entry.snake.metrics();
+            if !metrics.visible || metrics.expired {
+                continue;
+            }
+            let (curve, face_heading) = entry.snake.prepare_curve(quality_scale, detailed_style)?;
+            samples = samples
+                .checked_add(curve.as_ref().map_or(0, |curve| curve.samples.len()))
+                .filter(|count| *count <= MAX_DRAW_SAMPLES)
+                .ok_or(ClientPresentationError::Limit)?;
+            prepared.push(PreparedSnake {
+                draw_ordinal,
+                own: entry.own,
+                metrics: entry.snake.metrics(),
+                curve,
+                face_heading,
+                pupil: entry.snake.eyes().pupil(),
+                eye_geometry: *entry.snake.eye_geometry(),
+            });
         }
         *self = next;
+        Ok(prepared)
+    }
+
+    /// Set visual gaze on the retained original own object, including death fade
+    /// and retention after expiry. A missing own object is a validated no-op.
+    /// This does not depend on transport, wire lookup, or live steering eligibility.
+    pub fn set_own_gaze_heading(&mut self, heading: f64) -> Result<(), ClientPresentationError> {
+        finite(&[heading])?;
+        if let Some(entry) = self.entries.iter_mut().find(|entry| entry.own) {
+            entry.snake.set_gaze_heading(heading)?;
+        }
         Ok(())
     }
 
