@@ -275,6 +275,34 @@ export function animatedSmoke(wasm) {
     assert.equal(tick(156, true), 1);
     assert.equal(view().boundary.index, 8);
   } finally { radius.free(); }
+  const follow = new wasm.AnimatedScene(0);
+  try {
+    follow.set_follows(false);
+    let now = 0;
+    for (const reset of [false, true]) {
+      if (reset) {
+        follow.reset();
+        assert.equal(JSON.parse(follow.snapshot()).camera.follows, false);
+      }
+      follow.apply_frame(syntheticScene(), false);
+      assert.equal(JSON.parse(follow.snapshot()).camera.follows, false);
+      follow.prepare_draw(800, 600);
+      assert.equal(JSON.parse(follow.snapshot()).camera.x, 0,
+        'setup/reset keep the fixed newest-body-anchor camera when following is off');
+      follow.advance(now += 8, false).free();
+      follow.prepare_draw(800, 600);
+      const fixed = JSON.parse(follow.snapshot());
+      assert.equal(fixed.camera.x, 0);
+      assert.notEqual(fixed.ownHead.x, fixed.camera.x, 'the head advances while the camera stays fixed');
+    }
+    follow.set_follows(true);
+    follow.apply_frame(syntheticScene(), false);
+    follow.prepare_draw(800, 600);
+    const view = JSON.parse(follow.snapshot());
+    assert.equal(view.camera.follows, true);
+    assert.equal(view.camera.x, view.ownHead.x);
+  } finally { follow.free(); }
+
   const scene = new wasm.AnimatedScene(0);
   const view = () => JSON.parse(scene.snapshot());
   function advance(now) {

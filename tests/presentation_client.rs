@@ -478,6 +478,36 @@ fn cached_direction_compact_anchors_keep_addressing_undrawn_original_own() {
 }
 
 #[test]
+fn follow_preference_survives_first_setup_reset_and_repeated_setup() {
+    for follows in [false, true] {
+        let mut c = AnimatedClient::new(0.).unwrap();
+        c.set_follows(follows);
+        apply(&mut c, &[setup(), appearance(7, 2000, 12)]);
+        assert_eq!(c.camera().follows(), follows);
+        for reset in [false, true] {
+            if reset {
+                c.reset();
+                assert_eq!(c.camera().follows(), follows);
+            }
+            apply(
+                &mut c,
+                &[setup(), appearance(7, 4000, 12), appearance(8, 4445, 1)],
+            );
+            assert_eq!(c.camera().follows(), follows);
+            c.prepare_draw(800, 600).unwrap();
+            assert_eq!(
+                c.camera().position(),
+                Point {
+                    x: if follows { 4000. } else { 3958. },
+                    y: 1000.,
+                }
+            );
+            assert_eq!(c.snake(8).unwrap().metrics().visible, follows);
+        }
+    }
+}
+
+#[test]
 fn setup_resets_identity_and_camera_but_preserves_fractional_update_timeline() {
     let mut c = client();
     assert_eq!(c.advance(3., false).unwrap().whole_steps, 0);
@@ -495,7 +525,7 @@ fn setup_resets_identity_and_camera_but_preserves_fractional_update_timeline() {
     assert_eq!(c.retained_count(), 1);
     assert_eq!(c.own_snake().unwrap().metrics().id, 9);
     assert_eq!(c.camera().zoom(), INITIAL_ZOOM);
-    assert!(c.camera().follows());
+    assert!(!c.camera().follows());
     assert!(c.snake(7).is_none());
     let step = c.advance(8., false).unwrap();
     assert_eq!(step.delta, 5. / 8.);

@@ -168,15 +168,23 @@ impl AnimatedClient {
         })
     }
 
-    /// Clear the world and view controls, and restore the lag multiplier to one.
+    /// Clear the world and transient view state, and restore the lag multiplier to one.
     /// Preserve the clock's timestamp and both accumulated phases, boundary state,
-    /// and shared body-painter flag history. Use `new` to start a fresh timeline.
+    /// caller follow preference and shared body-painter flag history. Use `new`
+    /// to start a fresh timeline.
     pub fn reset(&mut self) {
         self.received = ClientState::default();
         self.clock.reset_lag();
-        self.camera = FollowCamera::default();
+        self.reset_camera();
         self.connected = false;
         self.entries.clear();
+    }
+
+    fn reset_camera(&mut self) {
+        // Following is a caller preference that survives world/connection resets.
+        let follows = self.camera.follows();
+        self.camera = FollowCamera::default();
+        self.camera.set_follows(follows);
     }
 
     fn target_index(&self, target: SnakeTarget) -> Option<usize> {
@@ -258,7 +266,7 @@ impl AnimatedClient {
                     next.connected = true;
                     setup = Some(value);
                     next.entries.clear();
-                    next.camera = FollowCamera::default();
+                    next.reset_camera();
                 }
                 PresentationEvent::SnakeAppearance(appearance) => {
                     let setup = setup
