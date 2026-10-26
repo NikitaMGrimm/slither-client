@@ -12,6 +12,7 @@ use std::{
 use crate::{math, state::Point};
 
 mod body;
+mod body_painter;
 mod camera;
 mod client;
 mod curve;
@@ -22,6 +23,13 @@ mod quality;
 mod snake;
 
 pub use body::{BODY_SAMPLES, BodyGeometry, BodyPoint, MAX_RETAINED_BODY_POINTS};
+pub use body_painter::{
+    BodyAlpha, BodyAsset, BodyAssetStatus, BodyAssetUse, BodyBlend, BodyFade, BodyImageCommand,
+    BodyPaintError, BodyPaintGeometry, BodyPaintInput, BodyPaintPass, BodyPaintPlan,
+    BodyPaintQuality, BodyPaintRecipe, BodyPaintSample, BodyPaintView, BodyPaintVisual,
+    BodyPalette, BodyRect, BodyRun, BodyStyle, BodyVariantMode, MAX_BODY_PAINT_COMMANDS,
+    MAX_BODY_PAINT_SAMPLES, plan_standard_body,
+};
 pub use camera::{CAMERA_SAMPLES, CameraCorrections};
 pub use client::{
     AnimatedClient, ClientPresentationError, MAX_DRAW_SAMPLES, MAX_RETAINED_SNAKES,
