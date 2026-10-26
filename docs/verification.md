@@ -372,7 +372,7 @@ claim. External adapters, source identities and raw evidence remain outside Git.
 
 `tools/body-render-smoke.mjs` executes the real Wasm `render_standard` ABI with
 an original synthetic Canvas recorder and normalized provider snapshots. Its
-236 assertions cover per-appearance custom/cosmetic requests, duplicate IDs and
+242 assertions cover per-appearance custom/cosmetic requests, duplicate IDs and
 original-own removal/reuse, whole-source versus full/partial crops, exact source
 objects, transforms/destination arithmetic, ordered body/death/eyes, HQ/LQ/blend
 gates, mixed glows, ignored invalid alpha, readiness/revision coherence, short
