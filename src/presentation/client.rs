@@ -10,8 +10,8 @@ use super::{
 use crate::{
     protocol::ElapsedHeader,
     state::{
-        ClientState, FrameReport, MAX_SNAKES, MAX_TOTAL_BODY_POINTS, Point, PresentationEvent,
-        SnakeTarget, StateError,
+        Appearance, ClientState, FrameReport, MAX_SNAKES, MAX_TOTAL_BODY_POINTS, Point,
+        PresentationEvent, SnakeTarget, StateError,
     },
 };
 
@@ -211,8 +211,28 @@ impl AnimatedClient {
         bytes: &[u8],
         header: ElapsedHeader,
     ) -> Result<FrameReport, ClientPresentationError> {
+        self.apply_frame_with_eye_geometry(bytes, header, |_| Ok(StandardEyeGeometry::default()))
+    }
+
+    /// Resolve paired-eye parameters once for each appearance in packet order,
+    /// before its first animation update. Geometry belongs to the retained object,
+    /// independently of later wire-ID reuse. Complete framing and received-state
+    /// validation precede callbacks; a later presentation error can still follow
+    /// a callback. Model changes roll back on any error; caller effects cannot.
+    pub fn apply_frame_with_eye_geometry<E, F>(
+        &mut self,
+        bytes: &[u8],
+        header: ElapsedHeader,
+        mut resolve: F,
+    ) -> Result<FrameReport, E>
+    where
+        E: From<ClientPresentationError>,
+        F: FnMut(&Appearance) -> Result<StandardEyeGeometry, E>,
+    {
         let mut received = self.received.clone();
-        let applied = received.apply_frame_with_events(bytes, header)?;
+        let applied = received
+            .apply_frame_with_events(bytes, header)
+            .map_err(ClientPresentationError::from)?;
         if applied.events.is_empty() {
             self.received = received;
             return Ok(applied.report);
@@ -223,12 +243,17 @@ impl AnimatedClient {
             match event {
                 PresentationEvent::Setup(value) => {
                     if value.game_mode == Some(2) {
-                        return Err(ClientPresentationError::UnsupportedMode(2));
+                        return Err(ClientPresentationError::UnsupportedMode(2).into());
                     }
                     if let Some(boundary) = &mut next.boundary {
-                        boundary.apply_setup(value.radius)?;
+                        boundary
+                            .apply_setup(value.radius)
+                            .map_err(ClientPresentationError::from)?;
                     } else {
-                        next.boundary = Some(BoundaryRadius::new(value.radius)?);
+                        next.boundary = Some(
+                            BoundaryRadius::new(value.radius)
+                                .map_err(ClientPresentationError::from)?,
+                        );
                     }
                     next.connected = true;
                     setup = Some(value);
@@ -236,9 +261,18 @@ impl AnimatedClient {
                     next.camera = FollowCamera::default();
                 }
                 PresentationEvent::SnakeAppearance(appearance) => {
-                    let setup = setup.as_ref().ok_or(StateError::MissingSetup)?;
-                    let snake =
-                        SnakePresentation::from_appearance(&appearance, setup, next.camera.zoom())?;
+                    let setup = setup
+                        .as_ref()
+                        .ok_or(StateError::MissingSetup)
+                        .map_err(ClientPresentationError::from)?;
+                    let geometry = resolve(&appearance)?;
+                    let snake = SnakePresentation::from_appearance_with_eye_geometry(
+                        &appearance,
+                        setup,
+                        next.camera.zoom(),
+                        geometry,
+                    )
+                    .map_err(ClientPresentationError::from)?;
                     let own = next.own_snake().is_none();
                     if own {
                         let position = snake
@@ -247,7 +281,9 @@ impl AnimatedClient {
                             .first()
                             .map(|point| point.position())
                             .unwrap_or(appearance.absolute_head);
-                        next.camera.set_position(position)?;
+                        next.camera
+                            .set_position(position)
+                            .map_err(ClientPresentationError::from)?;
                     }
                     for entry in &mut next.entries {
                         if entry.wire_id == Some(appearance.id) {
@@ -272,16 +308,17 @@ impl AnimatedClient {
                 } => {
                     if let Some(index) = next.target_index(target) {
                         let entry = &mut next.entries[index];
-                        entry.snake.set_motion(
-                            heading,
-                            wanted_heading,
-                            direction,
-                            speed_per_32ms,
-                        )?;
+                        entry
+                            .snake
+                            .set_motion(heading, wanted_heading, direction, speed_per_32ms)
+                            .map_err(ClientPresentationError::from)?;
                         if !entry.own
                             && let Some(wanted) = wanted_heading
                         {
-                            entry.snake.set_gaze_heading(wanted)?;
+                            entry
+                                .snake
+                                .set_gaze_heading(wanted)
+                                .map_err(ClientPresentationError::from)?;
                         }
                     }
                 }
@@ -295,32 +332,40 @@ impl AnimatedClient {
                     if let Some(index) = next.target_index(target) {
                         let entry = &mut next.entries[index];
                         let previous = entry.snake.metrics().corrected_head;
-                        entry.snake.apply_anchor(
-                            absolute_position,
-                            direction,
-                            if grew { fam } else { None },
-                            AnchorView {
-                                zoom: next.camera.zoom(),
-                                extrapolated_distance: 0.,
-                            },
-                        )?;
+                        entry
+                            .snake
+                            .apply_anchor(
+                                absolute_position,
+                                direction,
+                                if grew { fam } else { None },
+                                AnchorView {
+                                    zoom: next.camera.zoom(),
+                                    extrapolated_distance: 0.,
+                                },
+                            )
+                            .map_err(ClientPresentationError::from)?;
                         if entry.own {
                             next.camera
-                                .reanchor(previous, entry.snake.metrics().corrected_head)?;
+                                .reanchor(previous, entry.snake.metrics().corrected_head)
+                                .map_err(ClientPresentationError::from)?;
                         }
                         next.check_limits()?;
                     }
                 }
                 PresentationEvent::SnakeMass { id, fam } => {
                     if let Some(index) = next.lookup_index(id) {
-                        next.entries[index].snake.set_mass(fam)?;
+                        next.entries[index]
+                            .snake
+                            .set_mass(fam)
+                            .map_err(ClientPresentationError::from)?;
                     }
                 }
                 PresentationEvent::SnakeTailRemoved { id, fam } => {
                     if let Some(index) = next.lookup_index(id) {
                         next.entries[index]
                             .snake
-                            .remove_tail(fam, next.camera.zoom())?;
+                            .remove_tail(fam, next.camera.zoom())
+                            .map_err(ClientPresentationError::from)?;
                     }
                 }
                 PresentationEvent::SnakeRemoved { id, died } => {
@@ -349,7 +394,9 @@ impl AnimatedClient {
                 }
                 PresentationEvent::RadiusTarget(radius) => {
                     if let Some(boundary) = &mut next.boundary {
-                        boundary.set_target(radius)?;
+                        boundary
+                            .set_target(radius)
+                            .map_err(ClientPresentationError::from)?;
                     }
                     if let Some(setup) = &mut setup {
                         setup.radius = radius;

@@ -35,8 +35,8 @@ export function bodyRenderSmoke(wasm) {
     arc(...args) { this.throwIf('arc'); this.path.push(args); }
     closePath() {}
     fillRect(...args) { this.trace.push({ op: 'fillRect', args }); }
-    stroke() { this.trace.push({ op: 'stroke', path: this.path }); }
-    fill() { this.trace.push({ op: 'fill', path: this.path, alpha: this.alpha, blend: this.blend }); }
+    stroke() { this.trace.push({ op: 'stroke', path: this.path, color: this.strokeStyle, width: this.lineWidth, alpha: this.alpha }); }
+    fill() { this.trace.push({ op: 'fill', path: this.path, color: this.fillStyle, alpha: this.alpha, blend: this.blend }); }
     drawImage(source, ...args) {
       if (source === this.failSource) throw new Error('synthetic Canvas drawImage');
       this.trace.push({ op: 'image', source, args, alpha: this.alpha, blend: this.blend,
@@ -60,7 +60,7 @@ export function bodyRenderSmoke(wasm) {
   const vanillaEyes = () => ({ kind: 'standard', distance: 6, separation: 6, radius: 6,
     pupilRadius: 3.5, pupilTravel: 2.3, outlineWidth: 0, eyeColor: 0xffffff, pupilColor: 0,
     outlineColor: 0, eyeOpacity: 0.75, pupilOpacity: 1, angleSmoothing: 0.12 });
-  function fixture({ eyes = true, detailed = false } = {}) {
+  function fixture({ eyes = true, detailed = false, eyeStyle = null } = {}) {
     const scene = new wasm.AnimatedScene(0);
     const quality = new wasm.DesktopQuality(1, 0);
     const target = new HTMLCanvasElement('target'); target.width = 960; target.height = 540;
@@ -76,7 +76,7 @@ export function bodyRenderSmoke(wasm) {
       palettes: [
         { variants: [{ asset: 0 }, { asset: 7, sourceRect: [0, 0, 32, 32] }], boostGlow: { asset: 2 } },
         { variants: [{ asset: 1, sourceRect: [2, 3, 12, 14] }, { asset: 1 }], boostGlow: { asset: 3 } },
-      ], variantMode: 'cycle', variantPeriod: 2, eyes: eyes ? vanillaEyes() : { kind: 'none' },
+      ], variantMode: 'cycle', variantPeriod: 2, eyes: eyes ? (eyeStyle ?? vanillaEyes()) : { kind: 'none' },
       effects: ['outline', 'shadow', 'death-highlight'].map((kind, i) => ({ kind, asset: i + 4, opacity: 1 })),
       bodyStyle: { detailedSegments: detailed, swell: 0, rotateSegments: true, headFade: null, tailFade: null },
       attachment: null, unsupportedFeatures: [],
@@ -93,7 +93,8 @@ export function bodyRenderSmoke(wasm) {
       Array.from(scene.own_body_samples()), Array.from(scene.own_body()), Array.from(scene.length_samples()),
       Array.from(scene.boundary_samples())];
     const close = () => { scene.free(); quality.free(); };
-    scene.apply_frame(syntheticScene(), false);
+    if (eyeStyle) scene.apply_frame_with_eye_geometry(syntheticScene(), false, () => eyeStyle);
+    else scene.apply_frame(syntheticScene(), false);
     scene.advance(40, false).free();
     return { scene, quality, target, foods, background, sources, metadata, catalog, snapshot, requests,
       provider, resolve, render, state, close, transform: fn => { transform = fn; } };
@@ -119,6 +120,110 @@ export function bodyRenderSmoke(wasm) {
     return failure;
   }
   try {
+    const style = { ...vanillaEyes(), distance: 9.25, separation: 4.75, radius: 4.25,
+      pupilRadius: 1.5, pupilTravel: 0.02, outlineWidth: 2.5,
+      eyeColor: 0x123456, pupilColor: 0xabcdef, eyeOpacity: 0.6, pupilOpacity: 0.8 };
+    const styled = fixture({ eyeStyle: { ...style } });
+    try {
+      const { scene, target, foods, background } = styled;
+      // Direct eye metadata remains usable while unrelated body assets are pending.
+      scene.reset(); styled.catalog[0].state = 'pending';
+      const pending = styled.provider.resolve({ skin: 0 }, styled.snapshot);
+      eq(pending.status, 'pending'); ok(pending.recipe.eyes);
+      const mutable = { ...pending.recipe.eyes };
+      scene.apply_frame_with_eye_geometry(bundle(syntheticSetup(), appearance([1, 4], 17)), false,
+        request => { request.customBytes.fill(99); return mutable; });
+      mutable.pupilTravel = 200; mutable.eyeColor = 0xffffff; mutable.radius = 200;
+      scene.advance(44, false).free(); // Reset retained the fixture's 40-ms clock.
+      eq(JSON.parse(scene.snapshot()).own.eyes.pupilX, 0.02, 'appearance style applies before the first fractional step');
+      styled.catalog[0].state = 'ready';
+      styled.render();
+      eq([...styled.requests[0].customBytes], [1, 4], 'appearance request bytes are independently owned');
+      const paint = () => target.context.trace.filter(v => v.op === 'fill');
+      const fills = paint(); const row = scene.drawn_eyes(960, 540);
+      eq(fills.map(v => v.color), ['rgb(18,52,86)', 'rgb(171,205,239)', 'rgb(18,52,86)', 'rgb(171,205,239)']);
+      eq(fills.map(v => v.alpha), [0.6, 0.8, 0.6, 0.8]);
+      const view = JSON.parse(scene.snapshot()); const m = view.own, z = view.camera.zoom;
+      const expectedEye = [480 + ((9.25 * m.scale + Math.cos(-Math.PI / 2) * (4.75 * m.scale + 0.5)
+        + m.correctedX) - view.camera.absoluteX) * z,
+      270 + ((Math.sin(-Math.PI / 2) * (4.75 * m.scale + 0.5) + m.correctedY) - view.camera.absoluteY) * z,
+      4.25 * m.scale * z, 0, Math.PI * 2];
+      eq(fills[0].path[0], expectedEye, 'nondefault forward/separation/radius keep layout arithmetic');
+      eq(fills[0].path[0].slice(0, 3), [row[3], row[4], row[11]]);
+      eq(fills[1].path[0].slice(0, 3), [row[5], row[6], row[12]]);
+      eq(row[12], 1.5 * m.scale * z);
+      const outlines = target.context.trace.filter(v => v.op === 'stroke').slice(1);
+      eq(outlines.map(v => [v.color, v.width, v.alpha]), [['#000000', 2.5 * z, 0.6], ['#000000', 2.5 * z, 0.6]]);
+      for (const key of ['distance', 'separation', 'radius', 'pupilRadius', 'pupilTravel', 'outlineWidth',
+        'eyeColor', 'pupilColor', 'eyeOpacity', 'pupilOpacity']) {
+        const original = styled.metadata.eyes[key];
+        checkAtomic(styled, () => { styled.metadata.eyes[key] = original + 0.01; });
+        styled.metadata.eyes[key] = original;
+      }
+      target.context.trace = [];
+      scene.render(target, ...foods, background, 1, false);
+      eq(paint().map(v => [v.color, v.alpha, v.path]), fills.map(v => [v.color, v.alpha, v.path]),
+        'basic renderer consumes the same retained typed style');
+    } finally { styled.close(); }
+
+    const defaultLegacy = fixture(), defaultExplicit = fixture({ eyeStyle: vanillaEyes() });
+    try {
+      for (const basic of [false, true]) {
+        for (const f of [defaultLegacy, defaultExplicit]) {
+          f.target.context.trace = [];
+          if (basic) f.scene.render(f.target, ...f.foods, f.background, 1, false);
+          else f.render();
+        }
+        const normalized = f => f.target.context.trace.map(call => call.source
+          ? { ...call, source: call.source.name } : call);
+        eq(normalized(defaultLegacy), normalized(defaultExplicit), 'default API preserves all recorded commands exactly');
+        eq(defaultLegacy.state(), defaultExplicit.state());
+      }
+    } finally { defaultLegacy.close(); defaultExplicit.close(); }
+
+    for (const key of ['distance', 'separation', 'radius', 'pupilRadius', 'pupilTravel', 'outlineWidth', 'eyeOpacity', 'pupilOpacity']) {
+      const zero = { ...vanillaEyes(), [key]: -0 };
+      const f = fixture({ eyeStyle: zero });
+      try {
+        f.render();
+        checkAtomic(f, () => { f.metadata.eyes = { ...zero, [key]: 0 }; });
+      } finally { f.close(); }
+    }
+
+    const retainedStyles = fixture();
+    try {
+      const f = retainedStyles;
+      const styles = [0.02, 0.04, 0.06].map((pupilTravel, i) => ({ ...vanillaEyes(), pupilTravel, radius: 4 + i }));
+      let count = 0;
+      f.scene.reset();
+      f.scene.apply_frame_with_eye_geometry(bundle(syntheticSetup(), appearance([1], 17), appearance([2], 29),
+        [115, 0, 0, 0], appearance([3], 31)), false, () => styles[count++]);
+      f.scene.advance(44, false).free();
+      f.transform((snapshot, request) => ({ ...snapshot,
+        recipe: { ...snapshot.recipe, eyes: styles[request.customBytes[0] - 1] } }));
+      f.render();
+      eq(f.requests.map(r => [r.own, [...r.customBytes]]), [[false, [2]], [false, [3]]]);
+      eq(JSON.parse(f.scene.snapshot()).own.eyes.pupilX, 0, 'immediately removed own retains unadvanced pupil');
+      eq(JSON.parse(f.scene.drawn_snakes()).map(r => r.snake.eyes.pupilX), [0.04, 0.06]);
+      f.transform((snapshot, request) => ({ ...snapshot, recipe: { ...snapshot.recipe, eyes: styles[request.own ? 0 : 1] } }));
+      checkAtomic(f);
+    } finally { retainedStyles.close(); }
+
+    const directValidation = fixture();
+    try {
+      let getters = 0;
+      for (const [key, value] of Object.entries(vanillaEyes())) {
+        for (const accessor of [false, true]) {
+          const eyes = vanillaEyes(); delete eyes[key];
+          if (accessor) Object.defineProperty(eyes, key, { get() { getters++; return value; } });
+          else Object.setPrototypeOf(eyes, { [key]: value });
+          directValidation.transform(s => ({ ...s, recipe: { ...s.recipe, eyes } }));
+          checkAtomic(directValidation);
+        }
+      }
+      eq(getters, 0);
+    } finally { directValidation.close(); }
+
     const boundary = fixture();
     try {
       const { scene, target, foods, background } = boundary;

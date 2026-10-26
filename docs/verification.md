@@ -293,6 +293,32 @@ body, camera, curves, skins, rendering or entity death lifetime.
 
 ## Standard paired eyes
 
+Appearance-time geometry regressions cover first fractional-update clamps at
+travel 0.02/0.04, explicit-default solver equivalence, constructor rejection,
+copied ownership, wire-order resolution through duplicates and mid-frame setup,
+short/immediately removed appearances, retained death/reused-ID styles, and
+complete rollback after a late callback or geometry error. Framing and received
+tail failures invoke no resolver. Native tests compare complete client state.
+
+The real Wasm ABI smoke also checks exact appearance requests, copied custom
+bytes, callback exception identity, accessor/inherited/missing metadata rejection
+without getter calls, numeric/color bounds, unsupported rates/styles/promises,
+post-application metadata mutation, and default diagnostics/curve preservation.
+The Canvas recorder checks nondefault colors/radii/outline/layout and first
+fractional pupil travel, pending-body metadata use, exact default commands in
+both render paths, signed-zero-aware recipe coherence, and pre-reset rejection
+with model rollback. The explicit `none` renderer lane remains covered. These
+are synthetic native and Node/Wasm checks; fresh native-browser pixels and
+external-runtime comparisons of this API remain separate verification work.
+
+This milestone passed 249 native tests, formatting, doctests (no examples),
+native/Wasm Clippy, a fresh web build and the complete synthetic Wasm smoke,
+including 496 Canvas-recorder assertions. A restricted Node run passed 101 tests;
+the two loopback-server test files and three temporary-Git mutation tests were
+excluded under the implementation task's no-server/no-Git-mutation limits.
+The existing index/history guards passed separately, and the unstaged changed
+files were inspected with the same repository policy without staging them.
+
 Synthetic native checks cover effective/wanted heading initialization, Float32
 easing, shortest arcs, fractional pupils, visibility entry, deferred draw-target
 feedback, death/expiry and per-eye layout arithmetic. Coupling checks include

@@ -1,7 +1,10 @@
 //! Original synthetic snake transitions; no reference fixtures, sockets, or clocks.
 
 use slither_client::{
-    presentation::{AnchorView, FrameClock, FrameStep, HEAD_SAMPLES, SnakePresentation, Turn},
+    presentation::{
+        AnchorView, FrameClock, FrameStep, HEAD_SAMPLES, SnakePresentation, StandardEyeGeometry,
+        Turn,
+    },
     state::{Appearance, Direction, MAX_BODY_POINTS, Point, Setup},
 };
 use std::f64::consts::TAU;
@@ -70,6 +73,116 @@ fn view(zoom: f64, extrapolated_distance: f64) -> AnchorView {
     AnchorView {
         zoom,
         extrapolated_distance,
+    }
+}
+
+#[test]
+fn appearance_style_controls_the_first_fractional_pupil_update_and_is_owned() {
+    for travel in [0.02, 0.04] {
+        let mut appearance = appearance();
+        appearance.custom_skin = vec![2, 9];
+        let mut geometry = StandardEyeGeometry {
+            pupil_travel: travel,
+            ..StandardEyeGeometry::default()
+        };
+        let mut snake = SnakePresentation::from_appearance_with_eye_geometry(
+            &appearance,
+            &setup(),
+            1.,
+            geometry,
+        )
+        .unwrap();
+        geometry.pupil_travel = 30.;
+        appearance.custom_skin[0] = 99;
+        assert_eq!(geometry.pupil_travel, 30.);
+        assert_eq!(snake.custom_skin(), &[2, 9]);
+        snake.advance(step(0.5, 0)).unwrap();
+        assert_eq!(snake.eyes().pupil(), Point { x: travel, y: 0. });
+        assert_eq!(snake.eye_geometry().pupil_travel, travel);
+        snake.mark_dead();
+        snake.set_gaze_heading(std::f64::consts::PI).unwrap();
+        snake.advance(step(0.5, 1)).unwrap();
+        assert_eq!(snake.eyes().pupil().x, -travel);
+        assert_eq!(snake.eye_geometry().pupil_travel, travel);
+    }
+}
+
+#[test]
+fn explicit_default_constructor_preserves_the_complete_solver() {
+    let mut legacy = snake();
+    let mut explicit = SnakePresentation::from_appearance_with_eye_geometry(
+        &appearance(),
+        &setup(),
+        1.,
+        StandardEyeGeometry::default(),
+    )
+    .unwrap();
+    for delta in [0., 0.5, 1., 5.] {
+        for snake in [&mut legacy, &mut explicit] {
+            snake.set_gaze_heading(1.2).unwrap();
+            snake.advance(step(delta, delta as u32)).unwrap();
+        }
+        assert_eq!(legacy, explicit);
+    }
+}
+
+#[test]
+fn appearance_rejects_invalid_style_before_constructing_state() {
+    for invalid in [f64::NAN, f64::INFINITY, -0.01] {
+        for field in 0..8 {
+            let mut geometry = StandardEyeGeometry::default();
+            let fields = [
+                &mut geometry.eye_radius,
+                &mut geometry.pupil_radius,
+                &mut geometry.pupil_travel,
+                &mut geometry.forward,
+                &mut geometry.separation,
+                &mut geometry.outline_width,
+                &mut geometry.eye_alpha,
+                &mut geometry.pupil_alpha,
+            ];
+            *fields.into_iter().nth(field).unwrap() = invalid;
+            assert!(
+                SnakePresentation::from_appearance_with_eye_geometry(
+                    &appearance(),
+                    &setup(),
+                    1.,
+                    geometry,
+                )
+                .is_err()
+            );
+        }
+    }
+    for geometry in [
+        StandardEyeGeometry {
+            eye_alpha: 1.01,
+            ..StandardEyeGeometry::default()
+        },
+        StandardEyeGeometry {
+            pupil_alpha: 1.01,
+            ..StandardEyeGeometry::default()
+        },
+    ] {
+        assert!(
+            SnakePresentation::from_appearance_with_eye_geometry(
+                &appearance(),
+                &setup(),
+                1.,
+                geometry,
+            )
+            .is_err()
+        );
+    }
+    for zoom in [0., -1., f64::NAN] {
+        assert!(
+            SnakePresentation::from_appearance_with_eye_geometry(
+                &appearance(),
+                &setup(),
+                zoom,
+                StandardEyeGeometry::default(),
+            )
+            .is_err()
+        );
     }
 }
 

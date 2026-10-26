@@ -268,6 +268,27 @@ pub struct StandardEyeLayout {
 }
 
 impl StandardEyeGeometry {
+    /// Validate retained style parameters before the first pupil update or draw.
+    pub fn validate(&self) -> Result<(), PresentationError> {
+        let nonnegative = [
+            self.eye_radius,
+            self.pupil_radius,
+            self.pupil_travel,
+            self.forward,
+            self.separation,
+            self.outline_width,
+        ];
+        finite(&nonnegative)?;
+        finite(&[self.eye_alpha, self.pupil_alpha])?;
+        if nonnegative.iter().any(|value| *value < 0.)
+            || !(0. ..=1.).contains(&self.eye_alpha)
+            || !(0. ..=1.).contains(&self.pupil_alpha)
+        {
+            return Err(PresentationError);
+        }
+        Ok(())
+    }
+
     /// Compute a read-only layout from a captured face heading and pupil vector.
     /// Half-unit offsets follow distance scaling, and absolute coordinates are
     /// added before camera subtraction to retain double-precision operation order.
@@ -277,23 +298,13 @@ impl StandardEyeGeometry {
         pupil: Point,
         view: EyeLayoutInput,
     ) -> Result<StandardEyeLayout, PresentationError> {
-        let nonnegative = [
-            self.eye_radius,
-            self.pupil_radius,
-            self.pupil_travel,
-            self.forward,
-            self.separation,
-            self.outline_width,
-            view.viewport_half.x,
-            view.viewport_half.y,
-        ];
+        self.validate()?;
+        let nonnegative = [view.viewport_half.x, view.viewport_half.y];
         finite(&nonnegative)?;
         finite(&[
             face_heading,
             pupil.x,
             pupil.y,
-            self.eye_alpha,
-            self.pupil_alpha,
             view.corrected_head.x,
             view.corrected_head.y,
             view.camera.x,
@@ -303,8 +314,6 @@ impl StandardEyeGeometry {
             view.death_progress,
         ])?;
         if nonnegative.iter().any(|value| *value < 0.)
-            || !(0. ..=1.).contains(&self.eye_alpha)
-            || !(0. ..=1.).contains(&self.pupil_alpha)
             || view.scale <= 0.
             || view.zoom <= 0.
             || !(0. ..1.).contains(&view.death_progress)

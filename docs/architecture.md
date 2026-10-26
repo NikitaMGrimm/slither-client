@@ -200,6 +200,16 @@ divided by six. Visible entry resets face/target to raw heading. Death clears
 face turning while pupils keep moving until expiry. Own gaze is caller-owned;
 remote wanted-heading packets update the remote gaze.
 
+An appearance can install owned `StandardEyeGeometry` before the first pupil
+advance. `AnimatedClient::apply_frame_with_eye_geometry` resolves each appearance
+once in wire order after complete framing and received-state validation; later
+failure rolls back the model, including all styles. Callback side effects remain
+caller-owned. The old API supplies the same default geometry. The additive Wasm
+API accepts explicit normalized paired metadata with black outline and effective
+global smoothing 0.12; it needs no asset readiness. Both renderers consume the
+retained style. Standard recipe eyes must match it exactly, including signed
+zero, before Canvas reset. See the [paired-eye contract](standard-body-renderer.md#appearance-time-paired-eyes).
+
 `prepare_draw_with_style` samples each visible body once and returns ordered
 `PreparedSnake` values. It captures the current face heading before committing
 the new curve target for a later update. Spacing advances once; sampling uses that

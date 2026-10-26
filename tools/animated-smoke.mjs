@@ -3,12 +3,15 @@ import { bundle, syntheticScene, syntheticSetup, syntheticStep } from '../web/sy
 
 // Original synthetic packet/update/draw cases; no reference or server connection.
 export function animatedSmoke(wasm) {
-  function ownAppearance() {
+  function ownAppearance(custom = [], cosmetic = 0, skin = 0) {
     const packed = wasm.decode_frame(syntheticScene(), false);
     const bytes = new DataView(packed.buffer, packed.byteOffset, packed.byteLength);
     let offset = 4 + bytes.getUint32(0);
     const length = bytes.getUint32(offset); offset += 4;
-    return packed.slice(offset, offset + length);
+    const raw = Array.from(packed.slice(offset, offset + length));
+    raw[15] = skin;
+    raw.splice(23 + raw[22], 2, custom.length, ...custom, cosmetic);
+    return Uint8Array.from(raw);
   }
   const target = value => [122, value >>> 16 & 255, value >>> 8 & 255, value & 255];
   const setup = value => {
@@ -21,6 +24,137 @@ export function animatedSmoke(wasm) {
         'lag_multiplier', 'accumulated', 'doubled_accumulated'].map(key => [key, step[key]]));
     } finally { step.free(); }
   };
+  const standardEyes = () => ({ kind: 'standard', distance: 6, separation: 6, radius: 6,
+    pupilRadius: 3.5, pupilTravel: 2.3, outlineWidth: 0, eyeColor: 0xffffff, pupilColor: 0,
+    outlineColor: 0, eyeOpacity: 0.75, pupilOpacity: 1, angleSmoothing: 0.12 });
+  const coupledEyes = new wasm.AnimatedScene(0);
+  try {
+    const requests = [];
+    const metadata = [0.02, 0.04].map(pupilTravel => ({ ...standardEyes(), pupilTravel }));
+    coupledEyes.apply_frame_with_eye_geometry(bundle(syntheticSetup(),
+      ownAppearance([1, 4], 29, 17), ownAppearance([2, 8], 31, 23)), false, request => {
+      assert.equal(Object.getPrototypeOf(request), Object.prototype);
+      assert.equal(request.customBytes instanceof Uint8Array, true);
+      requests.push(request);
+      return metadata[requests.length - 1];
+    });
+    assert.deepEqual(requests.map(r => ({ ...r, customBytes: [...r.customBytes] })), [
+      { skin: 17, id: 0, cosmetic: 29, x: 32550, y: 32550, customBytes: [1, 4] },
+      { skin: 23, id: 0, cosmetic: 31, x: 32550, y: 32550, customBytes: [2, 8] },
+    ]);
+    assert.notEqual(requests[0], requests[1]);
+    assert.notEqual(requests[0].customBytes, requests[1].customBytes);
+    requests[0].customBytes.fill(99);
+    metadata[0].pupilTravel = 100;
+    metadata[1].pupilTravel = 200;
+    coupledEyes.advance(4, false).free();
+    assert.deepEqual(JSON.parse(coupledEyes.drawn_snakes()).map(r => r.snake.eyes.pupilX), [0.02, 0.04]);
+    coupledEyes.apply_frame_with_eye_geometry(bundle([115, 0, 0, 1], ownAppearance()), false,
+      () => ({ ...standardEyes(), pupilTravel: 0.06 }));
+    coupledEyes.advance(8, false).free();
+    assert.deepEqual(JSON.parse(coupledEyes.drawn_snakes()).map(r => r.snake.eyes.pupilX), [0.02, 0.04, 0.06]);
+    assert.equal(JSON.parse(coupledEyes.snapshot()).own.alive, false);
+    coupledEyes.reset();
+    let count = 0;
+    const short = ownAppearance().slice(0, -22);
+    coupledEyes.apply_frame_with_eye_geometry(bundle(syntheticSetup(), short,
+      [115, 0, 0, 0], ownAppearance(), syntheticSetup(), short), false, () => {
+      count++; return standardEyes();
+    });
+    assert.equal(count, 3, 'resolve short, immediately removed and mid-frame-reset appearances');
+  } finally { coupledEyes.free(); }
+
+  const validation = new wasm.AnimatedScene(0);
+  try {
+    validation.apply_frame(syntheticScene(), false);
+    validation.advance(4, false).free(); validation.prepare_draw(960, 540);
+    const state = () => [validation.snapshot(), validation.drawn_snakes(),
+      validation.camera_samples(), validation.own_body_samples(), validation.drawn_eyes(960, 540)];
+    const before = state();
+    const two = bundle(ownAppearance(), ownAppearance());
+    for (const thrown of [new Error('synthetic eye resolver'), { marker: 23 }, Symbol('eyes'), null, undefined]) {
+      let calls = 0, caught = false;
+      try {
+        validation.apply_frame_with_eye_geometry(two, false, () => {
+          if (++calls === 2) throw thrown;
+          return { ...standardEyes(), pupilTravel: 0.02 };
+        });
+      } catch (e) { caught = true; assert.equal(e, thrown, 'callback exception identity'); }
+      assert.equal(caught, true); assert.equal(calls, 2); assert.deepEqual(state(), before);
+    }
+    let calls = 0;
+    for (const frame of [bundle(ownAppearance(), [114, 0]),
+      Uint8Array.from([...two, 0, 9, 115])]) {
+      assert.throws(() => validation.apply_frame_with_eye_geometry(frame, false, () => {
+        calls++; return standardEyes();
+      }));
+      assert.equal(calls, 0); assert.deepEqual(state(), before);
+    }
+    const numericSetup = syntheticSetup(); numericSetup[10] = 0;
+    let numericCalls = 0;
+    assert.throws(() => validation.apply_frame_with_eye_geometry(
+      bundle(ownAppearance(), numericSetup, ownAppearance()), false, () => {
+        numericCalls++; return standardEyes();
+      }));
+    assert.equal(numericCalls, 2, 'later presentation failure cannot undo resolver side effects');
+    assert.deepEqual(state(), before);
+    const bad = [null, undefined, Promise.resolve(standardEyes()),
+      Object.assign(Promise.resolve(), standardEyes()), { kind: 'none' },
+      { ...standardEyes(), kind: 'special' }, { ...standardEyes(), angleSmoothing: 0.1 },
+      { ...standardEyes(), outlineColor: 1 }];
+    let getters = 0;
+    for (const [key, value] of Object.entries(standardEyes())) {
+      const missing = standardEyes(); delete missing[key]; bad.push(missing);
+      const inherited = Object.assign(Object.create({ [key]: value }), missing); bad.push(inherited);
+      const accessor = standardEyes();
+      Object.defineProperty(accessor, key, { get() { getters++; return value; } }); bad.push(accessor);
+      if (key !== 'kind') {
+        for (const invalid of [NaN, Infinity, -1, String(value), null, true]) {
+          bad.push({ ...standardEyes(), [key]: invalid });
+        }
+      }
+    }
+    for (const key of ['distance', 'separation', 'radius', 'pupilRadius', 'pupilTravel', 'outlineWidth']) {
+      bad.push({ ...standardEyes(), [key]: 4096.01 });
+    }
+    for (const key of ['eyeColor', 'pupilColor', 'outlineColor']) {
+      bad.push({ ...standardEyes(), [key]: 0.5 }, { ...standardEyes(), [key]: 0x1000000 });
+    }
+    for (const key of ['eyeOpacity', 'pupilOpacity', 'angleSmoothing']) bad.push({ ...standardEyes(), [key]: 1.01 });
+    for (const metadata of bad) {
+      let count = 0;
+      assert.throws(() => validation.apply_frame_with_eye_geometry(two, false, () =>
+        ++count === 1 ? standardEyes() : metadata));
+      assert.equal(count, 2); assert.deepEqual(state(), before);
+    }
+    assert.equal(getters, 0, 'metadata accessors must never execute');
+    for (const callback of [null, {}, 12]) {
+      assert.throws(() => validation.apply_frame_with_eye_geometry(ownAppearance(), false, callback));
+      assert.deepEqual(state(), before);
+    }
+  } finally { validation.free(); }
+
+  const legacy = new wasm.AnimatedScene(0), explicit = new wasm.AnimatedScene(0);
+  try {
+    for (const [now, frame] of [[4, syntheticScene()], [12, syntheticStep(1)],
+      [52, bundle([115, 0, 0, 1], ownAppearance())]]) {
+      legacy.apply_frame(frame, false);
+      explicit.apply_frame_with_eye_geometry(frame, false, standardEyes);
+      for (const scene of [legacy, explicit]) { scene.advance(now, false).free(); scene.prepare_draw(960, 540); }
+      assert.equal(legacy.snapshot(), explicit.snapshot());
+      assert.equal(legacy.drawn_snakes(), explicit.drawn_snakes());
+      assert.deepEqual(legacy.drawn_eyes(960, 540), explicit.drawn_eyes(960, 540));
+      assert.deepEqual(legacy.own_curve(1, false), explicit.own_curve(1, false));
+    }
+  } finally { legacy.free(); explicit.free(); }
+  const bounds = new wasm.AnimatedScene(0);
+  try {
+    const maximum = { ...standardEyes(), distance: 4096, separation: 4096, radius: 4096,
+      pupilRadius: 4096, pupilTravel: 4096, outlineWidth: 4096 };
+    bounds.apply_frame_with_eye_geometry(bundle(syntheticSetup(), ownAppearance()), false, () => maximum);
+    bounds.advance(4, false).free();
+    assert.equal(JSON.parse(bounds.snapshot()).own.eyes.pupilX, 1 / 12);
+  } finally { bounds.free(); }
   assert.equal(wasm.AnimatedScene.prototype.reset.length, 0, 'generated reset API is parameterless');
   const phase = new wasm.AnimatedScene(1000);
   try {

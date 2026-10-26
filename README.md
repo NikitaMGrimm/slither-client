@@ -85,6 +85,11 @@ recipes. Stock Firefox checks cover native Canvas submission and page cadence;
 a bounded external-runtime comparison matches production body commands exactly.
 Full skins and original-pixel parity remain separate.
 
+An additive [appearance-time paired-eye API](docs/standard-body-renderer.md#appearance-time-paired-eyes)
+retains trusted normalized geometry before the first pupil update. Both render
+paths consume that style; standard recipes must match it exactly. The existing
+packet API and synthetic page retain their default paired-eye geometry.
+
 CI checks native Rust on Linux and Windows and runs a real Wasm ABI smoke test
 on Linux. Release-plz remains dormant; ordinary pushes do not publish artifacts.
 See [releases](docs/releases.md) and the [roadmap](docs/roadmap.md).

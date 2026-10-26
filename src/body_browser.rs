@@ -7,8 +7,9 @@ use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, HtmlImageElement};
 use crate::presentation::{
     BodyAsset, BodyAssetStatus, BodyAssetUse, BodyBlend, BodyFade, BodyImageCommand,
     BodyPaintRecipe, BodyPalette, BodyRect, BodyRun, BodyStyle, BodyVariantMode,
-    ClientPresentationError, SnakePresentation,
+    ClientPresentationError, SnakePresentation, StandardEyeGeometry,
 };
+use crate::state::Appearance;
 
 pub(crate) fn error(message: impl std::fmt::Display) -> JsValue {
     JsValue::from_str(&message.to_string())
@@ -90,6 +91,80 @@ fn set(value: &Object, key: &str, field: &JsValue) -> Result<(), JsValue> {
         return Err(error("could not construct recipe request"));
     }
     Ok(())
+}
+
+/// Appearance-time metadata is independent of visibility and later ID lookup.
+pub(crate) fn appearance_request(appearance: &Appearance) -> Result<Object, JsValue> {
+    let value = Object::new();
+    for (key, n) in [
+        ("skin", f64::from(appearance.skin)),
+        ("id", f64::from(appearance.id)),
+        ("cosmetic", f64::from(appearance.cosmetic)),
+        ("x", appearance.absolute_head.x),
+        ("y", appearance.absolute_head.y),
+    ] {
+        set(&value, key, &JsValue::from_f64(n))?;
+    }
+    set(
+        &value,
+        "customBytes",
+        &Uint8Array::from(appearance.custom_skin.as_slice()).into(),
+    )?;
+    Ok(value)
+}
+
+/// The explicit paired lane accepts normalized own-data metadata only. It does
+/// not resolve assets or turn unsupported faces into standard pupils.
+pub(crate) fn standard_eyes(value: &JsValue) -> Result<StandardEyeGeometry, JsValue> {
+    if value.is_instance_of::<js_sys::Promise>() {
+        return Err(error("paired eye metadata must be synchronous"));
+    }
+    if text(field(value, "kind")?)? != "standard" {
+        return Err(error("unsupported paired eye geometry"));
+    }
+    if integer(field(value, "outlineColor")?, 0, 16_777_215)? != 0
+        || num(field(value, "angleSmoothing")?, 0., 1.)?.to_bits() != 0.12_f64.to_bits()
+    {
+        return Err(error(
+            "unsupported eye outline color or effective smoothing",
+        ));
+    }
+    let rgb = |key| -> Result<[u8; 3], JsValue> {
+        let packed = integer(field(value, key)?, 0, 16_777_215)? as u32;
+        let bytes = packed.to_be_bytes();
+        Ok([bytes[1], bytes[2], bytes[3]])
+    };
+    Ok(StandardEyeGeometry {
+        forward: num(field(value, "distance")?, 0., 4096.)?,
+        separation: num(field(value, "separation")?, 0., 4096.)?,
+        eye_radius: num(field(value, "radius")?, 0., 4096.)?,
+        pupil_radius: num(field(value, "pupilRadius")?, 0., 4096.)?,
+        pupil_travel: num(field(value, "pupilTravel")?, 0., 4096.)?,
+        outline_width: num(field(value, "outlineWidth")?, 0., 4096.)?,
+        eye_color: rgb("eyeColor")?,
+        pupil_color: rgb("pupilColor")?,
+        eye_alpha: num(field(value, "eyeOpacity")?, 0., 1.)?,
+        pupil_alpha: num(field(value, "pupilOpacity")?, 0., 1.)?,
+    })
+}
+
+/// Coherence requires the retained bits, including signed zero. Ordinary model
+/// PartialEq remains unchanged for callers that want numeric equality.
+pub(crate) fn same_eyes(a: &StandardEyeGeometry, b: &StandardEyeGeometry) -> bool {
+    a.eye_color == b.eye_color
+        && a.pupil_color == b.pupil_color
+        && [
+            (a.forward, b.forward),
+            (a.separation, b.separation),
+            (a.eye_radius, b.eye_radius),
+            (a.pupil_radius, b.pupil_radius),
+            (a.pupil_travel, b.pupil_travel),
+            (a.outline_width, b.outline_width),
+            (a.eye_alpha, b.eye_alpha),
+            (a.pupil_alpha, b.pupil_alpha),
+        ]
+        .iter()
+        .all(|(a, b)| a.to_bits() == b.to_bits())
 }
 
 /// Each callback gets a new plain request and a copied custom byte array.
@@ -218,35 +293,12 @@ impl BorrowedSources {
         }
         let eyes = field(&raw, "eyes")?;
         let eyes = match text(field(&eyes, "kind")?)?.as_str() {
-            "none" => false,
-            "standard" => {
-                // Eye state is already coupled using vanilla travel and easing.
-                // Accept only that exact geometry/style, never imply arbitrary
-                // provider eye metadata was installed into the state machine.
-                for (key, expected) in [
-                    ("distance", 6.),
-                    ("separation", 6.),
-                    ("radius", 6.),
-                    ("pupilRadius", 3.5),
-                    ("pupilTravel", 2.3),
-                    ("outlineWidth", 0.),
-                    ("eyeColor", 16_777_215.),
-                    ("pupilColor", 0.),
-                    ("outlineColor", 0.),
-                    ("eyeOpacity", 0.75),
-                    ("pupilOpacity", 1.),
-                    ("angleSmoothing", 0.12),
-                ] {
-                    if num(field(&eyes, key)?, 0., 16_777_215.)? != expected {
-                        return Err(error(format!("unsupported standard eye metadata: {key}")));
-                    }
-                }
-                true
-            }
+            "none" => None,
+            "standard" => Some(standard_eyes(&eyes)?),
             _ => return Err(error("unsupported eye geometry")),
         };
-        if features.len() != if eyes { 6 } else { 5 }
-            || features.iter().any(|f| f == "standard-eyes") != eyes
+        if features.len() != if eyes.is_some() { 6 } else { 5 }
+            || features.iter().any(|f| f == "standard-eyes") != eyes.is_some()
         {
             return Err(error("inconsistent standard feature metadata"));
         }
@@ -509,7 +561,7 @@ pub(crate) struct Recipe {
     variant_mode: BodyVariantMode,
     variant_period: usize,
     custom: bool,
-    pub(crate) eyes: bool,
+    pub(crate) eyes: Option<StandardEyeGeometry>,
     pub(crate) style: BodyStyle,
     effects: [Option<BodyAssetUse>; 3],
 }

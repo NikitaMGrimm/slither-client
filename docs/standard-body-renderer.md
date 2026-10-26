@@ -53,13 +53,71 @@ planner's existing semantics. Every normalized asset use must include the opt-in
 `Some(rect)`, including an explicitly full-size crop. The renderer does not infer
 whole-source semantics from a full rectangle.
 
-Eyes must be explicit `none` or exactly the existing vanilla-compatible lane:
-distance/separation/radius 6, pupil radius 3.5, pupil travel 2.3, outline width 0,
-white eyes, black pupils/outline, eye opacity .75, pupil opacity 1, smoothing .12.
-These fields are eligibility checks; arbitrary provider eye parameters are not
-coupled to the retained eye state. Different geometry/style, attachments,
-antennas, special faces, singleton boost effects and unknown feature tags fail
-explicitly. Full-skin support is outside this renderer.
+Eyes must be explicit `none` or standard paired metadata that exactly matches
+the geometry retained on that appearance. Standard eyes are parsed into typed
+geometry using the same validator as the appearance-time API below. Numeric
+geometry and opacity comparisons distinguish signed zero, without a tolerance.
+The renderer never overwrites pupil travel or installs style at draw time.
+The existing `none` lane omits eyes without changing retained state. Attachments,
+antennas, special faces, singleton boost effects and unknown feature tags still
+fail explicitly. Full-skin support is outside this renderer.
+
+## Appearance-time paired eyes
+
+The additive `AnimatedScene.apply_frame_with_eye_geometry` API installs explicit
+normalized `StandardEyes` metadata before the object's first pupil update:
+
+```js
+scene.apply_frame_with_eye_geometry(bytes, elapsedHeader, request => {
+  const result = provider.resolve(request, providerSnapshot);
+  return result.recipe.eyes;
+});
+```
+
+This callback receives a new plain object per appearance, with exactly `skin`,
+`id`, copied `customBytes: Uint8Array`, opaque `cosmetic`, and absolute initial
+head `x`/`y`. Skin and ID retain their original wire values. There is no wire-ID
+cache, visibility filter, draw ordinal or inferred attachment selection. The
+callback runs once in wire order for every validated appearance, including
+duplicates, short/culled bodies and appearances immediately removed or cleared
+by a later setup in the same frame. Each retained object owns its numeric style
+through death, own removal and wire-ID reuse.
+
+Return the `StandardEyes` object directly and synchronously, rather than a
+provider envelope or promise. Required own data fields are `kind: 'standard'`,
+`distance`, `separation`, `radius`, `pupilRadius`, `pupilTravel`, `outlineWidth`,
+`eyeColor`, `pupilColor`, `outlineColor`, `eyeOpacity`, `pupilOpacity`, and
+`angleSmoothing`. Geometry must be finite in 0..4096, packed colors exact integers
+in 0..16777215, and opacities in 0..1. Outline color must be black (0), and
+`angleSmoothing` must be the effective global rate 0.12. Missing, inherited,
+accessor, nonfinite, coerced and unsupported values fail; metadata getters are
+not called. Extra fields are ignored. The validated numeric values are copied;
+later mutation of returned metadata cannot change the appearance.
+
+This explicit paired lane rejects `none` and special-face metadata. A host must
+represent unsupported styles honestly instead of supplying default pupils when
+the metadata omits them. The callback consumes no assets or readiness state:
+`result.recipe.eyes` can be used even while body assets are pending, provided
+the trusted host has determined that these are supported standard paired eyes.
+Drawing the body still requires the renderer's ready, coherent snapshot.
+
+The callback and realm are trusted synchronous capabilities. Do not reenter or
+mutate the scene during resolution; proxies, patched builtins and arbitrary
+callback side effects are outside the validation boundary. Complete framing and
+received-state validation precede all callbacks. Later presentation validation
+or callback failure rolls back received state, entities, styles and counters
+together, but cannot undo caller side effects or earlier callback invocations.
+Callback exceptions propagate unchanged. Packet application advances no clock.
+
+The existing `apply_frame` installs default geometry for preview compatibility:
+distance/separation/radius 6, pupil radius 3.5, travel 2.3, outline width 0,
+white eyes, black pupils, eye opacity .75 and pupil opacity 1. Both the basic
+`render` and `render_standard` consume retained geometry. Native callers can use
+`AnimatedClient::apply_frame_with_eye_geometry` with a typed fallible resolver,
+or `SnakePresentation::from_appearance_with_eye_geometry`; the native style
+validator preserves its finite/nonnegative geometry and 0..1 opacity domain.
+
+## Submission
 
 Rendering borrows a copied applied quality snapshot (`high_quality`, blend and
 scale) without advancing interpolation, statistics or a clock. The caller owns
