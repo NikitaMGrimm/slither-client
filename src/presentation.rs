@@ -18,6 +18,7 @@ mod client;
 mod curve;
 mod follow_camera;
 mod length;
+mod quality;
 mod snake;
 
 pub use body::{BODY_SAMPLES, BodyGeometry, BodyPoint, MAX_RETAINED_BODY_POINTS};
@@ -30,6 +31,7 @@ pub use curve::{
 };
 pub use follow_camera::{FollowCamera, INITIAL_ZOOM};
 pub use length::LengthPresentation;
+pub use quality::{QualityMode, QualitySnapshot, QualityState};
 pub use snake::{AnchorView, SnakeMetrics, SnakePresentation};
 
 /// Number of samples in each head position/fraction correction channel.
