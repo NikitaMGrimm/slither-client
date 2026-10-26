@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add a native ordered standard-body paint planner with explicit recipe, asset,
+  geometry and quality inputs, plus opt-in borrowed-provider body metadata.
+  Canvas submission and renderer quality integration remain separate.
 - Couple standard paired-eye motion, independent pointer gaze and per-snake
   Canvas painting to the animated preview. Preserve fractional pupil updates,
   deferred curve targets, visibility resets and death fading. Special faces,

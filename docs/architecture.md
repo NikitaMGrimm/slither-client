@@ -200,6 +200,31 @@ canvas-center offsets before each update, separately from quantized live steerin
 Complete skins, special faces, effects, attachments, HQ/LQ drawing and radius
 easing remain unimplemented. This preview does not establish visual or gameplay equivalence.
 
+## Ordered body paint planning
+
+`plan_standard_body` consumes frozen Float32 curve samples, original ordinals,
+effective draw flags, the sampler's unrounded f64 distance-cursor seed, and an
+externally resolved recipe/asset snapshot. It returns image commands for one
+standard snake in painter order: boost, outlines/shadows, interleaved body and
+color fades, inner boost, then death highlighting after an antenna insertion
+barrier. Antenna work is not implemented by this planner.
+
+The planner preserves source identity/revision, whole-source or cropped uses,
+stored tangent rotation, separate f64 translations, and Canvas alpha assignment
+semantics. Invalid alpha assignments retain the preceding scoped value rather
+than clamp. Original ordinals and effective flags survive culling; this API does
+not generate or clear flags. It advances no clocks, spacing, lifecycle or quality
+state and performs no browser calls. Validation and a complete command-budget
+check precede allocation; arithmetic errors return no partial plan.
+
+Inputs are bounded to 65,536 active samples, 256 palettes/runs/variants, 4096
+asset entries and 524,304 image commands. Fewer than two active samples,
+coincident stored geometry, absent style metadata and unready referenced assets
+fail explicitly. The provider's opt-in `bodyStyle` and per-palette `boostGlow`
+describe these inputs without distributing host mappings or stock recipes.
+The animated preview still uses its existing stand-in renderer; it does not yet
+submit these commands or apply the standalone quality state to them.
+
 ## Browser rendering
 
 `QualityState` independently models desktop quality preference and applied mode.

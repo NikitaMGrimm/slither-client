@@ -342,6 +342,32 @@ the unchanged ES module. These establish that provider boundary only; host
 mapping, full skin/attachment coverage, rendered pixels and extension integration
 remain separate work.
 
+## Standard body planner checks
+
+Thirty-two native synthetic tests cover pass order, shared distance-cursor
+updates, quality gates, palette runs and variants, overlapping fades, opacity
+retention, stored tangents, exact source identity/revisions/crops, bounds and
+atomic failures. Independent read-only review reran these tests and the source
+guards without finding an actionable defect. The provider extension separately
+passed 24 focused synthetic tests and independent boundary review.
+
+A private real-Wasm adapter compared the planner with fresh observations from
+the complete pinned runtime in ten cases: all 4,823 ordered image calls matched
+across 118,830 exact comparisons, including signed zero, without a tolerance.
+Fresh numeric observations also matched the preserved earlier capture, and
+the observer/control state and buffers remained equal in the tested cases.
+Coverage includes HQ/LQ/transition gates, boost, spawn/death, mixed runs, custom
+and detailed variants, overlapping fades and fresh versus retained cull flags.
+
+This isolates the planner: geometry, effective flags, recipe metadata and cursor
+seed were supplied from observations. It does not verify their production
+collection, quality evolution, Canvas submission, browser pixels, antennas or
+all-skin behavior. The runtime fixtures use whole-source image calls; cropped
+uses have synthetic coverage only. Effective alpha is the observer's logical
+Canvas-state interpretation, not native raster evidence. Pass labels and final
+cursor output were not directly observed and are excluded from the comparison
+claim. External adapters, source identities and raw evidence remain outside Git.
+
 ## Dense-scene benchmark
 
 After `npm run build:web` and `npm run scene`, open
