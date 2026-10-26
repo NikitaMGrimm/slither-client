@@ -32,6 +32,235 @@ function fixture() {
   return { realm, canvas, image, catalog, metadata, calls, provider, snapshot, resolve };
 }
 
+function bodyFixture() {
+  const f = fixture();
+  f.catalog.push({ source: new f.realm.HTMLCanvasElement(), state: 'ready' },
+    { source: new f.realm.HTMLImageElement(), state: 'pending' });
+  f.metadata.palettes[0].boostGlow = { asset: 2, sourceRect: [1, 2, 5, 6] };
+  f.metadata.palettes[1].boostGlow = { asset: 3 };
+  f.metadata.effects = ['outline', 'shadow', 'death-highlight'].map(kind => ({ kind, asset: 0, opacity: 1 }));
+  f.metadata.bodyStyle = { detailedSegments: true, swell: -0.125, rotateSegments: false, headFade: null, tailFade: null };
+  return f;
+}
+
+test('absent and null body style preserve the exact legacy shape and feature tags', () => {
+  const f = fixture();
+  f.metadata.effects = [{ kind: 'boost-glow', asset: 0, opacity: 0.25 }];
+  const previous = f.resolve();
+  assert.deepEqual(Object.keys(previous.recipe), ['basePalette', 'custom', 'runs', 'palettes', 'variantMode',
+    'variantPeriod', 'eyes', 'effects', 'attachment', 'supportedFeatures', 'unsupportedFeatures']);
+  assert.deepEqual(previous.recipe.supportedFeatures, ['body-palettes', 'standard-eyes', 'boost-glow']);
+  assert.deepEqual(Object.keys(previous.recipe.palettes[0]), ['variants']);
+  for (const bodyStyle of [null, undefined]) {
+    f.metadata.bodyStyle = bodyStyle;
+    assert.deepEqual(f.resolve(), previous);
+  }
+  f.metadata.palettes[0].boostGlow = { asset: 1 };
+  const additive = f.resolve();
+  assert.equal(Object.hasOwn(additive.recipe, 'bodyStyle'), false);
+  assert.deepEqual(additive.recipe.supportedFeatures, previous.recipe.supportedFeatures);
+  assert.equal(additive.recipe.palettes[0].boostGlow.asset.source, f.image);
+});
+
+test('standard body metadata copies and freezes style, fades, crops and per-run glow identities', () => {
+  const f = bodyFixture();
+  f.metadata.palettes.push({ variants: [{ asset: 1 }] });
+  for (const palette of f.metadata.palettes.slice(0, 2)) palette.variants.push({ asset: 0 });
+  f.metadata.variantMode = 'ping-pong';
+  f.metadata.variantPeriod = 2;
+  f.metadata.bodyStyle.headFade = { palette: 2, length: 2.5 };
+  f.metadata.bodyStyle.tailFade = { palette: 0, length: 6 };
+  const result = f.resolve();
+  assert.equal(result.schema, 1);
+  assert.equal(result.status, 'ready');
+  assert.deepEqual(result.recipe.bodyStyle, f.metadata.bodyStyle);
+  assert.deepEqual(result.recipe.runs, f.metadata.runs);
+  assert.equal(result.recipe.variantMode, 'ping-pong');
+  assert.equal(result.recipe.variantPeriod, 2);
+  assert.deepEqual(result.recipe.runs.map(run => result.recipe.palettes[run.palette].boostGlow.asset.source),
+    [f.catalog[2].source, f.catalog[3].source, f.catalog[2].source]);
+  assert.deepEqual(result.recipe.palettes[0].boostGlow.sourceRect, [1, 2, 5, 6]);
+  assert.deepEqual(result.recipe.palettes[1].boostGlow.sourceRect, [0, 0, 40, 50]);
+  assert.deepEqual(result.recipe.supportedFeatures,
+    ['body-palettes', 'standard-eyes', 'outline', 'shadow', 'death-highlight', 'standard-body-style']);
+  for (const value of [result.recipe.bodyStyle, result.recipe.bodyStyle.headFade, result.recipe.bodyStyle.tailFade,
+    result.recipe.palettes[0].boostGlow, result.recipe.palettes[0].boostGlow.sourceRect]) assert(Object.isFrozen(value));
+  f.metadata.bodyStyle.swell = 3;
+  f.metadata.bodyStyle.headFade.length = 11;
+  f.metadata.palettes[0].boostGlow.sourceRect[0] = 4;
+  assert.equal(result.recipe.bodyStyle.swell, -0.125);
+  assert.equal(result.recipe.bodyStyle.headFade.length, 2.5);
+  assert.equal(result.recipe.palettes[0].boostGlow.sourceRect[0], 1);
+});
+
+test('body style preserves base-family variant mode and period without deriving them from runs or style', () => {
+  for (const variantMode of ['first', 'cycle', 'ping-pong']) {
+    const f = bodyFixture();
+    f.metadata.variantMode = variantMode;
+    f.metadata.variantPeriod = 60;
+    f.metadata.custom = variantMode === 'first';
+    f.metadata.bodyStyle.detailedSegments = false;
+    for (const palette of f.metadata.palettes) palette.variants = Array.from({ length: 60 }, () => ({ asset: 0 }));
+    const { recipe } = f.resolve();
+    assert.equal(recipe.variantMode, variantMode);
+    assert.equal(recipe.variantPeriod, 60);
+    assert.equal(recipe.custom, f.metadata.custom);
+    assert.equal(recipe.runs.length, 3);
+  }
+});
+
+test('glows use the existing shared borrower and refresh readiness, dimensions and identity by revision', () => {
+  const f = bodyFixture();
+  f.metadata.palettes[0].variants[0] = { asset: 2 };
+  f.metadata.effects[0].asset = 2;
+  f.catalog[2].state = 'pending';
+  f.catalog[3].source.complete = false;
+  const pending = f.resolve();
+  const glow = pending.recipe.palettes[0].boostGlow;
+  assert.equal(pending.status, 'pending');
+  assert.equal(glow.asset, pending.recipe.palettes[0].variants[0].asset);
+  assert.equal(glow.asset, pending.recipe.effects[0].asset);
+  assert.equal(pending.recipe.palettes[1].boostGlow.asset.status, 'pending');
+  f.catalog[2].state = 'ready';
+  f.catalog[3].source.complete = true;
+  f.snapshot.revision = 2;
+  const ready = f.resolve();
+  assert.equal(ready.status, 'ready');
+  assert.equal(ready.revision, 2);
+  assert.notEqual(ready.recipe.palettes[0].boostGlow.asset, glow.asset);
+  assert.equal(ready.recipe.palettes[0].boostGlow.asset.source, glow.asset.source);
+  assert.equal(glow.asset.status, 'pending');
+  f.catalog[2].source.width = 21;
+  f.snapshot.revision = 3;
+  const resized = f.resolve();
+  assert.equal(resized.recipe.palettes[0].boostGlow.asset.width, 21);
+  assert.equal(ready.recipe.palettes[0].boostGlow.asset.width, 20);
+  f.catalog[2].source = new f.realm.HTMLCanvasElement();
+  f.snapshot.revision = 4;
+  assert.notEqual(f.resolve().recipe.palettes[0].boostGlow.asset.source, glow.asset.source);
+  assert.equal(glow.asset.source, ready.recipe.palettes[0].boostGlow.asset.source);
+});
+
+test('missing glow sources stay pending, native sizes and catalog unsupported take precedence', () => {
+  const f = bodyFixture();
+  f.catalog[2].source = null;
+  const absent = f.resolve();
+  assert.equal(absent.status, 'pending');
+  assert.equal(absent.recipe.palettes[0].boostGlow.sourceRect, null);
+  f.catalog[3].source.naturalWidth = 0;
+  assert.equal(f.resolve().recipe.palettes[1].boostGlow.asset.status, 'pending');
+  f.catalog[3].state = 'unsupported';
+  assert.equal(f.resolve().status, 'unsupported');
+  f.catalog[3].state = 'pending';
+  f.metadata.unsupportedFeatures = ['synthetic-body-extension'];
+  assert.equal(f.resolve().status, 'unsupported');
+  f.metadata.unsupportedFeatures = [];
+  f.catalog[2].source = new f.realm.HTMLCanvasElement();
+  f.catalog[2].source.width = 5;
+  assert.throws(() => f.resolve(), /sourceRect exceeds/);
+});
+
+test('advertised body style requires base and run glows and all three unity-opacity shared effects', () => {
+  for (const index of [0, 1]) {
+    const f = bodyFixture();
+    delete f.metadata.palettes[index].boostGlow;
+    f.metadata.effects.push({ kind: 'boost-glow', asset: 0, opacity: 1 });
+    assert.throws(() => f.resolve(), /requires boostGlow/);
+  }
+  const base = bodyFixture();
+  base.metadata.palettes.push({ variants: [{ asset: 0 }] });
+  base.metadata.basePalette = 2;
+  assert.throws(() => base.resolve(), /requires boostGlow/);
+  base.metadata.palettes[2].boostGlow = { asset: 2 };
+  assert.equal(base.resolve().status, 'ready');
+  for (const kind of ['outline', 'shadow', 'death-highlight']) {
+    const f = bodyFixture();
+    f.metadata.effects = f.metadata.effects.filter(effect => effect.kind !== kind);
+    assert.throws(() => f.resolve(), /requires .* with opacity 1/);
+    for (const opacity of [0, 0.5]) {
+      f.metadata.effects.push({ kind, asset: 0, opacity });
+      assert.throws(() => f.resolve(), /requires .* with opacity 1/);
+      f.metadata.effects.pop();
+    }
+  }
+});
+
+test('style and fade fields are explicit bounded scalars with no defaults or coercion', () => {
+  for (const key of ['detailedSegments', 'swell', 'rotateSegments', 'headFade', 'tailFade']) {
+    const f = bodyFixture();
+    delete f.metadata.bodyStyle[key];
+    assert.throws(() => f.resolve());
+  }
+  for (const key of ['detailedSegments', 'rotateSegments']) {
+    for (const value of [0, 1, 'true', null, undefined]) {
+      const f = bodyFixture(); f.metadata.bodyStyle[key] = value;
+      assert.throws(() => f.resolve(), /Invalid/);
+    }
+  }
+  for (const swell of [-4096.01, 4096.01, NaN, Infinity, -Infinity, '0', null]) {
+    const f = bodyFixture(); f.metadata.bodyStyle.swell = swell;
+    assert.throws(() => f.resolve(), /swell/);
+  }
+  for (const swell of [-4096, -0, 0, 4096]) {
+    const f = bodyFixture(); f.metadata.bodyStyle.swell = swell;
+    assert(Object.is(f.resolve().recipe.bodyStyle.swell, swell));
+  }
+  for (const key of ['headFade', 'tailFade']) {
+    for (const value of [undefined, {}, { length: 1 }, { palette: 0 },
+      ...[-1, 2, 0.5, '0', NaN].map(palette => ({ palette, length: 1 })),
+      ...[-1, -0, 0, 65536, Infinity, NaN, '1', null].map(length => ({ palette: 0, length }))]) {
+      const f = bodyFixture(); f.metadata.bodyStyle[key] = value;
+      assert.throws(() => f.resolve());
+    }
+    for (const length of [Number.MIN_VALUE, 0.5, 65535]) {
+      const f = bodyFixture(); f.metadata.bodyStyle[key] = { palette: 1, length };
+      assert.equal(f.resolve().recipe.bodyStyle[key].length, length);
+    }
+  }
+  const f = bodyFixture();
+  f.metadata.palettes.push({ variants: [] });
+  f.metadata.bodyStyle.headFade = { palette: 2, length: 1 };
+  assert.throws(() => f.resolve(), /variants/);
+  for (const boostGlow of [null, {}, { asset: 4 }, { asset: '2' }]) {
+    const g = bodyFixture(); g.metadata.palettes[0].boostGlow = boostGlow;
+    assert.throws(() => g.resolve());
+  }
+});
+
+test('new metadata rejects accessors and inherited required fields without reading unknown fields or mutating inputs', () => {
+  const paths = [f => [f.metadata, 'bodyStyle'], f => [f.metadata.palettes[0], 'boostGlow'],
+    f => [f.metadata.palettes[0].boostGlow, 'asset'], f => [f.metadata.palettes[0].boostGlow, 'sourceRect'],
+    ...['detailedSegments', 'swell', 'rotateSegments', 'headFade', 'tailFade'].map(key => f => [f.metadata.bodyStyle, key]),
+    ...['palette', 'length'].map(key => f => [f.metadata.bodyStyle.headFade, key])];
+  for (const locate of paths) {
+    const f = bodyFixture();
+    f.metadata.bodyStyle.headFade = { palette: 0, length: 2 };
+    const before = f.resolve();
+    const [target, key] = locate(f);
+    const original = Object.getOwnPropertyDescriptor(target, key);
+    Object.defineProperty(target, key, { configurable: true, get() { assert.fail('new metadata getter'); } });
+    assert.throws(() => f.resolve(), /Accessor unsupported/);
+    Object.defineProperty(target, key, original);
+    assert.deepEqual(f.resolve(), before);
+  }
+  const f = bodyFixture();
+  const inherited = { swell: f.metadata.bodyStyle.swell };
+  delete f.metadata.bodyStyle.swell;
+  Object.setPrototypeOf(f.metadata.bodyStyle, inherited);
+  assert.throws(() => f.resolve(), /swell/);
+  f.metadata.bodyStyle.swell = inherited.swell;
+  const objects = [f.metadata, f.metadata.bodyStyle, ...f.metadata.palettes, ...f.catalog,
+    ...f.catalog.map(entry => entry.source), f.metadata.palettes[0].boostGlow,
+    f.metadata.palettes[0].boostGlow.sourceRect, f.snapshot];
+  for (const object of objects) {
+    Object.defineProperty(object, 'syntheticUnknown', { get() { assert.fail('unknown field getter'); } });
+    Object.freeze(object);
+  }
+  const descriptors = objects.map(Object.getOwnPropertyDescriptors);
+  assert.equal(f.resolve().status, 'ready');
+  assert.deepEqual(objects.map(Object.getOwnPropertyDescriptors), descriptors);
+});
+
 test('explicit trust, realm constructors, and both callbacks are required', () => {
   const f = fixture();
   const options = { trusted: true, realm: f.realm, resolveHostRecipe() {}, normalizeHostRecipe() {} };
@@ -302,8 +531,8 @@ test('import and resolution never access ambient DOM, network, pixels or source 
   try {
     for (const key of keys) Object.defineProperty(globalThis, key, { configurable: true, get() { assert.fail(`global ${key}`); } });
     const { createSkinProvider: create } = await import('../web/skin-provider.mjs?synthetic-side-effects');
-    const f = fixture();
-    for (const source of [f.canvas, f.image]) {
+    const f = bodyFixture();
+    for (const { source } of f.catalog) {
       for (const key of ['getContext', 'getImageData', 'toDataURL', 'toBlob', 'src', 'currentSrc', 'decode', 'cloneNode']) {
         Object.defineProperty(source, key, { get() { assert.fail(`source ${key}`); }, set() { assert.fail(`source write ${key}`); } });
       }
