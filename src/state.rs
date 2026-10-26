@@ -337,6 +337,8 @@ impl ClientState {
     /// explicit-ID updates and food commands emit no events. Compact own commands
     /// retain `Own` targeting after received-state removal, until setup. Elapsed
     /// headers never advance presentation here.
+    /// Appearance direction metadata must be ASCII `0`, `1` or `2`; received-only
+    /// `apply_frame` keeps ignoring this field for compatibility.
     pub fn apply_frame_with_events(
         &mut self,
         bytes: &[u8],
@@ -531,11 +533,16 @@ impl ClientState {
             }
             return Ok(());
         }
-        let direction = match byte(p, 6)? {
-            b'0' => Direction::None,
-            b'1' => Direction::Decreasing,
-            b'2' => Direction::Increasing,
-            _ => return Err(StateError::InvalidPacket(p[0])),
+        // Received-only state has never consumed this presentation metadata.
+        let direction = if events.is_some() {
+            match byte(p, 6)? {
+                b'0' => Direction::None,
+                b'1' => Direction::Decreasing,
+                b'2' => Direction::Increasing,
+                _ => return Err(StateError::InvalidPacket(p[0])),
+            }
+        } else {
+            Direction::None
         };
         let speed_per_32ms = f64::from(word(p, 10)?) / 1000.;
         let name_len = usize::from(byte(p, 22)?);
