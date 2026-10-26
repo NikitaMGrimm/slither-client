@@ -86,6 +86,14 @@ ports are bounded; HTTP serves only literal `127.0.0.1` with exact Host checking
 
 ## Presentation primitive checks
 
+`tests/state_events.rs` covers ordered bundled actions, replacement/reset,
+independent motion fields/directions, direct speed scalars, absolute appearance
+geometry, compact own targeting after removal, food exclusion, truncations,
+retention limits and complete rollback. The one-field `5` motion form is a
+validated no-op; complete six-byte `3/4/5` forms retain their three motion fields.
+The event API is native Rust; existing Wasm/browser checks exercise the received
+scene and standalone predictors, without establishing event/render integration.
+
 Native `tests/presentation.rs` covers fractional clocks, skew/clamps, lag changes,
 turn wrapping/crossing, speed units, exact speed arithmetic, ring overlap/wrap,
 Float32 assignments, deferred cleanup and invalid-input rollback. The real Wasm
@@ -94,7 +102,7 @@ rejection of invalid JavaScript directions before integer narrowing, copied
 sample arrays and atomic failure. These checks use original synthetic inputs.
 
 This verifies the primitives only. The scene still needs ordered presentation
-events, sampled bodies, camera/draw timing, eyes, quality modes and full skins
+event application, sampled bodies, camera/draw timing, eyes, quality modes and full skins
 before visual or gameplay equivalence can be assessed.
 
 An offline comparison on 2026-10-26 matched all seven timing fields exactly
@@ -150,6 +158,13 @@ rollback after malformed input, camera following an updated head, alternate
 palette, invalid camera/zoom, source-target alias, unloaded image and empty target.
 These use original generated fixtures, not a visual parity oracle.
 
+Stock Firefox 158.0.1 on Windows, running headless with a fresh isolated profile,
+also executed the standalone clock/predictor and received-anchor Canvas2D scene:
+119 assertions across 13 synthetic groups passed on the presentation-foundation
+build. This covers deterministic output, palette pixels, caller-state reset,
+input rejection, atomic rollback and scene transitions. Interactive desktop
+behavior, performance and original visual equivalence remain unverified.
+
 The optional loopback asset page rendered the same three-snake/28-food scene
 with exact existing palette canvas identities and its loaded background image.
 The earlier two-rectangle pixel comparison continued to pass, with zero game
@@ -171,7 +186,8 @@ the real Wasm client, received protocol 19 and rendered the own snake and food.
 Pointer aim and boost messages were sent, followed by manual disconnection.
 The isolated host and page server were stopped afterward. This refresh verifies
 the local transport/received-state path; the new presentation primitives remain
-separate from it. Firefox and complete presentation equivalence remain unverified.
+separate from it. Firefox simulator integration and complete presentation
+equivalence remain unverified.
 
 ## Optional external checks
 
