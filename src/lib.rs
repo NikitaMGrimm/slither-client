@@ -26,6 +26,9 @@ mod animated_browser;
 mod body_browser;
 
 #[cfg(target_arch = "wasm32")]
+mod food_browser;
+
+#[cfg(target_arch = "wasm32")]
 mod scene_browser;
 
 #[cfg(target_arch = "wasm32")]

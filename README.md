@@ -74,8 +74,9 @@ Open `http://127.0.0.1:18884/animated` for continuous prediction, corrected
 body sampling, standard paired eyes and arena-radius easing. Pointer motion
 controls visual gaze,
 including in the synthetic preview. The synthetic fixture uses original
-stand-ins with ordered body effects and adaptive quality. Local simulator mode
-keeps its basic stand-ins. Full skins, special faces and attachments remain pending.
+stand-ins with ordered body effects, retained food animation and adaptive quality.
+Local simulator mode keeps its basic snake stand-ins and uses the same retained
+food path. Full skins, special faces and attachments remain pending.
 The received-anchor preview at `/` remains available for comparison.
 
 The separate opt-in [`render_standard` API](docs/standard-body-renderer.md)
@@ -89,6 +90,11 @@ An additive [appearance-time paired-eye API](docs/standard-body-renderer.md#appe
 retains trusted normalized geometry before the first pupil update. Both render
 paths consume that style; standard recipes must match it exactly. The existing
 packet API and synthetic page retain their default paired-eye geometry.
+
+An additive [food factory API](docs/food-presentation.md) retains duplicate foods,
+captured eater objects and creation-selected sources. Both renderers place early
+outlines/body and late glows around snake drawing, using applied quality. Setup
+preserves the existing world; explicit reset clears it on the retained timeline.
 
 An additive [paired-face API](docs/standard-body-renderer.md#complete-ordinary-paired-faces)
 also retains optional geometric side images and composes the complete represented

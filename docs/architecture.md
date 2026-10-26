@@ -177,9 +177,9 @@ boundary until the next setup. Wasm exposes `set_connected`, copied
 `boundary_samples` and separate `snapshot.boundary` diagnostics; `snapshot.radius`
 continues to report the received target.
 
-## Native food integration
+## Retained food integration
 
-`AnimatedClient::apply_frame_with_factories` accepts explicit eye and food
+`AnimatedClient::apply_frame_with_factories` accepts explicit paired-face and food
 resolvers. Food creation receives two independent random units and owned source
 families, selecting and retaining numeric source metadata at that event's zoom.
 It must be enabled before packets or after reset; enabled sessions reject new
@@ -194,10 +194,13 @@ ID reuse cannot retarget an existing flight. Missing-at-capture eaters expire on
 the next update rather than binding later. Model, counters, caches, tokens and
 food roll back together after a late failure. Resolver side effects cannot.
 
-The native painter separates early outlines/body from late glows, with exact
-overloads, applied-quality gates and a shared command budget. Wasm source-object
-ownership, food submission in both render paths and page exercise are not yet
-connected; native model/planner checks do not establish a complete food renderer.
+The painter separates early outlines/body from late glows, with exact overloads,
+applied-quality gates and a shared command budget. The additive Wasm factory API
+commits retained source references with the model and releases them after expiry
+or reset. Both render paths submit these plans; the authored animated page
+exercises the complete path with synthetic textures and caller random inputs.
+See [retained desktop food](food-presentation.md) for metadata, lifecycle,
+transaction limits and pending independent browser/reference acceptance.
 
 Retained objects preserve duplicate appearances and original own identity through
 death, draw expiry and wire-ID reuse. Explicit lookup addresses the newest

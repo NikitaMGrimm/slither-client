@@ -297,6 +297,21 @@ pub(crate) struct BorrowedSources {
 }
 
 impl BorrowedSources {
+    pub(crate) fn validate_food(
+        &self,
+        foods: &crate::food_browser::FoodSources,
+    ) -> Result<(), JsValue> {
+        for source in &self.sources {
+            foods.validate_shared(
+                &source.object,
+                &source.revision,
+                source.width,
+                source.height,
+            )?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn validate(&self, target: &HtmlCanvasElement) -> Result<(), JsValue> {
         for source in &self.sources {
             source.validate(target)?;

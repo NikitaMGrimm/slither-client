@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Connect ordered food events to retained animation, captured eater objects,
+  creation-selected borrowed sources and two paint passes through both Wasm
+  renderers. Exercise the full path on the authored animated page.
+- Separate configuration-only Setup from explicit reset, preserving world and
+  compact caches while retaining appearance-time segment length and maximum speed.
+
 - Complete ordinary paired-face composition through retained numeric appearance
   metadata, optional provider side-image uses and both actual render APIs. Validate
   exact geometry/source coherence before clearing; keep legacy defaults and
