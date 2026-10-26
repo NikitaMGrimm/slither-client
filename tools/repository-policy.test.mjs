@@ -27,11 +27,22 @@ test('reference directories, disguised known bundles, maps, and binary payloads 
   assert(checkEntry('web/invalid.mjs', Buffer.from([0xc3, 0x28])).some(error => error.includes('UTF-8')));
 });
 
-test('only the self-contained project logo is permitted as a vector asset', () => {
+test('only the self-contained project logo and icon are permitted as vector assets', () => {
   const logo = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0H4"/></svg>');
-  assert.deepEqual(checkEntry('assets/logo.svg', logo), []);
+  for (const name of ['assets/logo.svg', 'assets/icon.svg']) {
+    assert.deepEqual(checkEntry(name, logo), []);
+    for (const unsafe of [
+      '<svg><script>alert(1)</script></svg>',
+      '<svg><foreignObject/></svg>',
+      '<svg><image href="data:image/png;base64,SYNTHETIC"/></svg>',
+      '<svg><use href="https://example.invalid/icon.svg"/></svg>',
+      '<svg onload="alert(1)"/>',
+      '<svg><style>path { fill: url(https://example.invalid/image); }</style></svg>',
+    ]) {
+      assert(checkEntry(name, Buffer.from(unsafe)).some(error => error.includes('SVG contains')), name);
+    }
+  }
   assert(checkEntry('assets/other.svg', logo).length > 0);
-  assert(checkEntry('assets/logo.svg', Buffer.from('<svg><image href="data:image/png;base64,SYNTHETIC"/></svg>')).length > 0);
 });
 
 function withRepository(run) {

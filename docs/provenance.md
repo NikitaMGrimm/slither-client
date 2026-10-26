@@ -19,7 +19,8 @@ human-source-derived port as independently specified clean-room work.
 
 ## What may be tracked
 
-Track original authored Rust, tooling, documentation, and the original SVG logo.
+Track original authored Rust, tooling, documentation, and the original SVG logo
+and icon.
 Use concise textual observations and the public reference identifier above for
 research notes. Synthetic fixtures must be explicitly labelled synthetic in
 their content and accompanying description. They are not official captures.
@@ -51,6 +52,10 @@ follow the visual family of the public
 and [SVG](https://github.com/NikitaMGrimm/slither-sim/blob/bb9d457a9649ac7c6a63fdb3970b1a7f945f3366/assets/logo.svg),
 inspected at `bb9d457a9649ac7c6a63fdb3970b1a7f945f3366`. It contains no official
 game artwork or raster assets.
+
+`assets/icon.svg` contains the same original snake symbol without the wordmark
+in a square viewport. T3 Code discovers this file automatically as the project
+icon; `assets/logo.svg` remains the wide README logo.
 
 [MIT](../LICENSE) covers our authored files. It grants no license to official
 client code or artwork. This project is independent of Slither.io and currently

@@ -19,8 +19,8 @@ port research is not clean-room work.
 Run `node tools/check-repository.mjs` against the reviewed Git index and
 `node tools/check-repository.mjs --history` before delivery. The guard checks
 known artifacts and file boundaries, not ownership. Never weaken it to admit a
-reference artifact. Only the original `assets/logo.svg` vector is permitted;
-keep it free of scripts and external resources.
+reference artifact. Only the original `assets/logo.svg` and `assets/icon.svg`
+vectors are permitted; keep them free of scripts and external resources.
 
 ## Implementation and verification
 
