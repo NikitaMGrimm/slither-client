@@ -15,6 +15,7 @@ mod body;
 mod camera;
 mod client;
 mod curve;
+mod eyes;
 mod follow_camera;
 mod length;
 mod quality;
@@ -28,6 +29,7 @@ pub use client::{
 pub use curve::{
     CurveInput, CurveOutput, CurveSample, CurveVertex, MAX_CURVE_SAMPLES, sample_curve,
 };
+pub use eyes::{EyeLayoutInput, EyePair, StandardEyeGeometry, StandardEyeLayout, StandardEyeState};
 pub use follow_camera::{FollowCamera, INITIAL_ZOOM};
 pub use length::LengthPresentation;
 pub use quality::{QualityMode, QualitySnapshot, QualityState};
