@@ -61,7 +61,7 @@ listen(window, 'pagehide', teardown);
 
 function reset() {
   disconnect();
-  animated.reset(performance.now());
+  animated.reset();
   quality.begin_skin_preview();
   animated.apply_frame(syntheticScene(Number(control('skin').value)), false);
   animated.set_follows(control('follow').checked);
@@ -148,10 +148,9 @@ async function start() {
     boost = false;
     try {
       animated.set_connected(false);
-      // The existing transport resets without a timestamp; adapt only that call.
       const scene = {
         reset: () => {
-          animated.reset(performance.now());
+          animated.reset();
           quality.begin_connection();
           animated.set_follows(control('follow').checked);
           animated.set_zoom(Number(control('zoom').value));

@@ -10,13 +10,65 @@ export function animatedSmoke(wasm) {
     const length = bytes.getUint32(offset); offset += 4;
     return packed.slice(offset, offset + length);
   }
+  const target = value => [122, value >>> 16 & 255, value >>> 8 & 255, value & 255];
+  const setup = value => {
+    const bytes = syntheticSetup(); bytes.set(target(value).slice(1), bytes.length - 3); return bytes;
+  };
+  const clockStep = (scene, now, lagging = false) => {
+    const step = scene.advance(now, lagging);
+    try {
+      return Object.fromEntries(['delta', 'unlagged_delta', 'whole_steps', 'double_steps',
+        'lag_multiplier', 'accumulated', 'doubled_accumulated'].map(key => [key, step[key]]));
+    } finally { step.free(); }
+  };
+  assert.equal(wasm.AnimatedScene.prototype.reset.length, 0, 'generated reset API is parameterless');
+  const phase = new wasm.AnimatedScene(1000);
+  try {
+    phase.apply_frame(bundle(setup(1200), ownAppearance(), target(600)), false);
+    assert.equal(clockStep(phase, 1003).accumulated, 0.375);
+    const ring = phase.boundary_samples();
+    phase.reset();
+    const cleared = JSON.parse(phase.snapshot());
+    assert.equal(cleared.protocol, null);
+    assert.equal(cleared.retainedSnakes, 0);
+    assert.equal(cleared.own, null);
+    assert.equal(cleared.boundary.connected, false);
+    assert.deepEqual(phase.boundary_samples(), ring, 'reset consumes no retained radius samples');
+    phase.apply_frame(bundle(setup(1300), target(700)), false);
+    assert.deepEqual(clockStep(phase, 1008), { delta: 0.625, unlagged_delta: 0.625,
+      whole_steps: 1, double_steps: 2, lag_multiplier: 1, accumulated: 1, doubled_accumulated: 2 });
+    assert.deepEqual(JSON.parse(phase.snapshot()).boundary,
+      { displayed: 1300, target: 700, index: 1, pending: 55, connected: true });
+    assert.equal(phase.boundary_samples()[0], 700);
+    phase.reset(); phase.reset();
+    phase.apply_frame(setup(1400), false);
+    assert.deepEqual(phase.boundary_samples(), new Float64Array(56).fill(1400));
+    assert.deepEqual(clockStep(phase, 1008), { delta: 0, unlagged_delta: 0,
+      whole_steps: 0, double_steps: 0, lag_multiplier: 1, accumulated: 1, doubled_accumulated: 2 });
+    assert.equal(JSON.parse(phase.snapshot()).boundary.pending, 55);
+  } finally { phase.free(); }
+  for (const [updates, nextMs, elapsed] of [
+    [[1003], 1024, 2.625], [[1003, 999], 1003, 0.5], [[1003, 2000], 3000, 5],
+  ]) {
+    const scene = new wasm.AnimatedScene(1000);
+    try {
+      scene.apply_frame(bundle(setup(1200), target(600)), false);
+      let before;
+      for (const now of updates) before = clockStep(scene, now, true);
+      assert(before.lag_multiplier < 1);
+      const ring = scene.boundary_samples();
+      scene.reset();
+      const next = clockStep(scene, nextMs);
+      assert.equal(next.lag_multiplier, 1, 'reset immediately restores full speed');
+      assert.equal(next.delta, elapsed, 'elapsed time since the last update survives reset');
+      assert.equal(next.accumulated, before.accumulated + elapsed);
+      assert.equal(next.doubled_accumulated, before.doubled_accumulated + elapsed * 2);
+      assert.deepEqual(scene.boundary_samples(), ring, 'disconnected updates retain boundary samples');
+    } finally { scene.free(); }
+  }
   const radius = new wasm.AnimatedScene(0);
   try {
     const view = () => JSON.parse(radius.snapshot());
-    const target = value => [122, value >>> 16 & 255, value >>> 8 & 255, value & 255];
-    const setup = value => {
-      const bytes = syntheticSetup(); bytes.set(target(value).slice(1), bytes.length - 3); return bytes;
-    };
     const tick = (now, lagging = false) => {
       const step = radius.advance(now, lagging);
       try { return step.whole_steps; } finally { step.free(); }
@@ -60,7 +112,7 @@ export function animatedSmoke(wasm) {
     assert.equal(view().boundary.index, 7);
     const retained = radius.boundary_samples();
     const retainedView = view().boundary;
-    radius.reset(100);
+    radius.reset();
     assert.deepEqual(view().boundary, { ...retainedView, connected: false });
     assert.deepEqual(radius.boundary_samples(), retained);
     tick(140);
@@ -77,7 +129,7 @@ export function animatedSmoke(wasm) {
       assert.throws(() => radius.apply_frame(bytes, false));
       assert.deepEqual(state(), stable, 'late received/numeric errors roll back setup, gate and ring together');
     }
-    for (const operation of [() => radius.advance(NaN, false), () => radius.reset(NaN),
+    for (const operation of [() => radius.advance(NaN, false),
       () => radius.prepare_draw_with_style(960, 540, NaN, true)]) {
       assert.throws(operation); assert.deepEqual(state(), stable);
     }
@@ -143,7 +195,7 @@ export function animatedSmoke(wasm) {
     advance(16);
     assert.equal(view().own.headPending, 52);
     assert.equal(view().camera.pending, 61, 'updates do not consume camera samples');
-    scene.reset(16);
+    scene.reset();
     scene.apply_frame(syntheticScene(), false);
     const resetState = scene.snapshot();
     assert.throws(() => scene.apply_frame(new Uint8Array(), false));

@@ -143,7 +143,7 @@ numeric Node/Wasm evidence without scene, pixel, browser or server acceptance.
 
 ## Coupled animation checks
 
-Six native boundary-client tests cover ordered and repeated targets, setup and
+Eight native boundary-client tests cover ordered and repeated targets, setup and
 reset retention, connection gating without a catch-up backlog, continued entity
 animation, draw independence and complete packet/numeric failure rollback.
 The real Wasm smoke checks copied boundary samples and received/displayed radius
@@ -151,6 +151,12 @@ separation. Canvas-recorder checks exercise both render paths, radius easing,
 disconnected drawing, Canvas failures and hiding retained state before setup.
 Page doubles verify that socket open alone does not activate the gate and that
 disconnect, life end and teardown clear it without touching freed owners.
+Native and real-Wasm reset regressions cover the retained 3-ms plus 5-ms phase,
+doubled accumulation, backward timestamps, clamped pauses, restored lag speed,
+world clearing and boundary retention without an extra step. The generated Wasm
+reset signature and all page reset routes are checked as parameterless. Existing
+body-painter tests cover retained flags; page doubles cover owner cleanup and
+unchanged update/quality ordering. These do not establish external reset parity.
 These are synthetic numeric/command checks; native browser and external-runtime
 comparisons remain separate verification steps for this integration.
 

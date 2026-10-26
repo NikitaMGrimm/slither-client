@@ -153,7 +153,7 @@ export function bodyRenderSmoke(wasm) {
         eq(target.context.stack.length, 0, 'Canvas failure balances the frame');
         target.context.failMethod = null;
       }
-      scene.reset(128);
+      scene.reset();
       const retained = scene.boundary_samples();
       for (const render of renderers) {
         target.context.trace = []; render();
@@ -286,7 +286,7 @@ export function bodyRenderSmoke(wasm) {
 
     const duplicates = fixture();
     try {
-      duplicates.scene.reset(0);
+      duplicates.scene.reset();
       duplicates.scene.apply_frame(bundle(syntheticSetup(), appearance([1, 4], 17), appearance([2, 8], 29)), false);
       duplicates.scene.advance(40, false).free();
       duplicates.render();
@@ -329,7 +329,7 @@ export function bodyRenderSmoke(wasm) {
     } finally { low.close(); }
     const short = fixture();
     try {
-      short.scene.reset(0); short.scene.apply_frame(bundle(syntheticSetup(), appearance().slice(0, -22)), false);
+      short.scene.reset(); short.scene.apply_frame(bundle(syntheticSetup(), appearance().slice(0, -22)), false);
       short.render(); eq(bodyImages(short).length, 0); eq(short.target.context.trace.filter(v => v.op === 'fill').length, 4);
       short.scene.apply_frame(syntheticStep(1), false); short.render(); ok(bodyImages(short).length > 0);
     } finally { short.close(); }
@@ -426,7 +426,7 @@ export function bodyRenderSmoke(wasm) {
     } finally { transition.close(); }
     const limits = fixture({ eyes: false, detailed: true });
     try {
-      limits.scene.reset(0);
+      limits.scene.reset();
       const frames = denseScene({ snakes: 128, anchors: 512, foods: 0, spread: 100 });
       for (const frame of frames) limits.scene.apply_frame(frame, false);
       for (const frame of frames.slice(1)) limits.scene.apply_frame(frame, false);

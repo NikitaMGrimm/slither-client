@@ -170,9 +170,10 @@ impl AnimatedScene {
         })
     }
 
-    /// Reset received state, retained entities and all clocks for a new session.
-    pub fn reset(&mut self, start_ms: f64) -> Result<(), JsValue> {
-        self.client.reset(start_ms).map_err(error)
+    /// Clear the world and view controls, retaining animation time and restoring lag to one.
+    /// Construct a new scene to start a fresh timeline.
+    pub fn reset(&mut self) {
+        self.client.reset();
     }
 
     /// Gate boundary updates only; setup activates this gate and reset clears it.

@@ -331,10 +331,10 @@ fn setup_resets_identity_and_camera_but_preserves_fractional_update_timeline() {
     assert_eq!(step.delta, 5. / 8.);
     assert_eq!(step.accumulated, 1.);
     assert_eq!(step.whole_steps, 1);
-    c.reset(8.).unwrap();
+    c.reset();
     assert!(c.own_snake().is_none());
     assert!(c.received().setup.is_none());
-    assert_eq!(c.advance(8., false).unwrap().accumulated, 0.);
+    assert_eq!(c.advance(8., false).unwrap().accumulated, 1.);
 }
 
 #[test]
@@ -481,7 +481,10 @@ fn food_and_unknown_events_commit_received_state_without_advancing_presentation(
 }
 
 #[test]
-fn view_clock_and_reset_errors_are_atomic() {
+fn view_and_clock_errors_are_atomic() {
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert!(AnimatedClient::new(bad).is_err());
+    }
     let mut c = client();
     let before = c.clone();
     assert!(c.set_zoom(0.).is_err());
@@ -489,7 +492,6 @@ fn view_clock_and_reset_errors_are_atomic() {
     assert!(c.set_camera_position(Point { x: f64::NAN, y: 0. }).is_err());
     assert!(c.prepare_draw(0, 200).is_err());
     assert!(c.advance(f64::NAN, false).is_err());
-    assert!(c.reset(f64::NAN).is_err());
     assert_eq!(c, before);
     let mut empty = AnimatedClient::new(0.).unwrap();
     empty.set_zoom(f64::from_bits(1)).unwrap();

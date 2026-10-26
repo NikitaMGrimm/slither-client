@@ -168,20 +168,15 @@ impl AnimatedClient {
         })
     }
 
-    /// Reset received state, retained objects, view controls, and the animation timeline.
-    /// Preserve boundary cadence and shared body-painter flag history for this client.
-    pub fn reset(&mut self, start_ms: f64) -> Result<(), ClientPresentationError> {
-        let clock = FrameClock::new(start_ms)?;
-        *self = Self {
-            received: ClientState::default(),
-            clock,
-            camera: FollowCamera::default(),
-            boundary: self.boundary.take(),
-            connected: false,
-            entries: Vec::new(),
-            body_paint_flags: std::mem::take(&mut self.body_paint_flags),
-        };
-        Ok(())
+    /// Clear the world and view controls, and restore the lag multiplier to one.
+    /// Preserve the clock's timestamp and both accumulated phases, boundary state,
+    /// and shared body-painter flag history. Use `new` to start a fresh timeline.
+    pub fn reset(&mut self) {
+        self.received = ClientState::default();
+        self.clock.reset_lag();
+        self.camera = FollowCamera::default();
+        self.connected = false;
+        self.entries.clear();
     }
 
     fn target_index(&self, target: SnakeTarget) -> Option<usize> {

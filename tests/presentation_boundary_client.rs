@@ -192,7 +192,7 @@ fn reset_retains_ring_and_setup_preserves_exhaustion_cleanup() {
     apply(&mut c, &[setup(1000), target(400)]);
     c.advance(8., false).unwrap();
     let ring = c.boundary().unwrap().clone();
-    c.reset(100.).unwrap();
+    c.reset();
     assert!(!c.connected());
     assert!(c.received().setup.is_none());
     assert_eq!(c.boundary(), Some(&ring));
@@ -226,6 +226,86 @@ fn reset_retains_ring_and_setup_preserves_exhaustion_cleanup() {
 }
 
 #[test]
+fn fractional_reset_preserves_timeline_and_boundary_without_consuming_a_step() {
+    let mut c = AnimatedClient::new(1000.).unwrap();
+    apply(&mut c, &[setup(1200), appearance(), target(600)]);
+    c.set_follows(false);
+    c.set_zoom(2.).unwrap();
+    let first = c.advance(1003., false).unwrap();
+    assert_eq!((first.whole_steps, first.double_steps), (0, 0));
+    let ring = c.boundary().unwrap().clone();
+    c.reset();
+    assert!(!c.connected());
+    assert_eq!(c.received(), AnimatedClient::new(0.).unwrap().received());
+    assert_eq!(c.retained_count(), 0);
+    assert!(c.own_snake().is_none());
+    assert_eq!(c.camera(), AnimatedClient::new(0.).unwrap().camera());
+    assert_eq!(c.boundary(), Some(&ring));
+    apply(&mut c, &[setup(1300), target(700)]);
+    assert!(c.connected());
+    assert_eq!(c.boundary().unwrap().index(), 0);
+    assert_eq!(c.boundary().unwrap().pending(), 56);
+    let next = c.advance(1008., false).unwrap();
+    assert_eq!(
+        (next.delta, next.whole_steps, next.double_steps),
+        (0.625, 1, 2)
+    );
+    assert_eq!((next.accumulated, next.doubled_accumulated), (1., 2.));
+    let ring = c.boundary().unwrap();
+    assert_eq!(
+        (ring.index(), ring.pending(), ring.samples()[0]),
+        (1, 55, 700.)
+    );
+    c.reset();
+    c.reset();
+    apply(&mut c, &[setup(1400)]);
+    let ring = c.boundary().unwrap().clone();
+    assert_eq!((ring.index(), ring.pending()), (1, 55));
+    assert_eq!(ring.samples(), &[1400.; 56]);
+    let same_time = c.advance(1008., false).unwrap();
+    assert_eq!((same_time.whole_steps, same_time.double_steps), (0, 0));
+    assert_eq!(
+        (same_time.accumulated, same_time.doubled_accumulated),
+        (1., 2.)
+    );
+    assert_eq!(c.boundary(), Some(&ring));
+}
+
+#[test]
+fn reset_restores_lag_and_retains_elapsed_time_after_skew_and_clamping() {
+    for (updates, next_ms, elapsed) in [
+        (vec![1003.], 1024., 2.625),
+        (vec![1003., 999.], 1003., 0.5),
+        (vec![1003., 2000.], 3000., 5.),
+    ] {
+        let mut c = AnimatedClient::new(1000.).unwrap();
+        apply(&mut c, &[setup(1200), target(600)]);
+        let mut before = None;
+        for now in updates {
+            before = Some(c.advance(now, true).unwrap());
+        }
+        let before = before.unwrap();
+        assert!(before.lag_multiplier < 1.);
+        let ring = c.boundary().unwrap().clone();
+        c.reset();
+        assert_eq!(c.boundary(), Some(&ring));
+        let next = c.advance(next_ms, false).unwrap();
+        assert_eq!(next.lag_multiplier, 1.);
+        assert_eq!(next.delta, elapsed);
+        assert_eq!(next.accumulated, before.accumulated + elapsed);
+        assert_eq!(
+            next.doubled_accumulated,
+            before.doubled_accumulated + elapsed * 2.
+        );
+        assert_eq!(
+            c.boundary(),
+            Some(&ring),
+            "reset disconnects boundary consumption"
+        );
+    }
+}
+
+#[test]
 fn draws_and_failures_preserve_boundary_and_atomic_connection_state() {
     let mut c = AnimatedClient::new(0.).unwrap();
     apply(&mut c, &[setup(1000), appearance(), target(400)]);
@@ -256,7 +336,6 @@ fn draws_and_failures_preserve_boundary_and_atomic_connection_state() {
         assert_eq!(c, before);
     }
     assert!(c.advance(f64::NAN, false).is_err());
-    assert!(c.reset(f64::NAN).is_err());
     assert!(c.prepare_draw_with_style(960, 540, f64::NAN, true).is_err());
     assert_eq!(c, before);
     c.set_connected(true);

@@ -84,9 +84,10 @@ function pageFixture(t, { initialize = async () => {}, decode = async () => {},
   const fetched = Promise.withResolvers();
   class AnimatedScene {
     constructor(nowMs) { constructions++; calls.push(['construct', nowMs]); }
-    reset(nowMs) {
+    reset(...args) {
       assert.equal(sceneFrees, 0, 'reset requires a live owner');
-      calls.push(['reset', nowMs]);
+      assert.equal(args.length, 0, 'page resets preserve the timeline without supplying a timestamp');
+      calls.push(['reset']);
       view.boundary.connected = false;
       view.ownHead = null;
       delete view.own;
@@ -224,6 +225,27 @@ test('RAF applies initial zero gaze before one advance, frees the step and rende
   expectFrame(page, 110.5, 0);
   assert.equal(page.window.slitherAnimatedSceneReport.renders, 2);
   assert.deepEqual(page.counts(), { constructions: 1, sceneFrees: 0, stepFrees: 2 });
+});
+
+test('initial, palette, manual and reconnect resets keep one owner and add no update', async t => {
+  const page = pageFixture(t);
+  await page.ready;
+  assert.deepEqual(page.calls.filter(call => call[0] === 'reset'), [['reset']]);
+  page.frame(13);
+  page.calls.length = 0;
+  page.elements.skin.value = '1';
+  page.elements.skin.emit('change');
+  page.elements.reset.emit('click');
+  page.connect();
+  page.elements.disconnect.emit('click');
+  page.connect();
+  assert.deepEqual(page.calls.filter(call => call[0] === 'reset'), Array.from({ length: 4 }, () => ['reset']));
+  assert.equal(page.calls.some(call => ['advance', 'render', 'step.free'].includes(call[0])), false);
+  assert.deepEqual(page.counts(), { constructions: 1, sceneFrees: 0, stepFrees: 1 });
+  page.window.emit('pagehide');
+  page.window.emit('pagehide');
+  assert.deepEqual(page.counts(), { constructions: 1, sceneFrees: 1, stepFrees: 1 });
+  assert.equal(page.qualityFrees(), 1);
 });
 
 test('quality statistics receive raw successful draws at the strict interval before the next draw', async t => {
