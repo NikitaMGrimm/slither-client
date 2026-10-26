@@ -370,6 +370,19 @@ claim. External adapters, source identities and raw evidence remain outside Git.
 
 ## Dense-scene benchmark
 
+Native collector tests cover the unrounded sampler seed, original ordinals,
+inclusive culling, shared retained flags, detailed cadence, short-curve omission
+and transactional failures. Independent review passed 75 focused tests for
+collection and 78 for the later staging cleanup. The combined native suite
+passed 221 tests.
+
+A private before/after real-Wasm recorder checked the staging cleanup across
+123 normal draw pairs and nine failure cases, plus death continuation: 420
+assertions passed, comparing 126,187 Canvas calls and copied model diagnostics
+exactly. This establishes command preservation for those fixtures. It does not
+measure a speedup or verify production-collector parity against an external
+runtime, browser rasterization, or the new body painter's Canvas submission.
+
 After `npm run build:web` and `npm run scene`, open
 `http://127.0.0.1:18884/benchmark` and use **Run benchmark**. It generates only
 original synthetic packets/artwork, uses real Wasm state and the existing

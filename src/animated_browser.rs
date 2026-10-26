@@ -520,7 +520,7 @@ impl AnimatedScene {
         let sprites = [palette_0, palette_1, palette_2];
         let mut prepared = self.client.clone();
         let snakes = prepared
-            .prepare_draw_with_style(
+            .prepare_draw_with_style_staged(
                 target.width(),
                 target.height(),
                 quality_scale,

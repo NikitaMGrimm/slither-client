@@ -65,6 +65,7 @@ pub struct CurveOutput {
     pub target_eye_heading: f64,
     vertices: Vec<CurveVertex>,
     redistribution_count: usize,
+    distance_cursor_seed: Option<Point>,
 }
 
 impl CurveOutput {
@@ -76,6 +77,12 @@ impl CurveOutput {
     /// Number of leading vertices considered by distance redistribution.
     pub fn redistribution_count(&self) -> usize {
         self.redistribution_count
+    }
+
+    /// Final unrounded displacement used by the tangent loop, for body painting.
+    /// Fewer than two samples leave no displacement and therefore no seed.
+    pub fn distance_cursor_seed(&self) -> Option<Point> {
+        self.distance_cursor_seed
     }
 }
 
@@ -591,12 +598,14 @@ fn sample_curve_inner(
     let redistribution_count = scratch.redistribute()?;
     let mut samples = Vec::with_capacity(scratch.vertices.len());
     let mut previous = head;
+    let mut distance_cursor_seed = None;
     for (index, vertex) in scratch.vertices.iter().enumerate() {
         let p = vertex.position;
         let angle = if index == 0 {
             0.
         } else {
             let delta = point(p.x - previous.x, p.y - previous.y)?;
+            distance_cursor_seed = Some(delta);
             math::atan2(delta.y, delta.x)
         };
         let sample = CurveSample {
@@ -622,5 +631,6 @@ fn sample_curve_inner(
         target_eye_heading,
         vertices: scratch.vertices,
         redistribution_count,
+        distance_cursor_seed,
     })
 }
