@@ -6,7 +6,9 @@ use wasm_bindgen::prelude::*;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, HtmlImageElement};
 
 use crate::{
-    body_browser::{BorrowedSources, ResolveError, request},
+    body_browser::{
+        BorrowedSources, ResolveError, appearance_request, request, same_eyes, standard_eyes,
+    },
     canvas_browser::{CanvasFrame, draw_sprite},
     presentation::{
         AnimatedClient, BodyPaintError, BodyPaintInput, BodyPaintQuality, BodyPaintView,
@@ -193,6 +195,34 @@ impl AnimatedScene {
                 },
             )
             .map_err(error)?;
+        Ok(())
+    }
+
+    /// Install explicit normalized paired eyes once per appearance, before its
+    /// first update. Framing and received-state validation precede callbacks.
+    /// The synchronous resolver is trusted; its side effects cannot roll back.
+    /// Any error preserves the complete model and callback exceptions keep identity.
+    pub fn apply_frame_with_eye_geometry(
+        &mut self,
+        bytes: &[u8],
+        elapsed_header: bool,
+        resolve_eyes: &js_sys::Function,
+    ) -> Result<(), JsValue> {
+        self.client
+            .apply_frame_with_eye_geometry(
+                bytes,
+                if elapsed_header {
+                    ElapsedHeader::TwoBytes
+                } else {
+                    ElapsedHeader::Absent
+                },
+                |appearance| -> Result<_, ResolveError> {
+                    let metadata = resolve_eyes
+                        .call1(&JsValue::UNDEFINED, &appearance_request(appearance)?.into())?;
+                    Ok(standard_eyes(&metadata)?)
+                },
+            )
+            .map_err(|e| e.0)?;
         Ok(())
     }
 
@@ -668,6 +698,13 @@ impl AnimatedScene {
                 |ordinal, own, snake| -> Result<bool, ResolveError> {
                     let recipe =
                         sources.resolve(resolve_recipe, &request(ordinal, own, snake)?, &target)?;
+                    if let Some(eyes) = &recipe.eyes
+                        && !same_eyes(eyes, snake.eye_geometry())
+                    {
+                        return Err(
+                            error("recipe eyes differ from retained appearance geometry").into(),
+                        );
+                    }
                     let detailed = recipe.style.detailed_segments;
                     recipes.push(recipe);
                     Ok(detailed)
@@ -690,7 +727,7 @@ impl AnimatedScene {
         let mut entry_alpha = 1.;
         for (snake, recipe) in snakes.iter().zip(&recipes) {
             let m = snake.metrics;
-            let layout = if recipe.eyes {
+            let layout = if recipe.eyes.is_some() {
                 Some(
                     snake
                         .eye_geometry

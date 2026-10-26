@@ -142,6 +142,23 @@ impl SnakePresentation {
         setup: &Setup,
         zoom: f64,
     ) -> Result<Self, PresentationError> {
+        Self::from_appearance_with_eye_geometry(
+            appearance,
+            setup,
+            zoom,
+            StandardEyeGeometry::default(),
+        )
+    }
+
+    /// Initialize paired-eye style before any pupil advancement. The style is
+    /// appearance-owned and does not reset later gaze, face or pupil state.
+    pub fn from_appearance_with_eye_geometry(
+        appearance: &Appearance,
+        setup: &Setup,
+        zoom: f64,
+        eye_geometry: StandardEyeGeometry,
+    ) -> Result<Self, PresentationError> {
+        eye_geometry.validate()?;
         validate_zoom(zoom)?;
         validate_mass(appearance.fam)?;
         finite(&[
@@ -199,7 +216,7 @@ impl SnakePresentation {
             body,
             length,
             eyes: StandardEyeState::new(appearance.heading, appearance.wanted_heading)?,
-            eye_geometry: StandardEyeGeometry::default(),
+            eye_geometry,
             turn_rate: setup.mamu,
             speed_angle_divisor: setup.spangdv,
             base_cruise_speed: setup.nsp1,

@@ -3,7 +3,7 @@
 use slither_client::{
     presentation::{
         AnimatedClient, ClientPresentationError, INITIAL_ZOOM, MAX_RETAINED_SNAKES,
-        MAX_RETAINED_TOTAL_BODY_POINTS,
+        MAX_RETAINED_TOTAL_BODY_POINTS, StandardEyeGeometry,
     },
     protocol::ElapsedHeader,
     state::{Point, StateError},
@@ -109,6 +109,159 @@ fn client() -> AnimatedClient {
     client
 }
 
+fn eye_style(travel: f64) -> StandardEyeGeometry {
+    StandardEyeGeometry {
+        pupil_travel: travel,
+        ..StandardEyeGeometry::default()
+    }
+}
+
+#[test]
+fn appearance_resolver_visits_wire_order_including_short_removed_and_reset_objects() {
+    let mut c = AnimatedClient::new(0.).unwrap();
+    let mut seen = Vec::new();
+    c.apply_frame_with_eye_geometry::<ClientPresentationError, _>(
+        &bundle(&[
+            setup(),
+            appearance(7, 2000, 0),
+            appearance(7, 2100, 2),
+            remove(7, 0),
+            setup(),
+            appearance(9, 5000, 1),
+            remove(9, 0),
+            appearance(9, 6000, 2),
+        ]),
+        ElapsedHeader::Absent,
+        |a| {
+            seen.push((a.id, a.absolute_head.x));
+            Ok(eye_style(seen.len() as f64 * 0.01))
+        },
+    )
+    .unwrap();
+    assert_eq!(seen, [(7, 2000.), (7, 2100.), (9, 5000.), (9, 6000.)]);
+    assert_eq!(c.own_snake().unwrap().eye_geometry(), &eye_style(0.03));
+    assert_eq!(c.snake(9).unwrap().eye_geometry(), &eye_style(0.04));
+    assert_eq!(c.retained_count(), 2);
+    assert!(c.drawn_own_snake().is_none());
+}
+
+#[test]
+fn duplicate_death_and_reused_ids_retain_appearance_styles() {
+    let mut c = AnimatedClient::new(0.).unwrap();
+    let mut index = 0;
+    c.apply_frame_with_eye_geometry::<ClientPresentationError, _>(
+        &bundle(&[
+            setup(),
+            appearance(7, 2000, 2),
+            appearance(7, 2100, 2),
+            remove(7, 1),
+            appearance(7, 2200, 2),
+        ]),
+        ElapsedHeader::Absent,
+        |_| {
+            index += 1;
+            Ok(eye_style(f64::from(index) * 0.02))
+        },
+    )
+    .unwrap();
+    assert!(!c.own_snake().unwrap().metrics().alive);
+    assert_eq!(c.own_snake().unwrap().eye_geometry(), &eye_style(0.02));
+    assert_eq!(c.snake(7).unwrap().eye_geometry(), &eye_style(0.06));
+    assert_eq!(
+        c.drawn_snakes()
+            .map(|s| s.eye_geometry().pupil_travel)
+            .collect::<Vec<_>>(),
+        [0.02, 0.04, 0.06]
+    );
+    c.advance(4., false).unwrap();
+    assert_eq!(
+        c.drawn_snakes()
+            .map(|s| s.eyes().pupil().x)
+            .collect::<Vec<_>>(),
+        [0.02, 0.04, 0.06]
+    );
+}
+
+#[test]
+fn eye_resolution_errors_rollback_received_model_counters_and_prior_styles() {
+    let mut c = client();
+    c.advance(4., false).unwrap();
+    c.prepare_draw(800, 600).unwrap();
+    let before = c.clone();
+    let prefix = [appearance(8, 2300, 2), appearance(9, 2400, 2)];
+    for invalid_geometry in [false, true] {
+        let mut calls = 0;
+        let result = c.apply_frame_with_eye_geometry::<ClientPresentationError, _>(
+            &bundle(&prefix),
+            ElapsedHeader::Absent,
+            |_| {
+                calls += 1;
+                if calls == 2 {
+                    if invalid_geometry {
+                        return Ok(eye_style(f64::NAN));
+                    }
+                    return Err(ClientPresentationError::Limit);
+                }
+                Ok(eye_style(0.02))
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(calls, 2);
+        assert_eq!(c, before);
+    }
+    let received_invalid = bundle(&[appearance(8, 2300, 2), vec![b'r', 0]]);
+    let mut framing_invalid = bundle(&prefix);
+    framing_invalid.extend([0, 9, b's']);
+    for frame in [received_invalid, framing_invalid] {
+        let mut calls = 0;
+        assert!(
+            c.apply_frame_with_eye_geometry::<ClientPresentationError, _>(
+                &frame,
+                ElapsedHeader::Absent,
+                |_| {
+                    calls += 1;
+                    Ok(eye_style(0.02))
+                },
+            )
+            .is_err()
+        );
+        assert_eq!(calls, 0);
+        assert_eq!(c, before);
+    }
+}
+
+#[test]
+fn default_frame_solver_matches_explicit_style_across_lifecycle_and_draws() {
+    let mut legacy = AnimatedClient::new(0.).unwrap();
+    let mut explicit = legacy.clone();
+    for (now, commands) in [
+        (4., vec![setup(), appearance(7, 2000, 3)]),
+        (
+            12.,
+            vec![anchor(None, 2008, 1004, true), appearance(7, 2200, 2)],
+        ),
+        (52., vec![remove(7, 1), appearance(7, 2300, 2)]),
+    ] {
+        let frame = bundle(&commands);
+        let report = legacy.apply_frame(&frame, ElapsedHeader::Absent).unwrap();
+        assert_eq!(
+            report,
+            explicit
+                .apply_frame_with_eye_geometry::<ClientPresentationError, _>(
+                    &frame,
+                    ElapsedHeader::Absent,
+                    |_| Ok(StandardEyeGeometry::default()),
+                )
+                .unwrap()
+        );
+        for c in [&mut legacy, &mut explicit] {
+            c.advance(now, false).unwrap();
+            c.prepare_draw(800, 600).unwrap();
+        }
+        assert_eq!(legacy, explicit);
+    }
+}
+
 #[test]
 fn synthetic_initial_camera_and_received_absolute_geometry_are_separate() {
     let c = client();
@@ -171,6 +324,23 @@ fn late_presentation_failure_rolls_back_prior_events_midframe_setup_and_clock() 
     ));
     assert_eq!(c, before);
     let mut control = before;
+    let mut callbacks = 0;
+    assert!(matches!(
+        c.apply_frame_with_eye_geometry::<ClientPresentationError, _>(
+            &frame,
+            ElapsedHeader::Absent,
+            |_| {
+                callbacks += 1;
+                Ok(eye_style(0.02))
+            },
+        ),
+        Err(ClientPresentationError::Presentation(_))
+    ));
+    assert_eq!(
+        callbacks, 1,
+        "received validation can precede a later numeric failure"
+    );
+    assert_eq!(c, control);
     assert_eq!(c.advance(8., false), control.advance(8., false));
     assert_eq!(c, control);
 }

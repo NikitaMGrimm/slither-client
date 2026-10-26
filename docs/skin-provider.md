@@ -188,6 +188,15 @@ any pending asset makes it pending. The validated partial recipe remains
 available in either case. Supported tags describe schema coverage, not readiness
 or implemented renderer behavior. There is no special renderer in this module.
 
+The additive [appearance-time paired-eye API](standard-body-renderer.md#appearance-time-paired-eyes)
+can consume `result.recipe.eyes` directly, even while body assets are pending.
+It requires explicit `standard` metadata, black outline color and effective
+global `angleSmoothing: 0.12`; provider schema coverage alone does not establish
+renderer support. The caller must check unsupported features rather than turn
+special faces or omitted pupils into standard eyes. No asset readiness, source
+reference or provider envelope is retained by that API. `render_standard` still
+requires a ready full snapshot whose paired-eye geometry matches the appearance.
+
 Normal tests use only original synthetic metadata and realm doubles. Private
 runtime probes, if performed, remain outside this checkout and establish neither
 real DOM/image readiness, pixel equality, extension integration, nor server

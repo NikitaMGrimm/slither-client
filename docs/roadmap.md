@@ -24,8 +24,11 @@ The separate animated preview now connects ordered events, head/body/length
 corrections, following camera, draw-driven spacing and sampled curves. Synthetic
 native/Wasm and Windows browser checks exercise this path. Standard paired eyes
 now retain gaze, pupil motion and deferred draw targets. Full skins, special
-faces, HUD, prey and team-mode drawing remain pending. Radius easing now shares
-the connected update clock and retains cadence through reset. The opt-in
+faces, HUD, prey and team-mode drawing remain pending. An additive API now
+installs trusted normalized paired geometry before the first pupil update,
+retains it per appearance and checks standard-recipe coherence before drawing.
+Full host skin adaptation and antennas remain future work. Radius easing now
+shares the connected update clock and retains cadence through reset. The opt-in
 standard-body renderer now connects ordered body effects and applied quality to
 production geometry; the synthetic page demonstrates three authored recipes.
 Native Firefox checks cover that bounded integration. Five frozen external-runtime

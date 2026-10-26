@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Install explicit normalized paired-eye geometry at appearance time through
+  additive native/Wasm APIs. Retain style per object before the first pupil
+  update and require exact standard-recipe coherence before drawing. Existing
+  default geometry and the renderer's explicit no-eyes lane remain unchanged.
 - Preserve the camera follow preference through reset and setup, avoiding
   unexpected camera shifts and visibility changes after respawn.
 - Make `AnimatedClient::reset()` and `AnimatedScene.reset()` parameterless and
@@ -22,9 +26,9 @@
   Canvas submission and renderer quality integration remain separate.
 - Couple standard paired-eye motion, independent pointer gaze and per-snake
   Canvas painting to the animated preview. Preserve fractional pupil updates,
-  deferred curve targets, visibility resets and death fading. Special faces,
-  skin-supplied geometry and attachment rendering remain pending. One-anchor
-  eyes preserve a defined finite head-lead target while unsupported suffix
+  deferred curve targets, visibility resets and death fading. Special faces and
+  attachment rendering remain pending. One-anchor eyes preserve a defined finite
+  head-lead target while unsupported suffix
   geometry retains an explicit raw-heading fallback and no body curve.
 - Select web-build Wasm from Cargo's artifact report, including configured target
   directories, and reject missing or ambiguous artifacts before binding.
