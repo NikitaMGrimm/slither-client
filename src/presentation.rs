@@ -13,6 +13,7 @@ use crate::{math, state::Point};
 
 mod body;
 mod body_painter;
+mod boundary;
 mod camera;
 mod client;
 mod curve;
@@ -30,6 +31,7 @@ pub use body_painter::{
     BodyPalette, BodyRect, BodyRun, BodyStyle, BodyVariantMode, MAX_BODY_PAINT_COMMANDS,
     MAX_BODY_PAINT_SAMPLES, plan_standard_body,
 };
+pub use boundary::{BOUNDARY_SAMPLES, BoundaryRadius};
 pub use camera::{CAMERA_SAMPLES, CameraCorrections};
 pub use client::{
     AnimatedClient, ClientPresentationError, MAX_DRAW_SAMPLES, MAX_RETAINED_SNAKES,

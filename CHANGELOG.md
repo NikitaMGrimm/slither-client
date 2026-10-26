@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add standalone double-precision boundary-radius easing and a `BoundarySmoother`
+  Wasm binding with explicit connection gating. Scene boundary integration remains pending.
 - Submit ordered standard-body plans through an opt-in borrowed-asset renderer.
   The synthetic animated page exercises authored body effects and adaptive
   quality; local simulator mode retains basic stand-ins. Full skins remain pending.

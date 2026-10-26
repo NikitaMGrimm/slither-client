@@ -120,6 +120,16 @@ retention, independent logical/physical caps and late-failure rollback. These
 are synthetic tests of the native model. The original `/` preview continues to
 draw received anchors; `/animated` connects the model to sampled body drawing.
 
+## Standalone boundary-radius checks
+
+Six native synthetic tests cover target scheduling, connection and whole-step
+gating, overlapping/equal updates, absolute samples, wrap, deferred cleanup,
+setup cadence, double-precision storage and atomic rejection. The real Wasm
+presentation smoke checks the copied arrays, current-host cosine weights,
+borrowed-step gating, setup behavior, exhaustion and invalid inputs through
+`BoundarySmoother`. These establish the standalone numeric API; scene packet
+consumption, boundary rendering and external-runtime parity remain separate.
+
 ## Coupled animation checks
 
 After building and starting `npm run scene`, open

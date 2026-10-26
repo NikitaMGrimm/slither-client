@@ -100,6 +100,14 @@ one per eligible draw. Injection retains the current camera offset; exhaustion
 has no entity-style cleanup sentinel. Following, zoom and event scheduling remain
 caller responsibilities.
 
+`BoundaryRadius` stores 56 double-precision absolute-radius samples. Radius
+targets blend every sample at the current cursor without changing display
+immediately. Connected whole-step updates consume samples and replace consumed
+slots with the latest target; a later positive connected update performs deferred
+cleanup. Setup replaces radii while preserving cursor and pending cadence.
+`BoundarySmoother` exposes the standalone state to Wasm and borrows existing owned
+animation steps. Neither API changes the scene's arena drawing yet.
+
 `BodyGeometry` keeps absolute anchors head to tail, including dying points.
 Normal anchors mark the oldest living point dying; growth changes logical count.
 Contraction walks older points sequentially and schedules visible x/y, edge and
