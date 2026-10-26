@@ -3,8 +3,9 @@
 use std::{error::Error, fmt};
 
 use super::{
-    AnchorView, CurveOutput, FollowCamera, FrameClock, FrameStep, PresentationError, SnakeMetrics,
-    SnakePresentation, StandardEyeGeometry, finite,
+    AnchorView, BodyPaintGeometry, BodyPaintSample, CurveOutput, FollowCamera, FrameClock,
+    FrameStep, MAX_CURVE_SAMPLES, PresentationError, SnakeMetrics, SnakePresentation,
+    StandardEyeGeometry, finite,
 };
 use crate::{
     protocol::ElapsedHeader,
@@ -21,6 +22,28 @@ pub const MAX_RETAINED_TOTAL_BODY_POINTS: usize = MAX_TOTAL_BODY_POINTS * 2;
 /// Aggregate active curve samples permitted in one prepared numeric draw.
 pub const MAX_DRAW_SAMPLES: usize = MAX_RETAINED_TOTAL_BODY_POINTS * 2;
 
+/// Owned active body-painter inputs captured during a visible snake's numeric draw.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreparedBodyGeometry {
+    /// All active samples in original head-to-tail order, including skipped flags.
+    pub samples: Vec<BodyPaintSample>,
+    /// Actual final unrounded tangent displacement, before Float32 storage.
+    pub distance_cursor_seed: Point,
+}
+
+impl PreparedBodyGeometry {
+    /// Borrow the complete active prefix of this visible body for the standard planner.
+    /// Recipe eligibility and readiness still belong to the caller's recipe inputs.
+    pub fn as_paint_geometry(&self) -> BodyPaintGeometry<'_> {
+        BodyPaintGeometry {
+            samples: &self.samples,
+            active_count: self.samples.len(),
+            distance_cursor_seed: self.distance_cursor_seed,
+            eligible: true,
+        }
+    }
+}
+
 /// One visible snake's complete numeric draw data, in current draw-collection order.
 /// Finish this body's eye/pupil pairs before painting the next prepared snake.
 #[derive(Clone, Debug, PartialEq)]
@@ -33,6 +56,8 @@ pub struct PreparedSnake {
     pub metrics: SnakeMetrics,
     /// Sampled body, or none when fewer than two retained anchors exist.
     pub curve: Option<CurveOutput>,
+    /// Painter snapshot, omitted when the curve has fewer than two active samples.
+    pub body_geometry: Option<PreparedBodyGeometry>,
     /// Face heading captured before committing this draw's new curve target.
     pub face_heading: f64,
     /// World-axis pupil displacement, before entity scale and zoom.
@@ -104,12 +129,15 @@ struct Entry {
 /// object is retained independently of the packet lookup and draw collection.
 /// Every fallible public transition preserves received counters/caches, clocks,
 /// camera, membership, and all entity channels on failure.
+/// Shared ordinal flags start at zero and survive setup and explicit reset on
+/// this object; only a brand-new client starts a new flag history.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AnimatedClient {
     received: ClientState,
     clock: FrameClock,
     camera: FollowCamera,
     entries: Vec<Entry>,
+    body_paint_flags: Vec<u8>,
 }
 
 impl AnimatedClient {
@@ -120,12 +148,21 @@ impl AnimatedClient {
             clock: FrameClock::new(start_ms)?,
             camera: FollowCamera::default(),
             entries: Vec::new(),
+            body_paint_flags: vec![0; MAX_CURVE_SAMPLES],
         })
     }
 
     /// Reset received state, retained objects, view controls, and the animation timeline.
+    /// Preserve shared body-painter flag history for this client's draw lifetime.
     pub fn reset(&mut self, start_ms: f64) -> Result<(), ClientPresentationError> {
-        *self = Self::new(start_ms)?;
+        let clock = FrameClock::new(start_ms)?;
+        *self = Self {
+            received: ClientState::default(),
+            clock,
+            camera: FollowCamera::default(),
+            entries: Vec::new(),
+            body_paint_flags: std::mem::take(&mut self.body_paint_flags),
+        };
         Ok(())
     }
 
@@ -155,6 +192,7 @@ impl AnimatedClient {
     /// Commit a complete received frame and its presentation events together.
     /// Elapsed headers are retained by received state; anchor extrapolation is zero.
     /// A setup clears the world and camera without resetting the fractional clock.
+    /// Shared body-painter ordinal flags survive setup on the same client.
     pub fn apply_frame(
         &mut self,
         bytes: &[u8],
@@ -385,11 +423,45 @@ impl AnimatedClient {
                 .checked_add(curve.as_ref().map_or(0, |curve| curve.samples.len()))
                 .filter(|count| *count <= MAX_DRAW_SAMPLES)
                 .ok_or(ClientPresentationError::Limit)?;
+            let body_geometry = curve.as_ref().and_then(|curve| {
+                let distance_cursor_seed = curve.distance_cursor_seed()?;
+                let samples = curve
+                    .samples
+                    .iter()
+                    .zip(curve.vertices())
+                    .enumerate()
+                    .map(|(ordinal, (sample, vertex))| {
+                        let p = vertex.position;
+                        // Cull before Float32 storage. Offscreen ordinals retain
+                        // the last write from any preceding snake or draw.
+                        if p.x >= left && p.y >= top && p.x <= right && p.y <= bottom {
+                            next.body_paint_flags[ordinal] = if !detailed_style || ordinal % 3 == 0
+                            {
+                                2
+                            } else {
+                                1
+                            };
+                        }
+                        BodyPaintSample {
+                            ordinal,
+                            x: sample.x,
+                            y: sample.y,
+                            tangent: sample.angle,
+                            flag: next.body_paint_flags[ordinal],
+                        }
+                    })
+                    .collect();
+                Some(PreparedBodyGeometry {
+                    samples,
+                    distance_cursor_seed,
+                })
+            });
             prepared.push(PreparedSnake {
                 draw_ordinal,
                 own: entry.own,
                 metrics: entry.snake.metrics(),
                 curve,
+                body_geometry,
                 face_heading,
                 pupil: entry.snake.eyes().pupil(),
                 eye_geometry: *entry.snake.eye_geometry(),
