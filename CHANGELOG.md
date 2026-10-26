@@ -18,7 +18,7 @@
   and bounded curve sampling in a separate animated Canvas2D preview. Preserve
   retained own identity through removal/ID reuse and repeated duplicate removals;
   test synthetic native, Wasm, Chrome and Firefox transitions. Full skins,
-  eyes, quality effects and team-mode drawing remain pending.
+  quality effects and team-mode drawing remain pending.
 - Add retained body contraction/correction state, logical visual length and
   draw-driven camera correction primitives, including standalone length/camera
   Wasm bindings and host presentation math.

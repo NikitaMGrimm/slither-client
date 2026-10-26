@@ -109,8 +109,8 @@ smoke test also exercises owned animation steps, predictor motion/corrections,
 rejection of invalid JavaScript directions before integer narrowing, copied
 sample arrays and atomic failure. These checks use original synthetic inputs.
 
-Those checks isolate the primitives. Coupled event/render checks are described
-below; eyes, quality-dependent drawing and full skins remain separate work.
+Those checks isolate the primitives. Coupled animation and standard-eye checks
+are described below; quality-dependent drawing and full skins remain separate work.
 
 `tests/presentation_geometry.rs` verifies length/camera ring overlap, distinct
 clock and cleanup rules, mass scheduling, copied samples and atomic errors.
@@ -244,6 +244,22 @@ All 97 Node tests pass, including 14 mocked-page cases for full-radian gaze,
 CSS-to-backing coordinate conversion, separate quantized steering, RAF ordering,
 retained gaze through death/disconnect/reset, boost release and teardown. These
 page doubles do not establish browser input or raster behavior.
+
+Stock Windows Firefox 158.0.1 headless passed 614 direct Canvas/ABI assertions
+and 889 assertions on the unchanged authored page. Nine matched synthetic
+checkpoints reproduced the saved baseline pixels exactly before testing the
+new build; its changes were confined to the eye/pupil bounds. Existing numeric
+head/body/camera fields and the received Scene pixels remained unchanged.
+Checks included fractional pupils, death alpha, per-snake paint order,
+short-body recovery, retained-own identity, hostile context reset and rollback.
+The page checks covered CSS-scaled full-radian gaze, reset/death/disconnect
+retention, native RAF ordering and pagehide cleanup. Deterministic checkpoints
+and native real-time RAF observations were recorded separately. All test
+processes, listeners and temporary profiles were removed.
+
+These browser checks use original synthetic packets and stand-in artwork.
+They do not establish original-client pixels, full skins, connected transport,
+desktop performance or official-server acceptance.
 
 ## Standalone quality state
 
