@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add atomic ordered snake/world presentation events with absolute geometry,
+  independent motion fields and direct decoded speed scalars. The native event
+  API remains separate from the browser preview's render loop.
 - Add explicit-time presentation clock, signed head prediction and additive
   Float32 head/angle correction primitives, with native and real Wasm checks.
   These are separate from the scene packet/render loop.

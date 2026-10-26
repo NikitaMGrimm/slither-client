@@ -120,6 +120,129 @@ pub struct FrameReport {
     pub ignored: usize,
 }
 
+/// Transmitted turning direction, independent of an omitted direction update.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Direction {
+    /// No active turn.
+    None,
+    /// Turn toward decreasing angles.
+    Decreasing,
+    /// Turn toward increasing angles.
+    Increasing,
+}
+
+/// Preserve compact own targeting even after removal from the received ID map.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SnakeTarget {
+    /// The retained own presentation object, which may be dying.
+    Own,
+    /// An explicitly addressed live snake.
+    Id(u16),
+}
+
+/// Complete initial presentation inputs, separate from centered received state.
+///
+/// Absolute geometry preserves wire arithmetic without a centering round trip.
+/// Body points are head to tail. A final directed body segment supplies the
+/// effective initial heading; otherwise the header heading is used. Initial
+/// active turning is `Direction::None`, irrespective of `wire_direction`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Appearance {
+    /// Wire identifier, including zero.
+    pub id: u16,
+    /// Wire skin index.
+    pub skin: u8,
+    /// Latin-1 nickname.
+    pub name: String,
+    /// Opaque custom appearance bytes.
+    pub custom_skin: Vec<u8>,
+    /// Cosmetic marker.
+    pub cosmetic: u8,
+    /// Absolute transmitted head position.
+    pub absolute_head: Point,
+    /// Absolute body anchors, decoded before centering.
+    pub absolute_body: Vec<Point>,
+    /// Final directed body heading in wire units, for later compact anchors.
+    pub anchor_direction: Option<u16>,
+    /// Effective initial heading in radians.
+    pub heading: f64,
+    /// Transmitted wanted heading in radians.
+    pub wanted_heading: f64,
+    /// Exact wire speed scalar before conversion to world units per second.
+    pub speed_per_32ms: f64,
+    /// Received fractional mass.
+    pub fam: f64,
+    /// Validated header metadata; this does not start an active turn.
+    pub wire_direction: Direction,
+}
+
+/// A validated presentation change in wire order, without advancing any clock.
+#[derive(Clone, Debug, PartialEq)]
+pub enum PresentationEvent {
+    /// Reset presentation entities and apply this configuration.
+    Setup(Setup),
+    /// Create or replace a snake with complete initial presentation inputs.
+    SnakeAppearance(Appearance),
+    /// Apply only the motion fields present in this command.
+    SnakeMotion {
+        /// Explicit live ID or the retained own presentation object.
+        target: SnakeTarget,
+        /// Optional heading in radians.
+        heading: Option<f64>,
+        /// Optional wanted heading in radians.
+        wanted_heading: Option<f64>,
+        /// Optional turning direction; omission preserves the previous value.
+        direction: Option<Direction>,
+        /// Optional exact wire speed scalar.
+        speed_per_32ms: Option<f64>,
+    },
+    /// Add a received front anchor, with optional growth and fractional mass.
+    SnakeAnchor {
+        /// Explicit live ID or the retained own presentation object.
+        target: SnakeTarget,
+        /// Absolute wire position, omitted by relative anchor commands.
+        absolute_position: Option<Point>,
+        /// Explicit wire direction; omission reuses presentation's cached value.
+        direction: Option<u16>,
+        /// Whether this anchor grows the body.
+        grew: bool,
+        /// Optional fractional mass accompanying growth.
+        fam: Option<f64>,
+    },
+    /// Replace fractional mass independently of geometry.
+    SnakeMass {
+        /// Known wire identifier.
+        id: u16,
+        /// Received fractional mass.
+        fam: f64,
+    },
+    /// Remove a tail anchor, optionally replacing fractional mass.
+    SnakeTailRemoved {
+        /// Known wire identifier.
+        id: u16,
+        /// Optional received fractional mass.
+        fam: Option<f64>,
+    },
+    /// Remove a known snake, retaining whether death presentation was requested.
+    SnakeRemoved {
+        /// Removed wire identifier.
+        id: u16,
+        /// True only when the wire removal flag equals one.
+        died: bool,
+    },
+    /// Replace the target arena radius, without advancing displayed easing.
+    RadiusTarget(f64),
+}
+
+/// A completely committed frame and its ordered presentation changes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AppliedFrame {
+    /// Received-state command counts.
+    pub report: FrameReport,
+    /// Changes published only after the entire frame succeeds.
+    pub events: Vec<PresentationEvent>,
+}
+
 /// A malformed or out-of-policy frame never changes the scene or counters.
 #[derive(Clone, Debug, PartialEq)]
 pub enum StateError {
@@ -199,11 +322,36 @@ impl ClientState {
         bytes: &[u8],
         header: ElapsedHeader,
     ) -> Result<FrameReport, StateError> {
+        self.apply_transaction(bytes, header, None)
+    }
+
+    /// Atomically apply a frame and return every supported presentation change.
+    ///
+    /// Events retain wire order, including replacements and mid-frame resets.
+    /// Unknown explicit IDs and food commands emit no events. Compact own
+    /// commands retain `Own` targeting after received-state removal, until setup.
+    /// Elapsed headers never advance presentation here.
+    pub fn apply_frame_with_events(
+        &mut self,
+        bytes: &[u8],
+        header: ElapsedHeader,
+    ) -> Result<AppliedFrame, StateError> {
+        let mut events = Vec::new();
+        let report = self.apply_transaction(bytes, header, Some(&mut events))?;
+        Ok(AppliedFrame { report, events })
+    }
+
+    fn apply_transaction(
+        &mut self,
+        bytes: &[u8],
+        header: ElapsedHeader,
+        mut events: Option<&mut Vec<PresentationEvent>>,
+    ) -> Result<FrameReport, StateError> {
         let decoded = protocol::decode_frame(bytes, header)?;
         let mut staged = self.clone();
         let mut ignored = 0;
         for command in &decoded.commands {
-            if !staged.apply_command(command)? {
+            if !staged.apply_command(command, events.as_deref_mut())? {
                 ignored += 1;
             }
         }
@@ -221,10 +369,17 @@ impl ClientState {
         Ok(report)
     }
 
-    fn apply_command(&mut self, p: &[u8]) -> Result<bool, StateError> {
+    fn apply_command(
+        &mut self,
+        p: &[u8],
+        events: Option<&mut Vec<PresentationEvent>>,
+    ) -> Result<bool, StateError> {
         let code = p[0];
         if code == b'a' {
             let setup = parse_setup(p)?;
+            if let Some(events) = events {
+                events.push(PresentationEvent::Setup(setup.clone()));
+            }
             self.setup = Some(setup);
             self.snakes.clear();
             self.foods.clear();
@@ -263,9 +418,9 @@ impl ClientState {
         }
         let setup = self.setup.as_ref().ok_or(StateError::MissingSetup)?.clone();
         match code {
-            b's' => self.appearance(p, &setup)?,
-            b'g' | b'n' | b'G' | b'N' | b'=' | b'+' => self.anchor(p, &setup)?,
-            b'e' | b'E' | b'3' | b'4' | b'5' | b'd' | b'7' => self.motion(p)?,
+            b's' => self.appearance(p, &setup, events)?,
+            b'g' | b'n' | b'G' | b'N' | b'=' | b'+' => self.anchor(p, &setup, events)?,
+            b'e' | b'E' | b'3' | b'4' | b'5' | b'd' | b'7' => self.motion(p, events)?,
             b'h' | b'r' => {
                 require(
                     p,
@@ -287,6 +442,16 @@ impl ClientState {
                     }
                     if let Some(fam) = fam {
                         snake.fam = fam;
+                    }
+                    if let Some(events) = events {
+                        events.push(if code == b'r' {
+                            PresentationEvent::SnakeTailRemoved { id, fam }
+                        } else {
+                            PresentationEvent::SnakeMass {
+                                id,
+                                fam: fam.expect("mass packet requires fractional mass"),
+                            }
+                        });
                     }
                 }
             }
@@ -333,19 +498,41 @@ impl ClientState {
                 let radius = f64::from(triple(p, 1)?);
                 require(p, radius > 0.)?;
                 self.setup.as_mut().ok_or(StateError::MissingSetup)?.radius = radius;
+                if let Some(events) = events {
+                    events.push(PresentationEvent::RadiusTarget(radius));
+                }
             }
             _ => unreachable!(),
         }
         Ok(true)
     }
 
-    fn appearance(&mut self, p: &[u8], setup: &Setup) -> Result<(), StateError> {
+    fn appearance(
+        &mut self,
+        p: &[u8],
+        setup: &Setup,
+        events: Option<&mut Vec<PresentationEvent>>,
+    ) -> Result<(), StateError> {
         let id = word(p, 1)?;
         if p.len() <= 7 {
             require(p, matches!(p.len(), 3 | 4))?;
-            self.snakes.remove(&id);
+            if self.snakes.remove(&id).is_some()
+                && let Some(events) = events
+            {
+                events.push(PresentationEvent::SnakeRemoved {
+                    id,
+                    died: p.get(3) == Some(&1),
+                });
+            }
             return Ok(());
         }
+        let direction = match byte(p, 6)? {
+            b'0' => Direction::None,
+            b'1' => Direction::Decreasing,
+            b'2' => Direction::Increasing,
+            _ => return Err(StateError::InvalidPacket(p[0])),
+        };
+        let speed_per_32ms = f64::from(word(p, 10)?) / 1000.;
         let name_len = usize::from(byte(p, 22)?);
         let name_end = 23 + name_len;
         let name = p.get(23..name_end).ok_or(StateError::InvalidPacket(p[0]))?;
@@ -357,54 +544,73 @@ impl ClientState {
         let cosmetic = byte(p, custom_end)?;
         let at = custom_end + 1;
         let mut body = Vec::new();
+        let mut absolute_body = events.as_ref().map(|_| Vec::new());
         let mut anchor_direction = None;
+        let mut effective_heading = f64::from(triple(p, 3)?) * TAU / 16_777_215.;
         if at < p.len() {
             require(p, p.len() >= at + 6 && (p.len() - at - 6).is_multiple_of(2))?;
-            let mut point = centered(
-                setup,
-                f64::from(triple(p, at)?) / 5.,
-                f64::from(triple(p, at + 3)?) / 5.,
-            )?;
+            let mut absolute_point = Point {
+                x: f64::from(triple(p, at)?) / 5.,
+                y: f64::from(triple(p, at + 3)?) / 5.,
+            };
+            let mut point = centered(setup, absolute_point.x, absolute_point.y)?;
             body.push(point);
+            if let Some(body) = &mut absolute_body {
+                body.push(absolute_point);
+            }
             let rest = &p[at + 6..];
             for (index, pair) in rest.as_chunks::<2>().0.iter().enumerate() {
                 if index * 2 + 2 == rest.len() {
                     let direction = u16::from_be_bytes([pair[0], pair[1]]);
                     point = advance(point, direction, setup.body_spacing)?;
                     anchor_direction = Some(direction);
+                    effective_heading = f64::from(direction) * (TAU / 65_536.);
+                    if absolute_body.is_some() {
+                        absolute_point.x += effective_heading.cos() * setup.body_spacing;
+                        absolute_point.y += effective_heading.sin() * setup.body_spacing;
+                    }
                 } else {
-                    point = checked_point(
-                        point.x + (f64::from(pair[0]) - 127.) / 2.,
-                        point.y + (f64::from(pair[1]) - 127.) / 2.,
-                    )?;
+                    let dx = (f64::from(pair[0]) - 127.) / 2.;
+                    let dy = (f64::from(pair[1]) - 127.) / 2.;
+                    point = checked_point(point.x + dx, point.y + dy)?;
+                    if absolute_body.is_some() {
+                        absolute_point.x += dx;
+                        absolute_point.y += dy;
+                    }
                 }
                 body.push(point);
+                if let Some(body) = &mut absolute_body {
+                    body.push(absolute_point);
+                }
                 if body.len() > MAX_BODY_POINTS {
                     return Err(StateError::Limit);
                 }
             }
             body.reverse();
+            if let Some(body) = &mut absolute_body {
+                body.reverse();
+            }
         }
         if body.len() > MAX_BODY_POINTS
             || (!self.snakes.contains_key(&id) && self.snakes.len() >= MAX_SNAKES)
         {
             return Err(StateError::Limit);
         }
+        let absolute_head = Point {
+            x: f64::from(triple(p, 16)?) / 5.,
+            y: f64::from(triple(p, 19)?) / 5.,
+        };
         let snake = Snake {
             id,
             skin: byte(p, 15)?,
             name: name.iter().map(|&b| char::from(b)).collect(),
             custom_skin: custom_skin.to_vec(),
             cosmetic,
-            head: centered(
-                setup,
-                f64::from(triple(p, 16)?) / 5.,
-                f64::from(triple(p, 19)?) / 5.,
-            )?,
+            head: centered(setup, absolute_head.x, absolute_head.y)?,
             body,
             heading: f64::from(triple(p, 3)?) * TAU / 16_777_215.,
             wanted_heading: f64::from(triple(p, 7)?) * TAU / 16_777_215.,
-            speed: f64::from(word(p, 10)?) / 1000. / 0.032,
+            speed: speed_per_32ms / 0.032,
             fam: fraction(p, 12)?,
             radius: 6.,
             anchor_direction,
@@ -412,10 +618,33 @@ impl ClientState {
         self.snakes.insert(id, snake);
         self.check_total_body()?;
         self.own_snake_id.get_or_insert(id);
+        if let Some((events, absolute_body)) = events.zip(absolute_body) {
+            let snake = &self.snakes[&id];
+            events.push(PresentationEvent::SnakeAppearance(Appearance {
+                id,
+                skin: snake.skin,
+                name: snake.name.clone(),
+                custom_skin: snake.custom_skin.clone(),
+                cosmetic,
+                absolute_head,
+                absolute_body,
+                anchor_direction,
+                heading: effective_heading,
+                wanted_heading: snake.wanted_heading,
+                speed_per_32ms,
+                fam: snake.fam,
+                wire_direction: direction,
+            }));
+        }
         Ok(())
     }
 
-    fn anchor(&mut self, p: &[u8], setup: &Setup) -> Result<(), StateError> {
+    fn anchor(
+        &mut self,
+        p: &[u8],
+        setup: &Setup,
+        events: Option<&mut Vec<PresentationEvent>>,
+    ) -> Result<(), StateError> {
         let code = p[0];
         let absolute = matches!(code, b'=' | b'+');
         let grow = matches!(code, b'n' | b'N' | b'+');
@@ -441,15 +670,17 @@ impl ClientState {
         } else {
             None
         };
-        let position = if absolute {
-            Some(centered(
-                setup,
-                f64::from(word(p, at + 2)?),
-                f64::from(word(p, at + 4)?),
-            )?)
+        let absolute_position = if absolute {
+            Some(Point {
+                x: f64::from(word(p, at + 2)?),
+                y: f64::from(word(p, at + 4)?),
+            })
         } else {
             None
         };
+        let position = absolute_position
+            .map(|point| centered(setup, point.x, point.y))
+            .transpose()?;
         let fam = if grow {
             Some(fraction(p, p.len() - 3)?)
         } else {
@@ -460,6 +691,22 @@ impl ClientState {
         } else {
             Some(word(p, 1)?)
         };
+        if let Some(id) = id
+            && (own || self.snakes.contains_key(&id))
+            && let Some(events) = events
+        {
+            events.push(PresentationEvent::SnakeAnchor {
+                target: if own {
+                    SnakeTarget::Own
+                } else {
+                    SnakeTarget::Id(id)
+                },
+                absolute_position,
+                direction,
+                grew: grow,
+                fam,
+            });
+        }
         let Some(snake) = id.and_then(|id| self.snakes.get_mut(&id)) else {
             return Ok(());
         };
@@ -492,7 +739,11 @@ impl ClientState {
         self.check_total_body()
     }
 
-    fn motion(&mut self, p: &[u8]) -> Result<(), StateError> {
+    fn motion(
+        &mut self,
+        p: &[u8],
+        events: Option<&mut Vec<PresentationEvent>>,
+    ) -> Result<(), StateError> {
         let code = p[0];
         let own = matches!(code, b'd' | b'7') || p.len() <= 3;
         let at = if own { 1 } else { 3 };
@@ -501,7 +752,9 @@ impl ClientState {
             .checked_sub(at)
             .ok_or(StateError::InvalidPacket(code))?;
         let (heading, wanted, speed) = match (code, count) {
-            (b'd' | b'7', 3) | (b'e' | b'E', 3) if !own || matches!(code, b'd' | b'7') => {
+            (b'd' | b'7', 3) | (b'e' | b'E' | b'3' | b'4' | b'5', 3)
+                if !own || matches!(code, b'd' | b'7') =>
+            {
                 (Some(p[at]), Some(p[at + 1]), Some(p[at + 2]))
             }
             (b'e', 2) => (Some(p[at]), None, Some(p[at + 1])),
@@ -510,22 +763,50 @@ impl ClientState {
             (b'e', 1) => (Some(p[at]), None, None),
             (b'E' | b'4', 1) => (None, Some(p[at]), None),
             (b'3', 1) => (None, None, Some(p[at])),
+            // The single-field 5 shape is valid but changes no motion fields.
+            (b'5', 1) => return Ok(()),
             _ => return Err(StateError::InvalidPacket(code)),
         };
+        let direction = match (code, count) {
+            (b'e', 3) | (b'd', 3) | (b'E' | b'3', 2) | (b'E', 1) => Some(Direction::Decreasing),
+            (b'E' | b'3' | b'4' | b'5' | b'7', 3) | (b'4' | b'5', 2) | (b'4', 1) => {
+                Some(Direction::Increasing)
+            }
+            _ => None,
+        };
+        let heading = heading.map(|value| f64::from(value) * TAU / 256.);
+        let wanted_heading = wanted.map(|value| f64::from(value) * TAU / 256.);
+        let speed_per_32ms = speed.map(|value| f64::from(value) / 18.);
         let id = if own {
             self.own_snake_id
         } else {
             Some(word(p, 1)?)
         };
+        if let Some(id) = id
+            && (own || self.snakes.contains_key(&id))
+            && let Some(events) = events
+        {
+            events.push(PresentationEvent::SnakeMotion {
+                target: if own {
+                    SnakeTarget::Own
+                } else {
+                    SnakeTarget::Id(id)
+                },
+                heading,
+                wanted_heading,
+                direction,
+                speed_per_32ms,
+            });
+        }
         if let Some(snake) = id.and_then(|id| self.snakes.get_mut(&id)) {
             if let Some(value) = heading {
-                snake.heading = f64::from(value) * TAU / 256.;
+                snake.heading = value;
             }
-            if let Some(value) = wanted {
-                snake.wanted_heading = f64::from(value) * TAU / 256.;
+            if let Some(value) = wanted_heading {
+                snake.wanted_heading = value;
             }
-            if let Some(value) = speed {
-                snake.speed = f64::from(value) / 18. / 0.032;
+            if let Some(value) = speed_per_32ms {
+                snake.speed = value / 0.032;
             }
         }
         Ok(())

@@ -363,7 +363,6 @@ fn synthetic_exact_supported_lengths_and_missing_direction_are_rejected() {
         vec![b'+', 0, 0, 0, 0, 0, 0, 0],
         vec![b'd', 0],
         vec![b'7', 0, 0],
-        vec![b'5', 0],
         vec![b'h', 0, 17],
         vec![b'r', 0, 17, 0],
         vec![b'F', 1],

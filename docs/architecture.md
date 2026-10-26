@@ -47,6 +47,29 @@ anchors and 65,536 food positions. Centered coordinate magnitudes are bounded by
 16,777,215. Setup's `max_segments` is a score-table index, not a body cap. These
 are client limits rather than assertions about every server.
 
+## Ordered presentation inputs
+
+`ClientState::apply_frame_with_events` uses the same transaction as `apply_frame`
+and returns `AppliedFrame { report, events }` only after the complete frame
+commits. Events retain command order, repeated equal updates, appearance
+replacements and setup resets within a frame. Food still updates received state;
+it does not yet produce presentation events. There is no retained event queue.
+
+`Appearance` supplies absolute head/body coordinates and the effective initial
+heading, plus appearance metadata and the decoded speed scalar. Its body runs
+head to tail. Absolute geometry avoids a centering round trip before prediction.
+The header's `wire_direction` is metadata; initial active turning is none.
+Motion fields are independently optional. Anchor events retain an explicit
+direction and an optional absolute position, so the presentation layer can
+reconstruct relative anchors with its own absolute geometry.
+
+`SnakeTarget::Own` addresses the retained own presentation object independently
+of the visible ID map; explicit unknown IDs emit no events. Removal distinguishes
+death from immediate disappearance. Radius events change a target, leaving
+display easing to presentation. Neither elapsed headers nor event application
+advance an animation clock. The existing browser preview still uses received
+state; these native inputs are not yet connected to its render loop.
+
 ## Presentation timing primitives
 
 `presentation` provides explicit-time arithmetic separately from received state.
@@ -75,8 +98,8 @@ including its consumed logical segment and an explicitly supplied extrapolated
 distance. Packet validation, body changes and camera corrections remain separate.
 
 These primitives are not yet connected to the scene's packet or render loop.
-Ordered presentation events, body contraction/curves, retained dying anchors,
-camera and draw clocks, eyes, complete skins and HQ/LQ rendering still require
+Applying ordered presentation events, body contraction/curves, retained dying
+anchors, camera and draw clocks, eyes, complete skins and HQ/LQ rendering still require
 implementation and comparison. The visible scene remains a received-anchor preview.
 
 ## Browser rendering
