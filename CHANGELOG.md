@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Capture ordered body-painter geometry with original sample ordinals, retained
+  culling flags and the sampler's unrounded distance seed. Reuse staged draw
+  preparation while preserving transactional model rollback and draw commands.
 - Add a native ordered standard-body paint planner with explicit recipe, asset,
   geometry and quality inputs, plus opt-in borrowed-provider body metadata.
   Canvas submission and renderer quality integration remain separate.

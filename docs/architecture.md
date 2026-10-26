@@ -218,6 +218,15 @@ describe these inputs without distributing host mappings or stock recipes.
 The animated preview still uses its existing stand-in renderer; it does not yet
 submit these commands or apply the standalone quality state to them.
 
+Numeric draw preparation also captures owned `PreparedBodyGeometry` snapshots
+for eligible curves. Each keeps original sample ordinals, effective flags and
+the sampler's final unrounded f64 displacement. Inclusive culling updates shared
+ordinal flags; offscreen ordinals retain their previous value across snakes,
+draws and resets of the same client. Short curves omit this painter snapshot.
+Public preparation stages the client once and commits only after all operations
+succeed. The browser renderer reuses its disposable stage, preserving model
+rollback if validation, sampling, eye layout or Canvas submission fails.
+
 ## Browser rendering
 
 `QualityState` independently models desktop quality preference and applied mode.
