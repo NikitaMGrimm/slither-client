@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Connect arena-radius easing to ordered packets, animated updates and both draw
+  paths, retaining cadence through reset and pausing boundary updates on disconnect.
 - Add standalone double-precision boundary-radius easing and a `BoundarySmoother`
   Wasm binding with explicit connection gating. Scene boundary integration remains pending.
 - Submit ordered standard-body plans through an opt-in borrowed-asset renderer.
