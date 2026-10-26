@@ -164,7 +164,7 @@ fn repeated_and_midframe_setup_replace_samples_but_retain_cadence() {
         ],
     );
     assert!(c.connected());
-    assert!(c.own_snake().is_none());
+    assert!(c.own_snake().is_some());
     let ring = c.boundary().unwrap();
     assert_eq!(
         (
@@ -234,6 +234,7 @@ fn fractional_reset_preserves_timeline_and_boundary_without_consuming_a_step() {
     let first = c.advance(1003., false).unwrap();
     assert_eq!((first.whole_steps, first.double_steps), (0, 0));
     let ring = c.boundary().unwrap().clone();
+    let position = c.camera().position();
     c.reset();
     assert!(!c.connected());
     assert_eq!(c.received(), AnimatedClient::new(0.).unwrap().received());
@@ -241,6 +242,7 @@ fn fractional_reset_preserves_timeline_and_boundary_without_consuming_a_step() {
     assert!(c.own_snake().is_none());
     let mut expected = AnimatedClient::new(0.).unwrap();
     expected.set_follows(false);
+    expected.set_camera_position(position).unwrap();
     assert_eq!(c.camera(), expected.camera());
     assert_eq!(c.boundary(), Some(&ring));
     apply(&mut c, &[setup(1300), target(700)]);

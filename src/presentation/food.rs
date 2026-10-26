@@ -161,6 +161,43 @@ pub struct FoodFactoryInput<'a> {
     pub palette: FoodPalette<'a>,
 }
 
+/// Owned resolver result used when source metadata is assembled during packet application.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FoodFactory {
+    /// First independent random unit in [0,1).
+    pub random_phase_unit: f64,
+    /// Second independent random unit in [0,1).
+    pub random_wobble_unit: f64,
+    /// Effective palette number matching the raw spawn color.
+    pub palette: u8,
+    /// Selectable family prefix length.
+    pub image_count: usize,
+    /// Body source family.
+    pub bodies: Vec<FoodSource>,
+    /// Outline source family.
+    pub outlines: Vec<FoodSource>,
+    /// Shared inner/outer glow source family.
+    pub glows: Vec<FoodSource>,
+}
+
+impl FoodFactory {
+    /// Borrow this creation's data at the client's current event-time zoom.
+    pub fn input(&self, creation_zoom: f64) -> FoodFactoryInput<'_> {
+        FoodFactoryInput {
+            random_phase_unit: self.random_phase_unit,
+            random_wobble_unit: self.random_wobble_unit,
+            creation_zoom,
+            palette: FoodPalette {
+                palette: self.palette,
+                image_count: self.image_count,
+                bodies: &self.bodies,
+                outlines: &self.outlines,
+                glows: &self.glows,
+            },
+        }
+    }
+}
+
 /// Frozen creation-time selections, including both uses of the same glow family.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FoodSources {

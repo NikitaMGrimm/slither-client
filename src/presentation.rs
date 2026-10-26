@@ -46,8 +46,8 @@ pub use curve::{
 pub use eyes::{EyeLayoutInput, EyePair, StandardEyeGeometry, StandardEyeLayout, StandardEyeState};
 pub use follow_camera::{FollowCamera, INITIAL_ZOOM};
 pub use food::{
-    FoodConsume, FoodEaterPose, FoodError, FoodFactoryInput, FoodInstance, FoodPalette,
-    FoodPresentation, FoodSnapshot, FoodSource, FoodSources, FoodSpawn, FoodWorld,
+    FoodConsume, FoodEaterPose, FoodError, FoodFactory, FoodFactoryInput, FoodInstance,
+    FoodPalette, FoodPresentation, FoodSnapshot, FoodSource, FoodSources, FoodSpawn, FoodWorld,
     MAX_RETAINED_FOODS, SnakeObjectToken, food_palette,
 };
 pub use food_painter::{

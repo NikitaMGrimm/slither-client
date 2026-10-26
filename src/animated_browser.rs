@@ -751,11 +751,7 @@ impl AnimatedScene {
             let mut root_alpha = entry_alpha;
             let plan = if let Some(geometry) = &snake.body_geometry {
                 let palettes = recipe.palettes();
-                let maximum_speed = received
-                    .setup
-                    .as_ref()
-                    .ok_or_else(|| error("missing body setup"))?
-                    .nsp3;
+                let maximum_speed = m.maximum_speed;
                 let input = BodyPaintInput {
                     geometry: geometry.as_paint_geometry(),
                     recipe: recipe.borrowed(&palettes),

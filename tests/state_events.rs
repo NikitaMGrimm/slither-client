@@ -341,7 +341,7 @@ fn synthetic_appearance_keeps_absolute_arithmetic_and_effective_initial_heading(
 }
 
 #[test]
-fn synthetic_compact_own_targets_survive_removal_and_setup_resets_them() {
+fn synthetic_compact_own_targets_survive_removal_and_setup() {
     let motion_packets = [
         vec![b'e', 1],
         vec![b'e', 1, 2],
@@ -413,8 +413,21 @@ fn synthetic_compact_own_targets_survive_removal_and_setup_resets_them() {
         assert!(state.snakes.is_empty());
         assert_eq!(state.own_snake_id, Some(0));
         let result = apply(&mut state, &bundle(&[setup(), vec![b'e', 1], vec![b'G']]));
-        assert!(matches!(&result.events[..], [PresentationEvent::Setup(_)]));
-        assert_eq!(state.own_snake_id, None);
+        assert!(matches!(
+            &result.events[..],
+            [
+                PresentationEvent::Setup(_),
+                PresentationEvent::SnakeMotion {
+                    target: SnakeTarget::Own,
+                    ..
+                },
+                PresentationEvent::SnakeAnchor {
+                    target: SnakeTarget::Own,
+                    ..
+                },
+            ]
+        ));
+        assert_eq!(state.own_snake_id, Some(0));
     }
     // Explicit ID zero and compact own must remain distinguishable while live.
     let mut state = playing();
@@ -896,7 +909,7 @@ fn synthetic_every_anchor_form_preserves_explicit_and_cached_fields() {
 }
 
 #[test]
-fn synthetic_replacement_and_midframe_setup_are_ordered_reset_markers() {
+fn synthetic_replacement_and_midframe_setup_preserve_original_own_targeting() {
     let mut state = playing();
     let result = apply(
         &mut state,
@@ -910,7 +923,7 @@ fn synthetic_replacement_and_midframe_setup_are_ordered_reset_markers() {
             vec![b'e', 56],
         ]),
     );
-    assert_eq!(result.events.len(), 6);
+    assert_eq!(result.events.len(), 7);
     assert!(
         matches!(&result.events[0], PresentationEvent::SnakeAppearance(appearance) if appearance.id == 0 && appearance.wire_direction == Direction::Increasing && appearance.absolute_body.len() == 1)
     );
@@ -922,23 +935,30 @@ fn synthetic_replacement_and_midframe_setup_are_ordered_reset_markers() {
         }
     ));
     assert!(matches!(result.events[2], PresentationEvent::Setup(_)));
-    assert_eq!(
-        result.events[3],
-        PresentationEvent::SnakeRemoved { id: 0, died: false }
-    );
-    assert!(
-        matches!(&result.events[4], PresentationEvent::SnakeAppearance(appearance) if appearance.id == 17 && appearance.wire_direction == Direction::None)
-    );
     assert!(matches!(
-        result.events[5],
+        result.events[3],
         PresentationEvent::SnakeMotion {
             target: SnakeTarget::Own,
             ..
         }
     ));
-    assert_eq!(state.own_snake_id, Some(17));
+    assert_eq!(
+        result.events[4],
+        PresentationEvent::SnakeRemoved { id: 0, died: false }
+    );
+    assert!(
+        matches!(&result.events[5], PresentationEvent::SnakeAppearance(appearance) if appearance.id == 17 && appearance.wire_direction == Direction::None)
+    );
+    assert!(matches!(
+        result.events[6],
+        PresentationEvent::SnakeMotion {
+            target: SnakeTarget::Own,
+            ..
+        }
+    ));
+    assert_eq!(state.own_snake_id, Some(0));
     assert!(!state.snakes.contains_key(&0));
-    assert_eq!(state.snakes[&17].heading, 56. * TAU / 256.);
+    assert_eq!(state.snakes[&17].heading, 123. * TAU / 16_777_215.);
     let reset = apply(&mut state, &bundle(&[setup(), setup()]));
     assert_eq!(reset.events.len(), 2);
     assert_eq!(reset.events[0], reset.events[1]);
@@ -1271,16 +1291,16 @@ fn synthetic_first_own_appearance_resets_all_food_caches_with_or_without_events(
             [food_consume([6, 7, 12, 13], Some(0))]
         );
 
-        // Keep the existing setup-as-clear contract in this preparatory slice.
+        let foods = state.foods.clone();
         apply(&mut state, &setup());
-        assert!(state.foods.is_empty());
+        assert_eq!(state.foods, foods);
         assert_eq!(
             apply(&mut state, &[b'f', 1, 2, 3, 4, 5]).events,
-            [food_spawn((1, 2), (3, 4), 5, 0, false)]
+            [food_spawn((1, 2), (3, 4), 5, 18, false)]
         );
         assert_eq!(
             apply(&mut state, &[b'C', 6, 7, 8, 9]).events,
-            [food_consume([6, 7, 8, 9], None)]
+            [food_consume([6, 7, 8, 9], Some(0))]
         );
     }
 }
@@ -1506,8 +1526,9 @@ fn synthetic_all_supported_truncations_and_malformed_tails_are_atomic() {
 
 #[test]
 fn synthetic_semantic_failures_and_retention_limits_discard_all_events() {
+    let mut unprimed = playing();
+    assert_rollback(&mut unprimed, &bundle(&[setup(), vec![b'f', 1, 2, 3]]));
     let mut state = cached_state();
-    assert_rollback(&mut state, &bundle(&[setup(), vec![b'f', 1, 2, 3]]));
     assert_rollback(
         &mut state,
         &bundle(&[appearance(17, b'0', 123, 1), vec![b'g', 0, 17]]),

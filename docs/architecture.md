@@ -25,13 +25,14 @@ wasm-bindgen 0.2.129 and web-sys 0.3.106.
 staged clone, and commits only on success. Malformed supported commands preserve
 the entire previous state, including compact caches and counters. BTreeMaps keep
 snake IDs and packed food keys in deterministic order. Setup must precede world
-commands; a new setup clears entities, own identity and caches. Only protocol 19
-is accepted by the scene layer.
+commands. Setup replaces configuration while preserving entities, own identity
+and compact caches; an explicit world reset clears entities. Existing snakes
+retain their appearance-time segment length. Only protocol 19 is accepted.
 
 | Commands | Scene behavior |
 | --- | --- |
 | `a`, `z` | Typed setup, centered coordinates, radius updates. Optional server number, mode and team are retained. |
-| `s` | Snake appearance/replacement and removal. The first appearance after setup identifies self, including ID zero. |
+| `s` | Snake appearance/replacement and removal. The first appearance in a fresh world identifies self, including ID zero. |
 | `g/n/G/N`, `=/+` | Relative, cached-direction and absolute front anchors, with growth variants. |
 | `e/E/3/4/5/d/7` | Heading, wanted heading and speed variants selected by opcode and length. |
 | `h/r` | Fractional mass and tail removal. |
@@ -40,7 +41,7 @@ is accepted by the scene layer.
 Unsupported families are opaque and counted, including sector-entry `W`, pongs,
 game-over, score/HUD, minimap and prey. Unknown-snake updates are validated and
 ignored. Compact food requires its stream's cached sector; relative anchors
-require known geometry and direction. Removal retains own ID until setup/reset.
+require known geometry and direction. Removal and setup retain the original own ID.
 
 Retention limits are 256 snakes, 4096 body anchors per snake, 65,536 total body
 anchors and 65,536 food positions. Centered coordinate magnitudes are bounded by
@@ -52,8 +53,12 @@ are client limits rather than assertions about every server.
 `ClientState::apply_frame_with_events` uses the same transaction as `apply_frame`
 and returns `AppliedFrame { report, events }` only after the complete frame
 commits. Events retain command order, repeated equal updates, appearance
-replacements and setup resets within a frame. Food still updates received state;
-it does not yet produce presentation events. There is no retained event queue.
+replacements and configuration changes within a frame. Each food creation,
+consume request and sector clear emits in wire order, including duplicate keys
+and unknown consumes. Raw color and eater caches remain independent of sector
+caches; the first own appearance initializes all four. The received food map is
+a lossy latest-value projection, separate from retained animation instances.
+There is no retained event queue.
 
 `Appearance` supplies absolute head/body coordinates and the effective initial
 heading, plus appearance metadata and the decoded speed scalar. Its body runs
@@ -154,21 +159,45 @@ anchor extrapolation time.
 parameterless world resets. They retain the last update timestamp and both
 accumulated animation phases, and restore the lag multiplier to one without
 advancing an update or draw. Construct a new client with `new(start_ms)` to
-start a fresh timeline. Reset clears received state, retained entities, transient
-camera state and the connection gate; follow preference and shared body-painter
-flags survive.
+start a fresh timeline. Reset clears received state, retained entities, camera
+corrections and the connection gate; camera position, follow preference, retained
+food cull bounds and shared body-painter flags survive. Initial zoom is restored.
 The animated page uses this same timeline across Reset, palette changes and
 reconnections, independently of quality-statistics cadence.
 
 The client retains boundary samples and cadence across resets. Setup fills the
 ring and activates its connection gate; ordered radius targets schedule easing.
-Setup also preserves follow preference while clearing transient camera state.
+Setup preserves existing camera state and retained objects. Global turn/speed
+and contraction parameters affect later operations; appearance-time segment
+length and maximum speed remain with each snake.
 Updates consume the same clock's whole steps only while connected. Disconnect
 pauses boundary consumption while entity animation continues. Both render paths
 use the displayed radius without consuming samples. A reset hides the retained
 boundary until the next setup. Wasm exposes `set_connected`, copied
 `boundary_samples` and separate `snapshot.boundary` diagnostics; `snapshot.radius`
 continues to report the received target.
+
+## Native food integration
+
+`AnimatedClient::apply_frame_with_factories` accepts explicit eye and food
+resolvers. Food creation receives two independent random units and owned source
+families, selecting and retaining numeric source metadata at that event's zoom.
+It must be enabled before packets or after reset; enabled sessions reject new
+food through an application API lacking a food resolver. Legacy preview callers
+can continue using the received-only food projection.
+
+`FoodWorld` retains duplicate instances in insertion/swap order. Fractional food
+updates follow the same owned frame step after all drawn snakes update, including
+zero-delta and disconnected updates. Consumption captures a stable snake-object
+token; detached referenced objects remain available until the last flight expires.
+ID reuse cannot retarget an existing flight. Missing-at-capture eaters expire on
+the next update rather than binding later. Model, counters, caches, tokens and
+food roll back together after a late failure. Resolver side effects cannot.
+
+The native painter separates early outlines/body from late glows, with exact
+overloads, applied-quality gates and a shared command budget. Wasm source-object
+ownership, food submission in both render paths and page exercise are not yet
+connected; native model/planner checks do not establish a complete food renderer.
 
 Retained objects preserve duplicate appearances and original own identity through
 death, draw expiry and wire-ID reuse. Explicit lookup addresses the newest

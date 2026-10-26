@@ -206,8 +206,8 @@ fn synthetic_spawn_anchors_growth_mass_tail_and_removal() {
     apply(&mut state, &spawn(3, 2));
     assert_eq!(state.own_snake_id, Some(17));
     apply(&mut state, &setup_with_score_index(430));
-    assert!(state.snakes.is_empty());
-    assert_eq!(state.own_snake_id, None);
+    assert!(state.snakes.contains_key(&3));
+    assert_eq!(state.own_snake_id, Some(17));
 }
 
 #[test]

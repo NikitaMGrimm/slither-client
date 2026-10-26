@@ -99,6 +99,7 @@ pub struct Snake {
     /// Fixed six-unit presentation radius, not a decoded physical hitbox.
     pub radius: f64,
     anchor_direction: Option<u16>,
+    segment_length: f64,
 }
 
 /// Latest received food at one key, without retained multiplicity or animation.
@@ -328,7 +329,7 @@ impl From<ProtocolError> for StateError {
 /// Deterministically ordered received scene, independent of browser and network I/O.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ClientState {
-    /// Current configuration. A new setup clears entities and compact caches.
+    /// Current configuration. Setup preserves existing entities and compact caches.
     pub setup: Option<Setup>,
     /// Current snakes, in wire identifier order.
     pub snakes: BTreeMap<u16, Snake>,
@@ -336,7 +337,7 @@ pub struct ClientState {
     /// the latest value and consumption removes it immediately. This map cannot
     /// represent duplicate instances, insertion order, or consumption animation.
     pub foods: BTreeMap<u32, Food>,
-    /// First full appearance after setup; retained when that snake is removed.
+    /// First full appearance in this world; retained through removal and setup.
     pub own_snake_id: Option<u16>,
     /// Successfully committed frames; saturates rather than overflowing.
     pub frames_applied: u64,
@@ -369,12 +370,12 @@ impl ClientState {
 
     /// Atomically apply a frame and return every supported presentation change.
     ///
-    /// Events retain wire order, including replacements and mid-frame resets.
+    /// Events retain wire order, including replacements and mid-frame configuration.
     /// Removal requests always emit, including unknown or already removed IDs,
     /// so retained presentation duplicates remain reachable. Every food creation,
     /// consume and sector clear emits directly in command/record order, including
     /// unknown keys; other unknown explicit-ID updates emit no events. Compact own
-    /// commands retain `Own` targeting after received-state removal, until setup. Elapsed
+    /// commands retain `Own` targeting after received-state removal and setup. Elapsed
     /// headers never advance presentation here.
     /// Appearance direction metadata must be ASCII `0`, `1` or `2`; received-only
     /// `apply_frame` keeps ignoring this field for compatibility.
@@ -424,17 +425,30 @@ impl ClientState {
         let code = p[0];
         if code == b'a' {
             let setup = parse_setup(p)?;
+            if let Some(previous) = &self.setup
+                && previous.grid_center != setup.grid_center
+            {
+                // The received preview is centered; retained presentation stays absolute.
+                let old_center = previous.grid_center;
+                for snake in self.snakes.values_mut() {
+                    snake.head =
+                        centered(&setup, snake.head.x + old_center, snake.head.y + old_center)?;
+                    for point in &mut snake.body {
+                        *point = centered(&setup, point.x + old_center, point.y + old_center)?;
+                    }
+                }
+                for food in self.foods.values_mut() {
+                    food.position = centered(
+                        &setup,
+                        food.position.x + old_center,
+                        food.position.y + old_center,
+                    )?;
+                }
+            }
             if let Some(events) = events {
                 events.push(PresentationEvent::Setup(setup.clone()));
             }
             self.setup = Some(setup);
-            self.snakes.clear();
-            self.foods.clear();
-            self.own_snake_id = None;
-            self.added_sector = None;
-            self.eaten_sector = None;
-            self.added_color = 0;
-            self.eater_id = None;
             return Ok(true);
         }
         if !matches!(
@@ -707,6 +721,7 @@ impl ClientState {
             fam: fraction(p, 12)?,
             radius: 6.,
             anchor_direction,
+            segment_length: setup.body_spacing,
         };
         self.snakes.insert(id, snake);
         self.check_total_body()?;
@@ -819,7 +834,7 @@ impl ClientState {
                     .first()
                     .ok_or(StateError::MissingAnchor(snake.id))?,
                 next_direction.ok_or(StateError::MissingAnchor(snake.id))?,
-                setup.body_spacing,
+                snake.segment_length,
             )?
         };
         let next_len = snake.body.len() + usize::from(grow || snake.body.is_empty());

@@ -190,6 +190,21 @@ fn distance(delta: Point) -> Result<f64, PresentationError> {
 }
 
 impl BodyGeometry {
+    pub(crate) fn configure_contraction(
+        &mut self,
+        contraction: f64,
+    ) -> Result<(), PresentationError> {
+        if !contraction.is_finite() || !(0. ..=1.).contains(&contraction) {
+            return Err(PresentationError);
+        }
+        self.contraction = contraction;
+        self.spacing = std::array::from_fn(|index| {
+            let contracted = index.saturating_sub(3).min(4);
+            (1. - contraction * contracted as f64 / 4.) as f32
+        });
+        Ok(())
+    }
+
     /// Initialize received absolute anchors without contracting their geometry.
     /// The tail's previous delta is zero; all initial normalized edge lengths are one.
     pub fn from_appearance(

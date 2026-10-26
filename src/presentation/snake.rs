@@ -60,6 +60,8 @@ pub struct SnakeMetrics {
     pub cruise_speed: f64,
     /// Cruise speed plus the visual boost threshold adjustment.
     pub boost_threshold_speed: f64,
+    /// Maximum speed captured when this appearance was constructed.
+    pub maximum_speed: f64,
     /// Speed eased once per live update, independently of elapsed time.
     pub visual_speed: f64,
     /// Accumulated visual boost animation phase.
@@ -107,6 +109,7 @@ pub struct SnakePresentation {
     speed_turn_factor: f64,
     cruise_speed: f64,
     boost_threshold_speed: f64,
+    maximum_speed: f64,
     visual_speed: f64,
     boost_phase: f64,
     point_spacing: f64,
@@ -134,6 +137,25 @@ fn validate_mass(fam: f64) -> Result<(), PresentationError> {
 }
 
 impl SnakePresentation {
+    /// Refresh global configuration without replacing appearance-time state or metrics.
+    pub(crate) fn apply_setup(&mut self, setup: &Setup) -> Result<(), PresentationError> {
+        finite(&[setup.mamu, setup.spangdv, setup.nsp1, setup.nsp2])?;
+        if setup.protocol != 19
+            || setup.mamu < 0.
+            || setup.spangdv <= 0.
+            || setup.nsp1 < 0.
+            || setup.nsp2 < 0.
+        {
+            return Err(PresentationError);
+        }
+        self.body.configure_contraction(setup.body_contraction)?;
+        self.turn_rate = setup.mamu;
+        self.speed_angle_divisor = setup.spangdv;
+        self.base_cruise_speed = setup.nsp1;
+        self.size_cruise_speed_factor = setup.nsp2;
+        Ok(())
+    }
+
     /// Initialize absolute geometry and effective heading from validated protocol 19 inputs.
     /// Initial length is constructed at zero mass before scheduling the wire mass,
     /// so its first displayed value excludes that mass even when it is nonzero.
@@ -226,6 +248,7 @@ impl SnakePresentation {
             speed_turn_factor: (appearance.speed_per_32ms / setup.spangdv).min(1.),
             cruise_speed: 0.,
             boost_threshold_speed: 0.,
+            maximum_speed: setup.nsp3,
             visual_speed: 0.,
             boost_phase: 0.,
             point_spacing: 0.,
@@ -592,6 +615,7 @@ impl SnakePresentation {
             speed_turn_factor: self.speed_turn_factor,
             cruise_speed: self.cruise_speed,
             boost_threshold_speed: self.boost_threshold_speed,
+            maximum_speed: self.maximum_speed,
             visual_speed: self.visual_speed,
             boost_phase: self.boost_phase,
             point_spacing: self.point_spacing,
