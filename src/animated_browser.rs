@@ -500,9 +500,9 @@ impl AnimatedScene {
         ])
     }
 
-    /// Draw sampled curves with caller-owned stand-in palettes. Full skin recipes,
-    /// standard paired eyes follow each body. Attachments, special faces and
-    /// quality-dependent effects remain separate.
+    /// Draw sampled curves with caller-owned stand-in palettes, then standard
+    /// paired eyes after each body. Full skin recipes, attachments, special faces
+    /// and quality-dependent effects remain separate.
     #[allow(clippy::too_many_arguments)]
     pub fn render(
         &mut self,
