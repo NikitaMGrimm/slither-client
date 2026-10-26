@@ -27,8 +27,12 @@ now retain gaze, pupil motion and deferred draw targets. Full skins, special
 faces, HUD, prey and team-mode drawing remain pending. An additive API now
 installs trusted normalized paired geometry before the first pupil update,
 retains it per appearance and checks standard-recipe coherence before drawing.
-Full host skin adaptation and antennas remain future work. Radius easing now
-shares the connected update clock and retains cadence through reset. The opt-in
+An additional paired-face API retains side geometry and ready borrowed
+images to compose the complete represented ordinary paired family in both renderers.
+Startup blank-source behavior, other special faces and general host mapping remain
+outside this completion. Full host skin adaptation and antennas remain future
+work. Radius easing now shares the connected update clock and retains cadence
+through reset. The opt-in
 standard-body renderer now connects ordered body effects and applied quality to
 production geometry; the synthetic page demonstrates three authored recipes.
 Native Firefox checks cover that bounded integration. Five frozen external-runtime

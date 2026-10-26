@@ -478,6 +478,23 @@ claim. External adapters, source identities and raw evidence remain outside Git.
 
 ## Opt-in standard-body renderer checks
 
+The integrated paired-face completion adds six native geometry/ownership tests,
+three provider tests and real-Wasm coverage through both actual render APIs.
+The combined local suite passed 256 native and 119 Node tests, with 1,483
+body/face Canvas recorder assertions. Checks cover exact source identity and
+whole/crop overloads, oblique non-unit geometry, signed-zero coherence and derived
+zero/underflow, body/death/eyes/reset/pair/next-snake order, spawn/death and applied
+quality, inclusive anchor culling and short faces, duplicate/dead/reused IDs,
+partial provider projections, readiness/revision/alias rejection, late source
+mutation and Canvas-exception model rollback. Legacy default forms retain the
+same recorded commands under the corrected unconditional end-of-face alpha reset.
+
+These are authored synthetic native/Node/Wasm checks using a logical Canvas
+recorder. No external runtime or native browser was executed for this lane.
+The older external/browser results below predate it. Ready trusted sources bound
+the capability; startup blank-source draws, general host mapping, original pixels,
+other face families, extension installation and server acceptance remain separate.
+
 `tools/body-render-smoke.mjs` executes the real Wasm `render_standard` ABI with
 an original synthetic Canvas recorder and normalized provider snapshots. Its
 296 assertions cover per-appearance custom/cosmetic requests, duplicate IDs and

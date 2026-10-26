@@ -7,13 +7,15 @@ use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, HtmlImageElement};
 
 use crate::{
     body_browser::{
-        BorrowedSources, ResolveError, appearance_request, request, same_eyes, standard_eyes,
+        BorrowedSources, ResolveError, appearance_request, paired_face, request, same_decoration,
+        same_eyes, standard_eyes,
     },
     canvas_browser::{CanvasFrame, draw_sprite},
     presentation::{
         AnimatedClient, BodyPaintError, BodyPaintInput, BodyPaintQuality, BodyPaintView,
         BodyPaintVisual, CurveInput, CurveOutput, EyeLayoutInput, MAX_BODY_PAINT_COMMANDS,
-        SnakePresentation, StandardEyeLayout, Turn, plan_standard_body, sample_curve_with_heading,
+        MAX_RETAINED_SNAKES, SnakePresentation, StandardEyeLayout, Turn, plan_standard_body,
+        sample_curve_with_heading,
     },
     presentation_browser::AnimationStep,
     protocol::ElapsedHeader,
@@ -220,6 +222,32 @@ impl AnimatedScene {
                     let metadata = resolve_eyes
                         .call1(&JsValue::UNDEFINED, &appearance_request(appearance)?.into())?;
                     Ok(standard_eyes(&metadata)?)
+                },
+            )
+            .map_err(|e| e.0)?;
+        Ok(())
+    }
+
+    /// Install owned numeric paired-face metadata atomically before any update.
+    /// The direct synchronous callback is trusted and owns face-family coverage.
+    pub fn apply_frame_with_face_geometry(
+        &mut self,
+        bytes: &[u8],
+        elapsed_header: bool,
+        resolve_face: &js_sys::Function,
+    ) -> Result<(), JsValue> {
+        self.client
+            .apply_frame_with_face_geometry(
+                bytes,
+                if elapsed_header {
+                    ElapsedHeader::TwoBytes
+                } else {
+                    ElapsedHeader::Absent
+                },
+                |appearance| -> Result<_, ResolveError> {
+                    let metadata = resolve_face
+                        .call1(&JsValue::UNDEFINED, &appearance_request(appearance)?.into())?;
+                    Ok(paired_face(&metadata)?)
                 },
             )
             .map_err(|e| e.0)?;
@@ -566,105 +594,38 @@ impl AnimatedScene {
         quality_scale: f64,
         detailed_style: bool,
     ) -> Result<(), JsValue> {
-        quality(quality_scale)?;
-        dimensions(f64::from(target.width()))?;
-        dimensions(f64::from(target.height()))?;
-        let sprites = [palette_0, palette_1, palette_2];
-        let mut prepared = self.client.clone();
-        let snakes = prepared
-            .prepare_draw_with_style_staged(
-                target.width(),
-                target.height(),
-                quality_scale,
-                detailed_style,
-            )
-            .map_err(error)?;
-        let received = prepared.received();
-        let center = received.setup.as_ref().map_or(0., |s| s.grid_center);
-        let camera = prepared.camera().position();
-        let zoom = prepared.camera().zoom();
-        let viewport_half = Point {
-            x: f64::from(target.width()) / 2.,
-            y: f64::from(target.height()) / 2.,
-        };
-        // Complete numeric validation before the target's destructive width reset.
-        let layouts = snakes
-            .iter()
-            .map(|snake| {
-                snake
-                    .eye_geometry
-                    .layout(
-                        snake.face_heading,
-                        snake.pupil,
-                        EyeLayoutInput {
-                            corrected_head: snake.metrics.corrected_head,
-                            camera,
-                            viewport_half,
-                            scale: snake.metrics.scale,
-                            zoom,
-                            death_progress: snake.metrics.death_progress,
-                        },
-                    )
-                    .map_err(error)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let frame = CanvasFrame::new(
-            &target,
-            &sprites,
-            &background,
-            camera.x - center,
-            camera.y - center,
-            zoom,
-        )?;
-        let context = frame.context();
-        if let Some(boundary) = prepared.boundary().filter(|_| received.setup.is_some()) {
-            context.begin_path();
-            context.arc(0., 0., boundary.displayed(), 0., TAU)?;
-            context.set_stroke_style_str("#647481");
-            context.set_line_width(1. / zoom);
-            context.stroke();
-        }
-        for food in received.foods.values() {
-            if frame.visible(food.position.x, food.position.y, food.size.max(1.)) {
-                draw_sprite(
-                    context,
-                    &sprites[usize::from(food.color) % 3],
-                    food.position.x,
-                    food.position.y,
-                    food.size.max(1.),
-                )?;
-            }
-        }
-        // Preserve subtraction-before-scaling for body screen coordinates. The
-        // borrowed background/food preview above retains its existing transform.
-        for (snake, layout) in snakes.into_iter().zip(layouts) {
-            context.set_transform(1., 0., 0., 1., viewport_half.x, viewport_half.y)?;
-            let m = snake.metrics;
-            let opacity = m.spawn_progress * (1. - m.death_progress);
-            context.set_global_alpha(opacity * opacity);
-            if let Some(curve) = snake.curve {
-                for point in curve.samples.iter().rev() {
-                    context.save();
-                    context.translate(
-                        (f64::from(point.x) - camera.x) * zoom,
-                        (f64::from(point.y) - camera.y) * zoom,
-                    )?;
-                    context.rotate(f64::from(point.angle))?;
-                    draw_sprite(
-                        context,
-                        &sprites[usize::from(m.skin) % 3],
-                        0.,
-                        0.,
-                        zoom * (29. * m.scale),
-                    )?;
-                    context.restore();
-                }
-            }
-            draw_eyes(context, layout)?;
-        }
-        drop(frame);
-        self.client = prepared;
-        Ok(())
+        self.render_basic(
+            target,
+            [palette_0, palette_1, palette_2],
+            background,
+            quality_scale,
+            detailed_style,
+            None,
+        )
+    }
+
+    /// Basic stand-in bodies plus complete retained paired faces. The resolver
+    /// returns a trusted normalized face-only projection, independent of body readiness.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_with_face_decorations(
+        &mut self,
+        target: HtmlCanvasElement,
+        palette_0: HtmlCanvasElement,
+        palette_1: HtmlCanvasElement,
+        palette_2: HtmlCanvasElement,
+        background: HtmlImageElement,
+        quality_scale: f64,
+        detailed_style: bool,
+        resolve_face: &js_sys::Function,
+    ) -> Result<(), JsValue> {
+        self.render_basic(
+            target,
+            [palette_0, palette_1, palette_2],
+            background,
+            quality_scale,
+            detailed_style,
+            Some(resolve_face),
+        )
     }
 
     /// Opt-in standard-body renderer using synchronous trusted normalized
@@ -705,12 +666,24 @@ impl AnimatedScene {
                             error("recipe eyes differ from retained appearance geometry").into(),
                         );
                     }
+                    if !same_decoration(
+                        recipe.decoration.as_ref(),
+                        snake.face_geometry().decoration.as_ref(),
+                    ) {
+                        return Err(error(
+                            "recipe decoration differs from retained appearance geometry",
+                        )
+                        .into());
+                    }
                     let detailed = recipe.style.detailed_segments;
                     recipes.push(recipe);
                     Ok(detailed)
                 },
             )
             .map_err(|e| e.0)?;
+        if snakes.len() > MAX_RETAINED_SNAKES {
+            return Err(error("face command budget exceeded"));
+        }
         let received = prepared.received();
         let center = received.setup.as_ref().map_or(0., |s| s.grid_center);
         let camera = prepared.camera().position();
@@ -721,10 +694,10 @@ impl AnimatedScene {
         };
         let mut draws = Vec::new();
         let mut budget = MAX_BODY_PAINT_COMMANDS;
-        // CanvasFrame resets globalAlpha to one; the eye lane's final pupil
-        // alpha is the following body's entry alpha. Eye-less bodies retain
-        // the root scope's outline alpha, independently of the last image.
-        let mut entry_alpha = 1.;
+        // Every ordinary face completes with an unconditional root alpha one,
+        // including eye-less and nondecorated faces. Standalone planner callers
+        // still control their own entry alpha.
+        let entry_alpha = 1.;
         for (snake, recipe) in snakes.iter().zip(&recipes) {
             let m = snake.metrics;
             let layout = if recipe.eyes.is_some() {
@@ -805,8 +778,26 @@ impl AnimatedScene {
             } else {
                 None
             };
-            entry_alpha = layout.as_ref().map_or(root_alpha, |v| v.pupil_alpha);
-            draws.push((plan, layout, root_alpha));
+            let decoration_layout = recipe
+                .decoration
+                .as_ref()
+                .map(|d| {
+                    d.geometry
+                        .layout(
+                            snake.face_heading,
+                            EyeLayoutInput {
+                                corrected_head: m.corrected_head,
+                                camera,
+                                viewport_half,
+                                scale: m.scale,
+                                zoom,
+                                death_progress: m.death_progress,
+                            },
+                        )
+                        .map_err(error)
+                })
+                .transpose()?;
+            draws.push((plan, layout, root_alpha, decoration_layout));
         }
         // Later callbacks may have changed an earlier borrowed DOM source.
         // Recheck native readiness/dimensions and the target after all callbacks.
@@ -841,7 +832,9 @@ impl AnimatedScene {
                 )?;
             }
         }
-        for (plan, layout, root_alpha) in draws {
+        for ((plan, layout, root_alpha, decoration_layout), recipe) in
+            draws.into_iter().zip(&recipes)
+        {
             if let Some(plan) = plan {
                 for command in &plan.commands {
                     sources.submit(context, command)?;
@@ -851,6 +844,196 @@ impl AnimatedScene {
             context.set_global_composite_operation("source-over")?;
             if let Some(layout) = layout {
                 draw_eyes(context, layout)?;
+            }
+            context.set_global_alpha(1.);
+            if let Some(layouts) = decoration_layout {
+                sources.submit_face(
+                    context,
+                    recipe.decoration.as_ref().expect("planned decoration"),
+                    layouts,
+                )?;
+            }
+        }
+        drop(frame);
+        self.client = prepared;
+        Ok(())
+    }
+}
+
+impl AnimatedScene {
+    #[allow(clippy::too_many_arguments)]
+    fn render_basic(
+        &mut self,
+        target: HtmlCanvasElement,
+        sprites: [HtmlCanvasElement; 3],
+        background: HtmlImageElement,
+        quality_scale: f64,
+        detailed_style: bool,
+        resolve_face: Option<&js_sys::Function>,
+    ) -> Result<(), JsValue> {
+        quality(quality_scale)?;
+        let width = dimensions(f64::from(target.width()))?;
+        let height = dimensions(f64::from(target.height()))?;
+        let mut prepared = self.client.clone();
+        let mut sources = BorrowedSources::default();
+        let mut decorations = Vec::new();
+        let snakes = prepared
+            .prepare_draw_resolved_staged(
+                width,
+                height,
+                quality_scale,
+                |ordinal, own, snake| -> Result<bool, ResolveError> {
+                    let decoration = if let Some(resolve_face) = resolve_face {
+                        sources.resolve_face(
+                            resolve_face,
+                            &request(ordinal, own, snake)?,
+                            snake.face_geometry(),
+                            &target,
+                        )?
+                    } else {
+                        if snake.face_geometry().decoration.is_some() {
+                            return Err(error(
+                                "decorated face requires render_with_face_decorations",
+                            )
+                            .into());
+                        }
+                        None
+                    };
+                    decorations.push(decoration);
+                    Ok(detailed_style)
+                },
+            )
+            .map_err(|e| e.0)?;
+        if snakes.len() > MAX_RETAINED_SNAKES {
+            return Err(error("face command budget exceeded"));
+        }
+        let received = prepared.received();
+        let center = received.setup.as_ref().map_or(0., |s| s.grid_center);
+        let camera = prepared.camera().position();
+        let zoom = prepared.camera().zoom();
+        let viewport_half = Point {
+            x: f64::from(target.width()) / 2.,
+            y: f64::from(target.height()) / 2.,
+        };
+        // Complete numeric validation before the target's destructive width reset.
+        let layouts = snakes
+            .iter()
+            .map(|snake| {
+                snake
+                    .eye_geometry
+                    .layout(
+                        snake.face_heading,
+                        snake.pupil,
+                        EyeLayoutInput {
+                            corrected_head: snake.metrics.corrected_head,
+                            camera,
+                            viewport_half,
+                            scale: snake.metrics.scale,
+                            zoom,
+                            death_progress: snake.metrics.death_progress,
+                        },
+                    )
+                    .map_err(error)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let decoration_layouts = snakes
+            .iter()
+            .zip(&decorations)
+            .map(|(snake, decoration)| {
+                decoration
+                    .as_ref()
+                    .map(|d| {
+                        d.geometry
+                            .layout(
+                                snake.face_heading,
+                                EyeLayoutInput {
+                                    corrected_head: snake.metrics.corrected_head,
+                                    camera,
+                                    viewport_half,
+                                    scale: snake.metrics.scale,
+                                    zoom,
+                                    death_progress: snake.metrics.death_progress,
+                                },
+                            )
+                            .map_err(error)
+                    })
+                    .transpose()
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        sources.validate(&target)?;
+        if target.width() != width || target.height() != height {
+            return Err(error("target dimensions changed during recipe resolution"));
+        }
+        let frame = CanvasFrame::new(
+            &target,
+            &sprites,
+            &background,
+            camera.x - center,
+            camera.y - center,
+            zoom,
+        )?;
+        let context = frame.context();
+        if let Some(boundary) = prepared.boundary().filter(|_| received.setup.is_some()) {
+            context.begin_path();
+            context.arc(0., 0., boundary.displayed(), 0., TAU)?;
+            context.set_stroke_style_str("#647481");
+            context.set_line_width(1. / zoom);
+            context.stroke();
+        }
+        for food in received.foods.values() {
+            if frame.visible(food.position.x, food.position.y, food.size.max(1.)) {
+                draw_sprite(
+                    context,
+                    &sprites[usize::from(food.color) % 3],
+                    food.position.x,
+                    food.position.y,
+                    food.size.max(1.),
+                )?;
+            }
+        }
+        // Preserve subtraction-before-scaling for body screen coordinates. The
+        // borrowed background/food preview above retains its existing transform.
+        for (((snake, layout), decoration), side_layouts) in snakes
+            .into_iter()
+            .zip(layouts)
+            .zip(&decorations)
+            .zip(decoration_layouts)
+        {
+            context.set_transform(1., 0., 0., 1., viewport_half.x, viewport_half.y)?;
+            let m = snake.metrics;
+            let opacity = m.spawn_progress * (1. - m.death_progress);
+            context.set_global_alpha(opacity * opacity);
+            if let Some(curve) = snake.curve {
+                for point in curve.samples.iter().rev() {
+                    context.save();
+                    let result = (|| {
+                        context.translate(
+                            (f64::from(point.x) - camera.x) * zoom,
+                            (f64::from(point.y) - camera.y) * zoom,
+                        )?;
+                        context.rotate(f64::from(point.angle))?;
+                        draw_sprite(
+                            context,
+                            &sprites[usize::from(m.skin) % 3],
+                            0.,
+                            0.,
+                            zoom * (29. * m.scale),
+                        )?;
+                        Ok::<_, JsValue>(())
+                    })();
+                    context.restore();
+                    result?;
+                }
+            }
+            draw_eyes(context, layout)?;
+            context.set_global_alpha(1.);
+            context.set_global_composite_operation("source-over")?;
+            if let Some(side_layouts) = side_layouts {
+                sources.submit_face(
+                    context,
+                    decoration.as_ref().expect("planned decoration"),
+                    side_layouts,
+                )?;
             }
         }
         drop(frame);

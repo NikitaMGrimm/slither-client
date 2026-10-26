@@ -3,7 +3,8 @@
 use slither_client::{
     presentation::{
         AnimatedClient, BodyAsset, BodyAssetStatus, ClientPresentationError, FoodError,
-        FoodFactory, FoodSnapshot, FoodSource, StandardEyeGeometry, food_palette,
+        FoodFactory, FoodSnapshot, FoodSource, PairedFaceGeometry, PairedSideGeometry,
+        StandardEyeGeometry, food_palette,
     },
     protocol::ElapsedHeader,
     state::FoodSpawnInput,
@@ -90,7 +91,7 @@ fn apply(c: &mut AnimatedClient, commands: &[Vec<u8>]) {
     c.apply_frame_with_factories::<ClientPresentationError, _, _>(
         &bundle(commands),
         ElapsedHeader::Absent,
-        |_| Ok(StandardEyeGeometry::default()),
+        |_| Ok(PairedFaceGeometry::default()),
         |spawn, _| Ok(factory(spawn.raw_color)),
     )
     .unwrap();
@@ -119,7 +120,7 @@ fn packet_creation_uses_wire_order_cached_color_and_current_zoom() {
             vec![b'b', 10, 11, 5],
         ]),
         ElapsedHeader::Absent,
-        |_| Ok(StandardEyeGeometry::default()),
+        |_| Ok(PairedFaceGeometry::default()),
         |spawn, at_zoom| {
             requests.push((spawn.key, spawn.raw_color, spawn.rapid, at_zoom));
             Ok(factory(spawn.raw_color))
@@ -257,7 +258,7 @@ fn late_factory_failure_rolls_back_received_caches_tokens_and_food_together() {
             vec![b'b', 5, 6, 5],
         ]),
         ElapsedHeader::Absent,
-        |_| Ok(StandardEyeGeometry::default()),
+        |_| Ok(PairedFaceGeometry::default()),
         |spawn, _| {
             calls += 1;
             let mut value = factory(spawn.raw_color);
@@ -284,7 +285,7 @@ fn food_factory_ownership_cannot_be_enabled_late_or_silently_dropped() {
     let result = c.apply_frame_with_factories::<ClientPresentationError, _, _>(
         &bundle(&[appearance(7, 2000)]),
         ElapsedHeader::Absent,
-        |_| Ok(StandardEyeGeometry::default()),
+        |_| Ok(PairedFaceGeometry::default()),
         |_: &FoodSpawnInput, _| Ok(factory(0)),
     );
     assert_eq!(result, Err(ClientPresentationError::FoodModeRequiresReset));
@@ -298,6 +299,54 @@ fn food_factory_ownership_cannot_be_enabled_late_or_silently_dropped() {
             ElapsedHeader::Absent
         ),
         Err(ClientPresentationError::FoodFactoryRequired)
+    );
+    assert_eq!(c, before);
+}
+
+#[test]
+fn full_factories_retain_face_geometry_alongside_food_and_rollback_together() {
+    let mut c = AnimatedClient::new(0.).unwrap();
+    let face = PairedFaceGeometry {
+        eyes: StandardEyeGeometry {
+            pupil_travel: 0.02,
+            ..StandardEyeGeometry::default()
+        },
+        decoration: Some(PairedSideGeometry {
+            forward: 11.,
+            lateral: 7.,
+            lateral_bias: 1.5,
+            rotation_offset: 0.3,
+            image_scale: 0.5,
+            pivot_x: 8.,
+            pivot_y: 19.,
+            width: 53.,
+            height: 27.,
+        }),
+    };
+    c.apply_frame_with_factories::<ClientPresentationError, _, _>(
+        &bundle(&[setup(), appearance(7, 2000), vec![b'f', 1, 2, 3, 4, 7, 5]]),
+        ElapsedHeader::Absent,
+        |_| Ok(face),
+        |spawn, _| Ok(factory(spawn.raw_color)),
+    )
+    .unwrap();
+    c.advance(4., false).unwrap();
+    assert_eq!(c.own_snake().unwrap().face_geometry(), &face);
+    assert_eq!(c.own_snake().unwrap().eyes().pupil().x, 0.02);
+    assert_eq!(food(&c).len(), 1);
+    let before = c.clone();
+    assert!(
+        c.apply_frame_with_factories::<ClientPresentationError, _, _>(
+            &bundle(&[appearance(8, 3000), vec![b'b', 5, 6, 5]]),
+            ElapsedHeader::Absent,
+            |_| Ok(PairedFaceGeometry::default()),
+            |spawn, _| {
+                let mut invalid = factory(spawn.raw_color);
+                invalid.random_wobble_unit = 1.;
+                Ok(invalid)
+            },
+        )
+        .is_err()
     );
     assert_eq!(c, before);
 }

@@ -18,6 +18,7 @@ mod camera;
 mod client;
 mod curve;
 mod eyes;
+mod face;
 mod follow_camera;
 mod food;
 mod food_painter;
@@ -44,6 +45,7 @@ pub use curve::{
     sample_curve_with_heading,
 };
 pub use eyes::{EyeLayoutInput, EyePair, StandardEyeGeometry, StandardEyeLayout, StandardEyeState};
+pub use face::{PairedFaceGeometry, PairedSideGeometry, PairedSideLayout};
 pub use follow_camera::{FollowCamera, INITIAL_ZOOM};
 pub use food::{
     FoodConsume, FoodEaterPose, FoodError, FoodFactory, FoodFactoryInput, FoodInstance,
