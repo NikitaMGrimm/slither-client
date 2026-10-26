@@ -16,8 +16,9 @@ checkout. Follow `docs/provenance.md`; never import a reference to satisfy a tes
 Run `node tools/check-repository.mjs` against the reviewed Git index and
 `node tools/check-repository.mjs --history` before delivery. These guards inspect
 Git blobs, so unstaged changes need separate inspection. Do not weaken the guard
-to admit external artifacts. The only permitted vector asset is the original
-`assets/logo.svg`; keep it free of scripts and external resources.
+to admit external artifacts. The only permitted vector assets are the original
+`assets/logo.svg` and `assets/icon.svg`; keep them free of scripts and external
+resources.
 
 ## Implementation and verification
 

@@ -3,7 +3,7 @@
 ## Tracked material
 
 Track original authored Rust, browser code, tooling, documentation, and the
-original SVG logo. Label synthetic fixtures explicitly in their content and
+original SVG logo and icon. Label synthetic fixtures explicitly in their content and
 description. Keep official client source, assets, credentials, and raw captures
 outside Git history, issues, and pull requests. External comparison inputs and
 outputs must remain separate from this checkout.
@@ -33,6 +33,10 @@ and compact presentation follow the visual family of the public
 [slither-sim README](https://github.com/NikitaMGrimm/slither-sim/blob/bb9d457a9649ac7c6a63fdb3970b1a7f945f3366/README.md)
 and [SVG](https://github.com/NikitaMGrimm/slither-sim/blob/bb9d457a9649ac7c6a63fdb3970b1a7f945f3366/assets/logo.svg).
 It contains no official game artwork.
+
+`assets/icon.svg` contains the same original snake symbol without the wordmark
+in a square viewport. T3 Code discovers this file automatically as the project
+icon; `assets/logo.svg` remains the wide README logo.
 
 [MIT](../LICENSE) covers our authored files and grants no license to official
 client code or artwork. This project is independent of Slither.io.

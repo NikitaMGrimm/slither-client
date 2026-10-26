@@ -37,7 +37,7 @@ export function checkEntry(name, bytes, mode = '100644', referenceHashes = known
   if (/"sourcesContent"\s*:/.test(text)) problems.push('embedded source-map contents');
   if (/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/.test(text)) problems.push('private key material');
   if (path.posix.extname(basename) === '.svg') {
-    if (normalized !== 'assets/logo.svg') problems.push('unreviewed vector asset');
+    if (normalized !== 'assets/logo.svg' && normalized !== 'assets/icon.svg') problems.push('unreviewed vector asset');
     if (/<script\b|<foreignObject\b|<image\b|\b(?:href|src)\s*=|\bon[a-z]+\s*=|url\s*\(/i.test(text)) problems.push('SVG contains scripts, external references, or embedded images');
   }
   return problems.map(problem => `${name}: ${problem}`);
