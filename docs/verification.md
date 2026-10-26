@@ -239,6 +239,27 @@ assertions separately checked preference application, interpolation ordering and
 atomic input rejection through the browser ABI. These remain standalone checks;
 the animated page does not yet apply quality state to its rendering passes.
 
+Stock Windows Firefox 158.0.1 headless separately passed 224 standalone quality
+assertions on that build. This checked the numerical ABI and input rejection;
+it did not exercise quality effects under actual rendering load.
+
+## Trusted skin-provider checks
+
+`tools/skin-provider.test.mjs` uses original synthetic metadata and realm doubles
+to check trust/input boundaries, collection limits, frozen numeric snapshots,
+exact asset identities, readiness/revisions, source rectangles and unsupported
+features. The provider does not contain stock recipes or host member mappings.
+It does not load images, draw, read pixels or open connections.
+
+On 2026-10-26, eleven Windows Chrome/Electron assertions and 49 stock Firefox
+158.0.1 headless assertions exercised synthetic trusted callbacks with real
+canvas/image objects. They verified pending-to-ready transitions, native image
+dimensions, preserved identity after canvas painting, frozen old snapshots,
+rejection before callbacks and explicit unsupported status. Firefox imported
+the unchanged ES module. These establish that provider boundary only; host
+mapping, full skin/attachment coverage, rendered pixels and extension integration
+remain separate work.
+
 ## Dense-scene benchmark
 
 After `npm run build:web` and `npm run scene`, open
