@@ -140,6 +140,18 @@ pub struct AnimatedClient {
     body_paint_flags: Vec<u8>,
 }
 
+fn validate_draw_inputs(
+    width: u32,
+    height: u32,
+    quality_scale: f64,
+) -> Result<(), ClientPresentationError> {
+    finite(&[quality_scale])?;
+    if width == 0 || height == 0 || quality_scale <= 0. {
+        return Err(PresentationError.into());
+    }
+    Ok(())
+}
+
 impl AnimatedClient {
     /// Start an empty received and animation world at an explicit timestamp.
     pub fn new(start_ms: f64) -> Result<Self, ClientPresentationError> {
@@ -378,11 +390,26 @@ impl AnimatedClient {
         quality_scale: f64,
         detailed_style: bool,
     ) -> Result<Vec<PreparedSnake>, ClientPresentationError> {
-        finite(&[quality_scale])?;
-        if width == 0 || height == 0 || quality_scale <= 0. {
-            return Err(PresentationError.into());
-        }
+        validate_draw_inputs(width, height, quality_scale)?;
         let mut next = self.clone();
+        let prepared =
+            next.prepare_draw_with_style_staged(width, height, quality_scale, detailed_style)?;
+        *self = next;
+        Ok(prepared)
+    }
+
+    /// Prepare an already staged client without copying the world again.
+    /// The caller must discard this client on any later preparation or drawing
+    /// error: this method can leave partial camera, eye, spacing and flag changes.
+    pub(crate) fn prepare_draw_with_style_staged(
+        &mut self,
+        width: u32,
+        height: u32,
+        quality_scale: f64,
+        detailed_style: bool,
+    ) -> Result<Vec<PreparedSnake>, ClientPresentationError> {
+        validate_draw_inputs(width, height, quality_scale)?;
+        let next = self;
         if let Some(own) = next.own_snake() {
             let metrics = own.metrics();
             next.camera
@@ -418,7 +445,9 @@ impl AnimatedClient {
             if !metrics.visible || metrics.expired {
                 continue;
             }
-            let (curve, face_heading) = entry.snake.prepare_curve(quality_scale, detailed_style)?;
+            let (curve, face_heading) = entry
+                .snake
+                .prepare_curve_staged(quality_scale, detailed_style)?;
             samples = samples
                 .checked_add(curve.as_ref().map_or(0, |curve| curve.samples.len()))
                 .filter(|count| *count <= MAX_DRAW_SAMPLES)
@@ -467,7 +496,6 @@ impl AnimatedClient {
                 eye_geometry: *entry.snake.eye_geometry(),
             });
         }
-        *self = next;
         Ok(prepared)
     }
 

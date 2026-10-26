@@ -462,20 +462,24 @@ impl SnakePresentation {
         if !self.visible || self.expired {
             return Ok(());
         }
-        self.transaction(|next| {
-            if next.point_spacing < next.target_point_spacing {
-                next.point_spacing += 0.0035;
-                if next.point_spacing >= next.target_point_spacing {
-                    next.point_spacing = next.target_point_spacing;
-                }
-            } else if next.point_spacing > next.target_point_spacing {
-                next.point_spacing -= 0.0035;
-                if next.point_spacing <= next.target_point_spacing {
-                    next.point_spacing = next.target_point_spacing;
-                }
+        let previous_spacing = self.point_spacing;
+        if self.point_spacing < self.target_point_spacing {
+            self.point_spacing += 0.0035;
+            if self.point_spacing >= self.target_point_spacing {
+                self.point_spacing = self.target_point_spacing;
             }
-            Ok(())
-        })
+        } else if self.point_spacing > self.target_point_spacing {
+            self.point_spacing -= 0.0035;
+            if self.point_spacing <= self.target_point_spacing {
+                self.point_spacing = self.target_point_spacing;
+            }
+        }
+        // Spacing is the only mutation; rollback needs no body/correction copy.
+        if let Err(error) = self.validate_observation() {
+            self.point_spacing = previous_spacing;
+            return Err(error);
+        }
+        Ok(())
     }
 
     /// Begin death once; repeated calls do not restart or resurrect an object.
@@ -484,14 +488,15 @@ impl SnakePresentation {
         self.eyes.mark_dead();
     }
 
-    /// Prepare a visible body's spacing and sample it once, freezing that spacing
-    /// inside the sampler. The returned face heading precedes this draw's target.
-    pub(crate) fn prepare_curve(
+    /// Prepare a body inside an already staged client, freezing its single spacing
+    /// transition in the sampler. The face heading precedes this draw's target.
+    /// The caller must discard its staged client on failure.
+    pub(crate) fn prepare_curve_staged(
         &mut self,
         quality_scale: f64,
         detailed_style: bool,
     ) -> Result<(Option<CurveOutput>, f64), PresentationError> {
-        let mut next = self.clone();
+        let next = self;
         next.prepare_draw()?;
         let metrics = next.metrics();
         let input = CurveInput {
@@ -516,7 +521,6 @@ impl SnakePresentation {
         };
         let face_heading = next.eyes.commit_draw_target(target)?;
         next.validate_observation()?;
-        *self = next;
         Ok((curve, face_heading))
     }
 
