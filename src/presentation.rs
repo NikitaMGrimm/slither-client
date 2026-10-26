@@ -1,8 +1,7 @@
 //! Explicit-time presentation primitives, separate from received state and physics.
 //!
-//! This foundation covers timing, head prediction, entity offsets, visual length,
-//! and draw-driven camera offsets. It does not implement body curves, cosmetics,
-//! a complete following camera, or session logic.
+//! Timing, prediction, corrected geometry, camera and quality state have explicit
+//! packet, update and draw inputs. These types own no sockets or raster assets.
 
 use std::{
     error::Error,

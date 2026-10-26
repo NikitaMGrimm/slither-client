@@ -6,6 +6,7 @@ import { bundle, syntheticScene, syntheticSetup, syntheticStep } from '../web/sy
 import { denseScene, DENSE_SCENE_PROFILES } from '../web/dense-scene.mjs';
 import { presentationSmoke } from './presentation-smoke.mjs';
 import { animatedSmoke } from './animated-smoke.mjs';
+import { qualitySmoke } from './quality-smoke.mjs';
 
 // Entirely synthetic ABI integration; no reference files or network are used.
 const wasm = await loadWasm();
@@ -59,3 +60,5 @@ presentationSmoke(wasm);
 console.log('Synthetic presentation clock, prediction and correction Wasm ABI passed.');
 animatedSmoke(wasm);
 console.log('Synthetic coupled animation, curve and lifecycle Wasm ABI passed.');
+qualitySmoke(wasm);
+console.log('Synthetic desktop quality preference, timing and rejection Wasm ABI passed.');

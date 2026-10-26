@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add standalone desktop quality state and `DesktopQuality` Wasm bindings,
+  separating requested preference, connection/preview initialization, blend,
+  sampling density and draw-count fallback/recovery. Rendering integration is pending.
 - Connect ordered packets to head/body/length prediction, draw-driven camera
   and bounded curve sampling in a separate animated Canvas2D preview. Preserve
   retained own identity through removal/ID reuse and repeated duplicate removals;

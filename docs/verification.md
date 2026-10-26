@@ -218,6 +218,27 @@ deferred cleanup. The head-only comparison supplied body-derived turn factors
 from the reference and used zero packet-extrapolation time. It does not verify
 body, camera, curves, skins, rendering or entity death lifetime.
 
+## Standalone quality state
+
+`tests/presentation_quality.rs` and the real `DesktopQuality` ABI smoke cover
+requested versus applied mode, connection/preview resets, interpolation before
+statistics, strict interval and draw-count thresholds, fallback, recovery and
+negative residuals. Invalid modes, timestamps and fractional/out-of-range counts
+preserve the previous state. These tests do not connect quality to the renderer.
+
+A separate native offline comparison against the pinned complete runtime matched
+51,240 fields across 8,540 operations in six cases exactly. It supplied explicit
+draw counts rather than measuring browser FPS. This verifies the tested numerical
+quality state; browser quality effects, renderer integration, pixel fidelity and
+automatic fallback under actual desktop load remain unverified.
+
+The integrated real Wasm bindings also matched those six frozen runtime traces:
+51,240 fields and 8,492 statistics-reset return values matched exactly. The
+private evidence documents JSON's signed-zero limitation. Seven Chrome/Electron
+assertions separately checked preference application, interpolation ordering and
+atomic input rejection through the browser ABI. These remain standalone checks;
+the animated page does not yet apply quality state to its rendering passes.
+
 ## Dense-scene benchmark
 
 After `npm run build:web` and `npm run scene`, open
