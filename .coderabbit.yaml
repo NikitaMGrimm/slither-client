@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+reviews:
+  # Keep the required attribution footer last in the PR description.
+  high_level_summary: true
+  high_level_summary_in_walkthrough: true
+  review_status: true
+  auto_review:
+    enabled: true
+    drafts: true
+    base_branches:
+      - ".*"
+    auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 0
