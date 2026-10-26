@@ -117,7 +117,7 @@ impl BodyPoint {
         self.tail_fade
     }
 
-    /// Whether this retained anchor has left the logical body.
+    /// Whether a tail or non-growing anchor update marked this point dying.
     pub fn dying(&self) -> bool {
         self.dying
     }
@@ -247,6 +247,7 @@ impl BodyGeometry {
 
     /// Add an absolute or cached-direction anchor and return its absolute position.
     /// Non-growth marks the oldest living point dying; growth increments logical length.
+    /// If every point is already dying, non-growth still leaves logical length unchanged.
     /// All arithmetic and retention failures preserve the entire previous body.
     pub fn apply_anchor(
         &mut self,
@@ -355,6 +356,8 @@ impl BodyGeometry {
 
     /// Mark the oldest living anchor dying and decrement logical length.
     /// Returns false when no living point remains; retained records are not erased.
+    /// A living point with zero logical length would require a negative count;
+    /// that unsupported transition returns an error without changing the body.
     pub fn remove_tail(&mut self) -> Result<bool, PresentationError> {
         let Some(tail) = self.points.iter_mut().rev().find(|point| !point.dying) else {
             return Ok(false);
@@ -394,7 +397,9 @@ impl BodyGeometry {
         &self.points
     }
 
-    /// Logical length, independent of retained physical records.
+    /// Nonnegative protocol count, updated by growth and tail removals.
+    /// It is not recomputed from retained or living points: a non-growing anchor
+    /// after exhaustion can add a living point while this count remains zero.
     pub fn logical_segments(&self) -> usize {
         self.logical_segments
     }
