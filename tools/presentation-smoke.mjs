@@ -125,4 +125,57 @@ export function presentationSmoke(wasm) {
     const exhausted = camera.snapshot(); camera.draw();
     assert.equal(camera.snapshot(), exhausted, 'camera has no entity cleanup sentinel');
   } finally { camera.free(); length.free(); geometryClock.free(); }
+
+  const boundaryClock = new wasm.AnimationClock(0);
+  const boundary = new wasm.BoundarySmoother(1200);
+  let boundaryNow = 0;
+  function advanceBoundary(elapsed, connected = true) {
+    const step = boundaryClock.advance(boundaryNow += elapsed, false, false);
+    try { boundary.advance(step, connected); }
+    finally { step.free(); }
+  }
+  try {
+    assert.equal(boundary.weights().length, 56);
+    assert.equal(boundary.weights()[0], 0);
+    assert.equal(boundary.weights()[55], 1);
+    for (let index = 0; index < 56; index++) {
+      assert.equal(boundary.weights()[index], 0.5 * (1 - Math.cos(Math.PI * index / 55)),
+        'boundary weights use host Math cosine without Float32 storage');
+    }
+    boundary.set_target(800);
+    const before = boundary.snapshot(), samples = boundary.samples();
+    samples[0] = 1;
+    assert.equal(boundary.samples()[0], 1200, 'boundary samples are copied');
+    advanceBoundary(4); advanceBoundary(0); advanceBoundary(4, false);
+    assert.equal(boundary.snapshot(), before);
+    advanceBoundary(8);
+    assert.deepEqual(JSON.parse(boundary.snapshot()), { displayed: 1200, target: 800, index: 1, pending: 55 });
+    boundary.apply_setup(1600);
+    assert.deepEqual(JSON.parse(boundary.snapshot()), { displayed: 1600, target: 1600, index: 1, pending: 55 });
+    assert.deepEqual(boundary.samples(), new Float64Array(56).fill(1600));
+    boundary.set_target(400);
+    for (let index = 0; index < 13; index++) advanceBoundary(40);
+    assert.deepEqual(JSON.parse(boundary.snapshot()), { displayed: 400, target: 400, index: 1, pending: -1 });
+    const stable = boundary.snapshot(), stableSamples = boundary.samples();
+    for (const radius of [NaN, Infinity, -Infinity, 0, -0, -1]) {
+      assert.throws(() => new wasm.BoundarySmoother(radius));
+      assert.throws(() => boundary.set_target(radius));
+      assert.throws(() => boundary.apply_setup(radius));
+      assert.equal(boundary.snapshot(), stable);
+      assert.deepEqual(boundary.samples(), stableSamples);
+    }
+    boundary.apply_setup(1000);
+    boundary.set_target(1e-14);
+    const tiny = JSON.parse(boundary.snapshot());
+    assert.equal(tiny.displayed, 1000);
+    assert.equal(tiny.target, 1e-14);
+    assert.equal(boundary.samples()[(tiny.index + 55) % 56], 0,
+      'retain subtraction/addition cancellation instead of replacing the final sample with the target');
+    for (let index = 0; index < 12; index++) advanceBoundary(40);
+    assert.equal(JSON.parse(boundary.snapshot()).displayed, 0);
+    assert.deepEqual(boundary.samples(), new Float64Array(56).fill(1e-14));
+    const exhausted = boundary.snapshot();
+    assert.throws(() => boundary.set_target(0));
+    assert.equal(boundary.snapshot(), exhausted, 'computed zero does not admit zero input');
+  } finally { boundary.free(); boundaryClock.free(); }
 }

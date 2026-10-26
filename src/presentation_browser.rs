@@ -4,8 +4,8 @@ use wasm_bindgen::prelude::*;
 
 use crate::{
     presentation::{
-        AngleCorrections, CameraCorrections, FrameClock, FrameStep, HeadCorrections, HeadMotion,
-        LengthPresentation, Turn,
+        AngleCorrections, BoundaryRadius, CameraCorrections, FrameClock, FrameStep,
+        HeadCorrections, HeadMotion, LengthPresentation, Turn,
     },
     state::Point,
 };
@@ -317,6 +317,59 @@ impl LengthSmoother {
 
     /// A copy of the Float32 entity weights.
     pub fn weights(&self) -> Vec<f32> {
+        self.inner.weights().to_vec()
+    }
+}
+
+/// Standalone boundary easing; connection state remains caller-owned.
+#[wasm_bindgen]
+pub struct BoundarySmoother {
+    inner: BoundaryRadius,
+}
+
+#[wasm_bindgen]
+impl BoundarySmoother {
+    /// Initialize a positive finite radius and a fresh double-precision ring.
+    #[wasm_bindgen(constructor)]
+    pub fn new(radius: f64) -> Result<BoundarySmoother, JsValue> {
+        Ok(Self {
+            inner: BoundaryRadius::new(radius).map_err(error)?,
+        })
+    }
+
+    /// Apply setup radii while preserving the current ring cursor and cadence.
+    pub fn apply_setup(&mut self, radius: f64) -> Result<(), JsValue> {
+        self.inner.apply_setup(radius).map_err(error)
+    }
+
+    /// Blend the absolute-radius ring toward a positive finite target atomically.
+    pub fn set_target(&mut self, radius: f64) -> Result<(), JsValue> {
+        self.inner.set_target(radius).map_err(error)
+    }
+
+    /// Borrow whole animation steps and consume samples only while connected.
+    pub fn advance(&mut self, step: &AnimationStep, connected: bool) {
+        self.inner.advance(step.inner.whole_steps, connected);
+    }
+
+    /// Copied numeric diagnostics; this API does not alter scene rendering.
+    pub fn snapshot(&self) -> String {
+        format!(
+            "{{\"displayed\":{},\"target\":{},\"index\":{},\"pending\":{}}}",
+            self.inner.displayed(),
+            self.inner.target(),
+            self.inner.index(),
+            self.inner.pending()
+        )
+    }
+
+    /// A copy of the absolute double-precision radius samples.
+    pub fn samples(&self) -> Vec<f64> {
+        self.inner.samples().to_vec()
+    }
+
+    /// A copy of the increasing double-precision blend weights.
+    pub fn weights(&self) -> Vec<f64> {
         self.inner.weights().to_vec()
     }
 }
