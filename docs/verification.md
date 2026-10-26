@@ -264,6 +264,33 @@ retention, native RAF ordering and pagehide cleanup. Deterministic checkpoints
 and native real-time RAF observations were recorded separately. All test
 processes, listeners and temporary profiles were removed.
 
+The bounded one-anchor correction subsequently passed 324 ABI/Canvas assertions
+and 13 native-page assertions in the same stock Firefox version. These checked
+finite lead targets, predecessor independence, raw-heading fallback, fractional
+updates, continued native animation and rollback, while body/curve diagnostics
+remain omitted for one anchor. All nine normal-fixture pixel hashes matched the
+earlier eye build exactly. Existing media retains its original build label;
+these checkpoints do not compare every frame of the native-timed recording.
+
+A corrected-build Wasm rerun against hash-verified, frozen observations from
+the complete pinned runtime matched all supported numeric comparisons exactly:
+
+| Comparison | Cases | Operations | Exact comparisons |
+| --- | ---: | ---: | ---: |
+| Unchanged coupled core | 10 | 508 | 2,037,174 |
+| Coupled eyes | 9 | 263 | 78,213 |
+| Focused continuation | 1 | 5 | 1,598 |
+| Supported one-anchor targets | 6 | 80 | 12,783 |
+
+All 2,129,768 executed comparisons had zero mismatches and maximum error zero,
+using signed-zero-aware equality without a tolerance. The continuation overlaps
+a primary case; these are executed comparisons, not independent features.
+Five unsupported one-anchor policy cases passed 51 separate assertions; their
+eight intentional source-target differences are recorded and excluded from
+parity totals. These numerical results cover standard eye state and layout
+arguments, with quality/style supplied externally, not full one-anchor body
+geometry, renderer quality integration or raster equivalence.
+
 These browser checks use original synthetic packets and stand-in artwork.
 They do not establish original-client pixels, full skins, connected transport,
 desktop performance or official-server acceptance.
