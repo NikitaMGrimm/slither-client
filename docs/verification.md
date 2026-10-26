@@ -307,17 +307,37 @@ post-application metadata mutation, and default diagnostics/curve preservation.
 The Canvas recorder checks nondefault colors/radii/outline/layout and first
 fractional pupil travel, pending-body metadata use, exact default commands in
 both render paths, signed-zero-aware recipe coherence, and pre-reset rejection
-with model rollback. The explicit `none` renderer lane remains covered. These
-are synthetic native and Node/Wasm checks; fresh native-browser pixels and
-external-runtime comparisons of this API remain separate verification work.
+with model rollback. The explicit `none` renderer lane remains covered.
 
-This milestone passed 249 native tests, formatting, doctests (no examples),
-native/Wasm Clippy, a fresh web build and the complete synthetic Wasm smoke,
-including 496 Canvas-recorder assertions. A restricted Node run passed 101 tests;
-the two loopback-server test files and three temporary-Git mutation tests were
-excluded under the implementation task's no-server/no-Git-mutation limits.
-The existing index/history guards passed separately, and the unstaged changed
-files were inspected with the same repository policy without staging them.
+The integrated milestone passed all 250 native tests and 116 Node tests,
+formatting, doctests (no examples), native/Wasm Clippy, a fresh web build and
+the complete synthetic Wasm smoke, including 496 Canvas-recorder assertions.
+Focused independent review found no actionable defect and separately passed
+59 native tests, the pinned integrated ABI smoke and both source guards.
+
+A separate exact comparison against the complete pinned offline runtime passed
+64,069 cells in four frozen schedules: 13,548 retained eye/head/camera cells,
+406 clock cells, 8,788 ordered paired-eye call cells, 2,734 frozen-metadata and
+appearance-request cells, 32,747 observer/control cells and 5,846 default-API
+preservation cells. Ten Wasm runs covered 176 operations and 84 draws. Nondefault
+travel matched before the first fractional update's draw; duplicate/death/ID-reuse
+styles matched through both render paths. Rust received authored packets,
+timestamps, controls and frozen recipe metadata, without observed motion,
+geometry, camera or expected commands. Equality used no tolerance; none of the
+compared cells contained negative zero. Five additional mismatched-recipe probes
+rejected before target reset. Supplemental face decorations, full skins, host
+mapping and native raster equivalence are outside this comparison.
+
+Stock Windows Firefox 158.0.1 separately passed 524 assertions across 24 native
+checkpoints and eight fresh-context repeats. Explicit travel was active before
+the first fractional update; both draw paths retained nondefault paired colors,
+radii, outlines and layouts. Inherited/accessor metadata and mismatched ready
+recipes rejected without clearing pixels or changing model state. Default APIs
+preserved baseline pixels, complete snapshots and Canvas calls exactly. Matched
+raw captures use authored synthetic artwork and metadata; the old build uses
+its default-only API, without implying it supported the new parameters. These
+checks do not establish original pixels, full skins, performance, extension
+integration or server acceptance. Browser diagnostics do not retain signed zero.
 
 Synthetic native checks cover effective/wanted heading initialization, Float32
 easing, shortest arcs, fractional pupils, visibility entry, deferred draw-target
