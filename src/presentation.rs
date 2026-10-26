@@ -33,7 +33,7 @@ pub use body_painter::{
 pub use camera::{CAMERA_SAMPLES, CameraCorrections};
 pub use client::{
     AnimatedClient, ClientPresentationError, MAX_DRAW_SAMPLES, MAX_RETAINED_SNAKES,
-    MAX_RETAINED_TOTAL_BODY_POINTS, PreparedSnake,
+    MAX_RETAINED_TOTAL_BODY_POINTS, PreparedBodyGeometry, PreparedSnake,
 };
 pub use curve::{
     CurveInput, CurveOutput, CurveSample, CurveVertex, MAX_CURVE_SAMPLES, sample_curve,
