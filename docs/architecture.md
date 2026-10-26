@@ -212,6 +212,20 @@ global smoothing 0.12; it needs no asset readiness. Both renderers consume the
 retained style. Standard recipe eyes must match it exactly, including signed
 zero, before Canvas reset. See the [paired-eye contract](standard-body-renderer.md#appearance-time-paired-eyes).
 
+`PairedFaceGeometry` additionally owns optional `PairedSideGeometry`. The additive
+`apply_frame_with_face_geometry` installs both parts in that same transaction.
+No DOM object, source revision or catalog ID is retained. `PreparedSnake` captures
+the decoration beside the eyes and current face heading. Both production draw
+paths share one bounded two-image layout and borrowed-source submitter; the basic
+path exposes `render_with_face_decorations` for ready normalized face-only
+projections independent of body readiness. The old basic API rejects visible
+required decorations before reset. Standard recipes must match the entire retained
+style exactly. Each ordinary face restores root alpha one after eyes, then paints
+negative/positive side images at alpha one before the next body. This includes
+nondecorated and eye-less completions. Standalone body entry-alpha semantics remain
+caller-owned. See the [complete face contract](standard-body-renderer.md#complete-ordinary-paired-faces)
+for source readiness, crop, trust and unsupported-family boundaries.
+
 `prepare_draw_with_style` samples each visible body once and returns ordered
 `PreparedSnake` values. It captures the current face heading before committing
 the new curve target for a later update. Spacing advances once; sampling uses that

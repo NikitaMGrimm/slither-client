@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url';
 import { createSkinProvider } from '../web/skin-provider.mjs';
 import { bundle, syntheticScene, syntheticSetup, syntheticStep } from '../web/synthetic-scene.mjs';
 import { denseScene } from '../web/dense-scene.mjs';
+import { faceRenderSmoke } from './face-render-smoke.mjs';
 
 // Original synthetic sources and Canvas recorder. This executes the real Wasm
 // ABI, but models Canvas state; it is neither a browser nor a raster oracle.
@@ -13,8 +14,8 @@ export function bodyRenderSmoke(wasm) {
   const rejects = (fn, message) => { assertions++; assert.throws(fn, message); };
   class CanvasRenderingContext2D {
     trace = []; stack = []; alpha = 1; blend = 'source-over'; transforms = []; alphaWrites = [];
-    failSource = null; failMethod = null;
-    reset() { this.trace.push({ op: 'reset' }); this.stack = []; this.alpha = 1; this.blend = 'source-over'; this.transforms = []; }
+    failSource = null; failMethod = null; failSourceAt = 1; failSourceCount = 0; failMethodAfterEyes = null;
+    reset() { this.trace.push({ op: 'reset' }); this.stack = []; this.alpha = 1; this.blend = 'source-over'; this.transforms = []; this.alphaWrites = []; }
     get globalAlpha() { return this.alpha; }
     set globalAlpha(requested) {
       if (Number.isFinite(requested) && requested >= 0 && requested <= 1) this.alpha = requested;
@@ -29,7 +30,11 @@ export function bodyRenderSmoke(wasm) {
     translate(...args) { this.throwIf('translate'); this.transforms.push(['translate', ...args]); }
     scale(...args) { this.throwIf('scale'); this.transforms.push(['scale', ...args]); }
     rotate(...args) { this.throwIf('rotate'); this.transforms.push(['rotate', ...args]); }
-    throwIf(method) { if (this.failMethod === method) throw new Error(`synthetic Canvas ${method}`); }
+    throwIf(method) {
+      if (this.failMethod === method || (this.failMethodAfterEyes === method && this.trace.filter(v => v.op === 'fill').length >= 4)) {
+        throw new Error(`synthetic Canvas ${method}`);
+      }
+    }
     createPattern(source, repetition) { this.throwIf('createPattern'); return { source, repetition }; }
     beginPath() { this.path = []; }
     arc(...args) { this.throwIf('arc'); this.path.push(args); }
@@ -38,7 +43,7 @@ export function bodyRenderSmoke(wasm) {
     stroke() { this.trace.push({ op: 'stroke', path: this.path, color: this.strokeStyle, width: this.lineWidth, alpha: this.alpha }); }
     fill() { this.trace.push({ op: 'fill', path: this.path, color: this.fillStyle, alpha: this.alpha, blend: this.blend }); }
     drawImage(source, ...args) {
-      if (source === this.failSource) throw new Error('synthetic Canvas drawImage');
+      if (source === this.failSource && ++this.failSourceCount === this.failSourceAt) throw new Error('synthetic Canvas drawImage');
       this.trace.push({ op: 'image', source, args, alpha: this.alpha, blend: this.blend,
         transforms: this.transforms.slice(), alphaWrites: this.alphaWrites.slice() });
     }
@@ -60,7 +65,7 @@ export function bodyRenderSmoke(wasm) {
   const vanillaEyes = () => ({ kind: 'standard', distance: 6, separation: 6, radius: 6,
     pupilRadius: 3.5, pupilTravel: 2.3, outlineWidth: 0, eyeColor: 0xffffff, pupilColor: 0,
     outlineColor: 0, eyeOpacity: 0.75, pupilOpacity: 1, angleSmoothing: 0.12 });
-  function fixture({ eyes = true, detailed = false, eyeStyle = null } = {}) {
+  function fixture({ eyes = true, detailed = false, eyeStyle = null, faceStyle = null } = {}) {
     const scene = new wasm.AnimatedScene(0);
     const quality = new wasm.DesktopQuality(1, 0);
     const target = new HTMLCanvasElement('target'); target.width = 960; target.height = 540;
@@ -76,12 +81,18 @@ export function bodyRenderSmoke(wasm) {
       palettes: [
         { variants: [{ asset: 0 }, { asset: 7, sourceRect: [0, 0, 32, 32] }], boostGlow: { asset: 2 } },
         { variants: [{ asset: 1, sourceRect: [2, 3, 12, 14] }, { asset: 1 }], boostGlow: { asset: 3 } },
-      ], variantMode: 'cycle', variantPeriod: 2, eyes: eyes ? (eyeStyle ?? vanillaEyes()) : { kind: 'none' },
+      ], variantMode: 'cycle', variantPeriod: 2, eyes: eyes ? (faceStyle?.eyes ?? eyeStyle ?? vanillaEyes()) : { kind: 'none' },
       effects: ['outline', 'shadow', 'death-highlight'].map((kind, i) => ({ kind, asset: i + 4, opacity: 1 })),
       bodyStyle: { detailedSegments: detailed, swell: 0, rotateSegments: true, headFade: null, tailFade: null },
       attachment: null, unsupportedFeatures: [],
     };
     const catalog = [...sources, sources[0]].map(source => ({ source, state: 'ready' }));
+    const faceSource = new HTMLCanvasElement('asymmetric-face');
+    faceSource.width = 43; faceSource.height = 29;
+    catalog.push({ source: faceSource, state: 'ready' });
+    if (faceStyle?.decoration.kind === 'paired-side-images') metadata.faceDecoration = {
+      kind: 'paired-side-images', geometry: { ...faceStyle.decoration.geometry }, image: { asset: 8 },
+    };
     const snapshot = { revision: 'synthetic-1', assetCatalog: catalog };
     const requests = [];
     const provider = createSkinProvider({ trusted: true, realm, resolveHostRecipe: request => request,
@@ -93,11 +104,12 @@ export function bodyRenderSmoke(wasm) {
       Array.from(scene.own_body_samples()), Array.from(scene.own_body()), Array.from(scene.length_samples()),
       Array.from(scene.boundary_samples())];
     const close = () => { scene.free(); quality.free(); };
-    if (eyeStyle) scene.apply_frame_with_eye_geometry(syntheticScene(), false, () => eyeStyle);
+    if (faceStyle) scene.apply_frame_with_face_geometry(syntheticScene(), false, () => faceStyle);
+    else if (eyeStyle) scene.apply_frame_with_eye_geometry(syntheticScene(), false, () => eyeStyle);
     else scene.apply_frame(syntheticScene(), false);
     scene.advance(40, false).free();
     return { scene, quality, target, foods, background, sources, metadata, catalog, snapshot, requests,
-      provider, resolve, render, state, close, transform: fn => { transform = fn; } };
+      provider, resolve, render, state, close, faceSource, transform: fn => { transform = fn; } };
   }
   function appearance(custom = [], cosmetic = 0) {
     const packed = wasm.decode_frame(syntheticScene(), false);
@@ -120,6 +132,7 @@ export function bodyRenderSmoke(wasm) {
     return failure;
   }
   try {
+    faceRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok, rejects, checkAtomic, bodyImages });
     const style = { ...vanillaEyes(), distance: 9.25, separation: 4.75, radius: 4.25,
       pupilRadius: 1.5, pupilTravel: 0.02, outlineWidth: 2.5,
       eyeColor: 0x123456, pupilColor: 0xabcdef, eyeOpacity: 0.6, pupilOpacity: 0.8 };
@@ -513,7 +526,9 @@ export function bodyRenderSmoke(wasm) {
         eq(trace[remoteStart].alphaWrites.length, 2);
         const remoteGlow = trace[remoteStart];
         ok(remoteGlow.alphaWrites.every(v => Number.isFinite(v.effective)));
-        ok(pupilAlpha < 1 && pupilAlpha > 0, 'a dying predecessor leaves a fractional eye entry alpha');
+        ok(pupilAlpha < 1 && pupilAlpha > 0, 'dying eyes fade before the unconditional face-exit alpha reset');
+        ok(trace.slice(firstEye, remoteStart).some(v => v.op === 'alpha' && v.requested === 1 && v.effective === 1),
+          'every completed face restores root alpha one before the next body');
         const n = boost.scene.own_curve(mode === 0 ? 1.7 : 1, false).length / 3;
         const glowCalls = own.filter(v => v.source === boost.sources[2] || v.source === boost.sources[3]);
         eq(glowCalls.length, n * (mode === 0 ? 1 : 2), 'applied quality gates inner shimmer independently of outer boost');

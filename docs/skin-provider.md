@@ -22,6 +22,13 @@ type CatalogEntry = {
   state: Status;
 };
 type AssetUse = { asset: number; sourceRect?: [number, number, number, number] };
+type PairedSideGeometry = {
+  forward: number; lateral: number; lateralBias: number; // finite 0..4096
+  rotationOffset: number; // finite 0..pi
+  imageScale: number; // finite 0 < value <= 256
+  pivotX: number; pivotY: number; // finite -65535..65535
+  width: number; height: number; // finite 0 < value <= 65535
+};
 type StandardEyes = {
   kind: 'standard';
   distance: number; separation: number; radius: number; pupilRadius: number;
@@ -49,6 +56,9 @@ type HostRecipe = { status: 'pending' | 'unsupported' } | {
   eyes: StandardEyes | { kind: 'none' };
   effects: (AssetUse & { kind: EffectKind; opacity: number })[];
   bodyStyle?: BodyStyle | null;
+  faceDecoration?: {
+    kind: 'paired-side-images'; geometry: PairedSideGeometry; image: AssetUse;
+  } | null;
   attachment?: AssetUse & {
     anchor: 'head'; scale: number; pivotX: number; pivotY: number; opacity: number;
   } | null;
@@ -99,7 +109,7 @@ frozen, and each asset use becomes:
     kind: 'canvas' | 'image' | null; width: number; height: number; status: Status;
   };
   sourceRect: readonly [number, number, number, number] | null;
-  sourceMode?: 'whole' | 'crop'; // emitted only when bodyStyle is present
+  sourceMode?: 'whole' | 'crop'; // bodyStyle uses, and every face-decoration image
 }
 ```
 
@@ -145,14 +155,37 @@ in the palette output and contribute their asset readiness, without adding a
 feature tag. Older singleton `boost-glow` effects remain valid, including their
 existing opacity range, but cannot substitute for per-palette glows.
 
-Only a present `bodyStyle` adds `sourceMode` to every output asset use (variants,
+A present `bodyStyle` adds `sourceMode` to every output asset use (variants,
 glows, effects and attachments): `whole` when the input omitted `sourceRect`,
 `crop` when it supplied one. An explicitly full rectangle remains `crop`, even
 though its numeric rectangle equals the normalized full rectangle of `whole`.
 Pending assets retain that mode while their normalized rectangle is null. The
-legacy output shape without a style remains exact and has no `sourceMode`.
+legacy uses without a body style retain their exact shape and omit `sourceMode`.
 The opt-in [standard-body renderer](standard-body-renderer.md) consumes this
 distinction as native `None` versus `Some(source_rect)`.
+
+Optional `faceDecoration` represents the fixed paired side-image family, following
+standard paired eyes. It requires `eyes.kind: 'standard'`; other face families
+remain unsupported. Its geometry and wrapper are copied and frozen, and its
+single image shares the same borrower, readiness and revision rules as body
+assets. Both emitted side draws use that exact source object. The image always
+has explicit `sourceMode`, including when `bodyStyle` is absent. Absence/null
+omits both the output field and the `paired-side-images` feature tag, preserving
+the exact legacy shape. No skin number or cosmetic marker enables it implicitly.
+
+All nine geometry scalars are required own data numbers. Nonnegative and signed
+domains preserve negative zero; strictly positive fields reject both zeros.
+These are validation bounds, not stock parameters. A pending image keeps a
+validated partial recipe; unsupported tags/assets still dominate pending. Hosts
+may project the numeric face before unrelated artwork is ready, but must first
+check required unsupported tags and complete face-family coverage. A host-status
+result with `recipe: null` has no installable face geometry. A trusted direct
+callback must not hide an unrepresented mouth, single eye, antenna or accessory.
+
+The renderer's readiness policy requires the side source to be ready before
+target reset. A sized pending canvas remains pending. This deliberately excludes
+startup blank-source draw equivalence. Same-size repaints require a new coherent
+revision; no pixel reads, URL loading or observers are added.
 
 A present style requires all five own data fields; no values are inferred or
 coerced. `detailedSegments` and `rotateSegments` are exact booleans. `swell` is

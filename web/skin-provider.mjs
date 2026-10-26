@@ -132,7 +132,7 @@ export function createSkinProvider({ trusted, realm, resolveHostRecipe, normaliz
         return asset;
       }
 
-      function assetUse(value) {
+      function assetUse(value, explicitMode = hasBodyStyle) {
         const asset = borrow(field(value, 'asset'));
         const rect = field(value, 'sourceRect');
         let sourceRect = null;
@@ -144,11 +144,11 @@ export function createSkinProvider({ trusted, realm, resolveHostRecipe, normaliz
             sourceRect = freeze([x, y, width, height]);
           }
         } else if (asset.width && asset.height) sourceRect = freeze([0, 0, asset.width, asset.height]);
-        return freeze({ asset, sourceRect, ...(hasBodyStyle ? { sourceMode: rect === undefined ? 'whole' : 'crop' } : {}) });
+        return freeze({ asset, sourceRect, ...(explicitMode ? { sourceMode: rect === undefined ? 'whole' : 'crop' } : {}) });
       }
 
       const palettes = freeze(list(field(normalized, 'palettes'), 1, 256, 'palettes').map(value => {
-        const variants = freeze(list(field(value, 'variants'), 1, 256, 'variants').map(assetUse));
+        const variants = freeze(list(field(value, 'variants'), 1, 256, 'variants').map(value => assetUse(value)));
         const glow = field(value, 'boostGlow');
         return freeze({ variants, ...(glow === undefined ? {} : { boostGlow: assetUse(glow) }) });
       }));
@@ -212,6 +212,22 @@ export function createSkinProvider({ trusted, realm, resolveHostRecipe, normaliz
         }
       }
       const attachmentInput = field(normalized, 'attachment');
+      const decorationInput = field(normalized, 'faceDecoration');
+      let faceDecoration = null;
+      if (decorationInput !== undefined && decorationInput !== null) {
+        if (decorationInput instanceof Promise) throw new TypeError('Face decoration must be synchronous');
+        const kind = choice(field(decorationInput, 'kind'), ['paired-side-images'], 'face decoration kind');
+        if (eyeKind !== 'standard') throw new TypeError('Paired side images require standard eyes');
+        const input = field(decorationInput, 'geometry');
+        if (input instanceof Promise) throw new TypeError('Face geometry must be synchronous');
+        const geometry = {};
+        for (const key of ['forward', 'lateral', 'lateralBias']) geometry[key] = number(field(input, key), 0, 4096, key);
+        geometry.rotationOffset = number(field(input, 'rotationOffset'), 0, Math.PI, 'rotationOffset');
+        geometry.imageScale = number(field(input, 'imageScale'), Number.MIN_VALUE, 256, 'imageScale');
+        for (const key of ['pivotX', 'pivotY']) geometry[key] = number(field(input, key), -65535, 65535, key);
+        for (const key of ['width', 'height']) geometry[key] = number(field(input, key), Number.MIN_VALUE, 65535, key);
+        faceDecoration = freeze({ kind, geometry: freeze(geometry), image: assetUse(field(decorationInput, 'image'), true) });
+      }
       let attachment = null;
       if (attachmentInput !== undefined && attachmentInput !== null) {
         attachment = freeze({
@@ -228,9 +244,11 @@ export function createSkinProvider({ trusted, realm, resolveHostRecipe, normaliz
         return tag;
       }));
       const supportedFeatures = freeze(['body-palettes', ...(eyeKind === 'standard' ? ['standard-eyes'] : []), ...effectKinds,
-        ...(attachment ? ['head-attachment'] : []), ...(bodyStyle ? ['standard-body-style'] : [])]);
+        ...(attachment ? ['head-attachment'] : []), ...(bodyStyle ? ['standard-body-style'] : []),
+        ...(faceDecoration ? ['paired-side-images'] : [])]);
       const recipe = freeze({ basePalette, custom, runs, palettes, variantMode, variantPeriod, eyes: freeze(eyes), effects,
-        attachment, supportedFeatures, unsupportedFeatures, ...(bodyStyle ? { bodyStyle } : {}) });
+        attachment, supportedFeatures, unsupportedFeatures, ...(bodyStyle ? { bodyStyle } : {}),
+        ...(faceDecoration ? { faceDecoration } : {}) });
       const statuses = [...borrowed.values()].map(asset => asset.status);
       const status = unsupportedFeatures.length || statuses.includes('unsupported') ? 'unsupported'
         : statuses.includes('pending') ? 'pending' : 'ready';

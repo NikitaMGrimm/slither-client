@@ -43,6 +43,81 @@ function bodyFixture() {
   return f;
 }
 
+const sideGeometry = () => ({ forward: 11.375, lateral: 3.125, lateralBias: 0.375,
+  rotationOffset: 0.287, imageScale: 0.3125, pivotX: 9.25, pivotY: -7.5, width: 47, height: 31 });
+function addDecoration(f) {
+  f.metadata.faceDecoration = { kind: 'paired-side-images', geometry: sideGeometry(), image: { asset: 0 } };
+}
+
+test('optional paired-side metadata preserves the exact legacy shape when absent or null', () => {
+  const f = fixture(); const legacy = f.resolve();
+  for (const value of [undefined, null]) {
+    f.metadata.faceDecoration = value; assert.deepEqual(f.resolve(), legacy);
+  }
+  addDecoration(f); const { recipe } = f.resolve();
+  assert(recipe.supportedFeatures.includes('paired-side-images'));
+  assert.equal(recipe.faceDecoration.image.asset, recipe.palettes[0].variants[0].asset);
+  assert.equal(recipe.faceDecoration.image.asset.source, f.canvas);
+  assert.equal(recipe.faceDecoration.image.sourceMode, 'whole');
+  assert.equal(Object.hasOwn(recipe.palettes[0].variants[0], 'sourceMode'), false);
+  assert(Object.isFrozen(recipe.faceDecoration)); assert(Object.isFrozen(recipe.faceDecoration.geometry));
+  const before = { ...recipe.faceDecoration.geometry };
+  f.metadata.faceDecoration.geometry.forward++;
+  assert.deepEqual(recipe.faceDecoration.geometry, before);
+  f.metadata.faceDecoration.image.sourceRect = [0, 0, 20, 30];
+  const crop = f.resolve().recipe.faceDecoration.image;
+  assert.equal(crop.sourceMode, 'crop'); assert.deepEqual(crop.sourceRect, [0, 0, 20, 30]);
+});
+
+test('paired side geometry validates every field and retains all admitted signed zeros', () => {
+  const f = fixture(); addDecoration(f); const input = f.metadata.faceDecoration;
+  for (const key of Object.keys(sideGeometry())) {
+    const original = input.geometry[key];
+    const positive = ['imageScale', 'width', 'height'].includes(key);
+    const upper = key === 'rotationOffset' ? Math.PI : key === 'imageScale' ? 256
+      : ['width', 'height', 'pivotX', 'pivotY'].includes(key) ? 65535 : 4096;
+    const lower = ['pivotX', 'pivotY'].includes(key) ? -65535 : positive ? Number.MIN_VALUE : 0;
+    for (const value of [NaN, Infinity, -Infinity, upper + 1, lower - 1, null, '1', undefined]) {
+      input.geometry[key] = value; assert.throws(() => f.resolve(), undefined, key);
+    }
+    input.geometry[key] = -0;
+    if (positive) assert.throws(() => f.resolve());
+    else assert(Object.is(f.resolve().recipe.faceDecoration.geometry[key], -0));
+    input.geometry[key] = original;
+    for (const accessor of [false, true]) {
+      input.geometry = sideGeometry(); delete input.geometry[key];
+      if (accessor) Object.defineProperty(input.geometry, key, { get() { throw new Error('must not run'); } });
+      else Object.setPrototypeOf(input.geometry, { [key]: original });
+      assert.throws(() => f.resolve());
+    }
+    input.geometry = sideGeometry();
+  }
+  for (const key of ['kind', 'geometry', 'image']) {
+    const original = input[key]; delete input[key]; assert.throws(() => f.resolve()); input[key] = original;
+  }
+  input.kind = 'antenna'; assert.throws(() => f.resolve()); input.kind = 'paired-side-images';
+  const valid = input.geometry; input.geometry = Object.assign(Promise.resolve(), valid);
+  assert.throws(() => f.resolve()); input.geometry = valid;
+  f.metadata.eyes = { kind: 'none' }; assert.throws(() => f.resolve());
+});
+
+test('side images share asset readiness, unsupported precedence and revision snapshots', () => {
+  const f = fixture(); addDecoration(f);
+  f.catalog.push({ source: null, state: 'pending' }); f.metadata.faceDecoration.image.asset = 2;
+  let result = f.resolve(); assert.equal(result.status, 'pending'); assert(result.recipe.faceDecoration.geometry);
+  assert.equal(result.recipe.faceDecoration.image.sourceMode, 'whole');
+  f.metadata.unsupportedFeatures = ['required-antenna']; assert.equal(f.resolve().status, 'unsupported');
+  f.metadata.unsupportedFeatures = []; f.catalog[2].state = 'unsupported'; assert.equal(f.resolve().status, 'unsupported');
+  f.catalog[2] = { source: f.canvas, state: 'pending' }; assert.equal(f.resolve().status, 'pending');
+  f.snapshot.revision = 'synthetic-2'; f.catalog[2].state = 'ready';
+  result = f.resolve(); assert.equal(result.status, 'ready');
+  assert.equal(result.recipe.faceDecoration.image.asset.source, f.canvas);
+  const old = result;
+  f.canvas.width = 28; f.snapshot.revision = 'synthetic-3';
+  assert.equal(f.resolve().recipe.faceDecoration.image.asset.width, 28);
+  assert.equal(old.recipe.faceDecoration.image.asset.width, 20);
+});
+
 test('only opt-in body output distinguishes whole-source from an explicit full crop', () => {
   const f = bodyFixture();
   f.metadata.palettes[0].variants = [{ asset: 0 }, { asset: 0, sourceRect: [0, 0, 20, 30] }];

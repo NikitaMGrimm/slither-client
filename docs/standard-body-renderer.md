@@ -58,9 +58,75 @@ the geometry retained on that appearance. Standard eyes are parsed into typed
 geometry using the same validator as the appearance-time API below. Numeric
 geometry and opacity comparisons distinguish signed zero, without a tolerance.
 The renderer never overwrites pupil travel or installs style at draw time.
-The existing `none` lane omits eyes without changing retained state. Attachments,
-antennas, special faces, singleton boost effects and unknown feature tags still
+The existing `none` lane omits eyes for nondecorated faces without changing retained
+state. Optional `faceDecoration` must match the retained paired-side kind and all
+nine geometry fields bit for bit, including signed zero; omission cannot discard
+a required retained decoration. Its feature tag must agree with its metadata,
+and it requires standard paired eyes. Attachments,
+antennas, other special faces, singleton boost effects and unknown feature tags still
 fail explicitly. Full-skin support is outside this renderer.
+
+## Complete ordinary paired faces
+
+`apply_frame_with_face_geometry(bytes, elapsedHeader, resolve)` adds owned
+`PairedFaceGeometry` to the same native/Wasm packet transaction as the eye-only
+API. The synchronous trusted callback receives the appearance request described
+below and returns explicit normalized data:
+
+```js
+// Check the adapter's complete face coverage and unsupported requirements first.
+const recipe = result.recipe; // validated partial provider recipe is sufficient
+return {
+  eyes: recipe.eyes,
+  decoration: recipe.faceDecoration == null
+    ? { kind: 'none' }
+    : { kind: 'paired-side-images', geometry: recipe.faceDecoration.geometry },
+};
+```
+
+Both eyes and decoration belong to the exact retained appearance, including
+duplicate/dead/reused IDs. Resolution occurs once in wire order after complete
+received validation, even for short, offscreen, immediately removed or later
+setup-cleared appearances. Late errors roll back the complete model; callback
+side effects remain external. The old packet and eye-only APIs install no
+decoration and preserve their default geometry and lifecycle.
+
+`render_standard` borrows the decoration image from its ready recipe using the
+same per-frame source pool as body assets. For basic stand-in bodies, use
+`render_with_face_decorations(target, palette0, palette1, palette2, background,
+qualityScale, detailedStyle, resolveFace)`. Its trusted callback receives the
+same visible retained-object request as `render_standard` and returns
+`{ revision, eyes, decoration }`, with explicit null or the provider-normalized
+`faceDecoration`. A ready face-only projection can come from a partial provider
+recipe while unrelated body assets are pending. Its own source must be ready;
+the outer provider status alone cannot establish this. Required unsupported
+features and complete face coverage remain the projecting adapter's responsibility.
+The old basic `render` rejects a visible decorated face before clearing.
+
+Each renderer prepares once. Layouts use the captured face heading, corrected
+double-precision head, scale, camera and zoom. Forward trig products multiply
+distance then entity scale; lateral distance scales before adding its unscaled
+bias. Negative side precedes positive side. Each image has identity screen
+transform, one complete translation, separate unnormalized rotation and the same
+local destination rectangle. Pivots and nominal dimensions are independent of
+source dimensions. Whole-source and explicit crop overloads remain distinct.
+Both images use one exact borrowed source at alpha 1, source-over, after both
+eye/pupil pairs and before the next snake. Pupils, spawn/death opacity and body
+quality do not modulate this lane. Whole-snake inclusive anchor visibility and
+short-face policy remain unchanged; no image/head culling or extra clock exists.
+
+All layouts, numeric coherence, shared catalog/source revisions, readiness,
+target aliases and budgets validate before reset. Backing/intrinsic dimensions
+and readiness are checked again after all callbacks. Per-image scopes unwind on
+Canvas exceptions and the disposable model is discarded; partial target pixels
+cannot be rolled back. No assets are loaded, copied or read back.
+
+This completes the represented ordinary paired face for trusted ready sources.
+Startup blank-source equivalence, actual antennas, mouth/single-eye families,
+accessories, general host recipe mapping, original pixels and extension packaging
+remain outside the capability boundary. Synthetic crop support is separate from
+whole-source fidelity evidence. Existing browser and external comparison results
+below predate this lane; they do not validate it.
 
 ## Appearance-time paired eyes
 
@@ -139,19 +205,24 @@ host repaint cannot be detected by dimension checks.
 Limits per recipe remain 256 palettes/runs/variants and catalog IDs 0..4095.
 Frame totals are at most 262,144 active curve samples, 524,304 body image commands,
 4096 referenced catalog entries (counted per recipe), 4096 distinct source objects
-and 262,144 asset uses. The aggregate command budget is checked by the planner
+and 262,144 asset uses, shared with face assets. A separate fixed ceiling allows
+1024 side-image commands (two per retained object, at most 512). The aggregate
+body command budget is checked by the planner
 before each complete plan allocation. No recipe, source, revision or command is
 cached in AnimatedScene after the call; live source references last only through
 submission. Hosts must keep sources ready and unchanged throughout that call.
 
 Background, arena and food precede snakes. Each snake completes body effects,
-death and both eye/pupil pairs before the next snake. Commands preserve separate
-center/local translations, stored tangent rotation, crop overload, destination
+death, both eye/pupil pairs and any paired side images before the next snake.
+Body commands preserve separate center/local translations, stored tangent rotation, crop overload, destination
 arithmetic, and source-over/lighter composition. Flattened commands first install
 the planner's effective scoped alpha, then issue its original requested alpha;
 Canvas ignores an invalid request rather than clamps it. Body root alpha is
-restored before eyes, whose last pupil alpha supplies the next body's entry
-alpha. Eye-less bodies leave their root alpha for the next snake.
+restored before eyes. The end of every ordinary face unconditionally restores
+root alpha 1, including nondecorated and eye-less faces, so the next body enters
+at 1. Standalone `plan_standard_body` retains its caller-supplied entry-alpha API.
+This corrects a static state-boundary discrepancy; it is not a claimed pixel
+failure from an invalid outer-boost request, whose validated formula is bounded.
 
 Short or coincident unsupported stored body geometry is omitted, while valid
 eyes and later snakes still draw. No synthetic anchors are added. Invalid recipe

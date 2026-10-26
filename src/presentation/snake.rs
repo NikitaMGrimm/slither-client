@@ -2,8 +2,8 @@
 
 use super::{
     AngleCorrections, BodyGeometry, CurveInput, CurveOutput, FrameStep, HeadCorrections,
-    HeadMotion, LengthPresentation, PresentationError, StandardEyeGeometry, StandardEyeState, Turn,
-    curve::single_anchor_eye_target, finite, sample_curve_with_heading,
+    HeadMotion, LengthPresentation, PairedFaceGeometry, PresentationError, StandardEyeGeometry,
+    StandardEyeState, Turn, curve::single_anchor_eye_target, finite, sample_curve_with_heading,
 };
 use crate::{
     math,
@@ -97,7 +97,7 @@ pub struct SnakePresentation {
     body: BodyGeometry,
     length: LengthPresentation,
     eyes: StandardEyeState,
-    eye_geometry: StandardEyeGeometry,
+    face_geometry: PairedFaceGeometry,
     turn_rate: f64,
     speed_angle_divisor: f64,
     base_cruise_speed: f64,
@@ -158,7 +158,25 @@ impl SnakePresentation {
         zoom: f64,
         eye_geometry: StandardEyeGeometry,
     ) -> Result<Self, PresentationError> {
-        eye_geometry.validate()?;
+        Self::from_appearance_with_face_geometry(
+            appearance,
+            setup,
+            zoom,
+            PairedFaceGeometry {
+                eyes: eye_geometry,
+                decoration: None,
+            },
+        )
+    }
+
+    /// Install the complete paired face before the first update, per retained object.
+    pub fn from_appearance_with_face_geometry(
+        appearance: &Appearance,
+        setup: &Setup,
+        zoom: f64,
+        face_geometry: PairedFaceGeometry,
+    ) -> Result<Self, PresentationError> {
+        face_geometry.validate()?;
         validate_zoom(zoom)?;
         validate_mass(appearance.fam)?;
         finite(&[
@@ -216,7 +234,7 @@ impl SnakePresentation {
             body,
             length,
             eyes: StandardEyeState::new(appearance.heading, appearance.wanted_heading)?,
-            eye_geometry,
+            face_geometry,
             turn_rate: setup.mamu,
             speed_angle_divisor: setup.spangdv,
             base_cruise_speed: setup.nsp1,
@@ -458,7 +476,7 @@ impl SnakePresentation {
                 next.alive,
             )?;
             next.eyes
-                .advance(step, next.alive, next.eye_geometry.pupil_travel)?;
+                .advance(step, next.alive, next.face_geometry.eyes.pupil_travel)?;
             next.body.advance(step.whole_steps);
             next.head_corrections.advance(step.whole_steps);
             next.angle_corrections.advance(step.whole_steps);
@@ -553,7 +571,12 @@ impl SnakePresentation {
 
     /// Standard paired-eye geometry; special topologies are not inferred from skin IDs.
     pub fn eye_geometry(&self) -> &StandardEyeGeometry {
-        &self.eye_geometry
+        &self.face_geometry.eyes
+    }
+
+    /// Complete appearance-owned numeric style, independent of wire-ID lookup.
+    pub fn face_geometry(&self) -> &PairedFaceGeometry {
+        &self.face_geometry
     }
 
     /// Original custom bytes on this retained appearance, independent of ID reuse.

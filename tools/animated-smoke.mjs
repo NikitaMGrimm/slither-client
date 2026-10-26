@@ -28,6 +28,36 @@ export function animatedSmoke(wasm) {
     pupilRadius: 3.5, pupilTravel: 2.3, outlineWidth: 0, eyeColor: 0xffffff, pupilColor: 0,
     outlineColor: 0, eyeOpacity: 0.75, pupilOpacity: 1, angleSmoothing: 0.12 });
   const coupledEyes = new wasm.AnimatedScene(0);
+  const pairedFace = new wasm.AnimatedScene(0);
+  try {
+    const geometry = { forward: 11.375, lateral: 3.125, lateralBias: 0.375, rotationOffset: 0.287,
+      imageScale: 0.3125, pivotX: -0, pivotY: -7.5, width: 47, height: 31 };
+    const face = { eyes: { ...standardEyes(), pupilTravel: 0.02 },
+      decoration: { kind: 'paired-side-images', geometry } };
+    let count = 0;
+    const short = ownAppearance().slice(0, -22);
+    pairedFace.apply_frame_with_face_geometry(bundle(syntheticSetup(), short, [115, 0, 0, 0],
+      ownAppearance(), syntheticSetup(), short), false, request => {
+      assert.equal(Object.getPrototypeOf(request), Object.prototype); count++; return face;
+    });
+    assert.equal(count, 3, 'face callback resolves each appearance once, including removal and bundled setup');
+    face.eyes.pupilTravel = 200; geometry.forward = 400;
+    pairedFace.advance(4, false).free();
+    assert.equal(JSON.parse(pairedFace.snapshot()).own.eyes.pupilX, 0.02);
+    const before = [pairedFace.snapshot(), pairedFace.drawn_snakes(), pairedFace.camera_samples()];
+    const valid = { eyes: standardEyes(), decoration: { kind: 'none' } };
+    for (const key of ['eyes', 'decoration']) {
+      for (const accessor of [true, false]) {
+        const value = { ...valid }; delete value[key];
+        if (accessor) Object.defineProperty(value, key, { get() { throw new Error('getter must not run'); } });
+        else Object.setPrototypeOf(value, { [key]: valid[key] });
+        assert.throws(() => pairedFace.apply_frame_with_face_geometry(bundle(ownAppearance()), false, () => value));
+        assert.deepEqual([pairedFace.snapshot(), pairedFace.drawn_snakes(), pairedFace.camera_samples()], before);
+      }
+    }
+    const promised = Object.assign(Promise.resolve(), valid);
+    assert.throws(() => pairedFace.apply_frame_with_face_geometry(bundle(ownAppearance()), false, () => promised));
+  } finally { pairedFace.free(); }
   try {
     const requests = [];
     const metadata = [0.02, 0.04].map(pupilTravel => ({ ...standardEyes(), pupilTravel }));
