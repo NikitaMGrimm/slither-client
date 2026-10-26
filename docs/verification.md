@@ -25,6 +25,13 @@ including spawn, update, removal, food, setup truncations and atomic rollback.
 It needs no browser, external reference, or socket. Keep
 this checkout's `target/` separate from other projects and running jobs.
 
+The web build uses the matching cdylib Wasm path reported by its successful Cargo
+invocation. `CARGO_TARGET_DIR` and Cargo target-directory configuration are
+respected; a missing or ambiguous artifact fails without using a stale default.
+Synthetic tooling checks cover selection and failure propagation. Integrated
+default and custom-target builds passed the real ABI smoke; custom bindings
+matched an independent bindgen run and left the default artifact unchanged.
+
 CI runs repository guards and npm tests, native Rust checks on Linux and Windows,
 and the web build plus Wasm ABI smoke test on Linux. It runs on pushes to `main`,
 pull requests, and manual dispatch. Normal tests and CI require no external

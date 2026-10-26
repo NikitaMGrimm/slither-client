@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Select web-build Wasm from Cargo's artifact report, including configured target
+  directories, and reject missing or ambiguous artifacts before binding.
 - Add a separate trusted host recipe provider with bounded metadata, explicit
   readiness/revisions and exact borrowed asset identities. No recipes or artwork
   are bundled; renderer and extension integration remain pending.
