@@ -19,6 +19,8 @@ mod client;
 mod curve;
 mod eyes;
 mod follow_camera;
+mod food;
+mod food_painter;
 mod length;
 mod quality;
 mod snake;
@@ -43,6 +45,15 @@ pub use curve::{
 };
 pub use eyes::{EyeLayoutInput, EyePair, StandardEyeGeometry, StandardEyeLayout, StandardEyeState};
 pub use follow_camera::{FollowCamera, INITIAL_ZOOM};
+pub use food::{
+    FoodConsume, FoodEaterPose, FoodError, FoodFactoryInput, FoodInstance, FoodPalette,
+    FoodPresentation, FoodSnapshot, FoodSource, FoodSources, FoodSpawn, FoodWorld,
+    MAX_RETAINED_FOODS, SnakeObjectToken, food_palette,
+};
+pub use food_painter::{
+    FoodCullBounds, FoodImageCommand, FoodImageDraw, FoodPaintCounts, FoodPaintError,
+    FoodPaintInput, FoodPaintPass, FoodPaintPlan, MAX_FOOD_PAINT_COMMANDS, plan_food,
+};
 pub use length::LengthPresentation;
 pub use quality::{QualityMode, QualitySnapshot, QualityState};
 pub use snake::{AnchorView, SnakeMetrics, SnakePresentation};
