@@ -14,10 +14,12 @@ use crate::{math, state::Point};
 
 mod body;
 mod camera;
+mod eyes;
 mod length;
 
 pub use body::{BODY_SAMPLES, BodyGeometry, BodyPoint, MAX_RETAINED_BODY_POINTS};
 pub use camera::{CAMERA_SAMPLES, CameraCorrections};
+pub use eyes::{EyeLayoutInput, EyePair, StandardEyeGeometry, StandardEyeLayout, StandardEyeState};
 pub use length::LengthPresentation;
 
 /// Number of samples in each head position/fraction correction channel.
