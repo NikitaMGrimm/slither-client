@@ -481,11 +481,17 @@ fn synthetic_spawn_direction_and_removal_contracts() {
             Err(StateError::InvalidPacket(b's'))
         );
         assert_eq!(state, before);
+        let mut expected = before.clone();
+        let expected_report = expected
+            .apply_frame(&appearance(0, b'0', 123, 2), ElapsedHeader::Absent)
+            .unwrap();
         assert_eq!(
-            state.apply_frame(&appearance(0, wire, 123, 2), ElapsedHeader::Absent),
-            Err(StateError::InvalidPacket(b's'))
+            state
+                .apply_frame(&appearance(0, wire, 123, 2), ElapsedHeader::Absent)
+                .unwrap(),
+            expected_report
         );
-        assert_eq!(state, before);
+        assert_eq!(state, expected);
     }
     // Preserve accepted missing flags and all byte values: only one means death.
     for flag in std::iter::once(None).chain((0..=255).map(Some)) {
@@ -657,6 +663,29 @@ fn synthetic_bundled_removal_requests_preserve_order_and_all_or_nothing_publicat
     let mut malformed_framing = bytes;
     malformed_framing.push(0);
     assert_rollback(&mut before.clone(), &malformed_framing);
+}
+
+#[test]
+fn synthetic_unknown_appearance_direction_preserves_legacy_bundle_rollback() {
+    let before = cached_state();
+    let frame = bundle(&[
+        setup(),
+        appearance(1, b'0', 539, 3),
+        appearance(17, 255, 123, 2),
+        vec![b'r', 0],
+    ]);
+    let mut legacy = before.clone();
+    assert_eq!(
+        legacy.apply_frame(&frame, ElapsedHeader::Absent),
+        Err(StateError::InvalidPacket(b'r'))
+    );
+    assert_eq!(legacy, before);
+    let mut collecting = before.clone();
+    assert_eq!(
+        collecting.apply_frame_with_events(&frame, ElapsedHeader::Absent),
+        Err(StateError::InvalidPacket(b's'))
+    );
+    assert_eq!(collecting, before);
 }
 
 #[test]
@@ -1088,7 +1117,6 @@ fn synthetic_all_supported_truncations_and_malformed_tails_are_atomic() {
     }
     for tail in [
         vec![b'z', 0, 0, 0],
-        appearance(0, b'3', 539, 3),
         vec![b'r', 0, 0, 0],
         vec![b's', 0, 0, 0, 0],
     ] {
