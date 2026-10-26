@@ -171,6 +171,15 @@ unimplemented. This preview does not establish visual or gameplay equivalence.
 
 ## Browser rendering
 
+`QualityState` independently models desktop quality preference and applied mode.
+Connection initialization applies the preference; preview starts high quality.
+Interpolation consumes the lag-adjusted update delta before the statistics
+transition. Statistics use the raw draw count over a strictly greater than
+1000-ms interval, retaining fallback/recovery history and its negative residual.
+The caller owns that draw counter. `DesktopQuality` exposes this same state to
+Wasm, validates numeric modes/counts before narrowing, and borrows an owned
+animation step. It does not change the animated preview's renderer or effects.
+
 `web/asset-bridge.mjs` borrows the exact existing canvas and loaded image objects
 from a supplied trusted page realm. It validates their types and readiness
 without copying or loading assets. The wasm32 bindings in `src/browser.rs` expose

@@ -1,8 +1,7 @@
 //! Explicit-time presentation primitives, separate from received state and physics.
 //!
-//! This foundation covers timing, head prediction, entity offsets, visual length,
-//! and draw-driven camera offsets. It does not implement body curves, cosmetics,
-//! a complete following camera, or session logic.
+//! Timing, prediction, corrected geometry, camera and quality state have explicit
+//! packet, update and draw inputs. These types own no sockets or raster assets.
 
 use std::{
     error::Error,
@@ -18,6 +17,7 @@ mod client;
 mod curve;
 mod follow_camera;
 mod length;
+mod quality;
 mod snake;
 
 pub use body::{BODY_SAMPLES, BodyGeometry, BodyPoint, MAX_RETAINED_BODY_POINTS};
@@ -30,6 +30,7 @@ pub use curve::{
 };
 pub use follow_camera::{FollowCamera, INITIAL_ZOOM};
 pub use length::LengthPresentation;
+pub use quality::{QualityMode, QualitySnapshot, QualityState};
 pub use snake::{AnchorView, SnakeMetrics, SnakePresentation};
 
 /// Number of samples in each head position/fraction correction channel.
