@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 112" width="480" height="112" role="img" aria-labelledby="title desc">
+  <title id="title">SlitherClient</title>
+  <desc id="desc">An original square blue angular snake beside the SlitherClient wordmark.</desc>
+  <style>
+    .blue { fill: #0969da; }
+    .surface { fill: #ffffff; }
+    .word { fill: #1f2328; }
+    @media (prefers-color-scheme: dark) {
+      .blue { fill: #4493f8; }
+      .surface { fill: #0d1117; }
+      .word { fill: #e6edf3; }
+    }
+  </style>
+  <rect class="blue" x="8" y="8" width="96" height="96"/>
+  <rect class="surface" x="12" y="12" width="88" height="88"/>
+  <path class="blue" d="M26 26H86V44H42V50H86V86H26V68H70V62H26Z"/>
+  <rect class="surface" x="76" y="30" width="6" height="6"/>
+  <text class="word" x="126" y="72" font-family="ui-monospace, Consolas, monospace" font-size="40" font-weight="700">Slither<tspan class="blue">Client</tspan></text>
+</svg>

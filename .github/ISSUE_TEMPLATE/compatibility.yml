@@ -1,0 +1,37 @@
+name: Compatibility investigation
+description: Propose or document a bounded client compatibility check.
+title: "compatibility: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        No server compatibility or parity is currently claimed. Compilation alone is not a compatibility result.
+        Keep official source, translations, dynamic challenge snippets, source maps, assets, and raw captures outside this issue. Reference public identifiers and concise textual observations only.
+  - type: input
+    id: environment
+    attributes:
+      label: Client revision and browser environment
+      description: Commit, browser version, OS, and relevant configuration.
+    validations:
+      required: true
+  - type: textarea
+    id: target
+    attributes:
+      label: Comparison target and scope
+      description: Public reference URL/fingerprint or server implementation/version, plus the specific behavior under investigation. Exclude private endpoints and credentials.
+    validations:
+      required: true
+  - type: textarea
+    id: procedure
+    attributes:
+      label: Procedure and observations
+      description: Reproducible steps and concise textual results. Distinguish proposed checks from completed checks; label any synthetic fixtures.
+    validations:
+      required: true
+  - type: textarea
+    id: limits
+    attributes:
+      label: Evidence limits
+      description: Separate local-reference comparisons, simulator results, browser execution, and official-server acceptance. State what remains unknown.
+    validations:
+      required: true

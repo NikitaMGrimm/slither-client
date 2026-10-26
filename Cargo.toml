@@ -1,0 +1,20 @@
+[package]
+name = "slither-client"
+version = "0.1.0-alpha.0"
+edition = "2024"
+rust-version = "1.99"
+description = "Independent Rust and WebAssembly browser-client scaffold for Slither-compatible servers"
+repository = "https://github.com/NikitaMGrimm/slither-client"
+readme = "README.md"
+license = "MIT"
+publish = false
+include = ["/src", "/Cargo.lock", "/README.md", "/LICENSE"]
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

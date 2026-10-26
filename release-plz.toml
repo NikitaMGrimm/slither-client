@@ -1,0 +1,8 @@
+# Dormant until the first release is ready. No workflow invokes release-plz.
+[workspace]
+release = false
+publish = false
+git_tag_enable = false
+git_release_enable = false
+dependencies_update = false
+semver_check = false
