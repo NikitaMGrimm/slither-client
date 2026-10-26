@@ -334,6 +334,42 @@ fn one_anchor_has_face_without_body_and_uses_raw_heading_target_fallback() {
 }
 
 #[test]
+fn one_emitted_sample_retains_body_and_raw_eye_target_after_tail_drain() {
+    let mut c = AnimatedClient::new(0.).unwrap();
+    // Two synthetic retained anchors with the front exactly at the stationary head.
+    let mut spawn = appearance(7, 2000, 2);
+    let tail = spawn.len() - 8;
+    spawn[tail..tail + 3].copy_from_slice(&u24(1958 * 5));
+    apply(
+        &mut c,
+        &[setup(), spawn, vec![b'r', 0, 7], vec![b'r', 0, 7]],
+    );
+    for index in 1..=12 {
+        c.advance(f64::from(index) * 40., false).unwrap();
+    }
+    let snake = c.own_snake().unwrap();
+    assert_eq!(snake.body().points().len(), 2);
+    assert_eq!(snake.metrics().logical_segments, 0);
+    assert_eq!(snake.metrics().displayed_length, -0.6);
+    for detailed_style in [false, true] {
+        let output = c
+            .prepare_draw_with_style(800, 600, 1., detailed_style)
+            .unwrap();
+        assert_eq!(output.len(), 1);
+        let curve = output[0].curve.as_ref().unwrap();
+        assert_eq!(curve.samples.len(), 1);
+        assert_eq!(curve.samples[0].x, 2000.);
+        assert_eq!(curve.samples[0].y, 1000.);
+        assert_eq!(curve.samples[0].angle, 0.);
+        assert_eq!(curve.target_eye_heading, output[0].metrics.heading);
+        assert_eq!(
+            c.own_snake().unwrap().eyes().target_heading(),
+            output[0].metrics.heading
+        );
+    }
+}
+
+#[test]
 fn prepared_outputs_keep_draw_order_duplicate_ids_and_culled_ordinal_gaps() {
     let mut c = client(3);
     apply(

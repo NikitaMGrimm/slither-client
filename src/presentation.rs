@@ -29,6 +29,7 @@ pub use client::{
 };
 pub use curve::{
     CurveInput, CurveOutput, CurveSample, CurveVertex, MAX_CURVE_SAMPLES, sample_curve,
+    sample_curve_with_heading,
 };
 pub use eyes::{EyeLayoutInput, EyePair, StandardEyeGeometry, StandardEyeLayout, StandardEyeState};
 pub use follow_camera::{FollowCamera, INITIAL_ZOOM};

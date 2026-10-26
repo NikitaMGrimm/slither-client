@@ -60,7 +60,8 @@ pub struct CurveOutput {
     pub samples: Vec<CurveSample>,
     /// Point spacing after exactly one draw transition.
     pub point_spacing: f64,
-    /// Eye target derived from the already-rounded second tangent plus pi.
+    /// Eye target from the rounded second tangent plus pi, or the supplied raw
+    /// heading when `sample_curve_with_heading` emits fewer than two samples.
     pub target_eye_heading: f64,
     vertices: Vec<CurveVertex>,
     redistribution_count: usize,
@@ -258,6 +259,23 @@ fn positive(value: f64) -> Result<(), PresentationError> {
 /// Sample one visible curve, preserving retained geometry and draw arithmetic.
 /// Call this exactly once per visible draw; no animation clock advances here.
 pub fn sample_curve(input: CurveInput<'_>) -> Result<CurveOutput, PresentationError> {
+    sample_curve_inner(input, None)
+}
+
+/// Sample with the raw head heading needed when fewer than two samples are emitted.
+/// A single sample retains its zero tangent; only the eye target uses this heading.
+pub fn sample_curve_with_heading(
+    input: CurveInput<'_>,
+    raw_heading: f64,
+) -> Result<CurveOutput, PresentationError> {
+    finite(&[raw_heading])?;
+    sample_curve_inner(input, Some(raw_heading))
+}
+
+fn sample_curve_inner(
+    input: CurveInput<'_>,
+    raw_heading: Option<f64>,
+) -> Result<CurveOutput, PresentationError> {
     finite(&[
         input.corrected_head.x,
         input.corrected_head.y,
@@ -508,7 +526,7 @@ pub fn sample_curve(input: CurveInput<'_>) -> Result<CurveOutput, PresentationEr
         samples[0].angle = samples[1].angle;
         f64::from(samples[1].angle) + PI
     } else {
-        return Err(PresentationError);
+        raw_heading.ok_or(PresentationError)?
     };
     Ok(CurveOutput {
         samples,
