@@ -105,6 +105,8 @@ targets blend every sample at the current cursor without changing display
 immediately. Connected whole-step updates consume samples and replace consumed
 slots with the latest target; a later positive connected update performs deferred
 cleanup. Setup replaces radii while preserving cursor and pending cadence.
+Inputs must be positive and finite; computed finite samples retain cancellation
+to zero, including at the final unit weight, without an endpoint shortcut.
 `BoundarySmoother` exposes the standalone state to Wasm and borrows existing owned
 animation steps. Neither API changes the scene's arena drawing yet.
 

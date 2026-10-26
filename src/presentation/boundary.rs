@@ -57,13 +57,14 @@ impl BoundaryRadius {
     /// Blend every pending absolute sample toward a new target in ring order.
     /// The displayed radius changes only on a later eligible whole-step update.
     /// Equal targets still blend existing samples and restart the pending window.
+    /// Computed samples retain cancellation to zero even for positive targets.
     pub fn set_target(&mut self, radius: f64) -> Result<(), PresentationError> {
         validate_radius(radius)?;
         let mut samples = self.samples;
         for (offset, weight) in self.weights.iter().enumerate() {
             let slot = (self.index + offset) % BOUNDARY_SAMPLES;
             let sample = samples[slot] + (radius - samples[slot]) * weight;
-            validate_radius(sample)?;
+            finite(&[sample])?;
             samples[slot] = sample;
         }
         self.samples = samples;
