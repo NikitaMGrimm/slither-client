@@ -90,6 +90,11 @@ retains trusted normalized geometry before the first pupil update. Both render
 paths consume that style; standard recipes must match it exactly. The existing
 packet API and synthetic page retain their default paired-eye geometry.
 
+An additive [paired-face API](docs/standard-body-renderer.md#complete-ordinary-paired-faces)
+also retains optional geometric side images and composes the complete represented
+face through both renderers with trusted ready borrowed sources. Host skin mapping,
+startup loading equivalence, other special faces and extension packaging remain pending.
+
 CI checks native Rust on Linux and Windows and runs a real Wasm ABI smoke test
 on Linux. Release-plz remains dormant; ordinary pushes do not publish artifacts.
 See [releases](docs/releases.md) and the [roadmap](docs/roadmap.md).

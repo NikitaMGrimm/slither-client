@@ -4,8 +4,8 @@ use std::{error::Error, fmt};
 
 use super::{
     AnchorView, BodyPaintGeometry, BodyPaintSample, BoundaryRadius, CurveOutput, FollowCamera,
-    FrameClock, FrameStep, MAX_CURVE_SAMPLES, PresentationError, SnakeMetrics, SnakePresentation,
-    StandardEyeGeometry, finite,
+    FrameClock, FrameStep, MAX_CURVE_SAMPLES, PairedFaceGeometry, PairedSideGeometry,
+    PresentationError, SnakeMetrics, SnakePresentation, StandardEyeGeometry, finite,
 };
 use crate::{
     protocol::ElapsedHeader,
@@ -64,6 +64,8 @@ pub struct PreparedSnake {
     pub pupil: Point,
     /// Caller-ready standard paired-eye geometry and style.
     pub eye_geometry: StandardEyeGeometry,
+    /// Appearance-owned side-image geometry; assets are borrowed only during submission.
+    pub face_decoration: Option<PairedSideGeometry>,
 }
 
 /// A failed received, numeric, or retention transition; the entire client is preserved.
@@ -237,6 +239,26 @@ impl AnimatedClient {
         E: From<ClientPresentationError>,
         F: FnMut(&Appearance) -> Result<StandardEyeGeometry, E>,
     {
+        self.apply_frame_with_face_geometry(bytes, header, |appearance| {
+            Ok(PairedFaceGeometry {
+                eyes: resolve(appearance)?,
+                decoration: None,
+            })
+        })
+    }
+
+    /// Resolve the complete paired face in the same single staged event transaction.
+    /// Numeric metadata is owned before any update; callback side effects remain external.
+    pub fn apply_frame_with_face_geometry<E, F>(
+        &mut self,
+        bytes: &[u8],
+        header: ElapsedHeader,
+        mut resolve: F,
+    ) -> Result<FrameReport, E>
+    where
+        E: From<ClientPresentationError>,
+        F: FnMut(&Appearance) -> Result<PairedFaceGeometry, E>,
+    {
         let mut received = self.received.clone();
         let applied = received
             .apply_frame_with_events(bytes, header)
@@ -274,7 +296,7 @@ impl AnimatedClient {
                         .ok_or(StateError::MissingSetup)
                         .map_err(ClientPresentationError::from)?;
                     let geometry = resolve(&appearance)?;
-                    let snake = SnakePresentation::from_appearance_with_eye_geometry(
+                    let snake = SnakePresentation::from_appearance_with_face_geometry(
                         &appearance,
                         setup,
                         next.camera.zoom(),
@@ -598,6 +620,7 @@ impl AnimatedClient {
                 face_heading,
                 pupil: entry.snake.eyes().pupil(),
                 eye_geometry: *entry.snake.eye_geometry(),
+                face_decoration: entry.snake.face_geometry().decoration,
             });
         }
         Ok(prepared)

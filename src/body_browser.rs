@@ -7,7 +7,8 @@ use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, HtmlImageElement};
 use crate::presentation::{
     BodyAsset, BodyAssetStatus, BodyAssetUse, BodyBlend, BodyFade, BodyImageCommand,
     BodyPaintRecipe, BodyPalette, BodyRect, BodyRun, BodyStyle, BodyVariantMode,
-    ClientPresentationError, SnakePresentation, StandardEyeGeometry,
+    ClientPresentationError, PairedFaceGeometry, PairedSideGeometry, PairedSideLayout,
+    SnakePresentation, StandardEyeGeometry,
 };
 use crate::state::Appearance;
 
@@ -32,7 +33,7 @@ impl From<JsValue> for ResolveError {
 // Read own data fields, never inherited metadata or metadata accessors. The
 // callback, realm and live DOM sources remain trusted synchronous capabilities.
 fn field(value: &JsValue, key: &str) -> Result<JsValue, JsValue> {
-    if !value.is_object() || value.is_null() {
+    if !value.is_object() || value.is_null() || value.is_instance_of::<js_sys::Promise>() {
         return Err(error(format!("expected record at {key}")));
     }
     let descriptor = Object::get_own_property_descriptor(
@@ -167,6 +168,65 @@ pub(crate) fn same_eyes(a: &StandardEyeGeometry, b: &StandardEyeGeometry) -> boo
         .all(|(a, b)| a.to_bits() == b.to_bits())
 }
 
+fn side_geometry(value: &JsValue) -> Result<PairedSideGeometry, JsValue> {
+    Ok(PairedSideGeometry {
+        forward: num(field(value, "forward")?, 0., 4096.)?,
+        lateral: num(field(value, "lateral")?, 0., 4096.)?,
+        lateral_bias: num(field(value, "lateralBias")?, 0., 4096.)?,
+        rotation_offset: num(field(value, "rotationOffset")?, 0., std::f64::consts::PI)?,
+        image_scale: num(field(value, "imageScale")?, f64::from_bits(1), 256.)?,
+        pivot_x: num(field(value, "pivotX")?, -65535., 65535.)?,
+        pivot_y: num(field(value, "pivotY")?, -65535., 65535.)?,
+        width: num(field(value, "width")?, f64::from_bits(1), 65535.)?,
+        height: num(field(value, "height")?, f64::from_bits(1), 65535.)?,
+    })
+}
+
+/// Explicit numeric callback has no provider envelope or readiness dependency.
+pub(crate) fn paired_face(value: &JsValue) -> Result<PairedFaceGeometry, JsValue> {
+    if value.is_instance_of::<js_sys::Promise>() {
+        return Err(error("face metadata must be synchronous"));
+    }
+    let decoration = field(value, "decoration")?;
+    let decoration = match text(field(&decoration, "kind")?)?.as_str() {
+        "none" => None,
+        "paired-side-images" => Some(side_geometry(&field(&decoration, "geometry")?)?),
+        _ => return Err(error("unsupported face decoration")),
+    };
+    Ok(PairedFaceGeometry {
+        eyes: standard_eyes(&field(value, "eyes")?)?,
+        decoration,
+    })
+}
+
+fn revision(value: JsValue) -> Result<JsValue, JsValue> {
+    if let Some(s) = value.as_string() {
+        if s.is_empty() || s.encode_utf16().count() > 128 {
+            return Err(error("invalid revision"));
+        }
+    } else {
+        let n = num(value.clone(), 0., 9_007_199_254_740_991.)?;
+        if n.fract() != 0. {
+            return Err(error("invalid revision"));
+        }
+    }
+    Ok(value)
+}
+
+pub(crate) struct FaceDecoration {
+    pub(crate) geometry: PairedSideGeometry,
+    asset: BodyAsset,
+    source_rect: Option<BodyRect>,
+}
+
+pub(crate) fn same_decoration(a: Option<&FaceDecoration>, b: Option<&PairedSideGeometry>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => a.geometry.same_bits(b),
+        _ => false,
+    }
+}
+
 /// Each callback gets a new plain request and a copied custom byte array.
 pub(crate) fn request(
     ordinal: usize,
@@ -244,6 +304,68 @@ impl BorrowedSources {
         Ok(())
     }
 
+    /// A normalized face-only projection can be ready while unrelated body
+    /// assets are pending. The caller owns the projection's feature coverage.
+    pub(crate) fn resolve_face(
+        &mut self,
+        callback: &Function,
+        request: &Object,
+        retained: &PairedFaceGeometry,
+        target: &HtmlCanvasElement,
+    ) -> Result<Option<FaceDecoration>, JsValue> {
+        let value = callback.call1(&JsValue::UNDEFINED, request)?;
+        if value.is_instance_of::<js_sys::Promise>() {
+            return Err(error("face source must be synchronous"));
+        }
+        let revision = revision(field(&value, "revision")?)?;
+        if !same_eyes(&standard_eyes(&field(&value, "eyes")?)?, &retained.eyes) {
+            return Err(error(
+                "recipe eyes differ from retained appearance geometry",
+            ));
+        }
+        let raw = field(&value, "decoration")?;
+        if raw.is_undefined() {
+            return Err(error("explicit face decoration or null required"));
+        }
+        let decoration =
+            self.decoration(&raw, &mut Vec::new(), &mut Vec::new(), &revision, target)?;
+        if !same_decoration(decoration.as_ref(), retained.decoration.as_ref()) {
+            return Err(error(
+                "recipe decoration differs from retained appearance geometry",
+            ));
+        }
+        Ok(decoration)
+    }
+
+    fn decoration(
+        &mut self,
+        value: &JsValue,
+        assets: &mut Vec<BodyAsset>,
+        catalog_ids: &mut Vec<usize>,
+        revision: &JsValue,
+        target: &HtmlCanvasElement,
+    ) -> Result<Option<FaceDecoration>, JsValue> {
+        if value.is_null() || value.is_undefined() {
+            return Ok(None);
+        }
+        if text(field(value, "kind")?)? != "paired-side-images" {
+            return Err(error("unsupported face decoration"));
+        }
+        let geometry = side_geometry(&field(value, "geometry")?)?;
+        let usage = self.usage(
+            assets,
+            catalog_ids,
+            &field(value, "image")?,
+            revision,
+            target,
+        )?;
+        Ok(Some(FaceDecoration {
+            geometry,
+            asset: assets[usage.asset],
+            source_rect: usage.source_rect,
+        }))
+    }
+
     pub(crate) fn resolve(
         &mut self,
         callback: &Function,
@@ -251,21 +373,14 @@ impl BorrowedSources {
         target: &HtmlCanvasElement,
     ) -> Result<Recipe, JsValue> {
         let snapshot = callback.call1(&JsValue::UNDEFINED, request)?;
+        if snapshot.is_instance_of::<js_sys::Promise>() {
+            return Err(error("recipe must be synchronous"));
+        }
         integer(field(&snapshot, "schema")?, 1, 1)?;
         if text(field(&snapshot, "status")?)? != "ready" {
             return Err(error("standard body recipe is pending or unsupported"));
         }
-        let revision = field(&snapshot, "revision")?;
-        if let Some(s) = revision.as_string() {
-            if s.is_empty() || s.encode_utf16().count() > 128 {
-                return Err(error("invalid revision"));
-            }
-        } else {
-            let n = num(revision.clone(), 0., 9_007_199_254_740_991.)?;
-            if n.fract() != 0. {
-                return Err(error("invalid revision"));
-            }
-        }
+        let revision = revision(field(&snapshot, "revision")?)?;
         let raw = field(&snapshot, "recipe")?;
         if !field(&raw, "attachment")?.is_null() {
             return Err(error("attachments are unsupported by standard renderer"));
@@ -283,6 +398,7 @@ impl BorrowedSources {
                 "shadow",
                 "death-highlight",
                 "standard-body-style",
+                "paired-side-images",
             ]
             .contains(&feature.as_str())
                 || features.contains(&feature)
@@ -297,8 +413,12 @@ impl BorrowedSources {
             "standard" => Some(standard_eyes(&eyes)?),
             _ => return Err(error("unsupported eye geometry")),
         };
-        if features.len() != if eyes.is_some() { 6 } else { 5 }
+        let decoration = field(&raw, "faceDecoration")?;
+        let has_decoration = !decoration.is_null() && !decoration.is_undefined();
+        if features.len() != 5 + usize::from(eyes.is_some()) + usize::from(has_decoration)
             || features.iter().any(|f| f == "standard-eyes") != eyes.is_some()
+            || features.iter().any(|f| f == "paired-side-images") != has_decoration
+            || (has_decoration && eyes.is_none())
         {
             return Err(error("inconsistent standard feature metadata"));
         }
@@ -312,6 +432,7 @@ impl BorrowedSources {
             variant_period: 1,
             custom: flag(field(&raw, "custom")?)?,
             eyes,
+            decoration: None,
             style: BodyStyle {
                 detailed_segments: false,
                 swell: 0.,
@@ -321,16 +442,35 @@ impl BorrowedSources {
             },
             effects: [None; 3],
         };
+        recipe.decoration = self.decoration(
+            &decoration,
+            &mut recipe.assets,
+            &mut recipe.catalog_ids,
+            &revision,
+            target,
+        )?;
         for palette in list(field(&raw, "palettes")?, 1, 256)? {
             let mut variants = Vec::new();
             for usage in list(field(&palette, "variants")?, 1, 256)? {
-                variants.push(self.usage(&mut recipe, &usage, &revision, target)?);
+                variants.push(self.usage(
+                    &mut recipe.assets,
+                    &mut recipe.catalog_ids,
+                    &usage,
+                    &revision,
+                    target,
+                )?);
             }
             let glow = field(&palette, "boostGlow")?;
             let glow = if glow.is_undefined() {
                 None
             } else {
-                Some(self.usage(&mut recipe, &glow, &revision, target)?)
+                Some(self.usage(
+                    &mut recipe.assets,
+                    &mut recipe.catalog_ids,
+                    &glow,
+                    &revision,
+                    target,
+                )?)
             };
             recipe.palettes.push((variants, glow));
         }
@@ -390,14 +530,21 @@ impl BorrowedSources {
             if recipe.effects[index].is_some() || num(field(&effect, "opacity")?, 1., 1.)? != 1. {
                 return Err(error("invalid shared standard effect"));
             }
-            recipe.effects[index] = Some(self.usage(&mut recipe, &effect, &revision, target)?);
+            recipe.effects[index] = Some(self.usage(
+                &mut recipe.assets,
+                &mut recipe.catalog_ids,
+                &effect,
+                &revision,
+                target,
+            )?);
         }
         Ok(recipe)
     }
 
     fn usage(
         &mut self,
-        recipe: &mut Recipe,
+        assets: &mut Vec<BodyAsset>,
+        catalog_ids: &mut Vec<usize>,
         value: &JsValue,
         revision: &JsValue,
         target: &HtmlCanvasElement,
@@ -469,8 +616,8 @@ impl BorrowedSources {
             height,
             status: BodyAssetStatus::Ready,
         };
-        let asset_index = if let Some(index) = recipe.catalog_ids.iter().position(|v| *v == id) {
-            if recipe.assets[index] != asset {
+        let asset_index = if let Some(index) = catalog_ids.iter().position(|v| *v == id) {
+            if assets[index] != asset {
                 return Err(error("incoherent catalog entry"));
             }
             index
@@ -479,9 +626,9 @@ impl BorrowedSources {
             if self.catalog_entries > 4096 {
                 return Err(error("frame catalog budget exceeded"));
             }
-            recipe.catalog_ids.push(id);
-            recipe.assets.push(asset);
-            recipe.assets.len() - 1
+            catalog_ids.push(id);
+            assets.push(asset);
+            assets.len() - 1
         };
         let rect = list(field(value, "sourceRect")?, 4, 4)?;
         let rect = BodyRect {
@@ -534,8 +681,45 @@ impl BorrowedSources {
             BodyBlend::Lighter => "lighter",
         })?;
         let d = command.destination;
-        let source = &self.sources[command.asset.handle as usize].source;
-        match (source, command.source_rect) {
+        self.image(context, command.asset, command.source_rect, d)
+    }
+
+    /// One bounded pair, shared source identity, alpha one and source-over.
+    /// Restore even when transform or image submission throws.
+    pub(crate) fn submit_face(
+        &self,
+        context: &CanvasRenderingContext2d,
+        decoration: &FaceDecoration,
+        layouts: [PairedSideLayout; 2],
+    ) -> Result<(), JsValue> {
+        for layout in layouts {
+            context.save();
+            let result = (|| {
+                context.set_transform(1., 0., 0., 1., 0., 0.)?;
+                context.translate(layout.translation.x, layout.translation.y)?;
+                context.rotate(layout.rotation)?;
+                self.image(
+                    context,
+                    decoration.asset,
+                    decoration.source_rect,
+                    layout.destination,
+                )
+            })();
+            context.restore();
+            result?;
+        }
+        Ok(())
+    }
+
+    fn image(
+        &self,
+        context: &CanvasRenderingContext2d,
+        asset: BodyAsset,
+        rect: Option<BodyRect>,
+        d: BodyRect,
+    ) -> Result<(), JsValue> {
+        let source = &self.sources[asset.handle as usize].source;
+        match (source, rect) {
             (Source::Canvas(c), None) => context
                 .draw_image_with_html_canvas_element_and_dw_and_dh(c, d.x, d.y, d.width, d.height),
             (Source::Image(i), None) => context
@@ -562,6 +746,7 @@ pub(crate) struct Recipe {
     variant_period: usize,
     custom: bool,
     pub(crate) eyes: Option<StandardEyeGeometry>,
+    pub(crate) decoration: Option<FaceDecoration>,
     pub(crate) style: BodyStyle,
     effects: [Option<BodyAssetUse>; 3],
 }

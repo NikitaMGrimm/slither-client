@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Complete ordinary paired-face composition through retained numeric appearance
+  metadata, optional provider side-image uses and both actual render APIs. Validate
+  exact geometry/source coherence before clearing; keep legacy defaults and
+  reject required decorations on the old basic call. Restore unconditional
+  end-of-face root alpha one in integrated planning and submission. Ready trusted
+  sources are required; host skin mapping and other face families remain pending.
+
 - Install explicit normalized paired-eye geometry at appearance time through
   additive native/Wasm APIs. Retain style per object before the first pupil
   update and require exact standard-recipe coherence before drawing. Existing
