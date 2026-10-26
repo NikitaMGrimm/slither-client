@@ -80,7 +80,8 @@ The received-anchor preview at `/` remains available for comparison.
 The separate opt-in [`render_standard` API](docs/standard-body-renderer.md)
 submits standard body plans from trusted borrowed skin-provider snapshots and
 applied quality. The animated page demonstrates it with three authored synthetic
-recipes; full skins and browser/reference validation remain separate.
+recipes. Stock Firefox checks cover native Canvas submission and page cadence;
+full skins and external-runtime production parity remain separate.
 
 CI checks native Rust on Linux and Windows and runs a real Wasm ABI smoke test
 on Linux. Release-plz remains dormant; ordinary pushes do not publish artifacts.

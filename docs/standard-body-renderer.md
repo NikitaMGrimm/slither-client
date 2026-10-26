@@ -107,6 +107,13 @@ the ABI and modeled Canvas calls/state. They do not establish native browser
 pixels, external-runtime production collection parity, performance, arbitrary
 skins, extension realms or official-server acceptance.
 
+Separate stock Windows Firefox 158.0.1 headless checks passed 247 native Canvas
+assertions and 1,290 authored-page assertions. Nine matched checkpoints preserve
+the earlier numeric/camera state and reproduce the new pixels on fresh reloads.
+Body pixels intentionally change with the authored effects. These checks cover
+the tested synthetic recipes and native submission, without an original-pixel or
+external-runtime production parity claim. See [verification](verification.md).
+
 The `/animated` synthetic preview uses this API with three original flat-color
 recipes and generated stand-in effects from `synthetic-body.mjs`. That resolver
 supports only the authored appearances with empty custom data and no cosmetic;

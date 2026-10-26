@@ -311,8 +311,9 @@ preserve the previous state. These tests do not connect quality to the renderer.
 A separate native offline comparison against the pinned complete runtime matched
 51,240 fields across 8,540 operations in six cases exactly. It supplied explicit
 draw counts rather than measuring browser FPS. This verifies the tested numerical
-quality state; browser quality effects, renderer integration, pixel fidelity and
-automatic fallback under actual desktop load remain unverified.
+quality state. It does not verify browser quality effects, renderer integration,
+pixel fidelity or automatic fallback under actual desktop load. Separate bounded
+renderer and authored-page checks appear below.
 
 The integrated real Wasm bindings also matched those six frozen runtime traces:
 51,240 fields and 8,492 statistics-reset return values matched exactly. The
@@ -384,11 +385,9 @@ appearance metadata and uniform API equivalence. The provider suite has 26 tests
 including opt-in source-mode preservation and legacy output shape. These are
 synthetic checks. The Canvas recorder models alpha/state and records calls; it
 does not rasterize or measure a browser. The earlier planner differential result
-does not establish production collection/submission parity. New browser pixels,
-external-runtime production comparisons, performance, all-skin support and page
-quality cadence remain unverified. See the [API contract](standard-body-renderer.md).
-
-## Dense-scene benchmark
+does not establish production collection/submission parity. External-runtime
+production comparisons, performance and all-skin support remain unverified.
+See the [API contract](standard-body-renderer.md).
 
 The animated page's synthetic body resolver and mocked-page tests separately
 check the three authored recipes, exact source identity, unsupported appearances,
@@ -396,6 +395,34 @@ shared-step quality ordering, raw draw counts at the strict statistics boundary,
 deferred connection preference, reset cadence and cleanup after quality errors.
 These are synthetic Node checks; they do not establish browser pixels or
 production collection parity with an external runtime.
+
+Stock Windows Firefox 158.0.1 headless separately passed 247 native Canvas
+assertions and 1,290 assertions on the unchanged authored page. Native checks
+cover live source identity, crop overloads, mixed styles, quality borrowing,
+painter order, native invalid-alpha retention, preflight rejection, hostile
+context reset and model rollback after Canvas exceptions. An independent native
+Canvas getter supplies the expected alpha round trip; no tolerance is used.
+
+Nine matched synthetic checkpoints use the same three views and explicit
+0..624-ms timeline as the preserved BEFORE build. All complete exported numeric
+and camera snapshots match BEFORE exactly, and all nine fresh-reload repeats
+match AFTER pixels and numeric state exactly. Body pixels intentionally change;
+there is no external pixel oracle. The JSON diagnostics do not retain signed zero.
+A separate received-Scene fixture retains its prior pixel hash.
+
+Native RAF and trusted CSS-scaled pointer input separately verify gaze before
+advance, one shared owned step, quality interpolation before statistics, raw
+successful draw counts independent of throttled readouts, deferred preference,
+HQ synthetic reset and pagehide teardown. No game socket is constructed. A
+6.264-second native recording preserves 155 decoded source frames; it is a
+synthetic demonstration, not an FPS or performance measurement. Test processes,
+listeners and temporary profiles were removed.
+
+These checks establish the tested native Canvas and page behavior. They do not
+establish external-runtime production collection parity, original pixels, full
+skins, extension realms, connected transport or official-server acceptance.
+
+## Dense-scene benchmark
 
 Native collector tests cover the unrounded sampler seed, original ordinals,
 inclusive culling, shared retained flags, detailed cadence, short-curve omission
