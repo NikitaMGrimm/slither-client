@@ -386,7 +386,7 @@ fn synthetic_compact_own_targets_survive_removal_and_setup_resets_them() {
         );
         assert_eq!(
             result.events.len(),
-            1 + motion_packets.len() + anchor_packets.len()
+            2 + motion_packets.len() + anchor_packets.len()
         );
         for event in &result.events[1..=motion_packets.len()] {
             assert!(matches!(
@@ -397,7 +397,7 @@ fn synthetic_compact_own_targets_survive_removal_and_setup_resets_them() {
                 }
             ));
         }
-        for event in &result.events[1 + motion_packets.len()..] {
+        for event in &result.events[1 + motion_packets.len()..result.events.len() - 1] {
             assert!(matches!(
                 event,
                 PresentationEvent::SnakeAnchor {
@@ -406,6 +406,10 @@ fn synthetic_compact_own_targets_survive_removal_and_setup_resets_them() {
                 }
             ));
         }
+        assert_eq!(
+            result.events.last(),
+            Some(&PresentationEvent::SnakeRemoved { id: 0, died: true })
+        );
         assert!(state.snakes.is_empty());
         assert_eq!(state.own_snake_id, Some(0));
         let result = apply(&mut state, &bundle(&[setup(), vec![b'e', 1], vec![b'G']]));
@@ -502,8 +506,163 @@ fn synthetic_spawn_direction_and_removal_contracts() {
             }]
         );
         assert_eq!(state.own_snake_id, Some(0));
-        assert!(apply(&mut state, &packet).events.is_empty());
+        assert_eq!(
+            apply(&mut state, &packet).events,
+            [PresentationEvent::SnakeRemoved {
+                id: 0,
+                died: flag == Some(1)
+            }]
+        );
     }
+}
+
+#[test]
+fn synthetic_unknown_removal_requests_emit_without_changing_received_entities() {
+    for id in [0_u16, 7, u16::MAX] {
+        for flag in [None, Some(0), Some(1), Some(2), Some(255)] {
+            let mut state = ClientState::default();
+            apply(&mut state, &setup());
+            let before = state.clone();
+            let mut packet = vec![b's'];
+            packet.extend(id.to_be_bytes());
+            packet.extend(flag);
+            let applied = apply(&mut state, &packet);
+            assert_eq!(
+                applied.events,
+                [PresentationEvent::SnakeRemoved {
+                    id,
+                    died: flag == Some(1)
+                }]
+            );
+            assert_eq!(
+                applied.report,
+                FrameReport {
+                    commands: 1,
+                    ignored: 0
+                }
+            );
+            assert_eq!(state.snakes, before.snakes);
+            assert_eq!(state.own_snake_id, before.own_snake_id);
+            assert_eq!(state.frames_applied, before.frames_applied + 1);
+            assert_eq!(state.commands_applied, before.commands_applied + 1);
+            assert_eq!(state.ignored_commands, before.ignored_commands);
+            let mut legacy = before;
+            assert_eq!(
+                legacy.apply_frame(&packet, ElapsedHeader::Absent).unwrap(),
+                applied.report
+            );
+            assert_eq!(state, legacy);
+        }
+    }
+    let mut unconfigured = ClientState::default();
+    assert_eq!(
+        unconfigured.apply_frame_with_events(&[b's', 0, 7], ElapsedHeader::Absent),
+        Err(StateError::MissingSetup)
+    );
+    assert_eq!(unconfigured, ClientState::default());
+}
+
+#[test]
+fn synthetic_repeated_removals_after_duplicate_appearances_each_emit_one_request() {
+    let mut state = playing();
+    let mut legacy = state.clone();
+    for packet in [appearance(7, b'1', 539, 2), appearance(7, b'2', 1001, 3)] {
+        let applied = apply(&mut state, &packet);
+        assert!(
+            matches!(&applied.events[..], [PresentationEvent::SnakeAppearance(appearance)] if appearance.id == 7)
+        );
+        assert_eq!(
+            legacy.apply_frame(&packet, ElapsedHeader::Absent).unwrap(),
+            applied.report
+        );
+        assert_eq!(state, legacy);
+    }
+    let mut removal_event_counts = Vec::new();
+    for _ in 0..2 {
+        let packet = [b's', 0, 7, 0];
+        let applied = apply(&mut state, &packet);
+        removal_event_counts.push(applied.events.len());
+        assert_eq!(
+            applied.events,
+            [PresentationEvent::SnakeRemoved { id: 7, died: false }]
+        );
+        assert!(!state.snakes.contains_key(&7));
+        assert_eq!(state.own_snake_id, Some(0));
+        assert_eq!(
+            legacy.apply_frame(&packet, ElapsedHeader::Absent).unwrap(),
+            applied.report
+        );
+        assert_eq!(state, legacy);
+    }
+    assert_eq!(removal_event_counts, [1, 1]);
+}
+
+#[test]
+fn synthetic_bundled_removal_requests_preserve_order_and_all_or_nothing_publication() {
+    let commands = [
+        appearance(7, b'1', 539, 2),
+        appearance(7, b'2', 1001, 3),
+        vec![b's', 0, 7, 0],
+        vec![b's', 0, 7, 0],
+        vec![b's', 0, 99, 1],
+        vec![b'f', 9, 8, 7, 6, 5],
+        vec![b'c', 7, 6, 5, 4],
+        vec![b'q'],
+    ];
+    let mut state = cached_state();
+    let before = state.clone();
+    let mut legacy = before.clone();
+    let bytes = bundle(&commands);
+    let applied = apply(&mut state, &bytes);
+    assert_eq!(
+        applied.report,
+        FrameReport {
+            commands: commands.len(),
+            ignored: 1
+        }
+    );
+    assert_eq!(applied.events.len(), 5);
+    assert!(
+        matches!(&applied.events[0], PresentationEvent::SnakeAppearance(appearance) if appearance.id == 7 && appearance.wire_direction == Direction::Decreasing)
+    );
+    assert!(
+        matches!(&applied.events[1], PresentationEvent::SnakeAppearance(appearance) if appearance.id == 7 && appearance.wire_direction == Direction::Increasing)
+    );
+    assert_eq!(
+        &applied.events[2..],
+        &[
+            PresentationEvent::SnakeRemoved { id: 7, died: false },
+            PresentationEvent::SnakeRemoved { id: 7, died: false },
+            PresentationEvent::SnakeRemoved { id: 99, died: true },
+        ]
+    );
+    assert_eq!(
+        legacy.apply_frame(&bytes, ElapsedHeader::Absent).unwrap(),
+        applied.report
+    );
+    assert_eq!(state, legacy);
+    let mut split = before.clone();
+    let split_events: Vec<_> = commands
+        .iter()
+        .flat_map(|packet| apply(&mut split, packet).events)
+        .collect();
+    assert_eq!(split_events, applied.events);
+    assert_eq!(split.snakes, state.snakes);
+    assert_eq!(split.foods, state.foods);
+
+    for malformed in [
+        vec![b's', 0],
+        vec![b's', 0, 7, 0, 0],
+        vec![b'h', 0, 7],
+        vec![b'z', 0, 0, 0],
+    ] {
+        let mut invalid_commands = commands.to_vec();
+        invalid_commands.push(malformed);
+        assert_rollback(&mut before.clone(), &bundle(&invalid_commands));
+    }
+    let mut malformed_framing = bytes;
+    malformed_framing.push(0);
+    assert_rollback(&mut before.clone(), &malformed_framing);
 }
 
 #[test]
@@ -742,7 +901,7 @@ fn synthetic_replacement_and_midframe_setup_are_ordered_reset_markers() {
             vec![b'e', 56],
         ]),
     );
-    assert_eq!(result.events.len(), 5);
+    assert_eq!(result.events.len(), 6);
     assert!(
         matches!(&result.events[0], PresentationEvent::SnakeAppearance(appearance) if appearance.id == 0 && appearance.wire_direction == Direction::Increasing && appearance.absolute_body.len() == 1)
     );
@@ -754,11 +913,15 @@ fn synthetic_replacement_and_midframe_setup_are_ordered_reset_markers() {
         }
     ));
     assert!(matches!(result.events[2], PresentationEvent::Setup(_)));
+    assert_eq!(
+        result.events[3],
+        PresentationEvent::SnakeRemoved { id: 0, died: false }
+    );
     assert!(
-        matches!(&result.events[3], PresentationEvent::SnakeAppearance(appearance) if appearance.id == 17 && appearance.wire_direction == Direction::None)
+        matches!(&result.events[4], PresentationEvent::SnakeAppearance(appearance) if appearance.id == 17 && appearance.wire_direction == Direction::None)
     );
     assert!(matches!(
-        result.events[4],
+        result.events[5],
         PresentationEvent::SnakeMotion {
             target: SnakeTarget::Own,
             ..
@@ -773,7 +936,7 @@ fn synthetic_replacement_and_midframe_setup_are_ordered_reset_markers() {
 }
 
 #[test]
-fn synthetic_unknown_entities_and_opaque_commands_emit_nothing_and_do_not_advance() {
+fn synthetic_unknown_entity_updates_emit_only_removal_requests_and_do_not_advance() {
     let mut empty = ClientState::default();
     assert!(apply(&mut empty, b"opaque").events.is_empty());
     apply(&mut empty, &setup());
@@ -813,7 +976,10 @@ fn synthetic_unknown_entities_and_opaque_commands_emit_nothing_and_do_not_advanc
     let result = state
         .apply_frame_with_events(&bytes, ElapsedHeader::TwoBytes)
         .unwrap();
-    assert!(result.events.is_empty());
+    assert_eq!(
+        result.events,
+        [PresentationEvent::SnakeRemoved { id: 17, died: true }]
+    );
     assert_eq!(
         result.report,
         FrameReport {

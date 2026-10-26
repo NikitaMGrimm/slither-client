@@ -6,9 +6,10 @@ import { fileURLToPath } from 'node:url';
 const projectRoot = fileURLToPath(new URL('..', import.meta.url));
 const routes = new Map([
   ['/', ['web/scene.html', 'text/html; charset=utf-8']],
+  ['/animated', ['web/animated.html', 'text/html; charset=utf-8']],
   ['/benchmark', ['web/benchmark.html', 'text/html; charset=utf-8']],
   ['/scene/scene.css', ['web/scene.css', 'text/css; charset=utf-8']],
-  ...['scene', 'synthetic-scene', 'loopback-session', 'dense-scene', 'benchmark'].map(name => [`/scene/${name}.mjs`, [`web/${name}.mjs`, 'text/javascript; charset=utf-8']]),
+  ...['scene', 'animated', 'synthetic-scene', 'loopback-session', 'dense-scene', 'benchmark'].map(name => [`/scene/${name}.mjs`, [`web/${name}.mjs`, 'text/javascript; charset=utf-8']]),
   ['/scene/pkg/slither_client.js', ['dist/web/slither_client.js', 'text/javascript; charset=utf-8']],
   ['/scene/pkg/slither_client_bg.wasm', ['dist/web/slither_client_bg.wasm', 'application/wasm']],
 ]);

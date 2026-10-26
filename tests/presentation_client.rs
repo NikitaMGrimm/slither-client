@@ -1,0 +1,609 @@
+//! Original synthetic packet/event fixtures. No reference arrays, network, or wall clock.
+
+use slither_client::{
+    presentation::{
+        AnimatedClient, ClientPresentationError, INITIAL_ZOOM, MAX_RETAINED_SNAKES,
+        MAX_RETAINED_TOTAL_BODY_POINTS,
+    },
+    protocol::ElapsedHeader,
+    state::{Point, StateError},
+};
+
+fn u24(value: u32) -> [u8; 3] {
+    let bytes = value.to_be_bytes();
+    [bytes[1], bytes[2], bytes[3]]
+}
+
+fn setup() -> Vec<u8> {
+    let mut p = vec![b'a'];
+    p.extend(u24(1000));
+    for value in [430_u16, 100, 20] {
+        p.extend(value.to_be_bytes());
+    }
+    p.push(48);
+    for value in [539_u16, 40, 1400, 33, 28, 430] {
+        p.extend(value.to_be_bytes());
+    }
+    p.extend([19, 42]);
+    p
+}
+
+fn appearance(id: u16, x: u32, points: usize) -> Vec<u8> {
+    let mut p = vec![b's'];
+    p.extend(id.to_be_bytes());
+    p.extend(u24(0));
+    p.push(b'0');
+    p.extend(u24(0));
+    p.extend(4250_u16.to_be_bytes());
+    p.extend(u24(0));
+    p.push(0);
+    p.extend(u24(x * 5));
+    p.extend(u24(1000 * 5));
+    p.extend([0, 0, 255]);
+    if points > 0 {
+        p.extend(u24((x - points as u32 * 42) * 5));
+        p.extend(u24(1000 * 5));
+        for _ in 2..points {
+            p.extend([211, 127]);
+        }
+        if points >= 2 {
+            p.extend(0_u16.to_be_bytes());
+        }
+    }
+    p
+}
+
+fn anchor(id: Option<u16>, x: u16, y: u16, growth: bool) -> Vec<u8> {
+    let mut p = vec![if growth { b'+' } else { b'=' }];
+    if let Some(id) = id {
+        p.extend(id.to_be_bytes());
+    }
+    p.extend(0_u16.to_be_bytes());
+    p.extend(x.to_be_bytes());
+    p.extend(y.to_be_bytes());
+    if growth {
+        p.extend(u24(8_388_608));
+    }
+    p
+}
+
+fn mass(id: u16, fraction: u32) -> Vec<u8> {
+    let mut p = vec![b'h'];
+    p.extend(id.to_be_bytes());
+    p.extend(u24(fraction));
+    p
+}
+
+fn tail(id: u16) -> Vec<u8> {
+    let mut p = vec![b'r'];
+    p.extend(id.to_be_bytes());
+    p
+}
+
+fn remove(id: u16, flag: u8) -> Vec<u8> {
+    let mut p = vec![b's'];
+    p.extend(id.to_be_bytes());
+    p.push(flag);
+    p
+}
+
+fn bundle(commands: &[Vec<u8>]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for p in commands {
+        assert!(p.len() < 8192);
+        bytes.extend((p.len() as u16).to_be_bytes());
+        bytes.extend(p);
+    }
+    bytes
+}
+
+fn apply(client: &mut AnimatedClient, commands: &[Vec<u8>]) {
+    client
+        .apply_frame(&bundle(commands), ElapsedHeader::Absent)
+        .unwrap();
+}
+
+fn client() -> AnimatedClient {
+    let mut client = AnimatedClient::new(0.).unwrap();
+    apply(&mut client, &[setup(), appearance(7, 2000, 12)]);
+    client
+}
+
+#[test]
+fn synthetic_initial_camera_and_received_absolute_geometry_are_separate() {
+    let c = client();
+    let own = c.own_snake().unwrap();
+    assert_eq!(own.metrics().raw_head, Point { x: 2000., y: 1000. });
+    assert_eq!(c.camera().position(), own.body().points()[0].position());
+    assert_eq!(c.camera().position().x, 1958.);
+    assert_eq!(c.camera().zoom(), INITIAL_ZOOM);
+    assert_eq!(c.received().snakes[&7].head.x, 1000.);
+    assert!(std::ptr::eq(own, c.snake(7).unwrap()));
+    assert_eq!(c.retained_count(), 1);
+    assert_eq!(c.retained_body_points(), 12);
+    assert!(!own.metrics().visible);
+}
+
+#[test]
+fn malformed_late_tail_discards_head_body_mass_food_cache_and_counters() {
+    let mut c = client();
+    c.prepare_draw(800, 600).unwrap();
+    let before = c.clone();
+    let frame = bundle(&[
+        vec![b'e', 0, 7, 20],
+        anchor(Some(7), 2001, 1003, true),
+        mass(7, 12_582_911),
+        vec![b'f', 1, 2, 30, 40, 4, 50],
+        vec![b'r', 0],
+    ]);
+    assert!(matches!(
+        c.apply_frame(&frame, ElapsedHeader::Absent),
+        Err(ClientPresentationError::State(StateError::InvalidPacket(
+            b'r'
+        )))
+    ));
+    assert_eq!(c, before);
+    assert!(matches!(
+        c.apply_frame(&[b'f', 10, 20, 30], ElapsedHeader::Absent),
+        Err(ClientPresentationError::State(StateError::MissingSector))
+    ));
+    assert_eq!(c, before);
+}
+
+#[test]
+fn late_presentation_failure_rolls_back_prior_events_midframe_setup_and_clock() {
+    let mut c = client();
+    c.advance(3., false).unwrap();
+    c.prepare_draw(300, 200).unwrap();
+    c.set_follows(false);
+    let before = c.clone();
+    let mut bad_setup = setup();
+    bad_setup[10] = 0; // Valid received setup; presentation turn-speed division fails.
+    let frame = bundle(&[
+        anchor(Some(7), 2000, 1000, true),
+        mass(7, 1),
+        bad_setup,
+        appearance(9, 3000, 4),
+    ]);
+    assert!(matches!(
+        c.apply_frame(&frame, ElapsedHeader::Absent),
+        Err(ClientPresentationError::Presentation(_))
+    ));
+    assert_eq!(c, before);
+    let mut control = before;
+    assert_eq!(c.advance(8., false), control.advance(8., false));
+    assert_eq!(c, control);
+}
+
+#[test]
+fn late_camera_failure_discards_received_and_entity_changes() {
+    let mut c = client();
+    c.set_follows(false);
+    c.set_camera_position(Point { x: f64::MAX, y: 0. }).unwrap();
+    let before = c.clone();
+    let frame = bundle(&[
+        mass(7, 1),
+        anchor(Some(7), 2000, 1000, false),
+        anchor(Some(7), 2042, 1000, true),
+    ]);
+    assert!(matches!(
+        c.apply_frame(&frame, ElapsedHeader::Absent),
+        Err(ClientPresentationError::Presentation(_))
+    ));
+    assert_eq!(c, before);
+}
+
+#[test]
+fn ordered_duplicate_appearance_keeps_old_object_and_newest_packet_lookup() {
+    let mut c = client();
+    apply(
+        &mut c,
+        &[
+            mass(7, 1),
+            appearance(8, 3000, 4),
+            appearance(7, 4000, 5),
+            mass(7, 8_388_608),
+        ],
+    );
+    let drawn = c.drawn_snakes().map(|s| s.metrics()).collect::<Vec<_>>();
+    assert_eq!(drawn.iter().map(|m| m.id).collect::<Vec<_>>(), [7, 8, 7]);
+    assert_eq!(
+        drawn.iter().map(|m| m.raw_head.x).collect::<Vec<_>>(),
+        [2000., 3000., 4000.]
+    );
+    assert_eq!(c.own_snake().unwrap().metrics().fam, 1. / 16_777_215.);
+    assert_eq!(c.snake(7).unwrap().metrics().fam, 8_388_608. / 16_777_215.);
+    assert_ne!(c.own_snake(), c.snake(7));
+
+    apply(&mut c, &[remove(7, 1)]);
+    assert!(c.snake(7).is_none());
+    assert!(!c.own_snake().unwrap().metrics().alive);
+    let newest = c.drawn_snakes().last().unwrap().metrics();
+    assert!(newest.alive);
+    assert_eq!(newest.raw_head.x, 4000.);
+    let before = c.drawn_snakes().last().unwrap().clone();
+    apply(&mut c, &[mass(7, 1), anchor(Some(7), 4100, 1000, false)]);
+    assert_eq!(c.drawn_snakes().last().unwrap(), &before);
+}
+
+#[test]
+fn retained_own_survives_death_expiry_id_reuse_and_compact_updates() {
+    let mut c = client();
+    apply(
+        &mut c,
+        &[
+            remove(7, 1),
+            appearance(7, 4000, 5),
+            appearance(8, 3000, 3),
+            remove(8, 1),
+        ],
+    );
+    for i in 1..=12 {
+        c.advance(f64::from(i) * 40., false).unwrap();
+    }
+    assert_eq!(c.drawn_snakes().count(), 1);
+    assert_eq!(c.retained_count(), 2);
+    assert!(c.own_snake().unwrap().metrics().expired);
+    let own = c.own_snake().unwrap().clone();
+    let newest = c.snake(7).unwrap().clone();
+    c.advance(520., false).unwrap();
+    assert_eq!(c.own_snake().unwrap(), &own);
+    apply(&mut c, &[anchor(None, 2050, 1010, true), vec![b'e', 64]]);
+    assert_eq!(
+        c.own_snake().unwrap().metrics().raw_head,
+        Point { x: 2050., y: 1010. }
+    );
+    assert_eq!(c.own_snake().unwrap().metrics().logical_segments, 13);
+    assert_ne!(
+        c.own_snake().unwrap().metrics().heading,
+        own.metrics().heading
+    );
+    // The reused ID's object advances normally, then compact packets leave it alone.
+    assert_ne!(c.snake(7).unwrap(), &newest);
+    let latest = c.snake(7).unwrap().clone();
+    apply(&mut c, &[anchor(None, 2092, 1010, false)]);
+    assert_eq!(c.snake(7).unwrap(), &latest);
+}
+
+#[test]
+fn immediate_removal_flags_keep_own_undrawn_and_drop_other_objects() {
+    let mut c = client();
+    apply(
+        &mut c,
+        &[appearance(8, 3000, 3), remove(7, 2), remove(8, 0)],
+    );
+    assert_eq!(c.drawn_snakes().count(), 0);
+    assert_eq!(c.retained_count(), 1);
+    assert!(c.snake(7).is_none());
+    let own = c.own_snake().unwrap().clone();
+    assert!(own.metrics().alive); // Only exactly flag one starts death.
+    c.advance(40., false).unwrap();
+    assert_eq!(c.own_snake().unwrap(), &own);
+    apply(&mut c, &[anchor(None, 2000, 1000, false)]);
+    assert_ne!(c.own_snake().unwrap(), &own);
+    assert_eq!(c.drawn_snakes().count(), 0);
+}
+
+#[test]
+fn cached_direction_compact_anchors_keep_addressing_undrawn_original_own() {
+    let mut c = client();
+    apply(&mut c, &[remove(7, 0), appearance(7, 4000, 4)]);
+    let original_front = c.own_snake().unwrap().body().points()[0].position();
+    let newest = c.snake(7).unwrap().clone();
+    let mut grow = vec![b'N'];
+    grow.extend(u24(1));
+    apply(&mut c, &[vec![b'G'], grow]);
+    let own = c.own_snake().unwrap();
+    assert_eq!(own.metrics().logical_segments, 13);
+    assert_eq!(
+        own.body().points()[0].position(),
+        Point {
+            x: original_front.x + 84.,
+            y: original_front.y,
+        }
+    );
+    assert_eq!(own.metrics().fam, 1. / 16_777_215.);
+    assert_eq!(c.snake(7).unwrap(), &newest);
+    assert_eq!(c.drawn_snakes().count(), 1);
+}
+
+#[test]
+fn setup_resets_identity_and_camera_but_preserves_fractional_update_timeline() {
+    let mut c = client();
+    assert_eq!(c.advance(3., false).unwrap().whole_steps, 0);
+    c.set_follows(false);
+    c.set_zoom(0.5).unwrap();
+    apply(
+        &mut c,
+        &[
+            appearance(8, 3000, 3),
+            setup(),
+            appearance(9, 4000, 4),
+            mass(9, 1),
+        ],
+    );
+    assert_eq!(c.retained_count(), 1);
+    assert_eq!(c.own_snake().unwrap().metrics().id, 9);
+    assert_eq!(c.camera().zoom(), INITIAL_ZOOM);
+    assert!(c.camera().follows());
+    assert!(c.snake(7).is_none());
+    let step = c.advance(8., false).unwrap();
+    assert_eq!(step.delta, 5. / 8.);
+    assert_eq!(step.accumulated, 1.);
+    assert_eq!(step.whole_steps, 1);
+    c.reset(8.).unwrap();
+    assert!(c.own_snake().is_none());
+    assert!(c.received().setup.is_none());
+    assert_eq!(c.advance(8., false).unwrap().accumulated, 0.);
+}
+
+#[test]
+fn empty_body_appearance_uses_head_for_camera_and_is_not_visible() {
+    let mut c = AnimatedClient::new(0.).unwrap();
+    apply(&mut c, &[setup()]);
+    c.set_follows(false);
+    c.set_zoom(1.).unwrap();
+    apply(&mut c, &[appearance(0, 2000, 0)]);
+    assert!(!c.camera().follows());
+    assert_eq!(c.camera().position(), Point { x: 2000., y: 1000. });
+    c.prepare_draw(800, 600).unwrap();
+    assert!(!c.own_snake().unwrap().metrics().visible);
+    assert_eq!(c.retained_body_points(), 0);
+}
+
+#[test]
+fn header_time_does_not_extrapolate_and_camera_reanchors_only_for_own() {
+    let mut c = client();
+    apply(&mut c, &[appearance(8, 3000, 3)]);
+    let before = c.camera().clone();
+    apply(&mut c, &[anchor(Some(8), 3010, 1010, false)]);
+    assert_eq!(c.camera(), &before);
+    let mut frame = vec![0xff, 0xff];
+    frame.extend(anchor(Some(7), 2000, 1000, false));
+    c.apply_frame(&frame, ElapsedHeader::TwoBytes).unwrap();
+    assert_eq!(c.received().last_elapsed_ms, Some(65535));
+    assert_eq!(c.own_snake().unwrap().head().head_fraction, 0.);
+    assert_eq!(c.camera().corrections().pending(), 62);
+    assert_eq!(
+        c.camera().position(),
+        c.own_snake().unwrap().metrics().corrected_head
+    );
+}
+
+#[test]
+fn draw_and_update_clocks_are_independent_and_follow_off_still_drains_camera() {
+    let mut c = client();
+    c.prepare_draw(800, 600).unwrap();
+    apply(&mut c, &[anchor(Some(7), 2000, 1000, false)]);
+    let pending = c.camera().corrections().pending();
+    let index = c.camera().corrections().index();
+    c.advance(0., false).unwrap();
+    c.advance(8., false).unwrap();
+    assert_eq!(c.camera().corrections().pending(), pending);
+    c.set_follows(false);
+    c.set_camera_position(Point { x: 1700., y: 900. }).unwrap();
+    c.set_zoom(0.5).unwrap();
+    let head = *c.own_snake().unwrap().head();
+    c.prepare_draw(800, 600).unwrap();
+    assert_eq!(c.camera().position(), Point { x: 1700., y: 900. });
+    assert_eq!(c.camera().corrections().pending(), pending - 1);
+    assert_eq!(c.camera().corrections().index(), (index + 1) % 62);
+    assert_eq!(c.camera().zoom(), 0.5002);
+    assert_eq!(c.own_snake().unwrap().head(), &head);
+    assert_eq!(c.advance(8., false).unwrap().delta, 0.);
+
+    apply(&mut c, &[remove(7, 0)]);
+    let pending = c.camera().corrections().pending();
+    c.prepare_draw(800, 600).unwrap();
+    assert_eq!(c.camera().corrections().pending(), pending - 1);
+}
+
+#[test]
+fn culling_is_inclusive_84_margin_uses_body_not_head_and_only_visible_spacing_eases() {
+    let mut c = AnimatedClient::new(0.).unwrap();
+    apply(
+        &mut c,
+        &[setup(), appearance(7, 1000, 0), appearance(8, 2000, 2)],
+    );
+    c.set_follows(false);
+    c.set_zoom(1.).unwrap();
+    let point = c.snake(8).unwrap().body().points()[0].position();
+    // Account for the draw's single automatic zoom step before testing the boundary.
+    let right_half = 100. / 2. / 1.0002 + 84.;
+    c.set_camera_position(Point {
+        x: point.x - right_half,
+        y: point.y,
+    })
+    .unwrap();
+    c.prepare_draw(100, 100).unwrap();
+    assert!(c.snake(8).unwrap().metrics().visible);
+    assert!(!c.own_snake().unwrap().metrics().visible);
+    c.set_camera_position(Point { x: 0., y: 0. }).unwrap();
+    c.prepare_draw(100, 100).unwrap();
+    assert!(!c.snake(8).unwrap().metrics().visible);
+    let before = c.snake(8).unwrap().metrics().point_spacing;
+    c.set_zoom(0.5).unwrap();
+    apply(&mut c, &[anchor(Some(8), 2000, 1000, true)]);
+    c.prepare_draw(100, 100).unwrap();
+    assert_eq!(c.snake(8).unwrap().metrics().point_spacing, before);
+    c.set_camera_position(Point { x: 2000., y: 1000. }).unwrap();
+    c.prepare_draw(100, 100).unwrap();
+    assert!(c.snake(8).unwrap().metrics().visible);
+    assert_eq!(c.snake(8).unwrap().metrics().point_spacing, before + 0.0035);
+}
+
+#[test]
+fn culling_uses_displayed_body_offsets_after_visible_anchor() {
+    let mut c = client();
+    c.prepare_draw(100, 100).unwrap();
+    apply(&mut c, &[anchor(Some(7), 2100, 1200, false)]);
+    let newest = &c.own_snake().unwrap().body().points()[0];
+    assert_ne!(newest.position_offset(), Point::default());
+    let displayed = Point {
+        x: newest.position().x + newest.position_offset().x,
+        y: newest.position().y + newest.position_offset().y,
+    };
+    c.set_follows(false);
+    c.set_zoom(1000.).unwrap();
+    c.set_camera_position(Point {
+        x: displayed.x + 84.,
+        y: displayed.y,
+    })
+    .unwrap();
+    c.prepare_draw(1, 1).unwrap();
+    assert!(c.own_snake().unwrap().metrics().visible);
+    let raw = c.own_snake().unwrap().body().points()[0].position();
+    assert!(raw.x < c.camera().position().x - 84. - 0.5 / c.camera().zoom());
+    assert!(c.own_snake().unwrap().body().points().iter().all(|point| {
+        point.position().x < c.camera().position().x - 84. - 0.5 / c.camera().zoom()
+    }));
+}
+
+#[test]
+fn food_and_unknown_events_commit_received_state_without_advancing_presentation() {
+    let mut c = client();
+    let own = c.own_snake().unwrap().clone();
+    let camera = c.camera().clone();
+    apply(
+        &mut c,
+        &[
+            vec![b'f', 1, 2, 30, 40, 4, 50],
+            vec![b'f', 50, 60, 40],
+            vec![b'W', 4, 5],
+            mass(999, 1),
+            tail(999),
+        ],
+    );
+    assert_eq!(c.received().foods.len(), 2);
+    assert_eq!(c.received().ignored_commands, 1);
+    assert_eq!(c.own_snake().unwrap(), &own);
+    assert_eq!(c.camera(), &camera);
+}
+
+#[test]
+fn view_clock_and_reset_errors_are_atomic() {
+    let mut c = client();
+    let before = c.clone();
+    assert!(c.set_zoom(0.).is_err());
+    assert!(c.set_zoom(f64::INFINITY).is_err());
+    assert!(c.set_camera_position(Point { x: f64::NAN, y: 0. }).is_err());
+    assert!(c.prepare_draw(0, 200).is_err());
+    assert!(c.advance(f64::NAN, false).is_err());
+    assert!(c.reset(f64::NAN).is_err());
+    assert_eq!(c, before);
+    let mut empty = AnimatedClient::new(0.).unwrap();
+    empty.set_zoom(f64::from_bits(1)).unwrap();
+    let before = empty.clone();
+    assert!(empty.prepare_draw(800, 600).is_err());
+    assert_eq!(empty, before);
+}
+
+#[test]
+fn retained_object_limit_includes_duplicates_and_rejects_whole_frame() {
+    let mut c = AnimatedClient::new(0.).unwrap();
+    let mut commands = vec![setup()];
+    commands.extend((0..MAX_RETAINED_SNAKES).map(|_| appearance(7, 2000, 2)));
+    apply(&mut c, &commands);
+    assert_eq!(c.received().snakes.len(), 1);
+    assert_eq!(c.retained_count(), 512);
+    let before = c.clone();
+    assert_eq!(
+        c.apply_frame(
+            &bundle(&[mass(7, 1), appearance(7, 2100, 2)]),
+            ElapsedHeader::Absent
+        ),
+        Err(ClientPresentationError::Limit)
+    );
+    assert_eq!(c, before);
+}
+
+#[test]
+fn retained_physical_point_limit_is_aggregate_and_rolls_back_prior_events() {
+    let mut c = AnimatedClient::new(0.).unwrap();
+    let points = 2048;
+    let appearances = MAX_RETAINED_TOTAL_BODY_POINTS / points;
+    let mut commands = vec![setup()];
+    commands.extend((0..appearances).map(|_| appearance(7, 100_000, points)));
+    apply(&mut c, &commands);
+    assert_eq!(c.retained_body_points(), 131_072);
+    assert_eq!(c.received().snakes[&7].body.len(), points);
+    let before = c.clone();
+    assert_eq!(
+        c.apply_frame(
+            &bundle(&[mass(7, 1), anchor(Some(7), 65535, 1000, false)]),
+            ElapsedHeader::Absent
+        ),
+        Err(ClientPresentationError::Limit)
+    );
+    assert_eq!(c, before);
+}
+
+#[test]
+fn team_mode_rejection_is_atomic_before_and_after_an_existing_world() {
+    let mut team = setup();
+    team.extend(1_u16.to_be_bytes());
+    team.extend(u24(900));
+    team.extend([2, 0]);
+    let mut empty = AnimatedClient::new(0.).unwrap();
+    let before = empty.clone();
+    assert_eq!(
+        empty.apply_frame(&team, ElapsedHeader::Absent),
+        Err(ClientPresentationError::UnsupportedMode(2))
+    );
+    assert_eq!(empty, before);
+    let mut existing = client();
+    existing.advance(13., false).unwrap();
+    existing.prepare_draw(800, 600).unwrap();
+    let before = existing.clone();
+    assert_eq!(
+        existing.apply_frame(
+            &bundle(&[mass(7, 8_388_608), anchor(None, 2020, 1002, false), team]),
+            ElapsedHeader::Absent
+        ),
+        Err(ClientPresentationError::UnsupportedMode(2))
+    );
+    assert_eq!(existing, before);
+}
+
+#[test]
+fn repeated_removals_reach_each_surviving_duplicate_even_without_received_lookup() {
+    for bundled in [false, true] {
+        let mut c = client();
+        apply(&mut c, &[appearance(7, 4000, 5)]);
+        assert_eq!(c.drawn_snakes().count(), 2);
+        if bundled {
+            apply(&mut c, &[remove(7, 0), remove(7, 0)]);
+        } else {
+            apply(&mut c, &[remove(7, 0)]);
+            assert_eq!(c.drawn_snakes().count(), 1);
+            assert!(c.received().snakes.is_empty());
+            apply(&mut c, &[remove(7, 0)]);
+        }
+        assert_eq!(c.drawn_snakes().count(), 0);
+        assert!(
+            c.own_snake().is_some(),
+            "own object remains addressable compactly"
+        );
+    }
+}
+
+#[test]
+fn input_own_lifecycle_cannot_be_revived_by_wire_id_reuse() {
+    for flag in [0, 1] {
+        for bundled in [false, true] {
+            let mut c = client();
+            assert!(c.active_own_snake().is_some());
+            if bundled {
+                apply(&mut c, &[remove(7, flag), appearance(7, 4000, 5)]);
+            } else {
+                apply(&mut c, &[remove(7, flag)]);
+                assert!(c.active_own_snake().is_none());
+                apply(&mut c, &[appearance(7, 4000, 5)]);
+            }
+            assert!(c.snake(7).unwrap().metrics().alive);
+            assert!(c.active_own_snake().is_none());
+            assert_eq!(c.drawn_own_snake().is_some(), flag == 1);
+            assert!(c.own_snake().is_some());
+        }
+    }
+}

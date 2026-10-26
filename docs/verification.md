@@ -91,8 +91,9 @@ independent motion fields/directions, direct speed scalars, absolute appearance
 geometry, compact own targeting after removal, food exclusion, truncations,
 retention limits and complete rollback. The one-field `5` motion form is a
 validated no-op; complete six-byte `3/4/5` forms retain their three motion fields.
-The event API is native Rust; existing Wasm/browser checks exercise the received
-scene and standalone predictors, without establishing event/render integration.
+The event API is native Rust. Earlier Wasm/browser checks exercised the received
+scene and standalone predictors; the coupled checks below exercise its animation
+consumer.
 
 Native `tests/presentation.rs` covers fractional clocks, skew/clamps, lag changes,
 turn wrapping/crossing, speed units, exact speed arithmetic, ring overlap/wrap,
@@ -101,16 +102,87 @@ smoke test also exercises owned animation steps, predictor motion/corrections,
 rejection of invalid JavaScript directions before integer narrowing, copied
 sample arrays and atomic failure. These checks use original synthetic inputs.
 
-This verifies the primitives only. The scene still needs ordered presentation
-event application, sampled bodies, camera/draw timing, eyes, quality modes and full skins
-before visual or gameplay equivalence can be assessed.
+Those checks isolate the primitives. Coupled event/render checks are described
+below; eyes, quality-dependent drawing and full skins remain separate work.
 
 `tests/presentation_geometry.rs` verifies length/camera ring overlap, distinct
 clock and cleanup rules, mass scheduling, copied samples and atomic errors.
 `tests/presentation_body.rs` covers initial absolute geometry, sequential
 contraction, visible/invisible corrections, cached relative anchors, dying-tail
 retention, independent logical/physical caps and late-failure rollback. These
-are synthetic tests of the native model; the scene still draws received anchors.
+are synthetic tests of the native model. The original `/` preview continues to
+draw received anchors; `/animated` connects the model to sampled body drawing.
+
+## Coupled animation checks
+
+After building and starting `npm run scene`, open
+`http://127.0.0.1:18884/animated`. Its animation callback advances the explicit
+clock, frees the returned step, then renders once. Step anchor injects a packet
+while animation continues. Reset, Palette, Follow and Zoom exercise the same
+model. `window.slitherAnimatedSceneReport` exposes the latest numeric readout.
+The existing loopback controls are available when the server was started with
+`--simulator-port`.
+
+`tests/presentation_snake.rs`, `presentation_camera.rs`, `presentation_client.rs`
+and `presentation_curve.rs` cover the coupled packet/update/draw clocks,
+absolute geometry, sequential contraction, correction overlap, dying retention,
+draw-driven zoom/spacing/culling, curve redistribution and exact stored tangent
+order. They also cover duplicate lookup/removal, retained own identity through
+ID reuse, retention limits, signed corrected edges and late-failure rollback.
+Team mode 2 is explicitly rejected atomically. A short appearance with fewer
+than two anchors is retained but omitted from curve drawing until another
+anchor arrives; no one-point visual-equivalence claim is made.
+
+The real ABI smoke includes the coupled `AnimatedScene`: copied diagnostics,
+packet/update/draw ordering, invalid JavaScript inputs, late malformed-frame
+rollback, duplicate removals, short-body recovery and dead/immediate own removal
+followed by separate or bundled wire-ID reuse.
+
+On 2026-10-26, Chrome 152 / Electron 44 on Windows passed 28 assertions across
+six coupled Canvas2D groups with a 960x540 backing canvas. Checks included
+prediction without packets, one camera sample per render, independent head-ring
+consumption, complete deterministic pixels after hostile caller drawing state,
+atomic rejection, one-anchor render recovery and retained-own input lifecycle.
+Stock Windows Firefox 158.0.1 headless passed 606 assertions on the final build,
+including the prior Scene pixel regression and the authored
+animated page's animation loop, controls and pagehide cleanup. These use only
+original synthetic packets/artwork. They establish execution and these cases;
+they do not establish original pixels, complete quality/skin fidelity, desktop
+Firefox interaction, performance targets or official-server acceptance.
+
+A coupled offline comparison against the complete pinned runtime passed ten
+cases and 508 operations: 2,037,174 comparisons matched exactly, including signed
+zero, without a tolerance. It covered 326 updates, 53 packet operations, 289
+numeric draws and 14,411 active curve samples. Inputs were authored packets,
+timestamps and view controls; Rust received no observed head, body, visibility
+or integer-step state. Coverage includes fractional/lagged clocks, motion,
+overlapping rings, growth/mass/tails, camera/culling, signed corrected edges,
+death/expiry and retained-own compact packets. Setup constants were initialized
+explicitly in the private oracle, so this does not compare its setup parser.
+Quality scale and detailed-style flags were external inputs; pixels, full skins,
+quality-state integration and general whole-world equivalence remain unverified.
+
+The animated page also ran against unreleased simulator commit `9480608` in
+Windows Chrome/Electron with the small sandbox configuration described below.
+The first local life applied 117 frames / 210 commands without rejection, then
+ended normally: the own object remained retained after death expiry and left the
+draw collection. A second manual connection verified heading, ping and boost
+start/release messages, then disconnected manually. The boost hold used explicit
+synthetic DOM key events across the transport timer. Both local test processes
+were stopped and their listeners closed. This is bounded local integration
+evidence; it does not establish official-server or full gameplay acceptance.
+
+A small Chrome/Electron diagnostic measured the coupled model separately from
+drawing at 1280x720 with a fixed centered camera and initial zoom 0.3. Across two
+rotating rounds, six measured calls per metric gave baseline/dense medians of
+below timer resolution / 1.3 ms for updates, 0.4 / 249.4 ms for render submission,
+and below timer resolution / 0.3 ms for opaque frame application. The dense case
+used 64 snakes, 8192 anchors and 8192 food items. The submission canvas was never
+read back. This is a small diagnostic, not FPS, a GPU timer, a performance target
+or a comparison with the received-anchor renderer's different geometry. Dense
+curve drawing still requires profiling and precision-preserving optimization.
+
+### Isolated numeric comparisons
 
 A further offline comparison matched 25,610 length/camera scalar and sample
 values exactly across 133 operations. Camera discontinuities were supplied from

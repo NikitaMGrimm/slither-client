@@ -17,6 +17,12 @@ pub mod state;
 mod browser;
 
 #[cfg(target_arch = "wasm32")]
+mod canvas_browser;
+
+#[cfg(target_arch = "wasm32")]
+mod animated_browser;
+
+#[cfg(target_arch = "wasm32")]
 mod scene_browser;
 
 #[cfg(target_arch = "wasm32")]

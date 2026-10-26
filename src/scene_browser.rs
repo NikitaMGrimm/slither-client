@@ -2,10 +2,14 @@
 
 use std::f64::consts::TAU;
 
-use wasm_bindgen::{JsCast, prelude::*};
-use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, HtmlImageElement};
+use wasm_bindgen::prelude::*;
+use web_sys::{HtmlCanvasElement, HtmlImageElement};
 
-use crate::{protocol::ElapsedHeader, state::ClientState};
+use crate::{
+    canvas_browser::{CanvasFrame, draw_sprite},
+    protocol::ElapsedHeader,
+    state::ClientState,
+};
 
 fn error(message: impl std::fmt::Display) -> JsValue {
     JsValue::from_str(&message.to_string())
@@ -95,65 +99,8 @@ impl Scene {
         zoom: f64,
     ) -> Result<(), JsValue> {
         let sprites = [palette_0, palette_1, palette_2];
-        if target.width() == 0
-            || target.height() == 0
-            || target.width() > 4096
-            || target.height() > 4096
-        {
-            return Err(error("scene target dimensions must be in 1..=4096"));
-        }
-        if !camera_x.is_finite()
-            || !camera_y.is_finite()
-            || camera_x.abs() > 16_777_215.
-            || camera_y.abs() > 16_777_215.
-            || !zoom.is_finite()
-            || !(0.05..=8.).contains(&zoom)
-        {
-            return Err(error("invalid scene camera or zoom"));
-        }
-        if sprites
-            .iter()
-            .any(|s| *s == target || s.width() == 0 || s.height() == 0)
-        {
-            return Err(error(
-                "scene sprites must be nonempty source canvases distinct from target",
-            ));
-        }
-        if !background.complete()
-            || background.natural_width() == 0
-            || background.natural_height() == 0
-        {
-            return Err(error("scene background must be a loaded image"));
-        }
-        let context = target
-            .get_context("2d")?
-            .ok_or_else(|| error("no Canvas2D context"))?
-            .dyn_into::<CanvasRenderingContext2d>()
-            .map_err(|_| error("not a Canvas2D context"))?;
-        // Resizing also clears hostile inherited clips, transforms and filters.
-        target.set_width(target.width());
-        let width = f64::from(target.width());
-        let height = f64::from(target.height());
-        context.set_fill_style_str("#111820");
-        context.fill_rect(0., 0., width, height);
-        let pattern = context
-            .create_pattern_with_html_image_element(&background, "repeat")?
-            .ok_or_else(|| error("could not create background pattern"))?;
-        context.save();
-        // A world-locked tile gives a camera reference without loading assets.
-        context.translate(width / 2. - camera_x * zoom, height / 2. - camera_y * zoom)?;
-        context.scale(zoom, zoom)?;
-        context.set_fill_style_canvas_pattern(&pattern);
-        context.fill_rect(
-            camera_x - width / (2. * zoom),
-            camera_y - height / (2. * zoom),
-            width / zoom,
-            height / zoom,
-        );
-        let visible = |x: f64, y: f64, radius: f64| {
-            (x - camera_x).abs() <= width / (2. * zoom) + radius
-                && (y - camera_y).abs() <= height / (2. * zoom) + radius
-        };
+        let frame = CanvasFrame::new(&target, &sprites, &background, camera_x, camera_y, zoom)?;
+        let context = frame.context();
         if let Some(setup) = &self.state.setup {
             context.begin_path();
             context.arc(0., 0., setup.radius, 0., TAU)?;
@@ -162,11 +109,11 @@ impl Scene {
             context.stroke();
         }
         for food in self.state.foods.values() {
-            if !visible(food.position.x, food.position.y, food.size.max(1.)) {
+            if !frame.visible(food.position.x, food.position.y, food.size.max(1.)) {
                 continue;
             }
             draw_sprite(
-                &context,
+                context,
                 &sprites[usize::from(food.color) % 3],
                 food.position.x,
                 food.position.y,
@@ -177,14 +124,14 @@ impl Scene {
             let sprite = &sprites[usize::from(snake.skin) % 3];
             // Retain transmitted anchors; there is no local physics or extrapolation.
             for point in snake.body.iter().rev() {
-                if visible(point.x, point.y, snake.radius) {
-                    draw_sprite(&context, sprite, point.x, point.y, snake.radius)?;
+                if frame.visible(point.x, point.y, snake.radius) {
+                    draw_sprite(context, sprite, point.x, point.y, snake.radius)?;
                 }
             }
-            if !visible(snake.head.x, snake.head.y, snake.radius) {
+            if !frame.visible(snake.head.x, snake.head.y, snake.radius) {
                 continue;
             }
-            draw_sprite(&context, sprite, snake.head.x, snake.head.y, snake.radius)?;
+            draw_sprite(context, sprite, snake.head.x, snake.head.y, snake.radius)?;
             context.set_fill_style_str("#ffffff");
             for offset in [-0.5_f64, 0.5] {
                 let angle = snake.heading + offset;
@@ -199,23 +146,6 @@ impl Scene {
                 context.fill();
             }
         }
-        context.restore();
         Ok(())
     }
-}
-
-fn draw_sprite(
-    context: &CanvasRenderingContext2d,
-    sprite: &HtmlCanvasElement,
-    x: f64,
-    y: f64,
-    radius: f64,
-) -> Result<(), JsValue> {
-    context.draw_image_with_html_canvas_element_and_dw_and_dh(
-        sprite,
-        x - radius,
-        y - radius,
-        radius * 2.,
-        radius * 2.,
-    )
 }
