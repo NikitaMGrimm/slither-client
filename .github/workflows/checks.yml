@@ -73,11 +73,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p "$RUNNER_TEMP/wasm-bindgen"
-          gh release download 0.2.129 --repo wasm-bindgen/wasm-bindgen --pattern 'wasm-bindgen-0.2.129-x86_64-unknown-linux-musl.tar.gz*' --dir "$RUNNER_TEMP/wasm-bindgen"
+          mkdir -p "$RUNNER_TEMP/wasm-bindgen/gh-release"
+          gh release download 0.2.129 --repo wasm-bindgen/wasm-bindgen --pattern 'wasm-bindgen-0.2.129-x86_64-unknown-linux-musl.tar.gz*' --dir "$RUNNER_TEMP/wasm-bindgen/gh-release"
           cd "$RUNNER_TEMP/wasm-bindgen"
-          sha256sum -c wasm-bindgen-0.2.129-x86_64-unknown-linux-musl.tar.gz.sha256sum
-          tar -xzf wasm-bindgen-0.2.129-x86_64-unknown-linux-musl.tar.gz
+          sha256sum -c gh-release/wasm-bindgen-0.2.129-x86_64-unknown-linux-musl.tar.gz.sha256sum
+          tar -xzf gh-release/wasm-bindgen-0.2.129-x86_64-unknown-linux-musl.tar.gz
           echo "WASM_BINDGEN=$RUNNER_TEMP/wasm-bindgen/wasm-bindgen-0.2.129-x86_64-unknown-linux-musl/wasm-bindgen" >> "$GITHUB_ENV"
       - run: npm run build:web
       - run: node tools/wasm-smoke.mjs
