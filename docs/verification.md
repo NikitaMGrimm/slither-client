@@ -480,7 +480,7 @@ claim. External adapters, source identities and raw evidence remain outside Git.
 
 The combined local suite passes 308 native tests, 119 Node tests, formatting,
 doctests, native/Wasm Clippy, a fresh web build and the full real-Wasm ABI smoke.
-The combined body/face/food recorder passes 1,582 assertions. Of these, 99 exercise
+The combined body/face/food recorder passes 1,654 assertions. Of these, 99 exercise
 the integrated food factory/state/render path through both actual renderer APIs:
 duplicate instances versus the received map, raw/effective colors, BigInt
 identities and copied diagnostics, initial/zero-delta/full-size scale, early/late
@@ -489,7 +489,10 @@ configuration-only Setup, retained eater ID zero through removal/reuse, expiry/G
 late factory failure and Canvas-fault rollback. The basic legacy quality-less API
 rejects an enabled food session before clearing. The page uses the same complete
 factory path, preserves shared update/quality/statistics/draw cadence and passes
-23 focused page/server tests included in the 119-test suite.
+23 focused page/server tests included in the 119-test suite. Another 72 recorder
+assertions cover 16 signed-zero revision schedules across both render APIs:
+matching positive or negative zero is accepted, while every conflicting alias
+observation rejects before target clear and preserves the complete model.
 
 A separate synthetic harness passed 243 real-Wasm registry assertions, including
 own-data parsing, all canvas/image overloads, source aliases, revisions, signed
@@ -499,9 +502,11 @@ Independent native review at the earlier native integration revision passed 122
 focused tests and found one stale cache comment, since corrected. That review
 predates the Wasm/face/page integration.
 
-These are synthetic state and logical Canvas checks. Independent review of the
-combined path, complete-runtime numeric food comparison and native Windows
-Canvas/page verification remain pending. No food original-pixel, installed
+These are synthetic state and logical Canvas checks. Independent combined review
+found a signed-zero source-revision coherence defect; the corrected alias boundary
+passes the new regressions, with focused independent recheck pending.
+Complete-runtime numeric food comparison and native Windows Canvas/page
+verification remain pending. No food original-pixel, installed
 extension or live-server acceptance is claimed. See [the food contract](food-presentation.md).
 
 ## Opt-in standard-body renderer checks

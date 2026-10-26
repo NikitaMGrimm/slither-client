@@ -203,7 +203,7 @@ pub struct FoodSpawnInput {
 /// A validated presentation change in wire order, without advancing any clock.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PresentationEvent {
-    /// Reset presentation entities and apply this configuration.
+    /// Apply configuration while preserving entities, own identity, caches and camera state.
     Setup(Setup),
     /// Create or replace a snake with complete initial presentation inputs.
     SnakeAppearance(Appearance),

@@ -1,4 +1,4 @@
-import { bundle, syntheticSetup } from '../web/synthetic-scene.mjs';
+import { bundle, syntheticScene, syntheticSetup } from '../web/synthetic-scene.mjs';
 
 // Authored full packet -> retained animation -> native Wasm render submissions.
 // The shared Canvas recorder has no pixels and opens no connection.
@@ -137,5 +137,56 @@ export function foodRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok
         eq(state(), before); eq(f.target.context.trace, prior, 'legacy basic API cannot silently select food quality');
       }
     } finally { f.close(); }
+  }
+
+  const geometry = { forward: 10.5, lateral: 5.75, lateralBias: 0.5,
+    rotationOffset: 0.25, imageScale: 0.5, pivotX: 8.25, pivotY: 11.5, width: 41, height: 27 };
+  const decorated = () => ({ eyes: vanillaEyes(),
+    decoration: { kind: 'paired-side-images', geometry } });
+  for (const path of ['standard', 'basic']) {
+    for (const foodRevision of [0, -0]) {
+      const opposite = Object.is(foodRevision, 0) ? -0 : 0;
+      const schedules = [
+        { revisions: [foodRevision, foodRevision, foodRevision], valid: true, calls: 3 },
+        { revisions: [foodRevision, opposite, foodRevision], valid: false, calls: 2 },
+        { revisions: [opposite, opposite, opposite], valid: false, calls: 3 },
+        { revisions: [foodRevision, 'other-revision', foodRevision], valid: false, calls: 2 },
+      ];
+      for (const schedule of schedules) {
+        const f = fixture({ faceStyle: decorated() });
+        try {
+          const source = path === 'standard' ? f.sources[0] : f.faceSource;
+          const entry = { asset: { source, kind: 'canvas', status: 'ready', revision: foodRevision,
+            width: source.width, height: source.height }, width: source.width, height: source.height,
+          halfWidth: source.width / 2, halfHeight: source.height / 2 };
+          f.scene.reset();
+          f.scene.apply_frame_with_factories(syntheticScene(), false, decorated, request => ({
+            randomPhaseUnit: 0.25, randomWobbleUnit: 0.5,
+            palette: { color: request.palette, count: 1, bodies: [entry], outlines: [entry], glows: [entry] },
+          }));
+          f.scene.advance(48, false).free();
+          let calls = 0;
+          const resolve = request => {
+            f.snapshot.revision = schedule.revisions[calls++];
+            const value = f.resolve(request);
+            return path === 'standard' ? value : { revision: value.revision,
+              eyes: value.recipe.eyes, decoration: value.recipe.faceDecoration };
+          };
+          const render = () => path === 'standard' ? f.render(resolve) : f.scene.render_with_food(
+            f.target, ...f.foods, f.background, false, resolve, f.quality);
+          const before = [f.state(), f.scene.food_state()], priorTrace = f.target.context.trace.slice();
+          if (schedule.valid) {
+            render();
+            ok(f.target.context.trace.some(v => v.op === 'reset'), 'coherent signed-zero revisions draw successfully');
+          } else {
+            rejects(render, 'every shared revision observation must agree before alias coalescing');
+            eq([f.state(), f.scene.food_state()], before);
+            eq(f.target.context.trace, priorTrace, 'conflicting signed-zero aliases reject before clear');
+          }
+          eq(calls, schedule.calls);
+          eq(f.target.context.stack.length, 0);
+        } finally { f.close(); }
+      }
+    }
   }
 }

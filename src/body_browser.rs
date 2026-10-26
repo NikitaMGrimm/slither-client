@@ -606,7 +606,10 @@ impl BorrowedSources {
             .position(|s| s.object == borrowed.object)
         {
             let prior = &self.sources[index];
-            if prior.revision != *revision || prior.width != width || prior.height != height {
+            if !Object::is(&prior.revision, revision)
+                || prior.width != width
+                || prior.height != height
+            {
                 return Err(error("incoherent aliased source revision or dimensions"));
             }
             index
@@ -617,13 +620,13 @@ impl BorrowedSources {
             self.sources.push(borrowed);
             self.sources.len() - 1
         };
-        let revision_token = if let Some(index) = self.revisions.iter().position(|v| v == revision)
-        {
-            index
-        } else {
-            self.revisions.push(revision.clone());
-            self.revisions.len() - 1
-        };
+        let revision_token =
+            if let Some(index) = self.revisions.iter().position(|v| Object::is(v, revision)) {
+                index
+            } else {
+                self.revisions.push(revision.clone());
+                self.revisions.len() - 1
+            };
         let asset = BodyAsset {
             handle: handle as u64,
             revision: revision_token as u64,

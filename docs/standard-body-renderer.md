@@ -197,7 +197,9 @@ disposable client clone before CanvasFrame resets the target. Source object
 brands, actual backing/intrinsic dimensions, image readiness, source mode/rect,
 catalog IDs and target aliases are checked. Aliased catalog entries retain the
 same exact live source object and coherent revision; the same source at different
-revisions within one frame fails. Native dimensions/readiness are checked again
+revisions within one frame fails. Revision identity uses `Object.is`, including
+the distinction between positive and negative zero, before aliases are coalesced.
+Native dimensions/readiness are checked again
 after every callback has finished. Sources must use the Wasm host's canvas/image
 realm. Revisions are explicit trusted content/readiness commitments; a same-size
 host repaint cannot be detected by dimension checks.
