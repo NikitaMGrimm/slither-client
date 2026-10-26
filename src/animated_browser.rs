@@ -6,13 +6,16 @@ use wasm_bindgen::prelude::*;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, HtmlImageElement};
 
 use crate::{
+    body_browser::{BorrowedSources, ResolveError, request},
     canvas_browser::{CanvasFrame, draw_sprite},
     presentation::{
-        AnimatedClient, CurveInput, CurveOutput, EyeLayoutInput, SnakePresentation,
-        StandardEyeLayout, Turn, sample_curve_with_heading,
+        AnimatedClient, BodyPaintError, BodyPaintInput, BodyPaintQuality, BodyPaintView,
+        BodyPaintVisual, CurveInput, CurveOutput, EyeLayoutInput, MAX_BODY_PAINT_COMMANDS,
+        SnakePresentation, StandardEyeLayout, Turn, plan_standard_body, sample_curve_with_heading,
     },
     presentation_browser::AnimationStep,
     protocol::ElapsedHeader,
+    quality_browser::DesktopQuality,
     state::Point,
 };
 
@@ -609,6 +612,194 @@ impl AnimatedScene {
                 }
             }
             draw_eyes(context, layout)?;
+        }
+        drop(frame);
+        self.client = prepared;
+        Ok(())
+    }
+
+    /// Opt-in standard-body renderer using synchronous trusted normalized
+    /// skin-provider snapshots and read-only applied quality. See
+    /// `docs/standard-body-renderer.md` for the supported recipe and lifetime.
+    /// No quality/update clock advances here. All recipes and commands validate
+    /// before Canvas reset; Canvas failures preserve the complete model.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_standard(
+        &mut self,
+        target: HtmlCanvasElement,
+        food_0: HtmlCanvasElement,
+        food_1: HtmlCanvasElement,
+        food_2: HtmlCanvasElement,
+        background: HtmlImageElement,
+        resolve_recipe: &js_sys::Function,
+        quality: &DesktopQuality,
+    ) -> Result<(), JsValue> {
+        let width = dimensions(f64::from(target.width()))?;
+        let height = dimensions(f64::from(target.height()))?;
+        let applied = quality.applied();
+        let sprites = [food_0, food_1, food_2];
+        let mut prepared = self.client.clone();
+        let mut sources = BorrowedSources::default();
+        let mut recipes = Vec::new();
+        let snakes = prepared
+            .prepare_draw_resolved_staged(
+                width,
+                height,
+                applied.quality_scale,
+                |ordinal, own, snake| -> Result<bool, ResolveError> {
+                    let recipe =
+                        sources.resolve(resolve_recipe, &request(ordinal, own, snake)?, &target)?;
+                    let detailed = recipe.style.detailed_segments;
+                    recipes.push(recipe);
+                    Ok(detailed)
+                },
+            )
+            .map_err(|e| e.0)?;
+        let received = prepared.received();
+        let center = received.setup.as_ref().map_or(0., |s| s.grid_center);
+        let camera = prepared.camera().position();
+        let zoom = prepared.camera().zoom();
+        let viewport_half = Point {
+            x: f64::from(width) / 2.,
+            y: f64::from(height) / 2.,
+        };
+        let mut draws = Vec::new();
+        let mut budget = MAX_BODY_PAINT_COMMANDS;
+        // CanvasFrame resets globalAlpha to one; the eye lane's final pupil
+        // alpha is the following body's entry alpha. Eye-less bodies retain
+        // the root scope's outline alpha, independently of the last image.
+        let mut entry_alpha = 1.;
+        for (snake, recipe) in snakes.iter().zip(&recipes) {
+            let m = snake.metrics;
+            let layout = if recipe.eyes {
+                Some(
+                    snake
+                        .eye_geometry
+                        .layout(
+                            snake.face_heading,
+                            snake.pupil,
+                            EyeLayoutInput {
+                                corrected_head: m.corrected_head,
+                                camera,
+                                viewport_half,
+                                scale: m.scale,
+                                zoom,
+                                death_progress: m.death_progress,
+                            },
+                        )
+                        .map_err(error)?,
+                )
+            } else {
+                None
+            };
+            let mut root_alpha = entry_alpha;
+            let plan = if let Some(geometry) = &snake.body_geometry {
+                let palettes = recipe.palettes();
+                let maximum_speed = received
+                    .setup
+                    .as_ref()
+                    .ok_or_else(|| error("missing body setup"))?
+                    .nsp3;
+                let input = BodyPaintInput {
+                    geometry: geometry.as_paint_geometry(),
+                    recipe: recipe.borrowed(&palettes),
+                    assets: &recipe.assets,
+                    view: BodyPaintView {
+                        camera,
+                        zoom,
+                        half_width: viewport_half.x,
+                        half_height: viewport_half.y,
+                    },
+                    quality: BodyPaintQuality {
+                        high_quality: applied.high_quality,
+                        blend: applied.quality_blend,
+                    },
+                    visual: BodyPaintVisual {
+                        scale: m.scale,
+                        spawn: m.spawn_progress,
+                        death: m.death_progress,
+                        dead: !m.alive,
+                        smoothed_speed: m.visual_speed,
+                        boost_threshold: m.boost_threshold_speed,
+                        cruise_speed: m.cruise_speed,
+                        maximum_speed,
+                        boost_phase: m.boost_phase,
+                    },
+                    entry_alpha,
+                    command_limit: budget,
+                };
+                match plan_standard_body(input) {
+                    Ok(plan) => {
+                        budget -= plan.commands.len();
+                        let mut opacity = m.spawn_progress * (1. - m.death_progress);
+                        opacity *= opacity;
+                        let boost = if m.visual_speed > m.boost_threshold_speed {
+                            m.spawn_progress
+                                * (1. - m.death_progress)
+                                * ((m.visual_speed - m.cruise_speed)
+                                    / (maximum_speed - m.cruise_speed))
+                                    .clamp(0., 1.)
+                        } else {
+                            0.
+                        };
+                        root_alpha = opacity * (1. - boost);
+                        Some(plan)
+                    }
+                    // Coincident/short stored geometry has no production body.
+                    // Its independently valid eyes still complete in draw order.
+                    Err(BodyPaintError::UnsupportedGeometry) => None,
+                    Err(e) => return Err(error(e)),
+                }
+            } else {
+                None
+            };
+            entry_alpha = layout.as_ref().map_or(root_alpha, |v| v.pupil_alpha);
+            draws.push((plan, layout, root_alpha));
+        }
+        // Later callbacks may have changed an earlier borrowed DOM source.
+        // Recheck native readiness/dimensions and the target after all callbacks.
+        sources.validate(&target)?;
+        if target.width() != width || target.height() != height {
+            return Err(error("target dimensions changed during recipe resolution"));
+        }
+        let frame = CanvasFrame::new(
+            &target,
+            &sprites,
+            &background,
+            camera.x - center,
+            camera.y - center,
+            zoom,
+        )?;
+        let context = frame.context();
+        if let Some(setup) = &received.setup {
+            context.begin_path();
+            context.arc(0., 0., setup.radius, 0., TAU)?;
+            context.set_stroke_style_str("#647481");
+            context.set_line_width(1. / zoom);
+            context.stroke();
+        }
+        for food in received.foods.values() {
+            if frame.visible(food.position.x, food.position.y, food.size.max(1.)) {
+                draw_sprite(
+                    context,
+                    &sprites[usize::from(food.color) % 3],
+                    food.position.x,
+                    food.position.y,
+                    food.size.max(1.),
+                )?;
+            }
+        }
+        for (plan, layout, root_alpha) in draws {
+            if let Some(plan) = plan {
+                for command in &plan.commands {
+                    sources.submit(context, command)?;
+                }
+            }
+            context.set_global_alpha(root_alpha);
+            context.set_global_composite_operation("source-over")?;
+            if let Some(layout) = layout {
+                draw_eyes(context, layout)?;
+            }
         }
         drop(frame);
         self.client = prepared;

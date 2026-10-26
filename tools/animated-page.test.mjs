@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import { Script } from 'node:vm';
 import { loopbackEndpoint, sceneHeading } from '../web/loopback-session.mjs';
 import { syntheticScene, syntheticStep } from '../web/synthetic-scene.mjs';
+import { createSyntheticBodyResolver } from '../web/synthetic-body.mjs';
 
 // Original synthetic page/Wasm doubles. No generated bindings, browser or sockets.
 // Execute the authored page body with its imports supplied in the isolated realm.
@@ -37,14 +38,45 @@ class Canvas extends Element {
 function pageFixture(t, { initialize = async () => {}, decode = async () => {},
   config = Promise.resolve({ simulatorUrl: 'ws://127.0.0.1:8766/slither' }) } = {}) {
   const elements = Object.fromEntries(['reset', 'step', 'skin', 'zoom', 'follow',
-    'connect', 'disconnect', 'counts', 'status'].map(id => [id, new Element()]));
+    'connect', 'disconnect', 'quality', 'counts', 'status'].map(id => [id, new Element()]));
   elements.scene = new Canvas();
   elements.skin.value = '0';
   elements.zoom.value = '1.5';
   elements.follow.checked = true;
+  elements.quality.value = '1';
   const window = new Element();
   const calls = [], sessions = [], frames = new Map(), cancelled = [], advances = [];
   const faults = {};
+  const renderMethods = [], renderScales = [], resolvedRecipes = [];
+  const qualityView = { requested: 1, highQuality: true, qualityBlend: 1, qualityScale: 1, lowFpsCounter: 0 };
+  let qualityFrees = 0, qualityClock = 10;
+  class DesktopQuality {
+    constructor(requested, startMs) { qualityView.requested = requested; qualityClock = startMs; }
+    begin_skin_preview() {
+      calls.push(['quality.preview']);
+      Object.assign(qualityView, { highQuality: true, qualityBlend: 1, qualityScale: 1 });
+    }
+    begin_connection() {
+      calls.push(['quality.connection']);
+      Object.assign(qualityView, qualityView.requested ? { highQuality: true, qualityBlend: 1, qualityScale: 1 }
+        : { highQuality: false, qualityBlend: 0, qualityScale: 1.7 });
+    }
+    set_requested_mode(requested) { calls.push(['quality.requested', requested]); qualityView.requested = requested; }
+    advance(step, playing) {
+      calls.push(['quality.advance', playing]);
+      assert.equal(step.freed, false, 'quality consumes the still-owned reusable step');
+      if (faults.qualityAdvance) throw faults.qualityAdvance;
+    }
+    update_statistics(nowMs, draws, playing) {
+      calls.push(['quality.statistics', nowMs, draws, playing]);
+      if (faults.statistics) throw faults.statistics;
+      if (nowMs - qualityClock <= 1000) return false;
+      qualityClock = nowMs;
+      return true;
+    }
+    snapshot() { calls.push(['quality.snapshot']); return JSON.stringify(qualityView); }
+    free() { qualityFrees++; calls.push(['quality.free']); }
+  }
   const view = { camera: { x: 0, y: 0, zoom: 1.5 }, ownHead: null,
     snakes: 3, retainedSnakes: 3, drawnSnakes: 3, foods: 28, frames: 1, ignored: 0 };
   let frameId = 0, sceneFrees = 0, stepFrees = 0, constructions = 0;
@@ -69,17 +101,30 @@ function pageFixture(t, { initialize = async () => {}, decode = async () => {},
       calls.push(['advance', nowMs, lagging]);
       advances.push({ nowMs, gaze: view.own?.eyes?.gazeHeading });
       let freed = false;
-      return { free() {
+      return { get freed() { return freed; }, free() {
         assert.equal(freed, false, 'each returned step is freed only once');
         freed = true;
         stepFrees++;
         calls.push(['step.free']);
       } };
     }
-    render(target) {
+    render(target, p0, p1, p2, background, scale, detailed) {
       assert.equal(target, elements.scene);
+      assert.equal(detailed, false);
       calls.push(['render']);
       if (faults.render) throw faults.render;
+      renderMethods.push('basic');
+      renderScales.push(scale);
+    }
+    render_standard(target, p0, p1, p2, background, resolve, quality) {
+      assert.equal(target, elements.scene);
+      assert(quality instanceof DesktopQuality);
+      const recipe = resolve({ skin: 0, customBytes: new Uint8Array(), cosmetic: 0, x: 0, y: 0 });
+      assert.equal(recipe.status, 'ready');
+      resolvedRecipes.push(recipe);
+      calls.push(['render']);
+      if (faults.render) throw faults.render;
+      renderMethods.push('standard');
     }
     snapshot() { calls.push(['snapshot']); return JSON.stringify(view); }
     free() { sceneFrees++; calls.push(['scene.free']); }
@@ -102,8 +147,9 @@ function pageFixture(t, { initialize = async () => {}, decode = async () => {},
     sessions.push(session);
     return session;
   }
+  class PageImage { decode() { return decode(); } }
   const ready = pageScript.runInNewContext({
-    init: initialize, wasm: { AnimatedScene }, syntheticScene, syntheticStep,
+    init: initialize, wasm: { AnimatedScene, DesktopQuality }, syntheticScene, syntheticStep, createSyntheticBodyResolver,
     loopbackEndpoint, sceneHeading, connectLoopback, window, AbortController,
     document: {
       querySelector(selector) {
@@ -113,7 +159,7 @@ function pageFixture(t, { initialize = async () => {}, decode = async () => {},
       },
       createElement(tag) { assert.equal(tag, 'canvas'); return new Canvas(); },
     },
-    Image: class { decode() { return decode(); } },
+    Image: PageImage, HTMLImageElement: PageImage, HTMLCanvasElement: Canvas,
     performance: { now: () => 10 },
     requestAnimationFrame(callback) { frames.set(++frameId, callback); return frameId; },
     cancelAnimationFrame(id) { cancelled.push(id); frames.delete(id); },
@@ -126,6 +172,7 @@ function pageFixture(t, { initialize = async () => {}, decode = async () => {},
   t.after(() => window.emit('pagehide'));
   return {
     ready, elements, window, calls, sessions, frames, cancelled, advances, faults, view,
+    qualityView, renderMethods, renderScales, resolvedRecipes, qualityFrees: () => qualityFrees,
     fetched: fetched.promise,
     counts: () => ({ constructions, sceneFrees, stepFrees }),
     pointer: (clientX, clientY) => elements.scene.emit('pointermove', { clientX, clientY }),
@@ -148,9 +195,11 @@ function pageFixture(t, { initialize = async () => {}, decode = async () => {},
 function expectFrame(page, nowMs, radians) {
   page.calls.length = 0;
   page.frame(nowMs);
-  assert.deepEqual(page.calls, [
+  assert.deepEqual(page.calls.filter(call => !call[0].startsWith('quality.')), [
     ['gaze', radians], ['advance', nowMs, false], ['step.free'], ['render'], ['snapshot'],
   ]);
+  assert.deepEqual(page.calls.map(call => call[0]), ['gaze', 'advance', 'quality.advance', 'step.free',
+    'quality.statistics', 'quality.snapshot', 'render', 'snapshot']);
   assert.equal(page.frames.size, 1);
 }
 
@@ -164,6 +213,58 @@ test('RAF applies initial zero gaze before one advance, frees the step and rende
   assert.equal(page.window.slitherAnimatedSceneReport.renders, 2);
   assert.deepEqual(page.counts(), { constructions: 1, sceneFrees: 0, stepFrees: 2 });
 });
+
+test('quality statistics receive raw successful draws at the strict interval before the next draw', async t => {
+  const page = pageFixture(t);
+  await page.ready;
+  page.calls.length = 0;
+  for (const nowMs of [1010, 1011, 2011, 2012]) page.frame(nowMs);
+  assert.deepEqual(page.calls.filter(call => call[0] === 'quality.statistics'), [
+    ['quality.statistics', 1010, 0, true], ['quality.statistics', 1011, 1, true],
+    ['quality.statistics', 2011, 1, true], ['quality.statistics', 2012, 2, true],
+  ]);
+  assert.deepEqual(page.renderMethods, ['standard', 'standard', 'standard', 'standard']);
+  assert.equal(page.window.slitherAnimatedSceneReport.renders, 3, 'the throttled readout does not define the draw counter');
+  assert.equal(page.resolvedRecipes[0].recipe.bodyStyle.rotateSegments, true);
+});
+
+test('preference is deferred until connection; preview reset preserves the statistics interval and count', async t => {
+  const page = pageFixture(t);
+  await page.ready;
+  page.frame(20);
+  page.calls.length = 0;
+  page.elements.quality.value = '0';
+  page.elements.quality.emit('change');
+  assert.deepEqual(page.calls, [['quality.requested', 0]]);
+  assert.equal(page.qualityView.highQuality, true);
+  page.elements.reset.emit('click');
+  assert.equal(page.qualityView.requested, 0);
+  assert.equal(page.qualityView.highQuality, true);
+  page.frame(1011);
+  assert.deepEqual(page.calls.find(call => call[0] === 'quality.statistics'), ['quality.statistics', 1011, 1, true]);
+  page.connect();
+  assert.equal(page.qualityView.highQuality, false);
+  page.calls.length = 0;
+  page.frame(2012);
+  assert.deepEqual(page.calls.find(call => call[0] === 'quality.statistics'), ['quality.statistics', 2012, 1, true]);
+  assert.equal(page.renderMethods.at(-1), 'basic', 'local mode retains its existing renderer explicitly');
+  assert.equal(page.renderScales.at(-1), 1.7);
+  assert.equal(page.window.slitherAnimatedSceneReport.quality.requested, 0);
+});
+
+for (const fault of ['qualityAdvance', 'statistics']) {
+  test(`${fault} failure frees the borrowed step and both owners without rendering`, async t => {
+    const page = pageFixture(t);
+    await page.ready;
+    page.faults[fault] = new Error(`synthetic ${fault}`);
+    page.frame(20);
+    assert.equal(page.renderMethods.length, 0);
+    assert.equal(page.frames.size, 0);
+    assert.deepEqual(page.counts(), { constructions: 1, sceneFrees: 1, stepFrees: 1 });
+    assert.equal(page.qualityFrees(), 1);
+    assert.match(page.elements.status.textContent, new RegExp(fault));
+  });
+}
 
 test('synthetic gaze uses fractional backing-pixel offsets, signed radians and center zero without own', async t => {
   const page = pageFixture(t);
@@ -319,7 +420,8 @@ test('pagehide aborts listeners and config, cancels RAF, closes transport and fr
   assert.deepEqual(session.inputs, []);
   assert.equal(page.frames.size, 0);
   assert.equal(session.closes, 1);
-  for (const id of ['reset', 'step', 'skin', 'zoom', 'follow', 'connect', 'disconnect']) {
+  assert.equal(page.qualityFrees(), 1);
+  for (const id of ['reset', 'step', 'skin', 'zoom', 'follow', 'quality', 'connect', 'disconnect']) {
     assert.equal(page.elements[id].disabled, true);
   }
 });
@@ -333,7 +435,8 @@ for (const fault of ['gaze', 'render']) {
     page.calls.length = 0;
     page.frame(20);
     assert.deepEqual(page.calls.map(call => call[0]), fault === 'gaze'
-      ? ['gaze', 'scene.free'] : ['gaze', 'advance', 'step.free', 'render', 'scene.free']);
+      ? ['gaze', 'scene.free', 'quality.free'] : ['gaze', 'advance', 'quality.advance', 'step.free',
+        'quality.statistics', 'quality.snapshot', 'render', 'scene.free', 'quality.free']);
     assert.equal(page.frames.size, 0);
     assert.equal(session.closes, 1);
     assert.deepEqual(page.counts(), { constructions: 1, sceneFrees: 1, stepFrees: fault === 'render' ? 1 : 0 });

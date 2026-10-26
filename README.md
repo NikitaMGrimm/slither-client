@@ -72,9 +72,17 @@ synthetic scene. **Step** advances a received anchor; **Palette**, **Zoom**, and
 
 Open `http://127.0.0.1:18884/animated` for continuous prediction, corrected
 body sampling and standard paired eyes. Pointer motion controls visual gaze,
-including in the synthetic preview. It uses original stand-in artwork; full
-skins, special faces, attachments and quality-dependent drawing remain pending.
+including in the synthetic preview. The synthetic fixture uses original
+stand-ins with ordered body effects and adaptive quality. Local simulator mode
+keeps its basic stand-ins. Full skins, special faces and attachments remain pending.
 The received-anchor preview at `/` remains available for comparison.
+
+The separate opt-in [`render_standard` API](docs/standard-body-renderer.md)
+submits standard body plans from trusted borrowed skin-provider snapshots and
+applied quality. The animated page demonstrates it with three authored synthetic
+recipes. Stock Firefox checks cover native Canvas submission and page cadence;
+a bounded external-runtime comparison matches production body commands exactly.
+Full skins and original-pixel parity remain separate.
 
 CI checks native Rust on Linux and Windows and runs a real Wasm ABI smoke test
 on Linux. Release-plz remains dormant; ordinary pushes do not publish artifacts.

@@ -89,6 +89,8 @@ pub struct SnakeMetrics {
 pub struct SnakePresentation {
     id: u16,
     skin: u8,
+    custom_skin: Vec<u8>,
+    cosmetic: u8,
     head: HeadMotion,
     head_corrections: HeadCorrections,
     angle_corrections: AngleCorrections,
@@ -159,6 +161,7 @@ impl SnakePresentation {
             appearance.speed_per_32ms / setup.spangdv,
         ])?;
         if setup.protocol != 19
+            || appearance.custom_skin.len() > 255
             || setup.grid_center <= 0.
             || setup.radius <= 0.
             || setup.max_segments == 0
@@ -180,6 +183,8 @@ impl SnakePresentation {
         let mut snake = Self {
             id: appearance.id,
             skin: appearance.skin,
+            custom_skin: appearance.custom_skin.clone(),
+            cosmetic: appearance.cosmetic,
             head: HeadMotion {
                 position: appearance.absolute_head,
                 heading: appearance.heading,
@@ -532,6 +537,16 @@ impl SnakePresentation {
     /// Standard paired-eye geometry; special topologies are not inferred from skin IDs.
     pub fn eye_geometry(&self) -> &StandardEyeGeometry {
         &self.eye_geometry
+    }
+
+    /// Original custom bytes on this retained appearance, independent of ID reuse.
+    pub fn custom_skin(&self) -> &[u8] {
+        &self.custom_skin
+    }
+
+    /// Original cosmetic marker; interpretation belongs to the trusted provider.
+    pub fn cosmetic(&self) -> u8 {
+        self.cosmetic
     }
 
     /// Observe all coupled numeric channels without advancing them.

@@ -56,7 +56,9 @@ function requestSnapshot(request) {
   if (y !== undefined) number(y, -Number.MAX_VALUE, Number.MAX_VALUE, 'y');
   const attachmentId = field(request, 'attachmentId');
   if (attachmentId !== undefined) integer(attachmentId, 0, 65535, 'attachmentId');
-  return freeze({ skin, customBytes, x, y, attachmentId });
+  const cosmetic = field(request, 'cosmetic');
+  if (cosmetic !== undefined) integer(cosmetic, 0, 255, 'cosmetic');
+  return freeze({ skin, customBytes, x, y, attachmentId, ...(cosmetic === undefined ? {} : { cosmetic }) });
 }
 
 function scalar(element, Constructor, key) {
@@ -99,6 +101,8 @@ export function createSkinProvider({ trusted, realm, resolveHostRecipe, normaliz
       if (hostStatus !== 'ready') return freeze({ schema: 1, revision: version, status: hostStatus, recipe: null });
 
       const borrowed = new Map();
+      const styleInput = field(normalized, 'bodyStyle');
+      const hasBodyStyle = styleInput !== undefined && styleInput !== null;
       function borrow(id) {
         integer(id, 0, catalog.length - 1, 'asset index');
         if (borrowed.has(id)) return borrowed.get(id);
@@ -140,7 +144,7 @@ export function createSkinProvider({ trusted, realm, resolveHostRecipe, normaliz
             sourceRect = freeze([x, y, width, height]);
           }
         } else if (asset.width && asset.height) sourceRect = freeze([0, 0, asset.width, asset.height]);
-        return freeze({ asset, sourceRect });
+        return freeze({ asset, sourceRect, ...(hasBodyStyle ? { sourceMode: rect === undefined ? 'whole' : 'crop' } : {}) });
       }
 
       const palettes = freeze(list(field(normalized, 'palettes'), 1, 256, 'palettes').map(value => {
@@ -185,7 +189,6 @@ export function createSkinProvider({ trusted, realm, resolveHostRecipe, normaliz
         effectKinds.add(kind);
         return freeze({ kind, ...assetUse(value), opacity: number(field(value, 'opacity'), 0, 1, 'effect opacity') });
       }));
-      const styleInput = field(normalized, 'bodyStyle');
       let bodyStyle = null;
       if (styleInput !== undefined && styleInput !== null) {
         function fade(value, label) {

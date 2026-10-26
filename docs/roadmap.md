@@ -24,7 +24,12 @@ The separate animated preview now connects ordered events, head/body/length
 corrections, following camera, draw-driven spacing and sampled curves. Synthetic
 native/Wasm and Windows browser checks exercise this path. Standard paired eyes
 now retain gaze, pupil motion and deferred draw targets. Full skins, special
-faces, quality effects, radius easing, HUD, prey and team-mode drawing remain pending.
+faces, radius easing, HUD, prey and team-mode drawing remain pending. The opt-in
+standard-body renderer now connects ordered body effects and applied quality to
+production geometry; the synthetic page demonstrates three authored recipes.
+Native Firefox checks cover that bounded integration. Five frozen external-runtime
+schedules match production body commands exactly; full-skin and original-pixel
+parity remain unverified.
 
 ## 3. Measure dense scenes
 

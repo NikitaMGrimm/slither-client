@@ -311,15 +311,16 @@ preserve the previous state. These tests do not connect quality to the renderer.
 A separate native offline comparison against the pinned complete runtime matched
 51,240 fields across 8,540 operations in six cases exactly. It supplied explicit
 draw counts rather than measuring browser FPS. This verifies the tested numerical
-quality state; browser quality effects, renderer integration, pixel fidelity and
-automatic fallback under actual desktop load remain unverified.
+quality state. It does not verify browser quality effects, renderer integration,
+pixel fidelity or automatic fallback under actual desktop load. Separate bounded
+renderer and authored-page checks appear below.
 
 The integrated real Wasm bindings also matched those six frozen runtime traces:
 51,240 fields and 8,492 statistics-reset return values matched exactly. The
 private evidence documents JSON's signed-zero limitation. Seven Chrome/Electron
 assertions separately checked preference application, interpolation ordering and
 atomic input rejection through the browser ABI. These remain standalone checks;
-the animated page does not yet apply quality state to its rendering passes.
+page integration has separate synthetic checks described below.
 
 Stock Windows Firefox 158.0.1 headless separately passed 224 standalone quality
 assertions on that build. This checked the numerical ABI and input rejection;
@@ -367,6 +368,83 @@ uses have synthetic coverage only. Effective alpha is the observer's logical
 Canvas-state interpretation, not native raster evidence. Pass labels and final
 cursor output were not directly observed and are excluded from the comparison
 claim. External adapters, source identities and raw evidence remain outside Git.
+
+## Opt-in standard-body renderer checks
+
+`tools/body-render-smoke.mjs` executes the real Wasm `render_standard` ABI with
+an original synthetic Canvas recorder and normalized provider snapshots. Its
+242 assertions cover per-appearance custom/cosmetic requests, duplicate IDs and
+original-own removal/reuse, whole-source versus full/partial crops, exact source
+objects, transforms/destination arithmetic, ordered body/death/eyes, HQ/LQ/blend
+gates, mixed glows, ignored invalid alpha, readiness/revision coherence, short
+bodies, aggregate command limits, pre-reset rejection and Canvas exception model
+rollback. The same checks run from `tools/wasm-smoke.mjs` after the web build.
+
+Two additional native client tests cover heterogeneous sampling/flags, retained
+appearance metadata and uniform API equivalence. The provider suite has 26 tests,
+including opt-in source-mode preservation and legacy output shape. These are
+synthetic checks. The Canvas recorder models alpha/state and records calls; it
+does not rasterize or measure a browser. The earlier planner differential result
+does not establish production collection/submission parity. The production
+comparison below separately covers bounded schedules; performance and all-skin
+support remain unverified.
+See the [API contract](standard-body-renderer.md).
+
+The animated page's synthetic body resolver and mocked-page tests separately
+check the three authored recipes, exact source identity, unsupported appearances,
+shared-step quality ordering, raw draw counts at the strict statistics boundary,
+deferred connection preference, reset cadence and cleanup after quality errors.
+These are synthetic Node checks; they do not establish browser pixels or
+production collection parity with an external runtime.
+
+Stock Windows Firefox 158.0.1 headless separately passed 247 native Canvas
+assertions and 1,290 assertions on the unchanged authored page. Native checks
+cover live source identity, crop overloads, mixed styles, quality borrowing,
+painter order, native invalid-alpha retention, preflight rejection, hostile
+context reset and model rollback after Canvas exceptions. An independent native
+Canvas getter supplies the expected alpha round trip; no tolerance is used.
+
+Nine matched synthetic checkpoints use the same three views and explicit
+0..624-ms timeline as the preserved BEFORE build. All complete exported numeric
+and camera snapshots match BEFORE exactly, and all nine fresh-reload repeats
+match AFTER pixels and numeric state exactly. Body pixels intentionally change;
+there is no external pixel oracle. The JSON diagnostics do not retain signed zero.
+A separate received-Scene fixture retains its prior pixel hash.
+
+Native RAF and trusted CSS-scaled pointer input separately verify gaze before
+advance, one shared owned step, quality interpolation before statistics, raw
+successful draw counts independent of throttled readouts, deferred preference,
+HQ synthetic reset and pagehide teardown. No game socket is constructed. A
+6.264-second native recording preserves 155 decoded source frames; it is a
+synthetic demonstration, not an FPS or performance measurement. Test processes,
+listeners and temporary profiles were removed.
+
+These checks establish the tested native Canvas and page behavior. They do not
+establish original pixels, full skins, extension realms, connected transport or
+official-server acceptance.
+
+A separate production `render_standard` comparison against the complete pinned
+runtime passed five frozen schedules, 114 operations and 71 draws. All 25,121
+ordered body image calls matched across 502,822 body-call cells. The total,
+including supplemental clocks, camera, entity/eye state and diagnostics, is
+525,983 exact cells, with zero mismatches and no tolerance. Separate translations
+and rotations, source IDs, overloads, requested/effective alpha and blend match.
+The comparison normalizes a leading identity transform; it compares each image's
+logical scoped state rather than equal raw save/restore sequences.
+
+Rust receives authored packets, timestamps, pointer/view controls and normalized
+live recipe/source metadata. Observed geometry, sample flags, cursor seeds,
+camera outputs and commands are not supplied. Independent observed/control runs
+match 119 snapshot pairs and 71 draw pairs, including curve caches, buffers,
+retained flags and fake-network records. No actual network connection is made.
+
+Coverage includes turning/anchors, multiple snakes, culling/retained flags,
+detailed sampling, boost, death and own-ID reuse. All calls use whole sources and
+standard skin zero. HQ and LQ are frozen at their public initialization states;
+adaptive-quality evolution, mixed/custom skins, cropped-use parity and general
+one-anchor bodies are excluded. Equality distinguishes signed zero, but no body
+comparison cell in these schedules contains negative zero. This is Node/Wasm
+numeric evidence, separate from native Canvas, pixel and server acceptance.
 
 ## Dense-scene benchmark
 
