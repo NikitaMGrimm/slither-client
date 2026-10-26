@@ -47,11 +47,12 @@ checks establish the guarded file boundaries, not ownership of arbitrary code.
 ## Optional external checks
 
 These commands use an existing trusted archive outside the checkout. They do not
-download a reference. Build the web bindings first.
+download a reference. Build the web bindings first. Replace `/path/to/trusted archive`
+with the path to your existing trusted archive.
 
 ```sh
-npm run compare:reference -- --reference-root <external-directory>
-npm run prototype -- --reference-root <external-directory>
+npm run compare:reference -- --reference-root "/path/to/trusted archive"
+npm run prototype -- --reference-root "/path/to/trusted archive"
 ```
 
 The offline comparison requires `raw/game1107249518.js` and
