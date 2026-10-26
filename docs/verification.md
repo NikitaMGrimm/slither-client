@@ -225,6 +225,26 @@ deferred cleanup. The head-only comparison supplied body-derived turn factors
 from the reference and used zero packet-extrapolation time. It does not verify
 body, camera, curves, skins, rendering or entity death lifetime.
 
+## Standard paired eyes
+
+Synthetic native checks cover effective/wanted heading initialization, Float32
+easing, shortest arcs, fractional pupils, visibility entry, deferred draw-target
+feedback, death/expiry and per-eye layout arithmetic. Coupling checks include
+remote gaze versus original-own pointer gaze through wire-ID reuse, spacing
+cadence, prepared sample limits and complete rollback. A drained two-anchor body
+that emits one render sample retains its raw-heading eye target.
+
+The integrated build passes 174 native tests, formatting, doctests and native/Wasm
+Clippy. The real Wasm smoke checks independent gaze, copied eye diagnostics,
+input rejection, style-aware preparation, fractional pupil motion, death fading
+and short-curve output. These are synthetic numeric checks; full skin geometry,
+special faces and complete renderer fidelity are outside this layer.
+
+All 97 Node tests pass, including 14 mocked-page cases for full-radian gaze,
+CSS-to-backing coordinate conversion, separate quantized steering, RAF ordering,
+retained gaze through death/disconnect/reset, boost release and teardown. These
+page doubles do not establish browser input or raster behavior.
+
 ## Standalone quality state
 
 `tests/presentation_quality.rs` and the real `DesktopQuality` ABI smoke cover

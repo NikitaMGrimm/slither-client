@@ -3,20 +3,18 @@
 use std::f64::consts::TAU;
 
 use wasm_bindgen::prelude::*;
-use web_sys::{HtmlCanvasElement, HtmlImageElement};
+use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, HtmlImageElement};
 
 use crate::{
     canvas_browser::{CanvasFrame, draw_sprite},
     presentation::{
-        AnimatedClient, CurveInput, CurveOutput, MAX_RETAINED_TOTAL_BODY_POINTS, SnakePresentation,
-        Turn, sample_curve,
+        AnimatedClient, CurveInput, CurveOutput, EyeLayoutInput, SnakePresentation,
+        StandardEyeLayout, Turn, sample_curve_with_heading,
     },
     presentation_browser::AnimationStep,
     protocol::ElapsedHeader,
     state::Point,
 };
-
-const MAX_DRAW_SAMPLES: usize = MAX_RETAINED_TOTAL_BODY_POINTS * 2;
 
 fn error(message: impl std::fmt::Display) -> JsValue {
     JsValue::from_str(&message.to_string())
@@ -52,18 +50,21 @@ fn curve(
     detailed_style: bool,
 ) -> Result<CurveOutput, JsValue> {
     let metrics = snake.metrics();
-    sample_curve(CurveInput {
-        corrected_head: metrics.corrected_head,
-        head_fraction: metrics.corrected_head_fraction,
-        body: snake.body().points(),
-        displayed_length: metrics.displayed_length,
-        segment_length: snake.body().segment_length(),
-        point_spacing: metrics.point_spacing,
-        // AnimatedClient already advanced spacing once during draw preparation.
-        target_point_spacing: metrics.point_spacing,
-        quality_scale,
-        detailed_style,
-    })
+    sample_curve_with_heading(
+        CurveInput {
+            corrected_head: metrics.corrected_head,
+            head_fraction: metrics.corrected_head_fraction,
+            body: snake.body().points(),
+            displayed_length: metrics.displayed_length,
+            segment_length: snake.body().segment_length(),
+            point_spacing: metrics.point_spacing,
+            // AnimatedClient already advanced spacing once during draw preparation.
+            target_point_spacing: metrics.point_spacing,
+            quality_scale,
+            detailed_style,
+        },
+        metrics.heading,
+    )
     .map_err(error)
 }
 
@@ -74,21 +75,25 @@ fn has_curve(snake: &SnakePresentation) -> bool {
     metrics.visible && !metrics.expired && snake.body().points().len() >= 2
 }
 
-fn own_snapshot(snake: &SnakePresentation) -> String {
-    let m = snake.metrics();
-    let [offset_x, offset_y, fraction_offset] = snake.head_corrections().offset();
-    let turn = match m.turn {
+fn turn_number(turn: Turn) -> u8 {
+    match turn {
         Turn::None => 0,
         Turn::Decreasing => 1,
         Turn::Increasing => 2,
-    };
+    }
+}
+
+fn snake_snapshot(snake: &SnakePresentation) -> String {
+    let m = snake.metrics();
+    let [offset_x, offset_y, fraction_offset] = snake.head_corrections().offset();
+    let eyes = snake.eyes();
     object! {
         "id": m.id, "skin": m.skin,
         "x": m.raw_head.x, "y": m.raw_head.y,
         "correctedX": m.corrected_head.x, "correctedY": m.corrected_head.y,
         "offsetX": offset_x, "offsetY": offset_y,
         "heading": m.heading, "wantedHeading": m.wanted_heading,
-        "correctedHeading": m.corrected_heading, "turn": turn,
+        "correctedHeading": m.corrected_heading, "turn": turn_number(m.turn),
         "fraction": m.head_fraction, "fractionOffset": fraction_offset,
         "speed": m.speed_per_32ms, "fam": m.fam,
         "logicalSegments": m.logical_segments, "physicalPoints": snake.body().points().len(),
@@ -107,8 +112,42 @@ fn own_snapshot(snake: &SnakePresentation) -> String {
         "pointSpacing": m.point_spacing, "targetPointSpacing": m.target_point_spacing,
         "spawnProgress": m.spawn_progress, "deathProgress": m.death_progress,
         "alive": m.alive, "expired": m.expired, "visible": m.visible,
+        "eyes": object! {
+            "heading": eyes.heading(), "targetHeading": eyes.target_heading(),
+            "turn": turn_number(eyes.turn()), "gazeHeading": eyes.gaze_heading(),
+            "pupilX": eyes.pupil().x, "pupilY": eyes.pupil().y
+        },
         "anchorDirection": snake.body().anchor_direction().map_or_else(|| "null".into(), |v| v.to_string())
     }
+}
+
+fn draw_eyes(context: &CanvasRenderingContext2d, layout: StandardEyeLayout) -> Result<(), JsValue> {
+    let [red, green, blue] = layout.eye_color;
+    let eye_color = format!("rgb({red},{green},{blue})");
+    let [red, green, blue] = layout.pupil_color;
+    let pupil_color = format!("rgb({red},{green},{blue})");
+    // Layout already includes the viewport center and f64 head/camera arithmetic.
+    context.set_transform(1., 0., 0., 1., 0., 0.)?;
+    for pair in layout.pairs {
+        context.set_global_alpha(layout.eye_alpha);
+        context.set_fill_style_str(&eye_color);
+        context.begin_path();
+        context.arc(pair.eye.x, pair.eye.y, layout.eye_radius, 0., TAU)?;
+        context.close_path();
+        if layout.outline_width > 0. {
+            context.set_stroke_style_str("#000000");
+            context.set_line_width(layout.outline_width);
+            context.stroke();
+        }
+        context.fill();
+        context.set_global_alpha(layout.pupil_alpha);
+        context.set_fill_style_str(&pupil_color);
+        context.begin_path();
+        context.arc(pair.pupil.x, pair.pupil.y, layout.pupil_radius, 0., TAU)?;
+        context.close_path();
+        context.fill();
+    }
+    Ok(())
 }
 
 /// Coupled packet/update/draw ownership with a synthetic three-palette preview.
@@ -163,6 +202,31 @@ impl AnimatedScene {
             .map_err(error)
     }
 
+    /// Numeric-only draw with the same sampling style and eye feedback as `render`.
+    pub fn prepare_draw_with_style(
+        &mut self,
+        width: f64,
+        height: f64,
+        quality_scale: f64,
+        detailed_style: bool,
+    ) -> Result<(), JsValue> {
+        self.client
+            .prepare_draw_with_style(
+                dimensions(width)?,
+                dimensions(height)?,
+                quality_scale,
+                detailed_style,
+            )
+            .map_err(error)?;
+        Ok(())
+    }
+
+    /// Set independent visual gaze on the retained original own object, including
+    /// death fade. This neither sends steering nor advances an animation clock.
+    pub fn set_gaze_heading(&mut self, heading: f64) -> Result<(), JsValue> {
+        self.client.set_own_gaze_heading(heading).map_err(error)
+    }
+
     /// Toggle following without advancing the camera's draw clock.
     pub fn set_follows(&mut self, follows: bool) {
         self.client.set_follows(follows);
@@ -215,8 +279,82 @@ impl AnimatedScene {
                 "offsetX": offset.x, "offsetY": offset.y,
                 "index": camera.corrections().index(), "pending": camera.corrections().pending()
             },
-            "own": own.map_or_else(|| "null".into(), own_snapshot)
+            "own": own.map_or_else(|| "null".into(), snake_snapshot)
         }
+    }
+
+    /// Copied numeric snapshots in draw order, including culled entries. The own
+    /// flag identifies the original object independently of a reused wire ID.
+    pub fn drawn_snakes(&self) -> String {
+        let own = self.client.own_snake();
+        let rows = self
+            .client
+            .drawn_snakes()
+            .enumerate()
+            .map(|(ordinal, snake)| {
+                object! {
+                    "drawOrdinal": ordinal,
+                    "own": own.is_some_and(|own| std::ptr::eq(own, snake)),
+                    "snake": snake_snapshot(snake)
+                }
+            })
+            .collect::<Vec<_>>();
+        format!("[{}]", rows.join(","))
+    }
+
+    /// Read-only paired-eye layouts for currently visible drawn snakes. Rows:
+    /// ordinal, ID, own, eye1 x/y, pupil1 x/y, eye2 x/y, pupil2 x/y,
+    /// eye radius, pupil radius, outline width, eye alpha, pupil alpha (stride 16).
+    /// This observes current state; it does not prepare or commit another draw.
+    pub fn drawn_eyes(&self, width: f64, height: f64) -> Result<Vec<f64>, JsValue> {
+        let viewport_half = Point {
+            x: f64::from(dimensions(width)?) / 2.,
+            y: f64::from(dimensions(height)?) / 2.,
+        };
+        let camera = self.client.camera();
+        let own = self.client.own_snake();
+        let mut rows = Vec::new();
+        for (ordinal, snake) in self.client.drawn_snakes().enumerate() {
+            let m = snake.metrics();
+            if !m.visible || m.expired {
+                continue;
+            }
+            let layout = snake
+                .eye_geometry()
+                .layout(
+                    snake.eyes().heading(),
+                    snake.eyes().pupil(),
+                    EyeLayoutInput {
+                        corrected_head: m.corrected_head,
+                        camera: camera.position(),
+                        viewport_half,
+                        scale: m.scale,
+                        zoom: camera.zoom(),
+                        death_progress: m.death_progress,
+                    },
+                )
+                .map_err(error)?;
+            let [first, second] = layout.pairs;
+            rows.extend([
+                ordinal as f64,
+                f64::from(m.id),
+                f64::from(u8::from(own.is_some_and(|own| std::ptr::eq(own, snake)))),
+                first.eye.x,
+                first.eye.y,
+                first.pupil.x,
+                first.pupil.y,
+                second.eye.x,
+                second.eye.y,
+                second.pupil.x,
+                second.pupil.y,
+                layout.eye_radius,
+                layout.pupil_radius,
+                layout.outline_width,
+                layout.eye_alpha,
+                layout.pupil_alpha,
+            ]);
+        }
+        Ok(rows)
     }
 
     /// Copied own body rows: x/y, previous dx/dy, edge, spacing, fade, dying,
@@ -363,7 +501,8 @@ impl AnimatedScene {
     }
 
     /// Draw sampled curves with caller-owned stand-in palettes. Full skin recipes,
-    /// eye/attachment layers and quality-dependent effects remain separate.
+    /// standard paired eyes follow each body. Attachments, special faces and
+    /// quality-dependent effects remain separate.
     #[allow(clippy::too_many_arguments)]
     pub fn render(
         &mut self,
@@ -380,27 +519,43 @@ impl AnimatedScene {
         dimensions(f64::from(target.height()))?;
         let sprites = [palette_0, palette_1, palette_2];
         let mut prepared = self.client.clone();
-        prepared
-            .prepare_draw(target.width(), target.height())
+        let snakes = prepared
+            .prepare_draw_with_style(
+                target.width(),
+                target.height(),
+                quality_scale,
+                detailed_style,
+            )
             .map_err(error)?;
-        let mut curves = Vec::new();
-        let mut count = 0_usize;
-        for snake in prepared.drawn_snakes().filter(|s| has_curve(s)) {
-            let m = snake.metrics();
-            let samples = curve(snake, quality_scale, detailed_style)?.samples;
-            count = count
-                .checked_add(samples.len())
-                .ok_or_else(|| error("draw sample limit exceeded"))?;
-            if count > MAX_DRAW_SAMPLES {
-                return Err(error("draw sample limit exceeded"));
-            }
-            let opacity = m.spawn_progress * (1. - m.death_progress);
-            curves.push((m.skin, 29. * m.scale, opacity * opacity, samples));
-        }
         let received = prepared.received();
         let center = received.setup.as_ref().map_or(0., |s| s.grid_center);
         let camera = prepared.camera().position();
         let zoom = prepared.camera().zoom();
+        let viewport_half = Point {
+            x: f64::from(target.width()) / 2.,
+            y: f64::from(target.height()) / 2.,
+        };
+        // Complete numeric validation before the target's destructive width reset.
+        let layouts = snakes
+            .iter()
+            .map(|snake| {
+                snake
+                    .eye_geometry
+                    .layout(
+                        snake.face_heading,
+                        snake.pupil,
+                        EyeLayoutInput {
+                            corrected_head: snake.metrics.corrected_head,
+                            camera,
+                            viewport_half,
+                            scale: snake.metrics.scale,
+                            zoom,
+                            death_progress: snake.metrics.death_progress,
+                        },
+                    )
+                    .map_err(error)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let frame = CanvasFrame::new(
             &target,
             &sprites,
@@ -430,32 +585,30 @@ impl AnimatedScene {
         }
         // Preserve subtraction-before-scaling for body screen coordinates. The
         // borrowed background/food preview above retains its existing transform.
-        context.set_transform(
-            1.,
-            0.,
-            0.,
-            1.,
-            f64::from(target.width()) / 2.,
-            f64::from(target.height()) / 2.,
-        )?;
-        for (skin, radius, opacity, samples) in curves {
-            context.set_global_alpha(opacity);
-            for point in samples.iter().rev() {
-                context.save();
-                context.translate(
-                    (f64::from(point.x) - camera.x) * zoom,
-                    (f64::from(point.y) - camera.y) * zoom,
-                )?;
-                context.rotate(f64::from(point.angle))?;
-                draw_sprite(
-                    context,
-                    &sprites[usize::from(skin) % 3],
-                    0.,
-                    0.,
-                    zoom * radius,
-                )?;
-                context.restore();
+        for (snake, layout) in snakes.into_iter().zip(layouts) {
+            context.set_transform(1., 0., 0., 1., viewport_half.x, viewport_half.y)?;
+            let m = snake.metrics;
+            let opacity = m.spawn_progress * (1. - m.death_progress);
+            context.set_global_alpha(opacity * opacity);
+            if let Some(curve) = snake.curve {
+                for point in curve.samples.iter().rev() {
+                    context.save();
+                    context.translate(
+                        (f64::from(point.x) - camera.x) * zoom,
+                        (f64::from(point.y) - camera.y) * zoom,
+                    )?;
+                    context.rotate(f64::from(point.angle))?;
+                    draw_sprite(
+                        context,
+                        &sprites[usize::from(m.skin) % 3],
+                        0.,
+                        0.,
+                        zoom * (29. * m.scale),
+                    )?;
+                    context.restore();
+                }
             }
+            draw_eyes(context, layout)?;
         }
         drop(frame);
         self.client = prepared;
