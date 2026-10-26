@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  Independent Rust and WebAssembly browser-client prototypes.
+  Independent Rust and WebAssembly browser client.
 </p>
 
 <p align="center">
@@ -22,10 +22,11 @@
 
 ## Status
 
-Version `0.1.0-alpha.0` is unreleased. The current prototypes provide bounded
-login encoding, challenge solving, frame validation, setup-version extraction,
-and a browser bridge that borrows existing canvas and image objects for a
-Rust/Wasm draw. There is no fully playable game or installed browser extension.
+Version `0.1.0-alpha.0` is unreleased. The client provides bounded handshake
+primitives, atomic protocol-19 scene state, and a Rust/Wasm Canvas2D preview
+with a camera and three palettes. A deterministic synthetic scene runs offline;
+an optional loopback simulator connection adds pointer heading and Space boost.
+There is no fully playable game or installed browser extension.
 See [architecture](docs/architecture.md) for supported inputs and limits.
 
 Local loopback browser verification demonstrated Wasm execution, exact source
@@ -33,7 +34,9 @@ object identity, and matching output pixels. An offline external comparison
 matched four login cases and three synthetic challenge cases byte for byte.
 On 2026-10-26, one Node/WebSocket session accepted the handshake through setup
 protocol 19 using an explicit Origin header. These results cover only the
-documented prototypes; see [verification](docs/verification.md).
+documented handshake primitives. The scene has separately passed synthetic
+Wasm/browser checks and a local simulator demonstration; see
+[verification](docs/verification.md).
 
 [slither-sim](https://github.com/NikitaMGrimm/slither-sim) is the separate
 simulator and server project. This repository owns browser-client behavior.
@@ -60,6 +63,11 @@ node tools/wasm-smoke.mjs
 CI require no external reference and do not connect to game servers. The optional
 loopback prototype and external comparison are described in
 [verification](docs/verification.md), along with index/history guards and hooks.
+
+After building, run `npm run scene` and open `http://127.0.0.1:18884/` for the
+synthetic scene. **Step** advances a received anchor; **Palette**, **Zoom**, and
+**Follow** change the preview. For local simulator controls, see
+[the loopback procedure](docs/verification.md#offline-scene-and-local-simulator).
 
 CI checks native Rust on Linux and Windows and runs a real Wasm ABI smoke test
 on Linux. Release-plz remains dormant; ordinary pushes do not publish artifacts.

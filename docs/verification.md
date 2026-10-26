@@ -14,13 +14,15 @@ cargo fmt --all --check
 cargo test --all-targets --locked
 cargo test --doc --locked
 cargo clippy --all-targets --locked -- -D warnings
+cargo clippy --lib --locked --target wasm32-unknown-unknown -- -D warnings
 npm run build:web
 node tools/wasm-smoke.mjs
 ```
 
 The web build produces ignored `dist/web` JavaScript bindings and Wasm. The smoke
-test executes that real Wasm ABI with a synthetic challenge/login/setup sequence
-and rejection cases. It needs no browser, external reference, or socket. Keep
+test executes that real Wasm ABI with synthetic handshake and scene sequences,
+including spawn, update, removal, food, setup truncations and atomic rollback.
+It needs no browser, external reference, or socket. Keep
 this checkout's `target/` separate from other projects and running jobs.
 
 CI runs repository guards and npm tests, native Rust checks on Linux and Windows,
@@ -43,6 +45,61 @@ The guard reads index and committed blobs, so it does not cover unstaged edits.
 The pre-push hook also inspects actual outgoing commits and their ancestry.
 Enable hooks per clone with `git config core.hooksPath tools/hooks`. Passing
 checks establish the guarded file boundaries, not ownership of arbitrary code.
+
+## Offline scene and local simulator
+
+Build the web bindings, then run:
+
+```sh
+npm run scene
+```
+
+Open `http://127.0.0.1:18884/`. The initial scene is entirely synthetic: three
+snakes, 28 food items, original generated sprites and a generated background.
+Step advances the own front anchor by eight units. Reset restores the fixture;
+palette selection resets it with the selected own skin. Zoom and Follow affect
+only the camera. `window.slitherSceneReport` exposes state counts and camera data.
+
+For manual local integration, start an existing
+[slither-sim](https://github.com/NikitaMGrimm/slither-sim) executable in a separate
+terminal, then enable that exact port on the scene server:
+
+```sh
+slither-sim host --bind 127.0.0.1:8766
+npm run scene -- --simulator-port 8766
+```
+
+Use the simulator's **host**, not its JSON `serve` command. Click **Connect local
+simulator**, move the pointer over the canvas to aim, and hold **Space** while the
+canvas has focus to boost. Blur releases boost. Disconnect stops the socket and
+input timer; Reset returns to the synthetic fixture. A life ends on own removal;
+another connection requires a manual click. No game discovery or official
+endpoint is accepted. The local host accepts placeholder login credentials, so
+this route does not verify credentials against another service.
+
+Normal tests and CI never start this host or open a game socket. Optional CLI
+ports are bounded; HTTP serves only literal `127.0.0.1` with exact Host checking.
+
+## Recorded scene results
+
+On 2026-10-26, the T3 Code browser (Chrome 152 / Electron 44, Windows) executed
+the real Wasm renderer. Ten synthetic checks passed: own palette pixel,
+deterministic full output, caller clip/filter/transform reset, state and rendered
+rollback after malformed input, camera following an updated head, alternate
+palette, invalid camera/zoom, source-target alias, unloaded image and empty target.
+These use original generated fixtures, not a visual parity oracle.
+
+The optional loopback asset page rendered the same three-snake/28-food scene
+with exact existing palette canvas identities and its loaded background image.
+The earlier two-rectangle pixel comparison continued to pass, with zero game
+sockets. The scene observation establishes object reuse and execution only.
+
+A locally rebuilt simulator at `dd9604455e7a373bd82fe107514eb01f33f3d49a`
+accepted header-free direct login from the browser. Real Wasm applied setup,
+own appearance with the selected skin, food and subsequent motion/removal frames;
+the camera followed the own head. Local life-end handling and manual reset were
+observed. No simulator source was changed. This establishes the tested local
+path, without a full gameplay or official-server acceptance claim.
 
 ## Optional external checks
 

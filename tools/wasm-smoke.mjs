@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { loadWasm } from './reference-context.mjs';
 import { syntheticChallenge } from './reference-parity.mjs';
 import { HandshakeSession } from '../web/handshake-session.mjs';
+import { bundle, syntheticScene, syntheticSetup, syntheticStep } from '../web/synthetic-scene.mjs';
 
 // Entirely synthetic ABI integration; no reference files or network are used.
 const wasm = await loadWasm();
@@ -18,3 +19,24 @@ assert.equal(accepted.complete, true); assert.equal(accepted.protocolVersion, 19
 assert.throws(() => wasm.solve_challenge(Uint8Array.of(0, 1)));
 assert.throws(() => wasm.encode_login(1, new Uint8Array(19), 'Synthetic', 0, new Uint8Array()));
 console.log('Synthetic Wasm ABI handshake passed; no reference files or sockets used.');
+
+const scene = new wasm.Scene();
+scene.apply_frame(syntheticScene(), false);
+const first = JSON.parse(scene.snapshot());
+assert.equal(first.snakes, 3); assert.equal(first.foods, 28); assert.equal(first.ownId, 0);
+assert.equal(first.protocol, 19); assert.deepEqual(first.ownHead, { x: 0, y: 0, skin: 0 });
+scene.apply_frame(syntheticStep(1), false);
+assert.equal(JSON.parse(scene.snapshot()).ownHead.x, 8);
+const before = scene.snapshot();
+assert.throws(() => scene.apply_frame(bundle(syntheticStep(2), [70, 108, 108, 0]), false));
+assert.equal(scene.snapshot(), before, 'malformed command must roll back earlier anchors and counters');
+for (let length = 0; length < 25; length++) {
+  assert.throws(() => scene.apply_frame(syntheticSetup().slice(0, length), false));
+  assert.equal(scene.snapshot(), before);
+}
+scene.apply_frame(bundle([115, 0, 0, 1], [119, 108, 108]), false);
+const removed = JSON.parse(scene.snapshot());
+assert.equal(removed.snakes, 2); assert.equal(removed.foods, 0); assert.equal(removed.ownHead, null);
+scene.reset(); assert.equal(JSON.parse(scene.snapshot()).protocol, null);
+scene.free();
+console.log('Synthetic Wasm scene ABI transitions and atomic rejection passed.');

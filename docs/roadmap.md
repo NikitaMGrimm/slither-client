@@ -1,18 +1,26 @@
 # Roadmap
 
-Version `0.1.0-alpha.0` contains bounded protocol and browser asset prototypes.
-The local draw, selected offline comparisons, and one Node/WebSocket handshake
-through setup have been demonstrated. See [verification](verification.md) for scope.
+Version `0.1.0-alpha.0` contains bounded handshake primitives and an atomic
+protocol-19 scene with a Rust/Wasm Canvas2D preview. Synthetic browser rendering,
+borrowed-asset integration and a local simulator connection have been demonstrated.
+See [verification](verification.md) for scope.
 
-## 1. Decode synthetic client state and render it
+## 1. Received scene slice (implemented)
 
-Add decoded setup and entity state using explicitly labelled synthetic offline
-fixtures. Build a deterministic minimal Canvas renderer for that state, then
-integrate it with the separate [slither-sim](https://github.com/NikitaMGrimm/slither-sim)
-server interface. Cover state transitions and rendering with focused tests and
-browser evidence. Simulator results establish only the tested simulator path.
+Setup, snake appearance/motion/removal and food state apply atomically with
+bounded retention. The deterministic renderer has a camera, three palettes,
+synthetic fixtures and optional loopback pointer/boost controls. It previews
+received anchors; prediction, smooth bodies, complete skins, HUD and prey remain
+unimplemented. Simulator results establish only the tested simulator path.
 
-## 2. Package the browser client
+## 2. Measure dense scenes and complete presentation
+
+Measure state staging and rendering on representative dense fixtures before
+selecting a batched GPU path. Preserve the separation between protocol state,
+borrowed asset inputs and rendering. Add supported presentation behavior in
+small verified steps rather than treating the preview as full gameplay.
+
+## 3. Package the browser client
 
 After the state/rendering path works, add extension packaging with a documented
 install and verification procedure. Input, connection flow, and gameplay still

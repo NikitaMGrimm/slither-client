@@ -37,19 +37,23 @@ function scalar(element, Constructor, key) {
 }
 
 /** Borrow existing elements from a trusted page realm without loading or rendering. */
-export function borrowReferenceAssets(scope = globalThis) {
+export function borrowReferenceAssets(scope = globalThis, palette = 0) {
+  if (!Number.isInteger(palette) || palette < 0 || palette > 2) {
+    throw new RangeError('Supported scene palettes are 0, 1, and 2');
+  }
   const Canvas = ownValue(scope, 'HTMLCanvasElement', 'HTMLCanvasElement');
   const Image = ownValue(scope, 'HTMLImageElement', 'HTMLImageElement');
   if (typeof Canvas !== 'function' || typeof Image !== 'function') {
     throw new TypeError('Unsupported reference assets: DOM constructors unavailable');
   }
   const table = ownValue(scope, 'per_color_imgs', 'per_color_imgs');
-  const color = ownValue(table, '0', 'per_color_imgs[0]');
-  const canvases = ownValue(color, 'kmcs', 'per_color_imgs[0].kmcs');
-  const generated = ownValue(canvases, '0', 'per_color_imgs[0].kmcs[0]');
+  const label = `per_color_imgs[${palette}]`;
+  const color = ownValue(table, String(palette), label);
+  const canvases = ownValue(color, 'kmcs', `${label}.kmcs`);
+  const generated = ownValue(canvases, '0', `${label}.kmcs[0]`);
   const downloaded = ownValue(scope, 'bg_hex', 'bg_hex');
   if (!(generated instanceof Canvas)) {
-    throw new TypeError('Unsupported reference assets: per_color_imgs[0].kmcs[0] is not a canvas in the supplied realm');
+    throw new TypeError(`Unsupported reference assets: ${label}.kmcs[0] is not a canvas in the supplied realm`);
   }
   if (!(downloaded instanceof Image)) {
     throw new TypeError('Unsupported reference assets: bg_hex is not an image in the supplied realm');
