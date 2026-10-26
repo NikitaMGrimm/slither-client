@@ -15,10 +15,12 @@ use crate::{math, state::Point};
 mod body;
 mod camera;
 mod length;
+mod quality;
 
 pub use body::{BODY_SAMPLES, BodyGeometry, BodyPoint, MAX_RETAINED_BODY_POINTS};
 pub use camera::{CAMERA_SAMPLES, CameraCorrections};
 pub use length::LengthPresentation;
+pub use quality::{QualityMode, QualitySnapshot, QualityState};
 
 /// Number of samples in each head position/fraction correction channel.
 pub const HEAD_SAMPLES: usize = 53;
