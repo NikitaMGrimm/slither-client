@@ -105,6 +105,32 @@ This verifies the primitives only. The scene still needs ordered presentation
 event application, sampled bodies, camera/draw timing, eyes, quality modes and full skins
 before visual or gameplay equivalence can be assessed.
 
+`tests/presentation_geometry.rs` verifies length/camera ring overlap, distinct
+clock and cleanup rules, mass scheduling, copied samples and atomic errors.
+`tests/presentation_body.rs` covers initial absolute geometry, sequential
+contraction, visible/invisible corrections, cached relative anchors, dying-tail
+retention, independent logical/physical caps and late-failure rollback. These
+are synthetic tests of the native model; the scene still draws received anchors.
+
+A further offline comparison matched 25,610 length/camera scalar and sample
+values exactly across 133 operations. Camera discontinuities were supplied from
+observed head/base-camera state to isolate its correction ring; this does not
+verify a complete following camera. The actual Wasm bindings also passed Chrome
+152 / Electron 44 checks for all 62 camera weights, per-draw consumption, live
+zero-step length cleanup and integer-input rejection. Stock Windows Firefox
+158.0.1 headless passed 158 assertions across 13 synthetic ABI/Canvas2D groups
+on the refreshed build, including the new length/camera bindings. Desktop
+interaction, Firefox performance and complete presentation parity remain unverified.
+
+A native body comparison covered five cases and 779 operations: 6,349,529
+Float32 samples/weights, 330,206 double-precision values and 92,987 discrete
+fields matched exactly, with maximum observed body error zero. It initialized
+through synthetic setup/appearance packets and the Rust events. Cases included
+growth/tail removal, visibility changes, overlapping corrections, dead updates,
+ring drain and 140 updates of 40 ms for dying-tail retention. Head positions,
+visibility and integer steps were supplied from runtime observations to isolate
+the body; coupled head/body/camera behavior remains a separate comparison.
+
 An offline comparison on 2026-10-26 matched all seven timing fields exactly
 across 67 synthetic clock updates against the pinned client runtime. Cases
 included fractional accumulation, zero/backward time, long pauses, lag decay,

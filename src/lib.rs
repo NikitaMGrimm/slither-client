@@ -6,6 +6,8 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+mod math;
+
 pub mod challenge;
 pub mod presentation;
 pub mod protocol;

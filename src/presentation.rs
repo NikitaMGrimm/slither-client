@@ -1,7 +1,8 @@
 //! Explicit-time presentation primitives, separate from received state and physics.
 //!
-//! This foundation covers frame timing, head prediction, and head/angle offsets.
-//! It does not implement body curves, cosmetics, camera motion, or session logic.
+//! This foundation covers timing, head prediction, entity offsets, visual length,
+//! and draw-driven camera offsets. It does not implement body curves, cosmetics,
+//! a complete following camera, or session logic.
 
 use std::{
     error::Error,
@@ -9,7 +10,15 @@ use std::{
     fmt,
 };
 
-use crate::state::Point;
+use crate::{math, state::Point};
+
+mod body;
+mod camera;
+mod length;
+
+pub use body::{BODY_SAMPLES, BodyGeometry, BodyPoint, MAX_RETAINED_BODY_POINTS};
+pub use camera::{CAMERA_SAMPLES, CameraCorrections};
+pub use length::LengthPresentation;
 
 /// Number of samples in each head position/fraction correction channel.
 pub const HEAD_SAMPLES: usize = 53;
@@ -259,8 +268,8 @@ impl HeadMotion {
         }
         if alive {
             let travel = travel.min(self.segment_length);
-            next.position.x += next.heading.cos() * travel;
-            next.position.y += next.heading.sin() * travel;
+            next.position.x += math::cos(next.heading) * travel;
+            next.position.y += math::sin(next.heading) * travel;
             next.head_fraction += travel / self.segment_length;
         }
         finite(&[next.position.x, next.position.y, next.head_fraction])?;
@@ -282,7 +291,7 @@ impl<const N: usize, const C: usize> Default for CorrectionRing<N, C> {
     fn default() -> Self {
         Self {
             weights: std::array::from_fn(|index| {
-                (0.5 * (1. - (PI * (N - 1 - index) as f64 / (N - 1) as f64).cos())) as f32
+                (0.5 * (1. - math::cos(PI * (N - 1 - index) as f64 / (N - 1) as f64))) as f32
             }),
             samples: [[0.; N]; C],
             index: 0,
