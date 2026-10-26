@@ -194,6 +194,11 @@ zero-step length cleanup and integer-input rejection. Stock Windows Firefox
 on the refreshed build, including the new length/camera bindings. Desktop
 interaction, Firefox performance and complete presentation parity remain unverified.
 
+Synthetic exhausted-body tests cover absolute and cached-direction anchors,
+non-growing zero-count retention, growth recovery, and complete rollback when
+a later tail removal would require a negative logical count. The native body
+API supports nonnegative counts; these tests do not claim negative-count parity.
+
 A native body comparison covered five cases and 779 operations: 6,349,529
 Float32 samples/weights, 330,206 double-precision values and 92,987 discrete
 fields matched exactly, with maximum observed body error zero. It initialized

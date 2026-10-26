@@ -28,11 +28,11 @@ the bounded comparison results are documented in [verification](verification.md)
 
 ## Branding and license
 
-`assets/logo.svg` is an original angular snake and client wordmark. Its palette
-and compact presentation follow the visual family of the public
-[slither-sim README](https://github.com/NikitaMGrimm/slither-sim/blob/bb9d457a9649ac7c6a63fdb3970b1a7f945f3366/README.md)
-and [SVG](https://github.com/NikitaMGrimm/slither-sim/blob/bb9d457a9649ac7c6a63fdb3970b1a7f945f3366/assets/logo.svg).
-It contains no official game artwork.
+`assets/logo.svg` uses an original C-shaped snake with an eye cutout and the
+SlitherClient wordmark. It pairs with SlitherSim's S-shaped snake. The lettering
+was typeset in [Inter Medium](https://github.com/rsms/inter) and converted to vector
+paths. Inter is distributed under the [SIL Open Font License 1.1](https://github.com/rsms/inter/blob/master/LICENSE.txt).
+The SVG contains no official game artwork, scripts or external resources.
 
 `assets/icon.svg` contains the same original snake symbol without the wordmark
 in a square viewport. T3 Code discovers this file automatically as the project

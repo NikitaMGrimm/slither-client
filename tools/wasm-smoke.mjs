@@ -19,6 +19,8 @@ assert.equal(reply.outbound[1][0], 115);
 const setup = new Uint8Array(30); setup[0] = 97; setup[23] = 19;
 const accepted = session.receive(setup);
 assert.equal(accepted.complete, true); assert.equal(accepted.protocolVersion, 19);
+assert.deepEqual(wasm.decode_frame(Uint8Array.of(112), false),
+  Uint8Array.of(0, 0, 0, 1, 112), 'packed pong uses a big-endian u32 command length');
 assert.throws(() => wasm.solve_challenge(Uint8Array.of(0, 1)));
 assert.throws(() => wasm.encode_login(1, new Uint8Array(19), 'Synthetic', 0, new Uint8Array()));
 console.log('Synthetic Wasm ABI handshake passed; no reference files or sockets used.');
