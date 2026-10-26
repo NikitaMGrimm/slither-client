@@ -143,9 +143,11 @@ export function createSkinProvider({ trusted, realm, resolveHostRecipe, normaliz
         return freeze({ asset, sourceRect });
       }
 
-      const palettes = freeze(list(field(normalized, 'palettes'), 1, 256, 'palettes').map(value => freeze({
-        variants: freeze(list(field(value, 'variants'), 1, 256, 'variants').map(assetUse)),
-      })));
+      const palettes = freeze(list(field(normalized, 'palettes'), 1, 256, 'palettes').map(value => {
+        const variants = freeze(list(field(value, 'variants'), 1, 256, 'variants').map(assetUse));
+        const glow = field(value, 'boostGlow');
+        return freeze({ variants, ...(glow === undefined ? {} : { boostGlow: assetUse(glow) }) });
+      }));
       const basePalette = integer(field(normalized, 'basePalette'), 0, palettes.length - 1, 'basePalette');
       const variantMode = choice(field(normalized, 'variantMode'), ['first', 'cycle', 'ping-pong'], 'variantMode');
       const variantPeriod = integer(field(normalized, 'variantPeriod'), 1, 256, 'variantPeriod');
@@ -183,6 +185,29 @@ export function createSkinProvider({ trusted, realm, resolveHostRecipe, normaliz
         effectKinds.add(kind);
         return freeze({ kind, ...assetUse(value), opacity: number(field(value, 'opacity'), 0, 1, 'effect opacity') });
       }));
+      const styleInput = field(normalized, 'bodyStyle');
+      let bodyStyle = null;
+      if (styleInput !== undefined && styleInput !== null) {
+        function fade(value, label) {
+          if (value === null) return null;
+          const palette = integer(field(value, 'palette'), 0, palettes.length - 1, `${label} palette`);
+          return freeze({ palette, length: number(field(value, 'length'), Number.MIN_VALUE, 65535, `${label} length`) });
+        }
+        bodyStyle = freeze({
+          detailedSegments: flag(field(styleInput, 'detailedSegments'), 'detailedSegments'),
+          swell: number(field(styleInput, 'swell'), -4096, 4096, 'swell'),
+          rotateSegments: flag(field(styleInput, 'rotateSegments'), 'rotateSegments'),
+          headFade: fade(field(styleInput, 'headFade'), 'headFade'),
+          tailFade: fade(field(styleInput, 'tailFade'), 'tailFade'),
+        });
+        for (const index of usedPalettes) {
+          if (!palettes[index].boostGlow) throw new TypeError('Standard body style requires boostGlow for every base/run palette');
+        }
+        for (const kind of ['outline', 'shadow', 'death-highlight']) {
+          const effect = effects.find(value => value.kind === kind);
+          if (!effect || effect.opacity !== 1) throw new TypeError(`Standard body style requires ${kind} with opacity 1`);
+        }
+      }
       const attachmentInput = field(normalized, 'attachment');
       let attachment = null;
       if (attachmentInput !== undefined && attachmentInput !== null) {
@@ -200,9 +225,9 @@ export function createSkinProvider({ trusted, realm, resolveHostRecipe, normaliz
         return tag;
       }));
       const supportedFeatures = freeze(['body-palettes', ...(eyeKind === 'standard' ? ['standard-eyes'] : []), ...effectKinds,
-        ...(attachment ? ['head-attachment'] : [])]);
+        ...(attachment ? ['head-attachment'] : []), ...(bodyStyle ? ['standard-body-style'] : [])]);
       const recipe = freeze({ basePalette, custom, runs, palettes, variantMode, variantPeriod, eyes: freeze(eyes), effects,
-        attachment, supportedFeatures, unsupportedFeatures });
+        attachment, supportedFeatures, unsupportedFeatures, ...(bodyStyle ? { bodyStyle } : {}) });
       const statuses = [...borrowed.values()].map(asset => asset.status);
       const status = unsupportedFeatures.length || statuses.includes('unsupported') ? 'unsupported'
         : statuses.includes('pending') ? 'pending' : 'ready';

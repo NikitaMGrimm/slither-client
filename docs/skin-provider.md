@@ -29,16 +29,25 @@ type StandardEyes = {
   eyeOpacity: number; pupilOpacity: number; angleSmoothing: number; // 0..1
 };
 type EffectKind = 'boost-glow' | 'outline' | 'shadow' | 'death-highlight';
+type BodyFade = { palette: number; length: number }; // local palette; finite 0 < length <= 65535
+type BodyStyle = {
+  detailedSegments: boolean;
+  swell: number;               // finite -4096..4096, including signed values
+  rotateSegments: boolean;
+  headFade: BodyFade | null;
+  tailFade: BodyFade | null;
+};
 type HostRecipe = { status: 'pending' | 'unsupported' } | {
   status: 'ready';
   basePalette: number;         // local index into palettes, distinct from requested skin
   custom: boolean;             // whether the host accepted custom data
   runs: { palette: number; count: number }[]; // ordered; local palette indices
-  palettes: { variants: AssetUse[] }[];
+  palettes: { variants: AssetUse[]; boostGlow?: AssetUse }[];
   variantMode: 'first' | 'cycle' | 'ping-pong';
   variantPeriod: number;       // family period supplied from resolved base palette
   eyes: StandardEyes | { kind: 'none' };
   effects: (AssetUse & { kind: EffectKind; opacity: number })[];
+  bodyStyle?: BodyStyle | null;
   attachment?: AssetUse & {
     anchor: 'head'; scale: number; pivotX: number; pivotY: number; opacity: number;
   } | null;
@@ -122,11 +131,47 @@ with opacity 0..1. Head attachment scale is positive and at most 256, pivots are
 within -65535..65535, and opacity is 0..1. Placement coordinates are in the
 adapter's declared head-local units; this module performs no placement or drawing.
 
+Schema version 1 also accepts optional per-palette `boostGlow` uses and explicit
+`bodyStyle` metadata. A supplied glow follows the same asset borrowing, native
+readiness, source-rectangle validation, wrapper sharing, and revision rules as
+variants and effects. It has no extra opacity multiplier. An absent glow is
+omitted from that output palette; a supplied glow must be an `AssetUse`, not null.
+
+When `bodyStyle` is absent or null, the output omits `bodyStyle` and preserves
+the existing feature tags and behavior. Supplied per-palette glows still appear
+in the palette output and contribute their asset readiness, without adding a
+feature tag. Older singleton `boost-glow` effects remain valid, including their
+existing opacity range, but cannot substitute for per-palette glows.
+
+A present style requires all five own data fields; no values are inferred or
+coerced. `detailedSegments` and `rotateSegments` are exact booleans. `swell` is
+finite within -4096..4096 and retains its sign, including negative zero. Each
+fade is explicitly null or a record with an existing local palette index and a
+finite positive length at most 65535; fractional lengths are allowed. The swell
+bound uses the existing geometry-scalar envelope, extended symmetrically; the
+fade bound uses the total-run-count envelope. These are validation limits, not
+stock recipe rules. Every palette already requires at least one variant, so a
+fade always has variant zero. A palette used only for a fade need not satisfy
+the base family's longer variant period or provide a glow.
+
+Advertising a style also requires a per-palette glow for the base palette and
+every run palette, plus shared `outline`, `shadow`, and `death-highlight` effects
+with opacity exactly 1. Missing required metadata or a different shared-effect
+opacity throws, consistently with other invalid recipe metadata. A required
+asset whose catalog source is null or not loaded instead stays pending under
+the existing rules; unsupported assets still take precedence. No additional
+effect opacity is applied by this metadata boundary. The output includes a
+copied, frozen `bodyStyle` (with copied, frozen fade records) and the precise
+`standard-body-style` feature tag. Base-family variant mode/period and ordered
+runs remain independent and unchanged. This tag describes metadata sufficient
+for the standard body scope; it does not claim renderer integration, arbitrary
+skin support, or an implemented drawing pass.
+
 `supportedFeatures` is generated from represented body, standard eye, effect,
 and attachment metadata. `unsupportedFeatures` contains opaque lowercase tags
 matching `[a-z][a-z0-9-]{0,63}`. The adapter must list any required feature it
-cannot represent (for example special eyes, antenna dynamics, or detailed body
-sampling), rather than silently substitute standard eyes. Any unsupported tag
+cannot represent (for example special eyes or antenna dynamics), rather than
+silently substitute standard eyes. Any unsupported tag
 or referenced unsupported asset makes the overall result unsupported; otherwise
 any pending asset makes it pending. The validated partial recipe remains
 available in either case. Supported tags describe schema coverage, not readiness
