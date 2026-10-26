@@ -110,7 +110,7 @@ pub struct Food {
     /// Transmitted size in world units.
     pub size: f64,
     /// Raw color: `F` supplies it directly; `f/b` omissions reuse their shared cache.
-    /// The cache starts at zero and resets at setup and first own appearance.
+    /// The cache starts at zero; explicit reset and first own appearance restore it.
     pub color: u8,
     /// Owning sector coordinates.
     pub sector: (u8, u8),
