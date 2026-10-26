@@ -90,6 +90,34 @@ steps consume and clear samples; consuming the final sample leaves cleanup for
 a later eligible update. Head injection refreshes its displayed offsets
 immediately; heading injection waits for integer advancement.
 
+`LengthPresentation` keeps logical segments and fractional mass separate from
+retained anchors. Spawn mass is scheduled after zero-mass construction. Its
+53-sample Float32 ring advances only while alive; an exhausted ring can clean up
+on a zero-step live update. Desktop displayed length is target plus offset minus
+0.6. `CameraCorrections` instead stores 62 double-precision samples and consumes
+one per eligible draw. Injection retains the current camera offset; exhaustion
+has no entity-style cleanup sentinel. Following, zoom and event scheduling remain
+caller responsibilities.
+
+`BodyGeometry` keeps absolute anchors head to tail, including dying points.
+Normal anchors mark the oldest living point dying; growth changes logical count.
+Contraction walks older points sequentially and schedules visible x/y, edge and
+spacing corrections with Float32 storage. Positive integer steps advance those
+corrections and fade tails, retaining the three newest dying records. Logical
+count is capped at 4096 and physical retention at 8192 per body. This module does
+not sample curves, draw sprites or implement authoritative physics.
+
+Logical count is nonnegative protocol state, not a recount of living points.
+After all points are marked dying, a non-growing anchor still leaves the count
+at zero while adding a living point. A later tail removal requiring a negative
+count fails without changing the body. Growth directly from an exhausted body
+increments the count and permits later removal. Negative logical counts are
+outside this API's supported domain.
+
+Wasm trigonometry uses the current host's `Math.sin`/`Math.cos`, preserving browser
+rounding in geometry and correction weights. Native builds use standard-library
+trigonometry; no cross-platform bit-equality claim follows from that fallback.
+
 Wasm exports `AnimationClock`, owned `AnimationStep` values, and `HeadPredictor`.
 Free a step after its consumers advance, and free clocks/predictors when finished.
 Predictor direction accepts exactly 0, 1 or 2. Its correction methods express
@@ -97,10 +125,15 @@ direct numeric discontinuities. `reanchor` applies the head portion of an anchor
 including its consumed logical segment and an explicitly supplied extrapolated
 distance. Packet validation, body changes and camera corrections remain separate.
 
+Standalone `LengthSmoother` and `CameraSmoother` bindings expose those two clocks
+and copied sample/weight arrays. Segment counts are checked as exact unsigned
+integers before conversion at the JavaScript boundary. `BodyGeometry` currently
+has a native Rust API; it is not a browser body renderer.
+
 These primitives are not yet connected to the scene's packet or render loop.
-Applying ordered presentation events, body contraction/curves, retained dying
-anchors, camera and draw clocks, eyes, complete skins and HQ/LQ rendering still require
-implementation and comparison. The visible scene remains a received-anchor preview.
+Applying ordered events to a complete snake, sampled curves, following-camera
+integration, eyes, complete skins and HQ/LQ rendering still require implementation
+and comparison. The visible scene remains a received-anchor preview.
 
 ## Browser rendering
 
