@@ -148,6 +148,12 @@ producing nonfinite geometry fails. Bodies with fewer than two anchors remain
 valid received/presentation state but are omitted from curve drawing until
 another anchor arrives.
 
+For one retained anchor, eye targeting uses only a completed finite head lead,
+or a lead followed by one terminal sample that cannot affect its redistribution
+prefix. Body drawing remains omitted. Geometry requiring the missing following
+anchor uses the raw head heading as an explicit finite fallback; no general
+one-anchor curve or eye parity is claimed for that unsupported geometry.
+
 `sample_curve_with_heading` additionally accepts the raw head heading for a
 valid traversal that emits only one sample. That sample keeps its zero tangent;
 the eye target uses the supplied heading. Numeric and capacity errors still fail.

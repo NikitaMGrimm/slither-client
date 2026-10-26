@@ -1,6 +1,6 @@
 //! Original synthetic native eye coupling cases; no external references or traffic.
 
-use std::f64::consts::{FRAC_PI_2, TAU};
+use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use slither_client::{
     presentation::{
@@ -311,26 +311,92 @@ fn death_clears_direction_and_keeps_pupils_updating_until_expiry() {
 }
 
 #[test]
-fn one_anchor_has_face_without_body_and_uses_raw_heading_target_fallback() {
+fn one_anchor_uses_finite_lead_target_without_drawing_missing_suffix() {
     let mut c = client(1);
     let first = c.prepare_draw_with_style(800, 600, 1., false).unwrap();
     assert_eq!(first.len(), 1);
     assert!(first[0].curve.is_none());
     assert_eq!(first[0].face_heading, first[0].metrics.heading);
     let face = first[0].face_heading;
+    let target = f64::from(PI as f32) + PI;
+    assert_eq!(c.own_snake().unwrap().eyes().target_heading(), target);
     apply(&mut c, &[vec![b'e', 64]]);
     let output = c.prepare_draw_with_style(800, 600, 1., false).unwrap();
     assert!(output[0].curve.is_none());
     assert_eq!(output[0].face_heading, face);
-    assert_eq!(c.own_snake().unwrap().eyes().target_heading(), FRAC_PI_2);
+    assert_eq!(c.own_snake().unwrap().eyes().target_heading(), target);
+    assert_ne!(target, output[0].metrics.heading);
     let mut expected =
         StandardEyeState::new(face, c.own_snake().unwrap().eyes().gaze_heading()).unwrap();
-    expected.commit_draw_target(FRAC_PI_2).unwrap();
+    expected.commit_draw_target(target).unwrap();
     let step = c.advance(8., false).unwrap();
     expected
         .advance(step, true, StandardEyeGeometry::default().pupil_travel)
         .unwrap();
     assert_eq!(*c.own_snake().unwrap().eyes(), expected);
+}
+
+#[test]
+fn single_anchor_lead_target_is_independent_of_other_snakes_and_style() {
+    for predecessor_points in [0, 2, 12] {
+        for detailed in [false, true] {
+            let mut c = AnimatedClient::new(0.).unwrap();
+            apply(&mut c, &[setup()]);
+            if predecessor_points != 0 {
+                apply(&mut c, &[appearance(7, 2060, predecessor_points)]);
+            }
+            let mut remote = appearance(8, 2000, 1);
+            let index = remote.len() - 6;
+            // A synthetic 3:4 head lead, separate from the packet's face heading.
+            remote[index..index + 3].copy_from_slice(&u24(1970 * 5));
+            remote[index + 3..].copy_from_slice(&u24(960 * 5));
+            apply(&mut c, &[remote]);
+            for drained in [false, true] {
+                if drained {
+                    apply(&mut c, &[vec![b'r', 0, 8]]);
+                    for index in 1..=12 {
+                        c.advance(f64::from(index) * 40., false).unwrap();
+                    }
+                    assert_eq!(c.snake(8).unwrap().metrics().displayed_length, -0.6);
+                }
+                let prepared = c.prepare_draw_with_style(800, 600, 1., detailed).unwrap();
+                let remote = prepared.iter().find(|snake| snake.metrics.id == 8).unwrap();
+                assert!(remote.curve.is_none());
+                assert_eq!(
+                    c.snake(8).unwrap().eyes().target_heading(),
+                    f64::from((-4_f64).atan2(-3.) as f32) + PI
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn coincident_single_anchor_keeps_finite_raw_fallback_for_unsupported_suffix() {
+    for (mass, remove, length) in [(0, false, 0.4), (10_066_329, true, 0.), (0, true, -0.6)] {
+        let mut c = AnimatedClient::new(0.).unwrap();
+        let mut spawn = appearance(7, 2000, 1);
+        spawn[12..15].copy_from_slice(&u24(mass));
+        let index = spawn.len() - 6;
+        spawn[index..index + 3].copy_from_slice(&u24(2000 * 5));
+        apply(&mut c, &[setup(), spawn]);
+        if remove {
+            apply(&mut c, &[vec![b'r', 0, 7]]);
+            for index in 1..=12 {
+                c.advance(f64::from(index) * 40., false).unwrap();
+            }
+        }
+        assert_eq!(c.own_snake().unwrap().metrics().displayed_length, length);
+        for detailed in [false, true] {
+            let prepared = c.prepare_draw_with_style(800, 600, 1.7, detailed).unwrap();
+            assert_eq!(prepared.len(), 1);
+            assert!(prepared[0].curve.is_none());
+            assert_eq!(
+                c.own_snake().unwrap().eyes().target_heading(),
+                prepared[0].metrics.heading
+            );
+        }
+    }
 }
 
 #[test]

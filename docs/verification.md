@@ -234,7 +234,14 @@ remote gaze versus original-own pointer gaze through wire-ID reuse, spacing
 cadence, prepared sample limits and complete rollback. A drained two-anchor body
 that emits one render sample retains its raw-heading eye target.
 
-The integrated build passes 174 native tests, formatting, doctests and native/Wasm
+One-anchor tests separately cover a finite sampled head-lead target, predecessor
+independence, detailed style and negative displayed length. Coincident or longer
+geometry requiring a missing following anchor keeps a finite raw-heading
+fallback and no body curve. This policy does not claim general one-anchor parity;
+the external runtime can consume scratch coordinates from a preceding snake,
+produce nonfinite geometry or fail on that missing anchor.
+
+The integrated build passes 176 native tests, formatting, doctests and native/Wasm
 Clippy. The real Wasm smoke checks independent gaze, copied eye diagnostics,
 input rejection, style-aware preparation, fractional pupil motion, death fading
 and short-curve output. These are synthetic numeric checks; full skin geometry,

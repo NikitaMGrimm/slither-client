@@ -147,6 +147,8 @@ export function animatedSmoke(wasm) {
     short.prepare_draw(960, 540);
     assert.equal(JSON.parse(short.snapshot()).own.physicalPoints, 1);
     assert.equal(JSON.parse(short.snapshot()).own.visible, true);
+    assert.equal(JSON.parse(short.snapshot()).own.eyes.targetHeading, Math.fround(Math.PI) + Math.PI,
+      'one-anchor eyes retain the finite head-lead tangent instead of the unrelated raw heading');
     assert.equal(short.own_curve(1, false).length, 0);
     assert.equal(short.own_curve_vertices(1, false).length, 0);
     assert.equal(short.own_curve_info(1, false).length, 0);

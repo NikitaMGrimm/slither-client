@@ -5,7 +5,9 @@
 - Couple standard paired-eye motion, independent pointer gaze and per-snake
   Canvas painting to the animated preview. Preserve fractional pupil updates,
   deferred curve targets, visibility resets and death fading. Special faces,
-  skin-supplied geometry and attachment rendering remain pending.
+  skin-supplied geometry and attachment rendering remain pending. One-anchor
+  eyes preserve a defined finite head-lead target while unsupported suffix
+  geometry retains an explicit raw-heading fallback and no body curve.
 - Select web-build Wasm from Cargo's artifact report, including configured target
   directories, and reject missing or ambiguous artifacts before binding.
 - Add a separate trusted host recipe provider with bounded metadata, explicit

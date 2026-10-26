@@ -3,7 +3,7 @@
 use super::{
     AngleCorrections, BodyGeometry, CurveInput, CurveOutput, FrameStep, HeadCorrections,
     HeadMotion, LengthPresentation, PresentationError, StandardEyeGeometry, StandardEyeState, Turn,
-    finite, sample_curve_with_heading,
+    curve::single_anchor_eye_target, finite, sample_curve_with_heading,
 };
 use crate::{
     math,
@@ -494,27 +494,26 @@ impl SnakePresentation {
         let mut next = self.clone();
         next.prepare_draw()?;
         let metrics = next.metrics();
-        let curve = if next.body.points().len() < 2 {
-            None
-        } else {
-            Some(sample_curve_with_heading(
-                CurveInput {
-                    corrected_head: metrics.corrected_head,
-                    head_fraction: metrics.corrected_head_fraction,
-                    body: next.body.points(),
-                    displayed_length: metrics.displayed_length,
-                    segment_length: next.body.segment_length(),
-                    point_spacing: metrics.point_spacing,
-                    target_point_spacing: metrics.point_spacing,
-                    quality_scale,
-                    detailed_style,
-                },
-                metrics.heading,
-            )?)
+        let input = CurveInput {
+            corrected_head: metrics.corrected_head,
+            head_fraction: metrics.corrected_head_fraction,
+            body: next.body.points(),
+            displayed_length: metrics.displayed_length,
+            segment_length: next.body.segment_length(),
+            point_spacing: metrics.point_spacing,
+            target_point_spacing: metrics.point_spacing,
+            quality_scale,
+            detailed_style,
         };
-        let target = curve
-            .as_ref()
-            .map_or(metrics.heading, |curve| curve.target_eye_heading);
+        let (curve, target) = match input.body.len() {
+            0 => (None, metrics.heading),
+            1 => (None, single_anchor_eye_target(input, metrics.heading)?),
+            _ => {
+                let curve = sample_curve_with_heading(input, metrics.heading)?;
+                let target = curve.target_eye_heading;
+                (Some(curve), target)
+            }
+        };
         let face_heading = next.eyes.commit_draw_target(target)?;
         next.validate_observation()?;
         *self = next;
