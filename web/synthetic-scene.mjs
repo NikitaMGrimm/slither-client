@@ -24,13 +24,13 @@ function snake(id, skin, x, y, angle) {
     ...u16(Math.round(angle / (Math.PI * 2) * 65536))];
 }
 
-export function syntheticScene(skin = 0) {
+export function syntheticScene(skin = 0, extraCommands = []) {
   const food = [70, 108, 108];
   for (let index = 0; index < 28; index++) {
     food.push(index % 3, 40 + index * 37 % 180, 40 + index * 61 % 180, 20 + index % 4 * 5);
   }
   return bundle(syntheticSetup(), snake(0, skin, 0, 0, 0),
-    snake(7, 1, 115, -105, Math.PI / 2), snake(8, 2, -100, 95, Math.PI / 4), food);
+    snake(7, 1, 115, -105, Math.PI / 2), snake(8, 2, -100, 95, Math.PI / 4), food, ...extraCommands);
 }
 
 export function syntheticStep(index) {

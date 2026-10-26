@@ -23,6 +23,8 @@ mod follow_camera;
 mod food;
 mod food_painter;
 mod length;
+mod prey;
+mod prey_painter;
 mod quality;
 mod snake;
 
@@ -57,6 +59,15 @@ pub use food_painter::{
     FoodPaintInput, FoodPaintPass, FoodPaintPlan, MAX_FOOD_PAINT_COMMANDS, plan_food,
 };
 pub use length::LengthPresentation;
+pub use prey::{
+    MAX_PREY_FAMILY_SOURCES, MAX_RETAINED_PREYS, PreyCorrections, PreyEaterPose, PreyError,
+    PreyFactory, PreyFactoryInput, PreyInstance, PreyPalette, PreyPresentation, PreySnapshot,
+    PreySource, PreySources, PreyWorld,
+};
+pub use prey_painter::{
+    MAX_PREY_PAINT_COMMANDS, PreyImageCommand, PreyPaintCounts, PreyPaintError, PreyPaintInput,
+    PreyPaintPass, PreyPaintPlan, plan_prey,
+};
 pub use quality::{QualityMode, QualitySnapshot, QualityState};
 pub use snake::{AnchorView, SnakeMetrics, SnakePresentation};
 

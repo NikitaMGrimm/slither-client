@@ -357,6 +357,16 @@ rollback if validation, sampling, eye layout or Canvas submission fails.
 
 ## Browser rendering
 
+Retained prey has a separate insertion-ordered world and typed canonical
+appearance/motion events, sharing the animation step after snakes and before
+food. Two Float32 position channels preserve reanchors; capture retains the
+event-time snake token through removal and ID reuse. Food/prey eater references
+jointly root detached snake objects. Both animated renderers insert prey bodies
+after early food and prey glows after late food; direct prey commands are not
+quality-gated. Ordered Setup plans retain their sources through later removals.
+The opt-in APIs, shared resource ceilings, diagnostics and evidence limits are
+documented in [prey presentation](prey-presentation.md).
+
 `QualityState` independently models desktop quality preference and applied mode.
 Connection initialization applies the preference; preview starts high quality.
 Interpolation consumes the lag-adjusted update delta before the statistics

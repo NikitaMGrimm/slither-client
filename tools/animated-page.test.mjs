@@ -6,6 +6,7 @@ import { loopbackEndpoint, sceneHeading } from '../web/loopback-session.mjs';
 import { bundle, syntheticScene, syntheticSetup, syntheticStep } from '../web/synthetic-scene.mjs';
 import { createSyntheticBodyResolver } from '../web/synthetic-body.mjs';
 import { createSyntheticFoodResolver } from '../web/synthetic-food.mjs';
+import { createSyntheticPreyResolver, syntheticPreyCommands } from '../web/synthetic-prey.mjs';
 import { desktopBackingSize } from '../web/desktop-layout.mjs';
 
 // Original synthetic page/Wasm doubles. No generated bindings, browser or sockets.
@@ -109,28 +110,38 @@ function pageFixture(t, { initialize = async () => {}, decode = async () => {},
       assert.ok(factory.randomWobbleUnit >= 0 && factory.randomWobbleUnit < 1);
       this.apply_frame(bytes, elapsed);
     }
-    apply_frame_and_render_standard(bytes, elapsed, face, food, target, p0, p1, p2,
+    apply_frame_with_all_factories(bytes, elapsed, face, food, prey) {
+      const factory = prey({ palette: 0 });
+      assert.equal(factory.palette.color, 0);
+      assert.equal(factory.palette.bodies.length, 4);
+      assert.equal(factory.palette.glows.length, 3);
+      assert.ok(factory.randomPhaseUnit >= 0 && factory.randomPhaseUnit < 1);
+      assert.ok(factory.randomRateUnit >= 0 && factory.randomRateUnit < 1);
+      this.apply_frame_with_factories(bytes, elapsed, face, food);
+    }
+    apply_frame_and_render_standard_with_prey(bytes, elapsed, face, food, prey, target, p0, p1, p2,
       background, width, height, resolve, quality) {
       calls.push(['applyDraw', 'standard', width, height]);
       if (faults.apply) throw faults.apply;
-      this.apply_frame_with_factories(bytes, elapsed, face, food);
+      this.apply_frame_with_all_factories(bytes, elapsed, face, food, prey);
       // The page consumes the engine's count; packet semantics are tested by real Wasm.
       const count = faults.setupDraws ?? Number(bytes[0] === 97 || bytes[2] === 97);
       for (let i = 0; i < count; i++) this.render_standard_at_size(target, p0, p1, p2,
         background, width, height, resolve, quality);
       return count;
     }
-    apply_frame_and_render_with_food(bytes, elapsed, face, food, target, p0, p1, p2,
+    apply_frame_and_render_with_food_and_prey(bytes, elapsed, face, food, prey, target, p0, p1, p2,
       background, width, height, detailed, resolve, quality) {
       calls.push(['applyDraw', 'basic', width, height]);
       if (faults.apply) throw faults.apply;
-      this.apply_frame_with_factories(bytes, elapsed, face, food);
+      this.apply_frame_with_all_factories(bytes, elapsed, face, food, prey);
       const count = faults.setupDraws ?? Number(bytes[0] === 97 || bytes[2] === 97);
       for (let i = 0; i < count; i++) this.render_with_food_at_size(target, p0, p1, p2,
         background, width, height, detailed, resolve, quality);
       return count;
     }
     food_state() { return { foods: Array.from({ length: view.foods }), sourceCount: 0 }; }
+    prey_state() { return { preys: [], sourceCount: 0 }; }
     set_connected(connected) {
       assert.equal(sceneFrees, 0, 'connection changes require a live owner');
       calls.push(['connected', connected]);
@@ -210,7 +221,7 @@ function pageFixture(t, { initialize = async () => {}, decode = async () => {},
   class PageImage { decode() { return decode(); } }
   const ready = pageScript.runInNewContext({
     init: initialize, wasm: { AnimatedScene, DesktopQuality }, syntheticScene, syntheticStep,
-    createSyntheticBodyResolver, createSyntheticFoodResolver, desktopBackingSize,
+    createSyntheticBodyResolver, createSyntheticFoodResolver, createSyntheticPreyResolver, syntheticPreyCommands, desktopBackingSize,
     loopbackEndpoint, sceneHeading, connectLoopback, window, AbortController,
     document: {
       querySelector(selector) {

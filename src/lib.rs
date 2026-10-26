@@ -29,6 +29,9 @@ mod body_browser;
 mod food_browser;
 
 #[cfg(target_arch = "wasm32")]
+mod prey_browser;
+
+#[cfg(target_arch = "wasm32")]
 mod scene_browser;
 
 #[cfg(target_arch = "wasm32")]

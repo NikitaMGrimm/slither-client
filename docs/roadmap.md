@@ -24,7 +24,7 @@ The separate animated preview now connects ordered events, head/body/length
 corrections, following camera, draw-driven spacing and sampled curves. Synthetic
 native/Wasm and Windows browser checks exercise this path. Standard paired eyes
 now retain gaze, pupil motion and deferred draw targets. Full skins, special
-faces, HUD, prey and team-mode drawing remain pending. An additive API now
+faces, HUD and team-mode drawing remain pending. An additive API now
 installs trusted normalized paired geometry before the first pupil update,
 retains it per appearance and checks standard-recipe coherence before drawing.
 An additional paired-face API retains side geometry and ready borrowed
@@ -45,8 +45,12 @@ both Wasm renderers and the authored page. Bounded numeric and native Windows
 browser checks cover the food engine and explicit draws; complete host parity is
 not established. Target-aware application now stages ordered Setup draws, with
 explicit resize APIs and synchronous page sizing/counting. New host-cadence
-reference/browser acceptance remains pending. Prey and
-the existing stand-in boundary remain separate rendering work.
+reference/browser acceptance remains bounded. Retained prey now joins the same
+event/update/Setup transactions and both animated renderers, with independent
+appearances, captured eaters, source selections and early/late paint passes.
+Synthetic native/Wasm/page checks cover this path; source-runtime, original
+artwork/loading and stock-browser prey acceptance remain unverified. The
+existing stand-in boundary remains separate rendering work.
 
 ## 3. Measure dense scenes
 

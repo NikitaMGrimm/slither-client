@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Retain canonical prey appearances, motion corrections and captured eater objects
+  through additive factory APIs, both animated paint paths and ordered Setup draws.
+  Share food/prey source and image budgets, expose copied diagnostics, and add
+  original authored prey to the synthetic page. Canonical prey packets now validate
+  after Setup instead of counting as opaque ignored commands.
+
 - Bound per-ingress Setup submissions and desired background area, including
   empty scenes, before native drawing. Preserve the camera correction cursor
   when reset clears world offsets.

@@ -38,6 +38,20 @@ pull requests, and manual dispatch. Normal tests and CI require no external
 reference and do not connect to game servers. Dependency and toolchain setup may
 access package sources. Release-plz remains dormant.
 
+## Retained prey integration
+
+The retained-prey integration has passed 360 native all-target tests, 127 Node
+tests and a fresh real-Wasm build/full smoke with 2359 body/face/food/Setup/prey
+recorder assertions. The prey checks include both production rendering lanes,
+zero-alpha calls, whole/scaled overloads, ordering around food/snakes, LQ
+retention, copied Float32 diagnostics, captured-object lifetime, late-Canvas
+rollback, ordered Setup source retention and signed-zero revision conflicts.
+An isolated registry probe additionally passed 588 assertions; it is separate
+from the production renderer count. Page tests use authored doubles. Independent
+review, stock-browser prey checks and source-runtime comparison remain pending;
+these synthetic results do not establish pixels, full host adaptation, original
+artwork/loading equivalence, gameplay or extension acceptance.
+
 ## Repository guards
 
 Before committing, review and stage only intended files, then run:
