@@ -40,6 +40,13 @@ impl Default for CameraCorrections {
 }
 
 impl CameraCorrections {
+    /// Discard world offsets without moving the draw ring's retained cursor.
+    pub(crate) fn clear(&mut self) {
+        self.samples = [[0.; CAMERA_SAMPLES]; 2];
+        self.pending = 0;
+        self.offset = Point::default();
+    }
+
     /// Add new-minus-old camera displacement without changing the current offset.
     /// Nonfinite inputs/results leave the entire ring unchanged.
     pub fn inject(&mut self, displacement: Point) -> Result<(), PresentationError> {

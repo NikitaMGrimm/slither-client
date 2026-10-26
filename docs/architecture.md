@@ -168,8 +168,9 @@ parameterless world resets. They retain the last update timestamp and both
 accumulated animation phases, and restore the lag multiplier to one without
 advancing an update or draw. Construct a new client with `new(start_ms)` to
 start a fresh timeline. Reset clears received state, retained entities, camera
-corrections and the connection gate; camera position, follow preference, retained
-food cull bounds and shared body-painter flags survive. Initial zoom is restored.
+corrections and the connection gate; camera position, follow preference, camera
+ring cursor, retained food cull bounds and shared body-painter flags survive.
+Initial zoom is restored.
 The animated page uses this same timeline across Reset, palette changes and
 reconnections, independently of quality-statistics cadence.
 
@@ -214,7 +215,9 @@ transaction limits and bounded browser/reference evidence.
 the target, assets, desired backing dimensions and applied quality explicitly,
 and return the submitted Setup-draw count. Sources used by an earlier draw remain
 alive through later removals in the same transaction. Image, curve-sample and
-layout budgets cover the complete ingress. Explicit `render_standard_at_size`
+layout budgets cover the complete ingress. Independent limits of 64 Setup draws
+and 67,108,864 desired backing pixels also charge empty-world backgrounds before
+draw resolution or native preflight. Explicit `render_standard_at_size`
 and `render_with_food_at_size` support synchronous resize draws. Native failures
 after submission starts may leave changed dimensions or partial pixels even
 though the numeric model and source registry roll back.

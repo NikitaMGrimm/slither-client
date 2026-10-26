@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Bound per-ingress Setup submissions and desired background area, including
+  empty scenes, before native drawing. Preserve the camera correction cursor
+  when reset clears world offsets.
 - Stage ordered Setup draws through additive target-aware Wasm factory APIs,
   preserving event-time camera/configuration and source lifetime across bundles.
   Add explicit size-aware rendering and synchronous desktop page resize/counting.

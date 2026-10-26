@@ -274,6 +274,10 @@ impl FoodSources {
     ) -> Result<(), JsValue> {
         for command in plan.early.iter().chain(&plan.late) {
             let source = self.lookup(command.source.asset())?;
+            let handle = command.source.asset().handle;
+            if self.observed.contains(&handle) {
+                continue;
+            }
             for prior in self
                 .sources
                 .iter()
@@ -283,7 +287,7 @@ impl FoodSources {
                     return Err(error("incoherent food source across planned draws"));
                 }
             }
-            self.observed.insert(command.source.asset().handle);
+            self.observed.insert(handle);
         }
         Ok(())
     }

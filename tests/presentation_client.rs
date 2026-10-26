@@ -2,7 +2,7 @@
 
 use slither_client::{
     presentation::{
-        AnimatedClient, ClientPresentationError, INITIAL_ZOOM, MAX_RETAINED_SNAKES,
+        AnimatedClient, CAMERA_SAMPLES, ClientPresentationError, INITIAL_ZOOM, MAX_RETAINED_SNAKES,
         MAX_RETAINED_TOTAL_BODY_POINTS, StandardEyeGeometry,
     },
     protocol::ElapsedHeader,
@@ -624,6 +624,54 @@ fn setup_preserves_identity_camera_and_fractional_update_timeline() {
     assert!(c.own_snake().is_none());
     assert!(c.received().setup.is_none());
     assert_eq!(c.advance(8., false).unwrap().accumulated, 1.);
+}
+
+#[test]
+fn reset_clears_camera_corrections_without_changing_the_ring_phase() {
+    for draws in [1, CAMERA_SAMPLES - 1, CAMERA_SAMPLES] {
+        let mut c = client();
+        c.set_follows(false);
+        apply(&mut c, &[anchor(Some(7), 2010, 1000, false)]);
+        for _ in 0..draws {
+            c.prepare_draw(800, 600).unwrap();
+        }
+        let cursor = c.camera().corrections().index();
+        let position = c.camera().position();
+        let weights = *c.camera().corrections().weights();
+        assert_eq!(cursor, draws % CAMERA_SAMPLES);
+        c.reset();
+        assert_eq!(c.camera().corrections().index(), cursor);
+        assert_eq!(c.camera().corrections().pending(), 0);
+        assert_eq!(c.camera().corrections().offset(), Point::default());
+        assert!(
+            c.camera()
+                .corrections()
+                .samples()
+                .iter()
+                .flatten()
+                .all(|v| v.to_bits() == 0)
+        );
+        assert_eq!(c.camera().corrections().weights(), &weights);
+        assert_eq!(c.camera().position(), position);
+        assert!(!c.camera().follows());
+        assert_eq!(c.camera().zoom(), INITIAL_ZOOM);
+        c.reset();
+        c.prepare_draw(800, 600).unwrap();
+        assert_eq!(
+            c.camera().corrections().index(),
+            cursor,
+            "reset and pre-own draws consume no sample"
+        );
+        apply(&mut c, &[setup(), appearance(7, 2000, 12)]);
+        apply(&mut c, &[anchor(Some(7), 2010, 1000, false)]);
+        assert_eq!(c.camera().corrections().index(), cursor);
+        c.prepare_draw(800, 600).unwrap();
+        assert_eq!(
+            c.camera().corrections().index(),
+            (cursor + 1) % CAMERA_SAMPLES
+        );
+        assert_eq!(c.camera().corrections().pending(), CAMERA_SAMPLES - 1);
+    }
 }
 
 #[test]

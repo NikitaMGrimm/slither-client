@@ -1001,6 +1001,7 @@ impl AnimatedScene {
         let mut sources = BorrowedSources::default();
         let mut plans = Vec::new();
         let mut budget = DrawBudget::default();
+        let mut setup_budget = SetupDrawBudget::default();
         prepared
             .apply_frame_with_factories_and_setup(
                 bytes,
@@ -1021,9 +1022,7 @@ impl AnimatedScene {
                         .resolve(resolve_food, spawn, zoom)?)
                 },
                 |client, setup| -> Result<(), ResolveError> {
-                    if plans.len() == crate::protocol::MAX_FRAME_COMMANDS {
-                        return Err(error("scene draw budget exceeded").into());
-                    }
+                    setup_budget.charge(size)?;
                     let context = SceneDrawContext::at_setup(client, size, Some(setup));
                     // Finish host callbacks before borrowing the food registry.
                     let paint = build_paint(
@@ -1250,6 +1249,41 @@ impl SceneDrawContext {
     }
     fn committed(client: &AnimatedClient, size: DrawSize) -> Self {
         Self::at_setup(client, size, client.received().setup.as_ref())
+    }
+}
+
+// Empty Setup draws still reset and repaint the complete desired target.
+// Charge those draws independently of geometry before invoking draw resolvers.
+struct SetupDrawBudget {
+    remaining_draws: u32,
+    remaining_pixels: u64,
+}
+
+impl Default for SetupDrawBudget {
+    fn default() -> Self {
+        Self {
+            remaining_draws: 64,
+            remaining_pixels: 67_108_864,
+        }
+    }
+}
+
+impl SetupDrawBudget {
+    fn charge(&mut self, size: DrawSize) -> Result<(), JsValue> {
+        let draws = self
+            .remaining_draws
+            .checked_sub(1)
+            .ok_or_else(|| error("Setup draw count budget exceeded"))?;
+        let area = u64::from(size.width)
+            .checked_mul(u64::from(size.height))
+            .ok_or_else(|| error("Setup background pixel budget exceeded"))?;
+        let pixels = self
+            .remaining_pixels
+            .checked_sub(area)
+            .ok_or_else(|| error("Setup background pixel budget exceeded"))?;
+        self.remaining_draws = draws;
+        self.remaining_pixels = pixels;
+        Ok(())
     }
 }
 

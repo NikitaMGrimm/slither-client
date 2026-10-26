@@ -57,7 +57,9 @@ export function setupRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, o
       ? f.scene.render_standard_at_size(f.target, ...f.foods, f.background, width, height, draw, f.quality)
       : f.scene.render_with_food_at_size(f.target, ...f.foods, f.background, width, height, false, draw, f.quality);
     const legacyApply = bytes => f.scene.apply_frame_with_factories(bytes, false, resolveAppearance, factory);
-    const state = () => [f.state(), f.scene.food_state(), f.quality.snapshot()];
+    const state = () => [f.state(), f.scene.food_state(), f.quality.snapshot(),
+      Array.from(f.scene.head_samples()), Array.from(f.scene.angle_samples()),
+      Array.from(f.scene.drawn_eyes(960, 540))];
     const atomic = (run, message) => {
       const before = state(), trace = f.target.context.trace.slice();
       let failure;
@@ -70,6 +72,37 @@ export function setupRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, o
     const start = () => { legacyApply(bundle(setup(), appearance(), x)); resize(); f.target.context.trace = []; order.length = 0; };
     return { ...f, path, entry, created, factory, order, resolve, apply, resize, legacyApply, state, atomic, start };
   }
+
+  function observeCanvas(f) {
+    const calls = { getContext: 0, createPattern: 0, reset: 0, fillRect: 0, fill: 0, stroke: 0, drawImage: 0 };
+    const assignments = [];
+    const width = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(f.target), 'width');
+    let height = f.target.height;
+    Object.defineProperties(f.target, {
+      width: { configurable: true, get() { return width.get.call(this); }, set(value) {
+        assignments.push(['width', value]); width.set.call(this, value);
+      } },
+      height: { configurable: true, get() { return height; }, set(value) {
+        assignments.push(['height', value]); height = value; this.context.reset();
+      } },
+    });
+    const getContext = f.target.getContext;
+    f.target.getContext = function(...args) { calls.getContext++; return getContext.apply(this, args); };
+    for (const method of Object.keys(calls).filter(method => method !== 'getContext')) {
+      const original = f.target.context[method];
+      f.target.context[method] = function(...args) { calls[method]++; return original.apply(this, args); };
+    }
+    return { calls, assignments, snapshot: () => ({ calls: { ...calls }, assignments: assignments.map(row => [...row]),
+      size: [f.target.width, f.target.height] }) };
+  }
+
+  // A visible one-anchor face has no curve/body images, even at a 1x1 viewport.
+  const shortFace = () => {
+    const bytes = appearance().slice(0, -22);
+    bytes.set(bytes.slice(16, 22), bytes.length - 6);
+    return bytes;
+  };
+  const setups = count => Array.from({ length: count }, (_, index) => setup(32550, 1000 + index));
 
   for (const path of ['basic', 'standard']) {
     const f = harness(path), control = harness(path);
@@ -296,12 +329,22 @@ export function setupRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, o
     // them for each Setup. These are bounded original stress inputs, not timings.
     const bounded = harness(path);
     try {
-      const frames = denseScene({ snakes: 1, anchors: 512, foods: 0, spread: 100 });
+      // Low quality and one catalog entry keep standard commands below twice
+      // the sample count and catalog observations below 32*64. Basic uses one
+      // image per sample. Thus neither can mask the 262144-sample ceiling.
+      bounded.quality.set_requested_mode(0); bounded.quality.begin_connection();
+      bounded.metadata.palettes = [{ variants: [{ asset: 0 }], boostGlow: { asset: 0 } }];
+      bounded.metadata.runs = [{ palette: 0, count: 1 }]; bounded.metadata.variantPeriod = 1;
+      bounded.metadata.effects = bounded.metadata.effects.map(effect => ({ ...effect, asset: 0 }));
+      const frames = denseScene({ snakes: 32, anchors: 512, foods: 0, spread: 100 });
       for (const frame of frames) bounded.legacyApply(frame);
       bounded.resize(); bounded.target.context.trace = [];
-      const failure = bounded.atomic(() => bounded.apply(bundle(...Array.from({ length: 1024 }, () => setup()))),
+      const perSnakeSamples = bounded.scene.own_curve(1.7, false).length / 3;
+      ok(perSnakeSamples * 32 * 64 > 262144, 'sample fixture can exhaust its own budget within 64 draws');
+      eq(JSON.parse(bounded.scene.drawn_snakes()).filter(row => row.snake.visible).length, 32);
+      const failure = bounded.atomic(() => bounded.apply(bundle(...setups(64))),
         'aggregate repeated-Setup capacity exhaustion precedes all Canvas writes');
-      ok(/capacity exceeded|budget|CommandLimit/.test(String(failure)), String(failure));
+      eq(failure, 'retained presentation capacity exceeded', 'limited native sampler rejects the aggregate sample excess');
     } finally { bounded.close(); }
 
     const images = harness(path);
@@ -316,27 +359,100 @@ export function setupRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, o
       images.resize(); images.target.context.trace = [];
       const failure = images.atomic(() => images.apply(bundle(...Array.from({ length: 20 }, () => setup()))),
         'food and body images share one budget across all Setup plans');
-      ok(String(failure).includes('CommandLimit'), String(failure));
+      eq(failure, 'food paint planning failed: CommandLimit');
     } finally { images.close(); }
 
     if (path === 'standard') {
       const catalog = harness(path);
       try {
-        catalog.start();
-        const failure = catalog.atomic(() => catalog.apply(bundle(...Array.from({ length: 1024 }, () => setup()))),
+        // Twenty-four face-only recipes observe eight distinct catalog IDs
+        // each. The 513th recipe crosses 4096 entries during Setup 22, with
+        // zero curve samples/body images and far below the area/draw ceilings.
+        catalog.legacyApply(bundle(setup(), ...Array.from({ length: 24 }, shortFace)));
+        catalog.resize(); catalog.target.context.trace = []; catalog.requests.length = 0;
+        const failure = catalog.atomic(() => catalog.apply(bundle(...setups(32))),
           'body catalog observations share one pool across all Setup plans');
-        ok(String(failure).includes('frame catalog budget exceeded'), String(failure));
+        eq(failure, 'frame catalog budget exceeded');
+        eq(catalog.requests.length, 513, 'catalog capacity is reached before the new draw ceiling');
       } finally { catalog.close(); }
     }
 
-    const count = harness(path);
+    for (const { size, accepted, error } of [
+      { size: 1, accepted: 64, error: 'Setup draw count budget exceeded' },
+      { size: 4096, accepted: 4, error: 'Setup background pixel budget exceeded' },
+    ]) {
+      const count = harness(path);
+      try {
+        const observed = observeCanvas(count);
+        eq([count.target.width, count.target.height], [960, 540], 'entry size differs from charged desired size');
+        eq(count.apply(bundle(...setups(accepted)), { width: size, height: size }), accepted);
+        eq(observed.calls, { getContext: accepted, createPattern: accepted, reset: accepted + 1,
+          fillRect: accepted * 2, fill: 0, stroke: accepted, drawImage: 0 });
+        eq(observed.assignments, [['width', size], ['height', size],
+          ...Array.from({ length: accepted - 1 }, () => ['width', size])],
+        'first changed-size draw assigns both sizes, then every draw isolates once');
+        eq(count.target.context.trace.filter(row => row.op === 'stroke').map(row => row.path[0][2]),
+          Array.from({ length: accepted }, (_, index) => 1000 + index), 'every accepted empty Setup submits in order');
+        eq(count.order, [], 'empty scenes invoke no artificial draw callbacks');
+        const beforeNoSetup = observed.snapshot(), quality = count.quality.snapshot();
+        eq(count.apply(bundle([112]), { width: size, height: size, draw: () => { throw new Error('no Setup resolver'); } }), 0);
+        eq(observed.snapshot(), beforeNoSetup, 'no-Setup ingress does no preflight, assignment or paint');
+        eq(count.quality.snapshot(), quality);
+        eq(count.apply(bundle(...setups(accepted)), { width: size, height: size }), accepted,
+          'a separate ingress starts with a fresh draw and desired-area budget');
+        eq(observed.calls.getContext, accepted * 2);
+        eq(observed.calls.createPattern, accepted * 2);
+        const beforeExplicit = observed.snapshot();
+        count.resize(4096, 4096);
+        eq(observed.calls.getContext, beforeExplicit.calls.getContext + 1,
+          'a maximum-size explicit render is accepted independently of ingress budgets');
+        eq(observed.calls.createPattern, beforeExplicit.calls.createPattern + 1);
+        eq([count.target.width, count.target.height], [4096, 4096]);
+      } finally { count.close(); }
+
+      const excess = harness(path);
+      try {
+        const observed = observeCanvas(excess), before = observed.snapshot();
+        excess.target.context.trace.push({ op: 'sentinel', marker: Symbol('pre-existing trace') });
+        eq(excess.atomic(() => excess.apply(bundle(...setups(accepted + 1)), { width: size, height: size }),
+          'empty-world excess rolls back model/source/quality and entry target'), error);
+        eq(observed.snapshot(), before, 'over-limit ingress never acquires context/pattern, assigns size or paints');
+        eq(excess.order, []);
+      } finally { excess.close(); }
+
+      const callbacks = harness(path);
+      try {
+        callbacks.legacyApply(bundle(setup(), shortFace(), x));
+        const observed = observeCanvas(callbacks), before = observed.snapshot();
+        callbacks.target.context.trace.push({ op: 'sentinel', marker: Symbol('callback preclear trace') });
+        const sideEffects = [], sentinel = { forbidden: 'draw resolver beyond ingress budget' };
+        eq(callbacks.atomic(() => callbacks.apply(bundle(y, ...setups(accepted + 1)), {
+          width: size, height: size, draw: request => {
+            if (sideEffects.length === accepted) throw sentinel;
+            sideEffects.push(sideEffects.length + 1);
+            return callbacks.resolve(request);
+          },
+        }), 'earlier callbacks survive externally while complete model/source state rolls back'), error);
+        eq(sideEffects, Array.from({ length: accepted }, (_, index) => index + 1),
+          'budget rejects before the 65th/fifth draw callback and never replays earlier callbacks');
+        eq(callbacks.created.length, 2, 'the earlier food factory side effect is retained outside rollback');
+        eq(callbacks.scene.food_state().sourceCount, 3, 'new staged food sources are discarded with the rejected ingress');
+        eq(observed.snapshot(), before, 'earlier planning callbacks still cause no native preflight or renderer mutation');
+        eq(callbacks.apply(setup(), { width: size, height: size }), 1, 'a separate call after rejection receives a fresh budget');
+      } finally { callbacks.close(); }
+    }
+
+    const protocol = harness(path);
     try {
-      eq(count.apply(bundle(...Array.from({ length: 4096 }, () => setup()))), 4096,
-        'every maximal bounded empty Setup is submitted without coalescing');
-      eq(clears(count), 4096);
-      count.atomic(() => count.apply(bundle(...Array.from({ length: 4097 }, () => setup()))),
-        'over-limit command count rejects before any callback or renderer reset');
-    } finally { count.close(); }
+      const observed = observeCanvas(protocol), before = observed.snapshot();
+      let callbacks = 0;
+      const forbidden = () => { callbacks++; throw new Error('structurally invalid ingress callback'); };
+      eq(protocol.atomic(() => protocol.apply(bundle(appearance(), x, ...setups(4095)), {
+        appearance: forbidden, food: forbidden, draw: forbidden,
+      }), '4097-command framing rejection precedes every callback and renderer action'), 'frame exceeds 4096 commands');
+      eq(callbacks, 0);
+      eq(observed.snapshot(), before);
+    } finally { protocol.close(); }
 
     // Initial empty worlds still preflight assets even though there are no recipes.
     const empty = harness(path);

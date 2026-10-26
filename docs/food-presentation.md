@@ -178,7 +178,12 @@ immediately after `background`. These calls prepare and submit once without
 advancing animation or quality. A changed backing size assigns both dimensions;
 unchanged size still resets drawing state for hostile clip/transform isolation.
 
-Per-ingress limits are `MAX_FRAME_COMMANDS` Setup draws, `MAX_DRAW_SAMPLES` total
+Per-ingress limits are 64 Setup draws and 67,108,864 aggregate desired backing
+pixels, independent of scene contents. Every Setup charges its desired width
+times height before its draw resolvers or native preflight; excess rejects the
+whole ingress. This bounds logical target area, not measured browser time or
+physical pixel work. Explicit single renders remain unaffected. The separate
+protocol limit is `MAX_FRAME_COMMANDS` commands. Other ingress limits are `MAX_DRAW_SAMPLES` total
 curve samples and retained snake layouts, and `MAX_BODY_PAINT_COMMANDS` total
 image commands. Source/catalog ceilings still apply across the whole transaction.
 Limits reject before target mutation instead of dropping or combining draws.
