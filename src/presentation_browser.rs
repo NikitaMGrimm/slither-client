@@ -33,7 +33,7 @@ fn segments(value: f64) -> Result<u32, JsValue> {
 /// One caller-owned animation step. Free it after its consumers have advanced.
 #[wasm_bindgen]
 pub struct AnimationStep {
-    inner: FrameStep,
+    pub(crate) inner: FrameStep,
 }
 
 #[wasm_bindgen]
