@@ -156,9 +156,32 @@ doubled accumulation, backward timestamps, clamped pauses, restored lag speed,
 world clearing and boundary retention without an extra step. The generated Wasm
 reset signature and all page reset routes are checked as parameterless. Existing
 body-painter tests cover retained flags; page doubles cover owner cleanup and
-unchanged update/quality ordering. These do not establish external reset parity.
-These are synthetic numeric/command checks; native browser and external-runtime
-comparisons remain separate verification steps for this integration.
+unchanged update/quality ordering. These are synthetic numeric/command checks;
+the following comparisons separately exercise native rendering and the runtime.
+
+Stock Windows Firefox 158.0.1 headless passed 1,265 assertions on the initial
+integration, including both Canvas paths and authored-page lifecycle checks.
+At matched initial/immediate/8-ms/48-ms checkpoints, native boundary radii changed
+from `[1000,400,400,400]` to `[1000,1000,1000,987.8478920843492]`. All four new
+checkpoints repeat exact decoded pixels; nine no-target body checkpoints preserve
+their prior pixels and existing numeric fields.
+
+A focused corrected-build Firefox recheck passed 235 assertions. It reproduced
+the old fractional-step loss and verified one whole and two doubled steps after
+3 ms, reset, then 5 ms. All five tested page reset routes passed no arguments.
+Both Canvas paths passed phase, lag, retained-ring and connection checks. Four
+no-reset checkpoints preserve the initial integration's pixels and complete
+snapshots exactly. The page checks use an explicitly synthetic transport.
+
+The corrected real Wasm also matches eight frozen runtime schedules and 195
+operations exactly: 12,106 boundary/absence, 931 clock, 693 bundled/sequential and
+195 copied-array checks, plus 36,068 preserved observer/control comparisons.
+All 29 earlier reset mismatch cells are cleared without changing cases or
+expected observations. Equality uses `Object.is` without tolerance; these cells
+contain no negative zero. Setup, targets, shared timing, repeated setup and reset
+are covered; source WebSocket framing and entity behavior are outside this empty-
+world comparison. These results do not establish original pixels, full skins,
+real transport, extension installation or full-client equivalence.
 
 After building and starting `npm run scene`, open
 `http://127.0.0.1:18884/animated`. Its animation callback advances the explicit
