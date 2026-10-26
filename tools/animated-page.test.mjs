@@ -3,9 +3,10 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { Script } from 'node:vm';
 import { loopbackEndpoint, sceneHeading } from '../web/loopback-session.mjs';
-import { syntheticScene, syntheticSetup, syntheticStep } from '../web/synthetic-scene.mjs';
+import { bundle, syntheticScene, syntheticSetup, syntheticStep } from '../web/synthetic-scene.mjs';
 import { createSyntheticBodyResolver } from '../web/synthetic-body.mjs';
 import { createSyntheticFoodResolver } from '../web/synthetic-food.mjs';
+import { desktopBackingSize } from '../web/desktop-layout.mjs';
 
 // Original synthetic page/Wasm doubles. No generated bindings, browser or sockets.
 // Execute the authored page body with its imports supplied in the isolated realm.
@@ -46,6 +47,7 @@ function pageFixture(t, { initialize = async () => {}, decode = async () => {},
   elements.follow.checked = true;
   elements.quality.value = '1';
   const window = new Element();
+  Object.assign(window, { innerWidth: 960, innerHeight: 540 });
   const calls = [], sessions = [], frames = new Map(), cancelled = [], advances = [];
   const faults = {};
   const renderMethods = [], renderScales = [], resolvedRecipes = [];
@@ -107,6 +109,27 @@ function pageFixture(t, { initialize = async () => {}, decode = async () => {},
       assert.ok(factory.randomWobbleUnit >= 0 && factory.randomWobbleUnit < 1);
       this.apply_frame(bytes, elapsed);
     }
+    apply_frame_and_render_standard(bytes, elapsed, face, food, target, p0, p1, p2,
+      background, width, height, resolve, quality) {
+      calls.push(['applyDraw', 'standard', width, height]);
+      if (faults.apply) throw faults.apply;
+      this.apply_frame_with_factories(bytes, elapsed, face, food);
+      // The page consumes the engine's count; packet semantics are tested by real Wasm.
+      const count = faults.setupDraws ?? Number(bytes[0] === 97 || bytes[2] === 97);
+      for (let i = 0; i < count; i++) this.render_standard_at_size(target, p0, p1, p2,
+        background, width, height, resolve, quality);
+      return count;
+    }
+    apply_frame_and_render_with_food(bytes, elapsed, face, food, target, p0, p1, p2,
+      background, width, height, detailed, resolve, quality) {
+      calls.push(['applyDraw', 'basic', width, height]);
+      if (faults.apply) throw faults.apply;
+      this.apply_frame_with_factories(bytes, elapsed, face, food);
+      const count = faults.setupDraws ?? Number(bytes[0] === 97 || bytes[2] === 97);
+      for (let i = 0; i < count; i++) this.render_with_food_at_size(target, p0, p1, p2,
+        background, width, height, detailed, resolve, quality);
+      return count;
+    }
     food_state() { return { foods: Array.from({ length: view.foods }), sourceCount: 0 }; }
     set_connected(connected) {
       assert.equal(sceneFrees, 0, 'connection changes require a live owner');
@@ -155,6 +178,14 @@ function pageFixture(t, { initialize = async () => {}, decode = async () => {},
       if (faults.render) throw faults.render;
       renderMethods.push('standard');
     }
+    render_standard_at_size(target, p0, p1, p2, background, width, height, resolve, quality) {
+      Object.assign(target, { width, height });
+      this.render_standard(target, p0, p1, p2, background, resolve, quality);
+    }
+    render_with_food_at_size(target, p0, p1, p2, background, width, height, detailed, resolve, quality) {
+      Object.assign(target, { width, height });
+      this.render_with_food(target, p0, p1, p2, background, detailed, resolve, quality);
+    }
     snapshot() { calls.push(['snapshot']); return JSON.stringify(view); }
     free() { sceneFrees++; calls.push(['scene.free']); }
   }
@@ -179,7 +210,7 @@ function pageFixture(t, { initialize = async () => {}, decode = async () => {},
   class PageImage { decode() { return decode(); } }
   const ready = pageScript.runInNewContext({
     init: initialize, wasm: { AnimatedScene, DesktopQuality }, syntheticScene, syntheticStep,
-    createSyntheticBodyResolver, createSyntheticFoodResolver,
+    createSyntheticBodyResolver, createSyntheticFoodResolver, desktopBackingSize,
     loopbackEndpoint, sceneHeading, connectLoopback, window, AbortController,
     document: {
       querySelector(selector) {
@@ -237,14 +268,98 @@ test('RAF applies initial zero gaze before one advance, frees the step and rende
   const page = pageFixture(t);
   await page.ready;
   expectFrame(page, 10.125, 0);
-  assert.equal(page.window.slitherAnimatedSceneReport.renders, 1);
+  assert.equal(page.window.slitherAnimatedSceneReport.renders, 2);
   assert.equal(page.window.slitherAnimatedSceneReport.ownHead, null);
   expectFrame(page, 110.5, 0);
-  assert.equal(page.window.slitherAnimatedSceneReport.renders, 2);
+  assert.equal(page.window.slitherAnimatedSceneReport.renders, 3);
   assert.deepEqual(page.counts(), { constructions: 1, sceneFrees: 0, stepFrees: 2 });
 });
 
-test('initial, palette, manual and reconnect resets keep one owner and add no update', async t => {
+test('initial Setup draws synchronously with view policy installed and no animation step', async t => {
+  const page = pageFixture(t);
+  await page.ready;
+  assert.deepEqual(page.renderMethods, ['standard']);
+  assert.deepEqual([page.elements.scene.width, page.elements.scene.height], [1500, 845]);
+  const names = page.calls.map(call => call[0]);
+  assert(names.indexOf('follow') < names.indexOf('applyDraw'));
+  assert(names.indexOf('zoom') < names.indexOf('applyDraw'));
+  assert.deepEqual(page.calls.filter(call => call[0] === 'applyDraw'), [['applyDraw', 'standard', 1500, 845]]);
+  assert.equal(names.some(name => ['advance', 'quality.advance', 'quality.statistics', 'step.free'].includes(name)), false);
+  assert.equal(page.frames.size, 1, 'Setup adds no extra RAF');
+});
+
+test('resize draws immediately even at unchanged size, without touching clock or quality', async t => {
+  const page = pageFixture(t);
+  await page.ready;
+  page.calls.length = 0;
+  page.window.emit('resize');
+  assert.deepEqual(page.calls, [['render'], ['snapshot']]);
+  assert.deepEqual([page.elements.scene.width, page.elements.scene.height], [1500, 845]);
+  page.calls.length = 0;
+  Object.assign(page.window, { innerWidth: 800, innerHeight: 600 });
+  page.window.emit('resize');
+  assert.deepEqual(page.calls, [['render'], ['snapshot']]);
+  assert.deepEqual([page.elements.scene.width, page.elements.scene.height], [1440, 1080]);
+  assert.equal(page.frames.size, 1);
+  page.calls.length = 0;
+  page.frame(1011);
+  assert.deepEqual(page.calls.find(call => call[0] === 'quality.statistics'), ['quality.statistics', 1011, 3, true]);
+  assert.equal(page.window.slitherAnimatedSceneReport.renders, 4);
+});
+
+test('all engine-reported Setup submissions count before the next local RAF', async t => {
+  const page = pageFixture(t);
+  await page.ready;
+  const session = page.connect();
+  page.calls.length = 0;
+  page.faults.setupDraws = 3;
+  assert.equal(session.options.scene.apply_frame(bundle(syntheticSetup(), syntheticSetup(), syntheticSetup()), false), 3);
+  assert.deepEqual(page.calls.filter(call => call[0] === 'applyDraw'), [['applyDraw', 'basic', 1500, 845]]);
+  assert.equal(page.calls.filter(call => call[0] === 'render').length, 3);
+  assert.equal(page.calls.some(call => ['advance', 'quality.advance', 'quality.statistics', 'step.free'].includes(call[0])), false);
+  page.calls.length = 0;
+  page.frame(1011);
+  assert.deepEqual(page.calls.find(call => call[0] === 'quality.statistics'), ['quality.statistics', 1011, 4, true]);
+  assert.equal(page.window.slitherAnimatedSceneReport.renders, 5);
+});
+
+test('synthetic reset selects its renderer before applying Setup after local mode', async t => {
+  const page = pageFixture(t);
+  await page.ready;
+  const session = page.connect();
+  page.calls.length = 0;
+  page.elements.reset.emit('click');
+  assert.equal(session.closes, 1);
+  assert.deepEqual(page.calls.filter(call => call[0] === 'applyDraw'), [['applyDraw', 'standard', 1500, 845]]);
+  assert.equal(page.renderMethods.at(-1), 'standard');
+  assert.equal(page.calls.some(call => call[0] === 'advance'), false);
+});
+
+test('invalid resize stops the preview before any Wasm draw or update', async t => {
+  const page = pageFixture(t);
+  await page.ready;
+  page.calls.length = 0;
+  page.window.innerWidth = 0;
+  page.window.emit('resize');
+  assert.deepEqual(page.calls.map(call => call[0]), ['connected', 'scene.free', 'quality.free']);
+  assert.equal(page.frames.size, 0);
+  assert.match(page.elements.status.textContent, /viewport/);
+});
+
+test('target-aware packet failure stops transport and preserves the thrown error', async t => {
+  const page = pageFixture(t);
+  await page.ready;
+  const session = page.connect();
+  const error = new Error('synthetic target-aware rejection');
+  page.faults.apply = error;
+  page.calls.length = 0;
+  assert.throws(() => session.options.scene.apply_frame(syntheticSetup(), false), value => value === error);
+  assert.deepEqual(page.calls.map(call => call[0]), ['applyDraw', 'connected', 'scene.free', 'quality.free']);
+  assert.equal(session.closes, 1);
+  assert.equal(page.frames.size, 0);
+});
+
+test('resets keep one owner and add only synthetic Setup draws without updates', async t => {
   const page = pageFixture(t);
   await page.ready;
   assert.deepEqual(page.calls.filter(call => call[0] === 'reset'), [['reset']]);
@@ -257,7 +372,8 @@ test('initial, palette, manual and reconnect resets keep one owner and add no up
   page.elements.disconnect.emit('click');
   page.connect();
   assert.deepEqual(page.calls.filter(call => call[0] === 'reset'), Array.from({ length: 4 }, () => ['reset']));
-  assert.equal(page.calls.some(call => ['advance', 'render', 'step.free'].includes(call[0])), false);
+  assert.equal(page.calls.some(call => ['advance', 'step.free'].includes(call[0])), false);
+  assert.equal(page.calls.filter(call => call[0] === 'render').length, 2);
   assert.deepEqual(page.counts(), { constructions: 1, sceneFrees: 0, stepFrees: 1 });
   page.window.emit('pagehide');
   page.window.emit('pagehide');
@@ -271,11 +387,11 @@ test('quality statistics receive raw successful draws at the strict interval bef
   page.calls.length = 0;
   for (const nowMs of [1010, 1011, 2011, 2012]) page.frame(nowMs);
   assert.deepEqual(page.calls.filter(call => call[0] === 'quality.statistics'), [
-    ['quality.statistics', 1010, 0, true], ['quality.statistics', 1011, 1, true],
+    ['quality.statistics', 1010, 1, true], ['quality.statistics', 1011, 2, true],
     ['quality.statistics', 2011, 1, true], ['quality.statistics', 2012, 2, true],
   ]);
-  assert.deepEqual(page.renderMethods, ['standard', 'standard', 'standard', 'standard']);
-  assert.equal(page.window.slitherAnimatedSceneReport.renders, 3, 'the throttled readout does not define the draw counter');
+  assert.deepEqual(page.renderMethods, ['standard', 'standard', 'standard', 'standard', 'standard']);
+  assert.equal(page.window.slitherAnimatedSceneReport.renders, 4, 'the throttled readout does not define the draw counter');
   assert.equal(page.resolvedRecipes[0].recipe.bodyStyle.rotateSegments, true);
 });
 
@@ -292,7 +408,7 @@ test('preference is deferred until connection; preview reset preserves the stati
   assert.equal(page.qualityView.requested, 0);
   assert.equal(page.qualityView.highQuality, true);
   page.frame(1011);
-  assert.deepEqual(page.calls.find(call => call[0] === 'quality.statistics'), ['quality.statistics', 1011, 1, true]);
+  assert.deepEqual(page.calls.find(call => call[0] === 'quality.statistics'), ['quality.statistics', 1011, 3, true]);
   page.connect();
   assert.equal(page.qualityView.highQuality, false);
   page.calls.length = 0;
@@ -309,7 +425,7 @@ for (const fault of ['qualityAdvance', 'statistics']) {
     await page.ready;
     page.faults[fault] = new Error(`synthetic ${fault}`);
     page.frame(20);
-    assert.equal(page.renderMethods.length, 0);
+    assert.deepEqual(page.renderMethods, ['standard'], 'only the earlier initial Setup rendered');
     assert.equal(page.frames.size, 0);
     assert.deepEqual(page.counts(), { constructions: 1, sceneFrees: 1, stepFrees: 1 });
     assert.equal(page.qualityFrees(), 1);
@@ -321,8 +437,8 @@ test('synthetic gaze uses fractional backing-pixel offsets, signed radians and c
   const page = pageFixture(t);
   await page.ready;
   for (const [clientX, clientY, angle] of [
-    [331.75, 124.25, Math.atan2(-47.25, 123.5)],
-    [224.25, 165.5, Math.atan2(76.5, -91.5)],
+    [331.75, 124.25, Math.atan2(-73.9375, 192.96875)],
+    [224.25, 165.5, Math.atan2(119.70833333333337, -142.96875)],
     [270, 140, 0],
   ]) {
     page.calls.length = 0;
@@ -337,7 +453,7 @@ test('zero CSS width or height preserves the previous finite gaze', async t => {
   const page = pageFixture(t);
   await page.ready;
   page.pointer(331.75, 124.25);
-  const angle = Math.atan2(-47.25, 123.5);
+  const angle = Math.atan2(-73.9375, 192.96875);
   for (const bounds of [{ width: 0, height: 180 }, { width: 480, height: 0 }]) {
     Object.assign(page.elements.scene.bounds, bounds);
     page.pointer(50, 60);
@@ -353,10 +469,10 @@ test('connected steering remains quantized relative to the rendered camera and a
   page.view.ownHead = { x: 100, y: 40 };
   page.pointer(331.75, 124.25);
   assert.deepEqual(session.inputs, [], 'steering waits for the first rendered camera');
-  expectFrame(page, 20, Math.atan2(-47.25, 123.5));
+  expectFrame(page, 20, Math.atan2(-73.9375, 192.96875));
   page.pointer(331.75, 124.25);
-  assert.deepEqual(session.inputs, [[178, false]]);
-  expectFrame(page, 28, Math.atan2(-47.25, 123.5));
+  assert.deepEqual(session.inputs, [[195, false]]);
+  expectFrame(page, 28, Math.atan2(-73.9375, 192.96875));
   page.pointer(270, 140);
   assert.deepEqual(session.inputs.at(-1), [147, false], 'center gaze still steers toward the world point');
   expectFrame(page, 36, 0);
@@ -373,13 +489,13 @@ test('retained own eyes receive gaze during death and after disconnection withou
   assert.equal(session.inputs.length, 1);
   page.view.ownHead = null;
   page.pointer(224.25, 165.5);
-  expectFrame(page, 28, Math.atan2(76.5, -91.5));
+  expectFrame(page, 28, Math.atan2(119.70833333333337, -142.96875));
   assert.equal(session.inputs.length, 1, 'retained own diagnostics do not enable steering');
-  assert.equal(page.advances.at(-1).gaze, Math.atan2(76.5, -91.5));
+  assert.equal(page.advances.at(-1).gaze, Math.atan2(119.70833333333337, -142.96875));
   session.options.onStatus('Local life ended');
   page.pointer(331.75, 124.25);
-  expectFrame(page, 140, Math.atan2(-47.25, 123.5));
-  assert.equal(page.advances.at(-1).gaze, Math.atan2(-47.25, 123.5));
+  expectFrame(page, 140, Math.atan2(-73.9375, 192.96875));
+  assert.equal(page.advances.at(-1).gaze, Math.atan2(-73.9375, 192.96875));
   assert.equal(session.inputs.length, 1);
   assert.equal(page.window.slitherAnimatedSceneReport.connected, false);
   assert.equal(page.elements.disconnect.disabled, true);
@@ -390,7 +506,7 @@ test('latest pointer gaze reaches a new appearance and survives reset and manual
   await page.ready;
   page.pointer(224.25, 165.5);
   page.pointer(331.75, 124.25);
-  const angle = Math.atan2(-47.25, 123.5);
+  const angle = Math.atan2(-73.9375, 192.96875);
   expectFrame(page, 20, angle);
   assert.equal(page.advances.at(-1).gaze, undefined, 'no own object yet');
   page.view.own = { eyes: { gazeHeading: 0 } };
@@ -405,7 +521,7 @@ test('latest pointer gaze reaches a new appearance and survives reset and manual
   expectFrame(page, 36, angle);
   assert.equal(page.advances.at(-1).gaze, angle);
   page.pointer(224.25, 165.5);
-  expectFrame(page, 44, Math.atan2(76.5, -91.5));
+  expectFrame(page, 44, Math.atan2(119.70833333333337, -142.96875));
 });
 
 test('anchor and view controls do not add animation advances or renders', async t => {
@@ -417,11 +533,11 @@ test('anchor and view controls do not add animation advances or renders', async 
   page.elements.zoom.emit('change');
   page.elements.follow.checked = false;
   page.elements.follow.emit('change');
-  assert.deepEqual(page.calls, [['apply', [...syntheticStep(1)], false], ['zoom', 2], ['follow', false]]);
+  assert.deepEqual(page.calls, [['applyDraw', 'standard', 1500, 845], ['apply', [...syntheticStep(1)], false], ['zoom', 2], ['follow', false]]);
   page.elements.reset.emit('click');
   page.calls.length = 0;
   page.elements.step.emit('click');
-  assert.deepEqual(page.calls, [['apply', [...syntheticStep(1)], false]]);
+  assert.deepEqual(page.calls, [['applyDraw', 'standard', 1500, 845], ['apply', [...syntheticStep(1)], false]]);
   expectFrame(page, 20, 0);
 });
 
@@ -439,11 +555,11 @@ test('canvas blur, window blur and Space keyup still release boost with the reta
     () => assert.equal(page.elements.scene.emit('keyup', { code: 'Space' }).defaultPrevented, true),
   ]) {
     assert.equal(page.elements.scene.emit('keydown', { code: 'Space' }).defaultPrevented, true);
-    assert.deepEqual(session.inputs.at(-1), [178, true]);
+    assert.deepEqual(session.inputs.at(-1), [195, true]);
     release();
-    assert.deepEqual(session.inputs.at(-1), [178, false]);
+    assert.deepEqual(session.inputs.at(-1), [195, false]);
   }
-  expectFrame(page, 28, Math.atan2(-47.25, 123.5));
+  expectFrame(page, 28, Math.atan2(-73.9375, 192.96875));
 });
 
 test('pagehide aborts listeners and config, cancels RAF, closes transport and frees once', async t => {
@@ -466,6 +582,7 @@ test('pagehide aborts listeners and config, cancels RAF, closes transport and fr
   page.elements.step.emit('click');
   page.elements.scene.emit('keydown', { code: 'Space' });
   page.window.emit('blur');
+  page.window.emit('resize');
   staleCallback(28);
   assert.deepEqual(page.calls, []);
   assert.deepEqual(session.inputs, []);

@@ -3,6 +3,7 @@ import { syntheticScene, syntheticStep } from './synthetic-scene.mjs';
 import { connectLoopback, loopbackEndpoint, sceneHeading } from './loopback-session.mjs';
 import { createSyntheticBodyResolver } from './synthetic-body.mjs';
 import { createSyntheticFoodResolver } from './synthetic-food.mjs';
+import { desktopBackingSize } from './desktop-layout.mjs';
 
 const control = id => document.querySelector(`#${id}`);
 const target = control('scene');
@@ -64,16 +65,16 @@ listen(window, 'pagehide', teardown);
 
 function reset() {
   disconnect();
+  mode = 'synthetic';
   animated.reset();
   quality.begin_skin_preview();
   foodRandomState = 0x5eed1;
-  applyFrame(syntheticScene(Number(control('skin').value)), false);
   animated.set_follows(control('follow').checked);
   animated.set_zoom(Number(control('zoom').value));
   anchorStep = 0;
-  mode = 'synthetic';
   lastReadout = -Infinity;
   renderedCamera = undefined;
+  applyFrame(syntheticScene(Number(control('skin').value)), false);
   updateControls();
   setStatus('Synthetic geometry preview');
 }
@@ -117,7 +118,36 @@ async function start() {
     foodRandomState = (Math.imul(foodRandomState, 1664525) + 1013904223) >>> 0;
     return foodRandomState / 4294967296;
   });
-  applyFrame = (bytes, header) => animated.apply_frame_with_factories(bytes, header, () => face, resolveFood);
+  const desiredSize = () => desktopBackingSize(window.innerWidth, window.innerHeight);
+  function recordDraws(count) {
+    renders += count;
+    drawsSinceStatistics += count;
+    if (count === 0) return;
+    const view = JSON.parse(animated.snapshot());
+    renderedCamera = { x: view.camera.x, y: view.camera.y, zoom: view.camera.zoom };
+    return view;
+  }
+  function renderScene() {
+    const { width, height } = desiredSize();
+    if (mode === 'synthetic') animated.render_standard_at_size(target, ...palettes, background,
+      width, height, resolveSynthetic, quality);
+    else animated.render_with_food_at_size(target, ...palettes, background,
+      width, height, false, resolveFace, quality);
+    return recordDraws(1);
+  }
+  applyFrame = (bytes, header) => {
+    const { width, height } = desiredSize();
+    const count = mode === 'synthetic'
+      ? animated.apply_frame_and_render_standard(bytes, header, () => face, resolveFood,
+        target, ...palettes, background, width, height, resolveSynthetic, quality)
+      : animated.apply_frame_and_render_with_food(bytes, header, () => face, resolveFood,
+        target, ...palettes, background, width, height, false, resolveFace, quality);
+    if (count !== 0) {
+      recordDraws(count);
+      lastReadout = -Infinity;
+    }
+    return count;
+  };
 
   function frame(nowMs) {
     pendingFrame = undefined;
@@ -131,12 +161,7 @@ async function start() {
       // a statistics transition affects interpolation on the following update.
       if (quality.update_statistics(nowMs, drawsSinceStatistics, true)) drawsSinceStatistics = 0;
       const qualityView = JSON.parse(quality.snapshot());
-      if (mode === 'synthetic') animated.render_standard(target, ...palettes, background, resolveSynthetic, quality);
-      else animated.render_with_food(target, ...palettes, background, false, resolveFace, quality);
-      drawsSinceStatistics++;
-      renders++;
-      const view = JSON.parse(animated.snapshot());
-      renderedCamera = { x: view.camera.x, y: view.camera.y, zoom: view.camera.zoom };
+      const view = renderScene();
       if (nowMs - lastReadout >= 100) {
         lastReadout = nowMs;
         const count = (value, width) => String(value).padStart(width);
@@ -149,14 +174,21 @@ async function start() {
     } catch (error) { fail(error); }
   }
 
-  listen(control('reset'), 'click', reset);
+  listen(window, 'resize', () => {
+    try { renderScene(); lastReadout = -Infinity; } catch (error) { fail(error); }
+  });
+  listen(control('reset'), 'click', () => { try { reset(); } catch (error) { fail(error); } });
   listen(control('step'), 'click', () => {
     if (mode !== 'synthetic') return;
-    applyFrame(syntheticStep(++anchorStep), false);
-    setStatus('Synthetic anchor advanced');
-    lastReadout = -Infinity;
+    try {
+      applyFrame(syntheticStep(++anchorStep), false);
+      setStatus('Synthetic anchor advanced');
+      lastReadout = -Infinity;
+    } catch (error) { fail(error); }
   });
-  listen(control('skin'), 'change', () => { if (!connection) reset(); });
+  listen(control('skin'), 'change', () => {
+    if (!connection) { try { reset(); } catch (error) { fail(error); } }
+  });
   listen(control('zoom'), 'change', () => animated.set_zoom(Number(control('zoom').value)));
   listen(control('follow'), 'change', () => animated.set_follows(control('follow').checked));
   listen(control('quality'), 'change', () => quality.set_requested_mode(Number(control('quality').value)));
@@ -176,11 +208,13 @@ async function start() {
           animated.set_zoom(Number(control('zoom').value));
           renderedCamera = undefined;
         },
-        apply_frame: applyFrame,
+        apply_frame: (bytes, header) => {
+          try { return applyFrame(bytes, header); } catch (error) { fail(error); throw error; }
+        },
         snapshot: animated.snapshot.bind(animated),
       };
       connection = connectLoopback({ url: simulatorUrl, wasm, scene, skin: Number(control('skin').value),
-        // Packets apply immediately in the transport; only RAF advances/draws.
+        // Packets deliver ordered Setup draws; RAF alone advances animation.
         onFrame() {},
         onStatus(text) {
           if (disposed) return;

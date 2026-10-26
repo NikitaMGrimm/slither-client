@@ -504,10 +504,41 @@ predates the Wasm/face/page integration.
 
 These are synthetic state and logical Canvas checks. Independent combined review
 found a signed-zero source-revision coherence defect; the corrected alias boundary
-passes the new regressions, with focused independent recheck pending.
-Complete-runtime numeric food comparison and native Windows Canvas/page
-verification remain pending. No food original-pixel, installed
+passes the new regressions and a focused independent recheck. At the corrected
+food revision, a bounded numeric comparison matches 124,356 food-engine cells;
+the same six Setup/layout submission-presence differences remain failures.
+Separate corrected stock Windows Chrome and Firefox checks pass 20,172 and
+10,805 assertions respectively, using authored textures and timestamps. These
+earlier results cover the food engine and explicit draws. No food original-pixel, installed
 extension or live-server acceptance is claimed. See [the food contract](food-presentation.md).
+
+## Target-aware Setup and resize checks
+
+The combined local checks pass 314 native tests, 127 Node tests, formatting,
+doctests, strict rustdoc, native/Wasm Clippy, a fresh web build and full real-Wasm
+smoke. The body/face/food/Setup recorder passes 2,093 assertions, including 439
+new Setup/resize assertions. These are synthetic native-call doubles rather than
+browser rasterization.
+
+The new host route has separate synthetic tests for ordered per-Setup plans,
+event-time configuration, draw-driven camera/spacing changes, creation-time food
+zoom and source retention through later removals. Real-Wasm recorder checks cover
+both target-aware application and size-aware render APIs, multi-Setup ordering,
+preclear callback/metadata/readiness/alias rejection, aggregate resource limits,
+changed/unchanged dimensions and late Canvas-failure model rollback.
+
+Page doubles cover initial and repeated Setup counts, synchronous unchanged-size
+and changed-size resize, renderer selection before reset packets, exact shared
+RAF/quality/statistics ownership, CSS-to-backing input coordinates and teardown.
+The pure desktop layout tests use authored viewport/expected-dimension pairs and
+invalid/overflow inputs. Fullscreen login/HUD layout and mobile insets are not
+represented by the contained zero-inset demo page.
+
+These checks compare actual candidate operations against authored ordered
+controls. New original-runtime host-cadence comparison, native Canvas/page
+verification and independent review remain pending for this route. Earlier food
+evidence and its six retained host mismatches are unchanged; no full-client,
+original-pixel, extension or official-server acceptance follows from these tests.
 
 ## Opt-in standard-body renderer checks
 

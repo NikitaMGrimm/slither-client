@@ -152,8 +152,16 @@ the coupled client described below.
 visual speed, spawn and death progress. `AnimatedClient` applies ordered events
 atomically with received state. Updates advance the explicit frame clock; draws
 advance camera samples, automatic zoom, corrected-body visibility and point
-spacing. Packet application advances neither clock. Elapsed headers do not add
+spacing. Targetless packet application advances neither clock. Elapsed headers do not add
 anchor extrapolation time.
+
+The additive target-aware Wasm factory APIs stage one draw at each ordered Setup
+event. Each draw sees that event's configuration and retained world, including
+its camera, spacing and source-selection effects on later commands in the bundle.
+Complete received validation precedes callbacks; every draw is planned and
+preflighted before the first target clear. The model and retained sources commit
+only after all submissions succeed. These draws consume no animation step or
+quality update. Existing targetless APIs retain their previous behavior.
 
 `AnimatedClient::reset()` and Wasm `AnimatedScene.reset()` are infallible,
 parameterless world resets. They retain the last update timestamp and both
@@ -200,7 +208,24 @@ commits retained source references with the model and releases them after expiry
 or reset. Both render paths submit these plans; the authored animated page
 exercises the complete path with synthetic textures and caller random inputs.
 See [retained desktop food](food-presentation.md) for metadata, lifecycle,
-transaction limits and pending independent browser/reference acceptance.
+transaction limits and bounded browser/reference evidence.
+
+`apply_frame_and_render_standard` and `apply_frame_and_render_with_food` receive
+the target, assets, desired backing dimensions and applied quality explicitly,
+and return the submitted Setup-draw count. Sources used by an earlier draw remain
+alive through later removals in the same transaction. Image, curve-sample and
+layout budgets cover the complete ingress. Explicit `render_standard_at_size`
+and `render_with_food_at_size` support synchronous resize draws. Native failures
+after submission starts may leave changed dimensions or partial pixels even
+though the numeric model and source registry roll back.
+
+The animated page uses the ceiled window viewport with zero UI insets to select
+desktop backing dimensions. Its existing contained CSS remains a demo layout.
+Initial/repeated Setup and every resize event submit synchronously, including an
+unchanged-size resize; successful draws join the unthrottled quality counter.
+Only RAF advances the shared update/quality step. Setup never reinitializes quality
+or resets its statistics interval. Login/HUD/mobile layout and original background
+pixels remain outside this host adapter.
 
 Retained objects preserve duplicate appearances and original own identity through
 death, draw expiry and wire-ID reuse. Explicit lookup addresses the newest

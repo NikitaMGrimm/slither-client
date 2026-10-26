@@ -253,8 +253,39 @@ impl FoodSources {
         Ok(())
     }
 
-    pub(crate) fn assets(&self) -> Vec<BodyAsset> {
-        self.sources.iter().map(|s| s.asset).collect()
+    pub(crate) fn len(&self) -> usize {
+        self.sources.len()
+    }
+
+    pub(crate) fn assets(&self) -> Result<Vec<BodyAsset>, JsValue> {
+        let mut assets = Vec::new();
+        assets
+            .try_reserve(self.sources.len())
+            .map_err(|_| error("food asset allocation failed"))?;
+        assets.extend(self.sources.iter().map(|s| s.asset));
+        Ok(assets)
+    }
+
+    /// Pin observations only for the new ordered multi-draw transaction. Old
+    /// retained revisions remain legal until a draw actually selects them.
+    pub(crate) fn observe_draw_sources(
+        &mut self,
+        plan: &crate::presentation::FoodPaintPlan,
+    ) -> Result<(), JsValue> {
+        for command in plan.early.iter().chain(&plan.late) {
+            let source = self.lookup(command.source.asset())?;
+            for prior in self
+                .sources
+                .iter()
+                .filter(|s| self.observed.contains(&s.asset.handle))
+            {
+                if Object::is(&source.object, &prior.object) && !source.coherent(prior) {
+                    return Err(error("incoherent food source across planned draws"));
+                }
+            }
+            self.observed.insert(command.source.asset().handle);
+        }
+        Ok(())
     }
 
     /// Expose exact borrowed identity for coherence with the body's per-call

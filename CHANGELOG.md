@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Stage ordered Setup draws through additive target-aware Wasm factory APIs,
+  preserving event-time camera/configuration and source lifetime across bundles.
+  Add explicit size-aware rendering and synchronous desktop page resize/counting.
 - Connect ordered food events to retained animation, captured eater objects,
   creation-selected borrowed sources and two paint passes through both Wasm
   renderers. Exercise the full path on the authored animated page.

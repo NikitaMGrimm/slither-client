@@ -41,6 +41,10 @@ resolveFace, resolveFood)` before any packets, or after explicit reset. Native
 `AnimatedClient` exposes the corresponding typed method. Once enabled, older
 apply APIs reject new food creations without a factory. Both resolvers run
 synchronously in event order after complete received-frame validation.
+Resolvers are trusted, non-reentrant capabilities: do not call the same scene
+during resolution. Nested mutation rejects, but the pinned binding runtime has a
+pre-existing cleanup limitation after such rejected reentry; subsequent `.free()`
+can fail. This behavior is outside the supported resolver contract.
 
 The face resolver uses the existing complete paired-face numeric contract.
 The food resolver receives a fresh own-data record:
@@ -131,11 +135,58 @@ limit rejects the complete transaction or draw; foods are never silently skipped
 
 ## Evidence limits
 
-Synthetic native and real-Wasm checks cover lifecycle, exact submissions and
-rollback. They do not establish full-runtime food parity or native pixels.
-External numeric comparison and Windows native Canvas verification remain
-required before broader fidelity acceptance. The current arena boundary remains
+The earlier food integration has bounded exact numeric and stock Windows
+Chrome/Firefox Canvas evidence using authored textures and timestamps. Its six
+Setup/layout draw-presence differences remain recorded failures. The additive
+host path below has separate synthetic checks; those earlier results do not
+establish its original-runtime cadence or native pixels. The current arena boundary remains
 a stand-in painted before food, so whole-frame boundary occlusion is not claimed.
 Prey, team ordering, mobile, other cosmetics, host skin/texture mapping, transport
 close policy, installed extensions and official-server acceptance remain outside
 this integration.
+
+## Ordered Setup draws and explicit resize
+
+The additive target-aware factory methods accept the same two resolvers, followed
+by explicit rendering inputs. They return the number of submitted Setup draws:
+
+```js
+scene.apply_frame_and_render_standard(bytes, elapsedHeader, resolveAppearance,
+  resolveFood, target, p0, p1, p2, background, width, height, resolveRecipe, quality);
+scene.apply_frame_and_render_with_food(bytes, elapsedHeader, resolveAppearance,
+  resolveFood, target, p0, p1, p2, background, width, height, detailedStyle,
+  resolveDrawFace, quality);
+```
+
+Each Setup plans exactly one draw before the next command. An initial empty Setup
+still paints its background; a packet without Setup returns zero and adds no
+draw. Later creations use the zoom after preceding draws. Earlier plans retain
+their exact source objects even when later commands remove the corresponding
+food or snake. Final GC follows successful submission of all plans.
+
+Dimensions must be finite integers in 1..4096. They describe the desired backing
+size, which can differ from the entry target size. No renderer resize, reset or
+paint occurs until all callbacks, plans, shared-source revisions, readiness,
+context/pattern acquisition and budgets pass. A callback changing the target's
+entry dimensions rejects. Callback side effects remain external. All new paths
+require retained food factories, enabled by target-aware apply before packets or
+after reset. They store no target, pending queue or quality owner on the scene.
+
+For resize without a packet, use `render_standard_at_size` or
+`render_with_food_at_size` with the existing render arguments and `width, height`
+immediately after `background`. These calls prepare and submit once without
+advancing animation or quality. A changed backing size assigns both dimensions;
+unchanged size still resets drawing state for hostile clip/transform isolation.
+
+Per-ingress limits are `MAX_FRAME_COMMANDS` Setup draws, `MAX_DRAW_SAMPLES` total
+curve samples and retained snake layouts, and `MAX_BODY_PAINT_COMMANDS` total
+image commands. Source/catalog ceilings still apply across the whole transaction.
+Limits reject before target mutation instead of dropping or combining draws.
+Late native Canvas failure preserves model/source state, while already resized,
+cleared or painted target pixels cannot be restored.
+
+The authored page routes both synthetic and local packets through these APIs.
+Its zero-inset desktop window sizing uses diagonal/ceil arithmetic and ordered
+1500-pixel caps; CSS scales the backing target inside the existing page. Setup
+counts and synchronous resize draws join the quality statistics counter. RAF
+alone advances the shared step; it continues to render once per callback.
