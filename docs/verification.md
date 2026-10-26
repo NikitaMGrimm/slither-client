@@ -128,7 +128,17 @@ setup cadence, double-precision storage and atomic rejection. The real Wasm
 presentation smoke checks the copied arrays, current-host cosine weights,
 borrowed-step gating, setup behavior, exhaustion and invalid inputs through
 `BoundarySmoother`. These establish the standalone numeric API; scene packet
-consumption, boundary rendering and external-runtime parity remain separate.
+consumption and boundary rendering remain separate.
+
+A private real-Wasm comparison against the complete pinned runtime matched
+6,385 fields exactly across four frozen schedules and 97 operations. Inputs were
+authored radius targets, connection changes and timestamps; Rust consumed its
+own animation clock. Weights, complete double-precision rings, displayed/target
+radii, cursor and pending state matched without a tolerance. Observed/control
+snapshots also matched. Coverage includes shrink, overlap/equal targets, wrap,
+disconnect/reconnect, fractional/lagged time and backward timestamps. Setup was
+initialized explicitly, so setup-parser equivalence is not established. This is
+numeric Node/Wasm evidence without scene, pixel, browser or server acceptance.
 
 ## Coupled animation checks
 
