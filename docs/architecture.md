@@ -108,7 +108,7 @@ cleanup. Setup replaces radii while preserving cursor and pending cadence.
 Inputs must be positive and finite; computed finite samples retain cancellation
 to zero, including at the final unit weight, without an endpoint shortcut.
 `BoundarySmoother` exposes the standalone state to Wasm and borrows existing owned
-animation steps. Neither API changes the scene's arena drawing yet.
+animation steps. The coupled animated client below consumes the same radius state.
 
 `BodyGeometry` keeps absolute anchors head to tail, including dying points.
 Normal anchors mark the oldest living point dying; growth changes logical count.
@@ -149,6 +149,24 @@ atomically with received state. Updates advance the explicit frame clock; draws
 advance camera samples, automatic zoom, corrected-body visibility and point
 spacing. Packet application advances neither clock. Elapsed headers do not add
 anchor extrapolation time.
+
+`AnimatedClient::reset()` and Wasm `AnimatedScene.reset()` are infallible,
+parameterless world resets. They retain the last update timestamp and both
+accumulated animation phases, and restore the lag multiplier to one without
+advancing an update or draw. Construct a new client with `new(start_ms)` to
+start a fresh timeline. Reset still clears received state, retained entities,
+camera controls and the connection gate; shared body-painter flags survive.
+The animated page uses this same timeline across Reset, palette changes and
+reconnections, independently of quality-statistics cadence.
+
+The client retains boundary samples and cadence across resets. Setup fills the
+ring and activates its connection gate; ordered radius targets schedule easing.
+Updates consume the same clock's whole steps only while connected. Disconnect
+pauses boundary consumption while entity animation continues. Both render paths
+use the displayed radius without consuming samples. A reset hides the retained
+boundary until the next setup. Wasm exposes `set_connected`, copied
+`boundary_samples` and separate `snapshot.boundary` diagnostics; `snapshot.radius`
+continues to report the received target.
 
 Retained objects preserve duplicate appearances and original own identity through
 death, draw expiry and wire-ID reuse. Explicit lookup addresses the newest
@@ -209,7 +227,7 @@ All layouts validate before canvas reset. Pointer gaze uses full radians from
 canvas-center offsets before each update, separately from quantized live steering.
 The synthetic fixture uses ordered body effects and applied HQ/LQ state. Local
 simulator mode retains the basic stand-ins. Complete skins, special faces,
-attachments and radius easing remain unimplemented. This preview does not
+attachments remain unimplemented. This preview does not
 establish visual or gameplay equivalence.
 
 ## Ordered body paint planning

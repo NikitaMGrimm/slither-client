@@ -35,7 +35,7 @@ export function bodyRenderSmoke(wasm) {
     arc(...args) { this.throwIf('arc'); this.path.push(args); }
     closePath() {}
     fillRect(...args) { this.trace.push({ op: 'fillRect', args }); }
-    stroke() { this.trace.push({ op: 'stroke' }); }
+    stroke() { this.trace.push({ op: 'stroke', path: this.path }); }
     fill() { this.trace.push({ op: 'fill', path: this.path, alpha: this.alpha, blend: this.blend }); }
     drawImage(source, ...args) {
       if (source === this.failSource) throw new Error('synthetic Canvas drawImage');
@@ -90,7 +90,8 @@ export function bodyRenderSmoke(wasm) {
     const resolve = request => { requests.push(request); return transform(provider.resolve(request, snapshot), request); };
     const render = (callback = resolve) => scene.render_standard(target, ...foods, background, callback, quality);
     const state = () => [scene.snapshot(), scene.drawn_snakes(), Array.from(scene.camera_samples()),
-      Array.from(scene.own_body_samples()), Array.from(scene.own_body()), Array.from(scene.length_samples())];
+      Array.from(scene.own_body_samples()), Array.from(scene.own_body()), Array.from(scene.length_samples()),
+      Array.from(scene.boundary_samples())];
     const close = () => { scene.free(); quality.free(); };
     scene.apply_frame(syntheticScene(), false);
     scene.advance(40, false).free();
@@ -118,6 +119,50 @@ export function bodyRenderSmoke(wasm) {
     return failure;
   }
   try {
+    const boundary = fixture();
+    try {
+      const { scene, target, foods, background } = boundary;
+      const view = () => JSON.parse(scene.snapshot()).boundary;
+      const renderers = [() => scene.render(target, ...foods, background, 1, false), boundary.render];
+      const boundaryState = () => [view(), Array.from(scene.boundary_samples())];
+      const arc = render => {
+        target.context.trace = [];
+        const before = boundaryState(); render();
+        eq(boundaryState(), before, 'both renderers leave the ring untouched');
+        const strokes = target.context.trace.filter(call => call.op === 'stroke');
+        eq(strokes.length, 1, 'one setup boundary per draw');
+        return strokes[0].path[0][2];
+      };
+      for (const render of renderers) eq(arc(render), 1000, 'unchanged fixture radius');
+      scene.apply_frame(Uint8Array.of(122, 0, 1, 144), false); // Authored radius 400.
+      const samples = scene.boundary_samples();
+      for (const render of renderers) eq(arc(render), 1000, 'target packets cannot jump the drawn boundary');
+      scene.advance(44, false).free();
+      for (const render of renderers) eq(arc(render), 1000, 'fractional update cannot consume boundary');
+      scene.advance(48, false).free();
+      for (const render of renderers) eq(arc(render), 1000, 'first whole step displays the original radius');
+      scene.advance(88, false).free();
+      for (const render of renderers) eq(arc(render), samples[5], 'both paths draw the eased absolute radius');
+      scene.set_connected(false);
+      scene.advance(128, false).free();
+      for (const render of renderers) eq(arc(render), samples[5], 'disconnected draws retain the paused display');
+      for (const render of renderers) {
+        const before = boundary.state(); const ring = scene.boundary_samples();
+        target.context.failMethod = 'arc';
+        rejects(render); eq(boundary.state(), before); eq(scene.boundary_samples(), ring);
+        eq(target.context.stack.length, 0, 'Canvas failure balances the frame');
+        target.context.failMethod = null;
+      }
+      scene.reset();
+      const retained = scene.boundary_samples();
+      for (const render of renderers) {
+        target.context.trace = []; render();
+        eq(target.context.trace.filter(call => call.op === 'stroke'), [], 'retained ring without Setup draws no boundary');
+        eq(scene.boundary_samples(), retained);
+      }
+      scene.apply_frame(syntheticSetup(), false);
+      for (const render of renderers) eq(arc(render), 1000, 'Setup replaces the retained display');
+    } finally { boundary.close(); }
     const inherited = fixture();
     const priorValue = Object.getOwnPropertyDescriptor(Object.prototype, 'value');
     let getterCalls = 0;
@@ -241,7 +286,7 @@ export function bodyRenderSmoke(wasm) {
 
     const duplicates = fixture();
     try {
-      duplicates.scene.reset(0);
+      duplicates.scene.reset();
       duplicates.scene.apply_frame(bundle(syntheticSetup(), appearance([1, 4], 17), appearance([2, 8], 29)), false);
       duplicates.scene.advance(40, false).free();
       duplicates.render();
@@ -284,7 +329,7 @@ export function bodyRenderSmoke(wasm) {
     } finally { low.close(); }
     const short = fixture();
     try {
-      short.scene.reset(0); short.scene.apply_frame(bundle(syntheticSetup(), appearance().slice(0, -22)), false);
+      short.scene.reset(); short.scene.apply_frame(bundle(syntheticSetup(), appearance().slice(0, -22)), false);
       short.render(); eq(bodyImages(short).length, 0); eq(short.target.context.trace.filter(v => v.op === 'fill').length, 4);
       short.scene.apply_frame(syntheticStep(1), false); short.render(); ok(bodyImages(short).length > 0);
     } finally { short.close(); }
@@ -381,7 +426,7 @@ export function bodyRenderSmoke(wasm) {
     } finally { transition.close(); }
     const limits = fixture({ eyes: false, detailed: true });
     try {
-      limits.scene.reset(0);
+      limits.scene.reset();
       const frames = denseScene({ snakes: 128, anchors: 512, foods: 0, spread: 100 });
       for (const frame of frames) limits.scene.apply_frame(frame, false);
       for (const frame of frames.slice(1)) limits.scene.apply_frame(frame, false);

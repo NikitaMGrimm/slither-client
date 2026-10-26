@@ -128,8 +128,8 @@ setup cadence, double-precision storage, cancellation to zero for a tiny positiv
 target and atomic rejection. The real Wasm
 presentation smoke checks the copied arrays, current-host cosine weights,
 borrowed-step gating, setup behavior, exhaustion and invalid inputs through
-`BoundarySmoother`. These establish the standalone numeric API; scene packet
-consumption and boundary rendering remain separate.
+`BoundarySmoother`. These establish the standalone numeric API; the coupled
+checks below exercise scene packet consumption and boundary rendering.
 
 A private real-Wasm comparison against the complete pinned runtime matched
 6,385 fields exactly across four frozen schedules and 97 operations. Inputs were
@@ -142,6 +142,46 @@ initialized explicitly, so setup-parser equivalence is not established. This is
 numeric Node/Wasm evidence without scene, pixel, browser or server acceptance.
 
 ## Coupled animation checks
+
+Eight native boundary-client tests cover ordered and repeated targets, setup and
+reset retention, connection gating without a catch-up backlog, continued entity
+animation, draw independence and complete packet/numeric failure rollback.
+The real Wasm smoke checks copied boundary samples and received/displayed radius
+separation. Canvas-recorder checks exercise both render paths, radius easing,
+disconnected drawing, Canvas failures and hiding retained state before setup.
+Page doubles verify that socket open alone does not activate the gate and that
+disconnect, life end and teardown clear it without touching freed owners.
+Native and real-Wasm reset regressions cover the retained 3-ms plus 5-ms phase,
+doubled accumulation, backward timestamps, clamped pauses, restored lag speed,
+world clearing and boundary retention without an extra step. The generated Wasm
+reset signature and all page reset routes are checked as parameterless. Existing
+body-painter tests cover retained flags; page doubles cover owner cleanup and
+unchanged update/quality ordering. These are synthetic numeric/command checks;
+the following comparisons separately exercise native rendering and the runtime.
+
+Stock Windows Firefox 158.0.1 headless passed 1,265 assertions on the initial
+integration, including both Canvas paths and authored-page lifecycle checks.
+At matched initial/immediate/8-ms/48-ms checkpoints, native boundary radii changed
+from `[1000,400,400,400]` to `[1000,1000,1000,987.8478920843492]`. All four new
+checkpoints repeat exact decoded pixels; nine no-target body checkpoints preserve
+their prior pixels and existing numeric fields.
+
+A focused corrected-build Firefox recheck passed 235 assertions. It reproduced
+the old fractional-step loss and verified one whole and two doubled steps after
+3 ms, reset, then 5 ms. All five tested page reset routes passed no arguments.
+Both Canvas paths passed phase, lag, retained-ring and connection checks. Four
+no-reset checkpoints preserve the initial integration's pixels and complete
+snapshots exactly. The page checks use an explicitly synthetic transport.
+
+The corrected real Wasm also matches eight frozen runtime schedules and 195
+operations exactly: 12,106 boundary/absence, 931 clock, 693 bundled/sequential and
+195 copied-array checks, plus 36,068 preserved observer/control comparisons.
+All 29 earlier reset mismatch cells are cleared without changing cases or
+expected observations. Equality uses `Object.is` without tolerance; these cells
+contain no negative zero. Setup, targets, shared timing, repeated setup and reset
+are covered; source WebSocket framing and entity behavior are outside this empty-
+world comparison. These results do not establish original pixels, full skins,
+real transport, extension installation or full-client equivalence.
 
 After building and starting `npm run scene`, open
 `http://127.0.0.1:18884/animated`. Its animation callback advances the explicit
@@ -394,7 +434,7 @@ claim. External adapters, source identities and raw evidence remain outside Git.
 
 `tools/body-render-smoke.mjs` executes the real Wasm `render_standard` ABI with
 an original synthetic Canvas recorder and normalized provider snapshots. Its
-242 assertions cover per-appearance custom/cosmetic requests, duplicate IDs and
+296 assertions cover per-appearance custom/cosmetic requests, duplicate IDs and
 original-own removal/reuse, whole-source versus full/partial crops, exact source
 objects, transforms/destination arithmetic, ordered body/death/eyes, HQ/LQ/blend
 gates, mixed glows, ignored invalid alpha, readiness/revision coherence, short

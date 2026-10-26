@@ -71,7 +71,8 @@ synthetic scene. **Step** advances a received anchor; **Palette**, **Zoom**, and
 [the loopback procedure](docs/verification.md#offline-scene-and-local-simulator).
 
 Open `http://127.0.0.1:18884/animated` for continuous prediction, corrected
-body sampling and standard paired eyes. Pointer motion controls visual gaze,
+body sampling, standard paired eyes and arena-radius easing. Pointer motion
+controls visual gaze,
 including in the synthetic preview. The synthetic fixture uses original
 stand-ins with ordered body effects and adaptive quality. Local simulator mode
 keeps its basic stand-ins. Full skins, special faces and attachments remain pending.

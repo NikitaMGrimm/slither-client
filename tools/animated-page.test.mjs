@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { Script } from 'node:vm';
 import { loopbackEndpoint, sceneHeading } from '../web/loopback-session.mjs';
-import { syntheticScene, syntheticStep } from '../web/synthetic-scene.mjs';
+import { syntheticScene, syntheticSetup, syntheticStep } from '../web/synthetic-scene.mjs';
 import { createSyntheticBodyResolver } from '../web/synthetic-body.mjs';
 
 // Original synthetic page/Wasm doubles. No generated bindings, browser or sockets.
@@ -78,17 +78,30 @@ function pageFixture(t, { initialize = async () => {}, decode = async () => {},
     free() { qualityFrees++; calls.push(['quality.free']); }
   }
   const view = { camera: { x: 0, y: 0, zoom: 1.5 }, ownHead: null,
+    boundary: { connected: false },
     snakes: 3, retainedSnakes: 3, drawnSnakes: 3, foods: 28, frames: 1, ignored: 0 };
   let frameId = 0, sceneFrees = 0, stepFrees = 0, constructions = 0;
   const fetched = Promise.withResolvers();
   class AnimatedScene {
     constructor(nowMs) { constructions++; calls.push(['construct', nowMs]); }
-    reset(nowMs) {
-      calls.push(['reset', nowMs]);
+    reset(...args) {
+      assert.equal(sceneFrees, 0, 'reset requires a live owner');
+      assert.equal(args.length, 0, 'page resets preserve the timeline without supplying a timestamp');
+      calls.push(['reset']);
+      view.boundary.connected = false;
       view.ownHead = null;
       delete view.own;
     }
-    apply_frame(bytes, elapsed) { calls.push(['apply', [...bytes], elapsed]); }
+    apply_frame(bytes, elapsed) {
+      assert.equal(sceneFrees, 0, 'packets require a live owner');
+      calls.push(['apply', [...bytes], elapsed]);
+      if (bytes[0] === 97 || bytes[2] === 97) view.boundary.connected = true;
+    }
+    set_connected(connected) {
+      assert.equal(sceneFrees, 0, 'connection changes require a live owner');
+      calls.push(['connected', connected]);
+      view.boundary.connected = connected;
+    }
     set_follows(follows) { calls.push(['follow', follows]); }
     set_zoom(zoom) { calls.push(['zoom', zoom]); }
     set_gaze_heading(radians) {
@@ -212,6 +225,27 @@ test('RAF applies initial zero gaze before one advance, frees the step and rende
   expectFrame(page, 110.5, 0);
   assert.equal(page.window.slitherAnimatedSceneReport.renders, 2);
   assert.deepEqual(page.counts(), { constructions: 1, sceneFrees: 0, stepFrees: 2 });
+});
+
+test('initial, palette, manual and reconnect resets keep one owner and add no update', async t => {
+  const page = pageFixture(t);
+  await page.ready;
+  assert.deepEqual(page.calls.filter(call => call[0] === 'reset'), [['reset']]);
+  page.frame(13);
+  page.calls.length = 0;
+  page.elements.skin.value = '1';
+  page.elements.skin.emit('change');
+  page.elements.reset.emit('click');
+  page.connect();
+  page.elements.disconnect.emit('click');
+  page.connect();
+  assert.deepEqual(page.calls.filter(call => call[0] === 'reset'), Array.from({ length: 4 }, () => ['reset']));
+  assert.equal(page.calls.some(call => ['advance', 'render', 'step.free'].includes(call[0])), false);
+  assert.deepEqual(page.counts(), { constructions: 1, sceneFrees: 0, stepFrees: 1 });
+  page.window.emit('pagehide');
+  page.window.emit('pagehide');
+  assert.deepEqual(page.counts(), { constructions: 1, sceneFrees: 1, stepFrees: 1 });
+  assert.equal(page.qualityFrees(), 1);
 });
 
 test('quality statistics receive raw successful draws at the strict interval before the next draw', async t => {
@@ -435,14 +469,52 @@ for (const fault of ['gaze', 'render']) {
     page.calls.length = 0;
     page.frame(20);
     assert.deepEqual(page.calls.map(call => call[0]), fault === 'gaze'
-      ? ['gaze', 'scene.free', 'quality.free'] : ['gaze', 'advance', 'quality.advance', 'step.free',
-        'quality.statistics', 'quality.snapshot', 'render', 'scene.free', 'quality.free']);
+      ? ['gaze', 'connected', 'scene.free', 'quality.free'] : ['gaze', 'advance', 'quality.advance', 'step.free',
+        'quality.statistics', 'quality.snapshot', 'render', 'connected', 'scene.free', 'quality.free']);
     assert.equal(page.frames.size, 0);
     assert.equal(session.closes, 1);
     assert.deepEqual(page.counts(), { constructions: 1, sceneFrees: 1, stepFrees: fault === 'render' ? 1 : 0 });
     assert.match(page.elements.status.textContent, new RegExp(`synthetic ${fault} failure`));
   });
 }
+
+test('only Setup activates the boundary gate through connecting, open, stop and reconnect', async t => {
+  const page = pageFixture(t);
+  await page.ready;
+  assert.equal(page.view.boundary.connected, true, 'synthetic Setup activates the native gate');
+  page.calls.length = 0;
+  page.elements.connect.emit('click');
+  const first = page.sessions.at(-1);
+  assert.equal(page.view.boundary.connected, false, 'a connecting handle cannot retain the synthetic gate');
+  assert.deepEqual(page.calls, [['connected', false]]);
+  first.open();
+  assert.equal(page.view.boundary.connected, false, 'open resets but does not activate the gate');
+  first.options.scene.apply_frame(syntheticSetup(), false);
+  assert.equal(page.view.boundary.connected, true);
+  page.elements.disconnect.emit('click');
+  assert.equal(page.view.boundary.connected, false);
+  assert.equal(first.closes, 1);
+  for (const status of ['Local connection failed', 'Local life ended', 'Local frame rejected: synthetic']) {
+    const session = page.connect();
+    assert.equal(page.view.boundary.connected, false);
+    session.options.scene.apply_frame(syntheticSetup(), false);
+    assert.equal(page.view.boundary.connected, true);
+    page.calls.length = 0;
+    session.options.onStatus(status);
+    assert.deepEqual(page.calls, [['connected', false]], 'status changes no animation or packet clocks');
+    assert.equal(page.view.boundary.connected, false);
+    assert.equal(page.elements.connect.disabled, false);
+  }
+  page.elements.reset.emit('click');
+  assert.equal(page.view.boundary.connected, true, 'synthetic reset reconnects via Setup');
+  const session = page.connect();
+  page.window.emit('pagehide');
+  page.calls.length = 0;
+  session.options.onStatus('Disconnected');
+  session.options.onStatus('Connected to local simulator');
+  assert.deepEqual(page.calls, [], 'late statuses never access a freed owner');
+  assert.equal(page.frames.size, 0);
+});
 
 test('pagehide while Wasm initialization is pending prevents later scene construction', async t => {
   const initialization = Promise.withResolvers();

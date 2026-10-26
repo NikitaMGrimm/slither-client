@@ -434,12 +434,9 @@ fn setup_and_reset_preserve_flags_while_new_clients_start_zero() {
         warm.prepare_draw_with_style(800, 600, 1., false).unwrap();
         warm.advance(17., false).unwrap();
         if reset {
-            let before = warm.clone();
-            assert!(warm.reset(f64::NAN).is_err());
-            assert_eq!(warm, before);
-            warm.reset(100.).unwrap();
+            warm.reset();
             assert!(warm.own_snake().is_none());
-            assert_eq!(warm.advance(100., false).unwrap().accumulated, 0.);
+            assert_eq!(warm.advance(17., false).unwrap().accumulated, 17. / 8.);
         }
         apply(&mut warm, &[setup(), appearance(8, 2100, 2)]);
         if !reset {

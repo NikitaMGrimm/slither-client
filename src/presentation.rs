@@ -112,6 +112,11 @@ impl FrameClock {
         })
     }
 
+    /// Restore full speed without advancing or replacing the retained timeline.
+    pub fn reset_lag(&mut self) {
+        self.lag_multiplier = 1.;
+    }
+
     /// Advance atomically. Backward time contributes zero but replaces the timestamp.
     /// Skin preview freezes multiplier adjustment, while still applying its value.
     pub fn advance(

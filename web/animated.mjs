@@ -37,6 +37,7 @@ function disconnect() {
   connection = undefined;
   boost = false;
   heading = 0;
+  animated?.set_connected(false);
   previous?.close();
   updateControls();
 }
@@ -60,7 +61,7 @@ listen(window, 'pagehide', teardown);
 
 function reset() {
   disconnect();
-  animated.reset(performance.now());
+  animated.reset();
   quality.begin_skin_preview();
   animated.apply_frame(syntheticScene(Number(control('skin').value)), false);
   animated.set_follows(control('follow').checked);
@@ -146,10 +147,10 @@ async function start() {
     heading = 0;
     boost = false;
     try {
-      // The existing transport resets without a timestamp; adapt only that call.
+      animated.set_connected(false);
       const scene = {
         reset: () => {
-          animated.reset(performance.now());
+          animated.reset();
           quality.begin_connection();
           animated.set_follows(control('follow').checked);
           animated.set_zoom(Number(control('zoom').value));
@@ -162,8 +163,10 @@ async function start() {
         // Packets apply immediately in the transport; only RAF advances/draws.
         onFrame() {},
         onStatus(text) {
+          if (disposed) return;
           setStatus(text);
           if (text !== 'Connected to local simulator') {
+            animated.set_connected(false);
             connection = undefined;
             boost = false;
             updateControls();

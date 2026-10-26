@@ -2,8 +2,13 @@
 
 ## Unreleased
 
+- Make `AnimatedClient::reset()` and `AnimatedScene.reset()` parameterless and
+  infallible. Preserve animation timestamps and fractional phases while restoring
+  full-speed lag state; construct a new client to start a fresh timeline.
+- Connect arena-radius easing to ordered packets, animated updates and both draw
+  paths, retaining cadence through reset and pausing boundary updates on disconnect.
 - Add standalone double-precision boundary-radius easing and a `BoundarySmoother`
-  Wasm binding with explicit connection gating. Scene boundary integration remains pending.
+  Wasm binding with explicit connection gating.
 - Submit ordered standard-body plans through an opt-in borrowed-asset renderer.
   The synthetic animated page exercises authored body effects and adaptive
   quality; local simulator mode retains basic stand-ins. Full skins remain pending.

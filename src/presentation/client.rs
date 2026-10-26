@@ -3,8 +3,8 @@
 use std::{error::Error, fmt};
 
 use super::{
-    AnchorView, BodyPaintGeometry, BodyPaintSample, CurveOutput, FollowCamera, FrameClock,
-    FrameStep, MAX_CURVE_SAMPLES, PresentationError, SnakeMetrics, SnakePresentation,
+    AnchorView, BodyPaintGeometry, BodyPaintSample, BoundaryRadius, CurveOutput, FollowCamera,
+    FrameClock, FrameStep, MAX_CURVE_SAMPLES, PresentationError, SnakeMetrics, SnakePresentation,
     StandardEyeGeometry, finite,
 };
 use crate::{
@@ -136,6 +136,8 @@ pub struct AnimatedClient {
     received: ClientState,
     clock: FrameClock,
     camera: FollowCamera,
+    boundary: Option<BoundaryRadius>,
+    connected: bool,
     entries: Vec<Entry>,
     body_paint_flags: Vec<u8>,
 }
@@ -159,23 +161,22 @@ impl AnimatedClient {
             received: ClientState::default(),
             clock: FrameClock::new(start_ms)?,
             camera: FollowCamera::default(),
+            boundary: None,
+            connected: false,
             entries: Vec::new(),
             body_paint_flags: vec![0; MAX_CURVE_SAMPLES],
         })
     }
 
-    /// Reset received state, retained objects, view controls, and the animation timeline.
-    /// Preserve shared body-painter flag history for this client's draw lifetime.
-    pub fn reset(&mut self, start_ms: f64) -> Result<(), ClientPresentationError> {
-        let clock = FrameClock::new(start_ms)?;
-        *self = Self {
-            received: ClientState::default(),
-            clock,
-            camera: FollowCamera::default(),
-            entries: Vec::new(),
-            body_paint_flags: std::mem::take(&mut self.body_paint_flags),
-        };
-        Ok(())
+    /// Clear the world and view controls, and restore the lag multiplier to one.
+    /// Preserve the clock's timestamp and both accumulated phases, boundary state,
+    /// and shared body-painter flag history. Use `new` to start a fresh timeline.
+    pub fn reset(&mut self) {
+        self.received = ClientState::default();
+        self.clock.reset_lag();
+        self.camera = FollowCamera::default();
+        self.connected = false;
+        self.entries.clear();
     }
 
     fn target_index(&self, target: SnakeTarget) -> Option<usize> {
@@ -224,6 +225,12 @@ impl AnimatedClient {
                     if value.game_mode == Some(2) {
                         return Err(ClientPresentationError::UnsupportedMode(2));
                     }
+                    if let Some(boundary) = &mut next.boundary {
+                        boundary.apply_setup(value.radius)?;
+                    } else {
+                        next.boundary = Some(BoundaryRadius::new(value.radius)?);
+                    }
+                    next.connected = true;
                     setup = Some(value);
                     next.entries.clear();
                     next.camera = FollowCamera::default();
@@ -341,6 +348,9 @@ impl AnimatedClient {
                     }
                 }
                 PresentationEvent::RadiusTarget(radius) => {
+                    if let Some(boundary) = &mut next.boundary {
+                        boundary.set_target(radius)?;
+                    }
                     if let Some(setup) = &mut setup {
                         setup.radius = radius;
                     }
@@ -352,7 +362,7 @@ impl AnimatedClient {
         Ok(applied.report)
     }
 
-    /// Advance only the current draw collection, then retire completed deaths.
+    /// Advance the boundary and current draw collection, then retire completed deaths.
     /// An undrawn retained own object still accepts packets but stops animating.
     pub fn advance(
         &mut self,
@@ -361,6 +371,9 @@ impl AnimatedClient {
     ) -> Result<FrameStep, ClientPresentationError> {
         let mut next = self.clone();
         let step = next.clock.advance(now_ms, lagging, false)?;
+        if let Some(boundary) = &mut next.boundary {
+            boundary.advance(step.whole_steps, next.connected);
+        }
         for entry in &mut next.entries {
             if entry.drawn && !entry.snake.advance(step)? {
                 entry.drawn = false;
@@ -369,6 +382,21 @@ impl AnimatedClient {
         next.entries.retain(|entry| entry.drawn || entry.own);
         *self = next;
         Ok(step)
+    }
+
+    /// Gate boundary consumption without changing clocks, samples or entity animation.
+    pub fn set_connected(&mut self, connected: bool) {
+        self.connected = connected;
+    }
+
+    /// Current connection gate, activated by an accepted setup.
+    pub fn connected(&self) -> bool {
+        self.connected
+    }
+
+    /// Retained boundary state, including across resets before the next setup.
+    pub fn boundary(&self) -> Option<&BoundaryRadius> {
+        self.boundary.as_ref()
     }
 
     /// Prepare a default-style numeric draw and discard its paint data.

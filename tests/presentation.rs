@@ -101,6 +101,25 @@ fn lag_adjusts_before_delta_and_preview_freezes_adjustment_only() {
 }
 
 #[test]
+fn resetting_lag_preserves_phase_and_last_backward_timestamp() {
+    let mut clock = FrameClock::new(1000.).unwrap();
+    clock.advance(1003., false, false).unwrap();
+    let lagged = clock.advance(1100., true, false).unwrap();
+    assert_eq!(lagged.delta, 4.25);
+    let backward = clock.advance(1096., true, false).unwrap();
+    assert_eq!(backward.accumulated, 4.625);
+    assert_eq!(backward.doubled_accumulated, 9.25);
+    clock.reset_lag();
+    clock.reset_lag();
+    // Preview freezes adjustment, exposing the reset multiplier directly.
+    let next = clock.advance(1100., true, true).unwrap();
+    assert_eq!(next.lag_multiplier, 1.);
+    assert_eq!(next.delta, 0.5);
+    assert_eq!((next.accumulated, next.doubled_accumulated), (5.125, 10.25));
+    assert_eq!((next.whole_steps, next.double_steps), (1, 1));
+}
+
+#[test]
 fn clock_rejects_nonfinite_and_overflow_without_partial_updates() {
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         assert!(FrameClock::new(bad).is_err());
