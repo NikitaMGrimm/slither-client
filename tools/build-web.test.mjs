@@ -6,6 +6,8 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { buildWeb } from './build-web.mjs';
 
+const realExecFileSync = childProcess.execFileSync;
+
 // Original synthetic Cargo messages; no external builds or reference inputs.
 const defaultWasm = path.resolve('target/wasm32-unknown-unknown/release/slither_client.wasm');
 const customWasm = path.resolve('synthetic custom target/wasm32-unknown-unknown/release/slither_client.wasm');
@@ -19,7 +21,7 @@ const artifact = (changes = {}) => ({
 });
 const cargoOutput = messages => [...messages, { reason: 'build-finished', success: true }].map(message => typeof message === 'string' ? message : JSON.stringify(message)).join('\r\n') + '\r\n';
 
-function commands(t, messages, { version = 'wasm-bindgen 0.2.129\n', cargoError, bindgenError } = {}) {
+function commands(t, messages, { version = 'wasm-bindgen 0.2.129\n', cargoError, bindgenError, realCargoPipe = false } = {}) {
   const calls = [];
   const madeDirectories = [];
   const logs = [];
@@ -28,6 +30,11 @@ function commands(t, messages, { version = 'wasm-bindgen 0.2.129\n', cargoError,
     if (args[0] === '--version') return version;
     if (command === 'cargo') {
       if (cargoError) throw cargoError;
+      if (realCargoPipe) {
+        return realExecFileSync(process.execPath, ['-e', 'process.stdout.write(require("node:fs").readFileSync(0))'], {
+          ...options, stdio: ['pipe', 'pipe', 'inherit'], input: cargoOutput(messages),
+        });
+      }
       return cargoOutput(messages);
     }
     if (bindgenError) throw bindgenError;
@@ -64,6 +71,15 @@ test('a default target artifact confirmed up-to-date by this Cargo invocation is
   const { calls } = commands(t, [artifact({ filenames: [defaultWasm], fresh: true })]);
   buildWeb();
   assert.equal(calls[2].args[0], defaultWasm);
+});
+
+test('Cargo output above 1 MiB survives a real child-process pipe and selects the artifact', t => {
+  const { calls } = commands(t, [
+    { reason: 'synthetic-build-output', message: 'x'.repeat(1024 * 1024 + 4096) },
+    artifact(),
+  ], { realCargoPipe: true });
+  buildWeb();
+  assert.equal(calls[2].args[0], customWasm);
 });
 
 test('non-JSON procedural macro output remains visible without hiding artifact messages', t => {
