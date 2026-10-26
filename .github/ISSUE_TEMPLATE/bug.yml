@@ -1,12 +1,12 @@
 name: Bug report
-description: Report a reproducible defect in the scaffold or implemented client behavior.
+description: Report a reproducible defect in the browser prototypes.
 title: "bug: "
 body:
   - type: markdown
     attributes:
       value: |
-        This project is an unimplemented scaffold. No gameplay or server compatibility is claimed.
-        Do not attach official source, translations, challenge snippets, source maps, assets, or raw captures. Use textual observations and explicitly labelled synthetic reproducers.
+        Report the specific prototype behavior involved.
+        Keep official source, assets, credentials, and raw captures out of this issue. Use textual observations and explicitly labelled synthetic reproducers.
   - type: input
     id: revision
     attributes:
@@ -32,4 +32,4 @@ body:
     id: checks
     attributes:
       label: Verification and limits
-      description: Checks run, results, and anything still unverified. Do not include restricted source or payload captures.
+      description: Checks run, results, and anything still unverified. Omit credentials and raw payloads.

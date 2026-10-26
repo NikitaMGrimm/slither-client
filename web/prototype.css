@@ -1,0 +1,5 @@
+#slither-prototype { position: fixed; z-index: 2147483647; right: 12px; bottom: 12px; width: 386px; padding: 12px; border: 1px solid #555; background: #111; color: #eee; font: 13px/1.4 monospace; }
+#slither-prototype h2 { margin: 0 0 8px; font: bold 15px monospace; }
+#slither-prototype canvas { display: block; width: 384px; height: 96px; border: 1px solid #555; }
+#slither-prototype .labels { display: grid; grid-template-columns: 1fr 1fr; margin: 4px 0; }
+#slither-prototype pre { margin: 8px 0 0; white-space: pre-wrap; font-variant-numeric: tabular-nums; }

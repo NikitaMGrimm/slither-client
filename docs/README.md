@@ -1,14 +1,13 @@
 # Documentation
 
-The project is an unimplemented browser-client scaffold. These documents describe
-its current boundaries and the evidence needed before claiming functionality.
+The current prototypes cover bounded protocol primitives and a browser asset draw.
 
-- [Architecture](architecture.md): current scaffold and browser-client scope.
-- [Provenance](provenance.md): external reference, authorship, and source boundaries.
-- [Roadmap](roadmap.md): the first compatibility milestone and later work.
-- [Verification](verification.md): local checks, CI, hooks, and evidence limits.
+- [Architecture](architecture.md): modules, supported inputs, and browser scope.
+- [Verification](verification.md): builds, tests, optional comparisons, and results.
+- [Provenance](provenance.md): source/asset policy and external reference identity.
+- [Roadmap](roadmap.md): client state, deterministic rendering, and packaging.
 - [Releases](releases.md): dormant release configuration and readiness criteria.
 - [Contributing](../CONTRIBUTING.md): changes, review, and reporting.
 
-For authoritative simulation and server interfaces, use the separate
+For simulation and server interfaces, use the separate
 [slither-sim documentation](https://github.com/NikitaMGrimm/slither-sim/tree/main/docs).

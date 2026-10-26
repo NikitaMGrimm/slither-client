@@ -1,57 +1,57 @@
 # Working in this repository
 
-This is an unimplemented Rust/Wasm browser-client scaffold, version
+This is an unreleased Rust/Wasm browser-client prototype, version
 `0.1.0-alpha.0`. Read `README.md`, `docs/architecture.md`, `docs/provenance.md`,
 and `docs/verification.md` before changing behavior. Keep changes narrow and
-preserve unrelated work. Do not claim gameplay, extension support, browser
-execution, server compatibility, or parity without the corresponding evidence.
+preserve unrelated work. Describe implemented behavior and the exact evidence
+supporting it.
 
 ## Source boundary
 
-Keep official client code, readable translations, dynamic challenge snippets,
-source maps, restoration metadata, official assets and artwork, and raw captures
-outside tracked history. The original local V3 reference stays outside this
-repository. Do not copy implementation snippets from it. Record only the public
-reference URL, fingerprint, and concise research observations permitted by
-`docs/provenance.md`. Label synthetic fixtures explicitly. Human-source-derived
-port research is not clean-room work.
+Keep official client source, assets, credentials, and raw captures outside Git
+history and public reports. Commit original code and explicitly labelled
+synthetic fixtures. External comparison inputs and evidence stay outside this
+checkout. Follow `docs/provenance.md`; never import a reference to satisfy a test.
 
 Run `node tools/check-repository.mjs` against the reviewed Git index and
-`node tools/check-repository.mjs --history` before delivery. The guard checks
-known artifacts and file boundaries, not ownership. Never weaken it to admit a
-reference artifact. Only the original `assets/logo.svg` and `assets/icon.svg`
-vectors are permitted; keep them free of scripts and external resources.
+`node tools/check-repository.mjs --history` before delivery. These guards inspect
+Git blobs, so unstaged changes need separate inspection. Do not weaken the guard
+to admit external artifacts. The only permitted vector assets are the original
+`assets/logo.svg` and `assets/icon.svg`; keep them free of scripts and external
+resources.
 
 ## Implementation and verification
 
-Use Rust 1.99.0, Node.js 24, LF text, and Conventional Commits. There are no
-runtime dependencies or gameplay APIs yet; do not add speculative infrastructure.
-Keep authoritative world simulation in the separate `slither-sim` repository.
-Do not modify that checkout or an external local reference as a side effect.
+Use Rust 1.99.0, Node.js 24, LF text, and Conventional Commits. Browser dependencies
+are wasm32-only: wasm-bindgen 0.2.129 and web-sys 0.3.106. The build requires a
+separately installed matching wasm-bindgen CLI, optionally selected by the
+absolute `WASM_BINDGEN` path. Generated `dist/web` files stay ignored.
 
-Follow `docs/verification.md`: run the repository guard and history guard,
-`node --test tools/*.test.mjs`, `cargo fmt --check`,
-`cargo test --all-targets --locked`, `cargo test --doc --locked`,
-`cargo clippy --all-targets --locked -- -D warnings`, and
-`cargo build --release --locked --target wasm32-unknown-unknown`.
-Tests stay offline from game servers and official-client resources. Distinguish
-compilation, synthetic tests, external reference comparisons, and browser or
-server verification; state exact limits and unrun checks. Native Rust currently
-has zero gameplay tests.
+Follow `docs/verification.md` for npm installation and tests, Rust formatting,
+all-target tests, doctests, Clippy, the web build, and real Wasm ABI smoke test.
+Normal tests and CI require no external reference and must not connect to game
+servers. State unrun checks and distinguish synthetic tests, local comparisons,
+browser observations, and official-server acceptance. The live CLI is manual
+only: it requires explicit authorization for one attempt and a fixed external
+ledger. Never retry, replace, or bypass a consumed ledger.
 
-CI runs on pushes to `main`, pull requests, and `workflow_dispatch`.
-Release-plz configuration is intentionally disabled until the first releasable
-client. There is no release workflow. Follow `docs/releases.md`; never turn a
-check or ordinary push into publication.
+Keep authoritative simulation in the separate `slither-sim` repository. Do not
+modify that checkout or external comparison inputs as a side effect. CI runs on
+pushes to `main`, pull requests, and `workflow_dispatch`. Release-plz is dormant;
+follow `docs/releases.md` before changing delivery behavior.
 
-## Independent review
+## Delegation and independent review
 
-Obtain independent review for consequential protocol, security, source boundary,
-or behavior changes. Use T3 Code's app-owned `delegate_task` and continue the same
-review conversation with `t3_thread_send`. Discover the configured provider and
-model through `orchestrator_capabilities`; select the user's chosen **GPT 6.1
-Sol**, with `reasoningEffort: high`, explicitly in the target options. Do not
-substitute another model or delegation route when unavailable; report the
-limitation and continue independent work. Keep reviewers read-only and retain
-task IDs and terminal reports. The main agent evaluates findings against the
-requirements and verification evidence.
+Focused implementation agents are permitted within the task's scope unless the
+user restricts delegation. Obtain independent review for consequential protocol,
+security, source-boundary, or behavior changes. Use T3 Code's app-owned
+`delegate_task` for child agents and `t3_thread_send` to continue the same
+conversation. Discover the configured provider and model through
+`orchestrator_capabilities`. For independent review, select **GPT 6.1 Sol** with
+`reasoningEffort: high` explicitly in the target options. Do not substitute
+another model or delegation route when unavailable; report the limitation and
+continue independent work.
+
+Give implementation agents clear file ownership. Keep reviewers read-only and
+retain task IDs and terminal reports. The main agent evaluates findings against
+the requirements and verification evidence.

@@ -1,33 +1,44 @@
 # Architecture
 
-## Current scaffold
+## Protocol boundary
 
-The repository defines a Rust library built as `rlib` and `cdylib`, with
-`wasm32-unknown-unknown` as the browser-oriented compilation target. Version
-`0.1.0-alpha.0` has no runtime dependencies and no gameplay APIs. The scaffold
-does not load a page, bridge assets, perform a handshake, render a world, or
-provide an extension. Native and Wasm builds establish compilation only.
+The Rust library builds as `rlib` and `cdylib`. It opens no sockets and fetches no
+assets. Native code has no runtime dependencies; browser bindings use wasm32-only
+wasm-bindgen 0.2.129 and web-sys 0.3.106.
 
-## Client scope
+- `protocol::encode_login` accepts caller-supplied client-version and 20-byte
+  password values. Nicknames may be empty or contain up to 24 printable ASCII
+  bytes; custom skin data is limited to 255 bytes.
+- `challenge::solve_challenge` accepts at most 512 encoded bytes and a closed
+  token grammar with two fixed-length literals and a fixed copy loop. It rejects
+  unsupported syntax without evaluating a general program.
+- `protocol::decode_frame` requires an explicit elapsed-header mode and validates
+  the entire frame before returning borrowed command slices. Frames are limited
+  to 1 MiB and 4096 commands. It checks framing and setup field boundaries;
+  other command bodies remain opaque.
+- `protocol::setup_protocol_version` extracts the advertised setup version after
+  structural checks. That value alone does not establish compatibility.
 
-Future implementation belongs on the browser side: page integration, input,
-network decoding, client state, and rendering. These are areas of work, not
-existing modules or stable interfaces. Establish the asset bridge and handshake
-first, using the [roadmap](roadmap.md), before choosing further abstractions.
+## Browser prototype
 
-[slither-sim](https://github.com/NikitaMGrimm/slither-sim) owns the separate
-authoritative simulator and server. A client receives server state; it does not
-establish official world rules. Success against that simulator alone would not
-prove official-server acceptance or official-client parity.
+`web/asset-bridge.mjs` borrows the exact existing canvas and loaded image objects
+from a supplied trusted page realm. It validates their types and readiness
+without copying or loading assets. The wasm32 bindings in `src/browser.rs` expose
+protocol operations and `render_borrowed_assets`.
 
-## Reference boundary
+The Wasm draw resets the output canvas and draws the two borrowed sources into
+rectangles separated by a one-pixel gutter. This is an asset integration probe;
+a world renderer, input loop, and playable game remain future work.
 
-The official client and the original local V3 reference remain external to this
-repository. Research may inform original authored code, but copied client source,
-translations, challenge snippets, assets, raw captures, and source-restoration
-materials do not belong in tracked history. See [provenance](provenance.md).
+`web/handshake-session.mjs` sequences challenge, login, and setup through the Wasm
+API without owning a socket. Optional tooling provides a loopback page, an
+offline external comparison, and a separate manual single-attempt live transport.
+Normal tests and CI use synthetic fixtures without external reference files.
+See [verification](verification.md) for procedures and evidence limits.
 
-Introduce tests alongside behavior. Keep synthetic fixtures explicitly labelled
-and separate from descriptions of external observations. Record what a
-comparison demonstrates and what remains unverified; see
-[verification](verification.md).
+## Project boundary
+
+[slither-sim](https://github.com/NikitaMGrimm/slither-sim) remains the separate
+simulator and server project. Client state and rendering belong here; simulator
+integration is planned. Extension packaging is not yet implemented. Source and
+asset exclusions are defined in [provenance](provenance.md).

@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  An independent browser-client project in Rust and WebAssembly. Unimplemented scaffold.
+  Independent Rust and WebAssembly browser-client prototypes.
 </p>
 
 <p align="center">
@@ -22,58 +22,55 @@
 
 ## Status
 
-Version `0.1.0-alpha.0` is unreleased. The repository contains a Rust/Wasm
-scaffold with no runtime dependencies or gameplay APIs. There is no playable
-game, browser extension, renderer, connection flow, or verified server
-compatibility. Compiling the Wasm target does not establish browser execution.
+Version `0.1.0-alpha.0` is unreleased. The current prototypes provide bounded
+login encoding, challenge solving, frame validation, setup-version extraction,
+and a browser bridge that borrows existing canvas and image objects for a
+Rust/Wasm draw. There is no fully playable game or installed browser extension.
+See [architecture](docs/architecture.md) for supported inputs and limits.
 
-The first milestone is to prove the official-page asset bridge and handshake
-behavior against an external local reference. No parity claim is made today.
-See the [roadmap](docs/roadmap.md) for the evidence required.
+Local loopback browser verification demonstrated Wasm execution, exact source
+object identity, and matching output pixels. An offline external comparison
+matched four login cases and three synthetic challenge cases byte for byte.
+On 2026-10-26, one Node/WebSocket session accepted the handshake through setup
+protocol 19 using an explicit Origin header. These results cover only the
+documented prototypes; see [verification](docs/verification.md).
 
 [slither-sim](https://github.com/NikitaMGrimm/slither-sim) is the separate
-authoritative simulator and server project. This repository concerns the browser
-client; it does not implement authoritative world rules.
+simulator and server project. This repository owns browser-client behavior.
 
 ## Development
 
-Install Rust **1.99.0**, platform build tools, and Node.js **24**. The pinned Rust
-toolchain includes the Wasm target. From this checkout:
+Use Rust **1.99.0**, platform build tools, and Node.js **24**. The Rust toolchain
+file includes the Wasm target. Install the **wasm-bindgen CLI 0.2.129** separately
+and put it on `PATH`, or set `WASM_BINDGEN` to its absolute executable path.
+From this checkout:
 
 ```sh
-node tools/check-repository.mjs
-node tools/check-repository.mjs --history
-node --test tools/*.test.mjs
-cargo fmt --check
+npm ci --ignore-scripts --no-audit --no-fund
+npm test
+cargo fmt --all --check
 cargo test --all-targets --locked
+cargo test --doc --locked
 cargo clippy --all-targets --locked -- -D warnings
-cargo build --release --locked --target wasm32-unknown-unknown
+npm run build:web
+node tools/wasm-smoke.mjs
 ```
 
-The repository guard checks the Git index and reachable historical blobs, so
-review and stage intended changes before treating its result as coverage of new
-files. Enable the local hooks with `git config core.hooksPath tools/hooks`.
-See [verification](docs/verification.md) for doctests, CI coverage, and limits.
-Checks stay offline from game servers; toolchain installation may use package
-sources. Rust has no gameplay tests yet.
+`build:web` generates ignored bindings and Wasm in `dist/web`. Normal tests and
+CI require no external reference and do not connect to game servers. The optional
+loopback prototype and external comparison are described in
+[verification](docs/verification.md), along with index/history guards and hooks.
 
-CI runs automatically on pushes to `main` and pull requests, and can be started
-with `workflow_dispatch`. It checks native builds on Linux and Windows and the
-Wasm target on Linux. Release-plz configuration is present but intentionally
-disabled until the first releasable client. There is no release workflow;
-pushes do not publish anything. See [releases](docs/releases.md).
+CI checks native Rust on Linux and Windows and runs a real Wasm ABI smoke test
+on Linux. Release-plz remains dormant; ordinary pushes do not publish artifacts.
+See [releases](docs/releases.md) and the [roadmap](docs/roadmap.md).
 
 ## Source and license
 
-Keep official client code, readable translations, source maps, restoration
-metadata, artwork, assets, and raw captures outside tracked history. The original
-local V3 reference also stays outside this repository. Only original authored
-code and clearly labelled synthetic fixtures belong here.
-
-Research informed by human reading of the official client is **not clean-room**.
-[Provenance](docs/provenance.md) records the public reference URL and fingerprint,
-what may be committed, and what verification cannot establish.
+Keep official client source, assets, credentials, and raw captures outside Git
+history and public reports. Commit original code and explicitly labelled
+synthetic fixtures; see [provenance](docs/provenance.md).
 
 [MIT](LICENSE) covers our authored files, including the original SVG logo. It
-does not grant a license to official artwork or client code. This project is
-independent of Slither.io.
+does not license official client code or artwork. This project is independent
+of Slither.io.
