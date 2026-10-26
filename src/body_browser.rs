@@ -41,7 +41,10 @@ fn field(value: &JsValue, key: &str) -> Result<JsValue, JsValue> {
     if descriptor.is_undefined() {
         return Ok(JsValue::UNDEFINED);
     }
-    if !Reflect::has(&descriptor, &JsValue::from_str("value"))? {
+    if !Object::has_own(
+        descriptor.unchecked_ref::<Object>(),
+        &JsValue::from_str("value"),
+    ) {
         return Err(error(format!("metadata accessor at {key}")));
     }
     Reflect::get(&descriptor, &JsValue::from_str("value"))

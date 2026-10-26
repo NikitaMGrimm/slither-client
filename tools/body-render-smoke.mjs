@@ -118,6 +118,27 @@ export function bodyRenderSmoke(wasm) {
     return failure;
   }
   try {
+    const inherited = fixture();
+    const priorValue = Object.getOwnPropertyDescriptor(Object.prototype, 'value');
+    let getterCalls = 0;
+    try {
+      inherited.transform(snapshot => {
+        const invalid = { ...snapshot };
+        Object.defineProperty(invalid, 'schema', Object.assign(Object.create(null), {
+          get() { getterCalls++; return 1; }, configurable: true,
+        }));
+        return invalid;
+      });
+      const failure = checkAtomic(inherited, () => {
+        Object.defineProperty(Object.prototype, 'value', { value: 1, writable: true, configurable: true });
+      });
+      ok(String(failure).includes('metadata accessor at schema'));
+      eq(getterCalls, 0, 'inherited descriptor values cannot admit accessor metadata');
+    } finally {
+      delete Object.prototype.value;
+      if (priorValue) Object.defineProperty(Object.prototype, 'value', priorValue);
+      inherited.close();
+    }
     const f = fixture();
     try {
       const quality = f.quality.snapshot();
