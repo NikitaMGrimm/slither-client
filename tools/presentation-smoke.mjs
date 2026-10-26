@@ -70,4 +70,59 @@ export function presentationSmoke(wasm) {
     assert.throws(() => anchored.reanchor(Number.MAX_VALUE, 0, 0));
     assert.equal(anchored.snapshot(), stable);
   } finally { anchored.free(); }
+
+  const geometryClock = new wasm.AnimationClock(0);
+  const length = new wasm.LengthSmoother(12);
+  const camera = new wasm.CameraSmoother();
+  try {
+    length.set_length(12, 0.5);
+    assert.equal(JSON.parse(length.snapshot()).offset, -0.5);
+    assert.equal(JSON.parse(length.snapshot()).displayed, 11.4);
+    const zero = geometryClock.advance(0, false, false);
+    try { length.advance(zero, true); }
+    finally { zero.free(); }
+    assert.equal(JSON.parse(length.snapshot()).pending, 53);
+    const lengthBefore = length.snapshot();
+    const samplesBefore = length.samples();
+    for (const count of [-1, 0.5, 4294967296, NaN, Infinity]) {
+      assert.throws(() => new wasm.LengthSmoother(count));
+      assert.throws(() => length.set_length(count, 0));
+      assert.equal(length.snapshot(), lengthBefore);
+      assert.deepEqual(length.samples(), samplesBefore);
+    }
+    for (let index = 1; index <= 53; index++) {
+      const step = geometryClock.advance(index * 8, false, false);
+      try { length.advance(step, true); }
+      finally { step.free(); }
+    }
+    assert.equal(JSON.parse(length.snapshot()).pending, 0);
+    const cleanup = geometryClock.advance(53 * 8, false, false);
+    try { length.advance(cleanup, true); }
+    finally { cleanup.free(); }
+    assert.equal(JSON.parse(length.snapshot()).pending, -1, 'live zero-step cleanup');
+    assert.equal(JSON.parse(length.snapshot()).displayed, 11.9);
+    camera.inject(8, -4);
+    assert.equal(JSON.parse(camera.snapshot()).offsetX, 0, 'injection waits for draw');
+    camera.draw();
+    assert.deepEqual(JSON.parse(camera.snapshot()), { offsetX: -8, offsetY: 4, index: 1, pending: 61 });
+    assert.equal(camera.samples()[0], 0);
+    const copy = camera.samples(); copy[1] = 12345;
+    assert.equal(camera.samples()[1] === 12345, false, 'sample arrays are copied');
+    const stableCamera = camera.snapshot();
+    const stableSamples = camera.samples();
+    assert.throws(() => camera.inject(NaN, 0));
+    assert.equal(camera.snapshot(), stableCamera);
+    assert.deepEqual(camera.samples(), stableSamples);
+    assert.equal(camera.weights().length, 62);
+    assert.equal(length.weights().length, 53);
+    assert.equal(camera.weights()[1] === Math.fround(camera.weights()[1]), false);
+    // This index exposed a host-vs-libm rounding difference in the Wasm build.
+    let cameraWeight = 0.5 * (1 - Math.cos(Math.PI * (61 - 55) / 61));
+    cameraWeight += (0.5 * (1 - Math.cos(Math.PI * cameraWeight)) - cameraWeight) * 0.5;
+    assert.equal(camera.weights()[55], cameraWeight, 'use the current host Math cosine');
+    for (let index = 1; index < 62; index++) camera.draw();
+    assert.equal(JSON.parse(camera.snapshot()).pending, 0);
+    const exhausted = camera.snapshot(); camera.draw();
+    assert.equal(camera.snapshot(), exhausted, 'camera has no entity cleanup sentinel');
+  } finally { camera.free(); length.free(); geometryClock.free(); }
 }

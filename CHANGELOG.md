@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add retained body contraction/correction state, logical visual length and
+  draw-driven camera correction primitives, including standalone length/camera
+  Wasm bindings and host trigonometry. Scene integration and curves remain separate.
 - Add atomic ordered snake/world presentation events with absolute geometry,
   independent motion fields and direct decoded speed scalars. The native event
   API remains separate from the browser preview's render loop.

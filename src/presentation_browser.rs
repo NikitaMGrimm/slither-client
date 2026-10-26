@@ -3,7 +3,10 @@
 use wasm_bindgen::prelude::*;
 
 use crate::{
-    presentation::{AngleCorrections, FrameClock, FrameStep, HeadCorrections, HeadMotion, Turn},
+    presentation::{
+        AngleCorrections, CameraCorrections, FrameClock, FrameStep, HeadCorrections, HeadMotion,
+        LengthPresentation, Turn,
+    },
     state::Point,
 };
 
@@ -18,6 +21,13 @@ fn turn(value: f64) -> Result<Turn, JsValue> {
         2. => Ok(Turn::Increasing),
         _ => Err(error("turn must be 0, 1 or 2")),
     }
+}
+
+fn segments(value: f64) -> Result<u32, JsValue> {
+    if !value.is_finite() || value.fract() != 0. || !(0. ..=f64::from(u32::MAX)).contains(&value) {
+        return Err(error("segment count must be an unsigned 32-bit integer"));
+    }
+    Ok(value as u32)
 }
 
 /// One caller-owned animation step. Free it after its consumers have advanced.
@@ -255,5 +265,106 @@ impl HeadPredictor {
     /// Float32 angle samples in ring storage order.
     pub fn angle_samples(&self) -> Vec<f32> {
         self.angle.samples().to_vec()
+    }
+}
+
+/// Standalone desktop visual length; packet/body membership remains caller-owned.
+#[wasm_bindgen]
+pub struct LengthSmoother {
+    inner: LengthPresentation,
+}
+
+#[wasm_bindgen]
+impl LengthSmoother {
+    /// Begin with a logical segment count and zero mass, before spawn scheduling.
+    #[wasm_bindgen(constructor)]
+    pub fn new(segment_count: f64) -> Result<LengthSmoother, JsValue> {
+        Ok(Self {
+            inner: LengthPresentation::new(segments(segment_count)?),
+        })
+    }
+
+    /// Schedule even equal values; validate JavaScript integers before narrowing.
+    pub fn set_length(&mut self, segment_count: f64, fractional_mass: f64) -> Result<(), JsValue> {
+        self.inner
+            .set_length(segments(segment_count)?, fractional_mass)
+            .map_err(error)
+    }
+
+    /// Consume the supplied integer clock step only while alive.
+    pub fn advance(&mut self, step: &AnimationStep, alive: bool) {
+        self.inner.advance(step.inner.whole_steps, alive);
+    }
+
+    /// Numeric diagnostics; no body geometry or score calculation is implied.
+    pub fn snapshot(&self) -> String {
+        format!(
+            "{{\"segments\":{},\"mass\":{},\"target\":{},\"displayed\":{},\"offset\":{},\"index\":{},\"pending\":{}}}",
+            self.inner.segments(),
+            self.inner.fractional_mass(),
+            self.inner.target(),
+            self.inner.displayed(),
+            self.inner.offset(),
+            self.inner.index(),
+            self.inner.pending()
+        )
+    }
+
+    /// A copy of the Float32 correction samples.
+    pub fn samples(&self) -> Vec<f32> {
+        self.inner.samples().to_vec()
+    }
+
+    /// A copy of the Float32 entity weights.
+    pub fn weights(&self) -> Vec<f32> {
+        self.inner.weights().to_vec()
+    }
+}
+
+/// Camera offsets with an explicit draw clock, independent of following/zoom.
+#[wasm_bindgen]
+#[derive(Default)]
+pub struct CameraSmoother {
+    inner: CameraCorrections,
+}
+
+#[wasm_bindgen]
+impl CameraSmoother {
+    /// Create an empty double-precision camera correction ring.
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Accumulate new-minus-old displacement while retaining the current offset.
+    pub fn inject(&mut self, x: f64, y: f64) -> Result<(), JsValue> {
+        self.inner.inject(Point { x, y }).map_err(error)
+    }
+
+    /// Consume one pending sample for an eligible draw.
+    pub fn draw(&mut self) {
+        self.inner.advance_draw();
+    }
+
+    /// Numeric offset and ring-position diagnostics.
+    pub fn snapshot(&self) -> String {
+        let offset = self.inner.offset();
+        format!(
+            "{{\"offsetX\":{},\"offsetY\":{},\"index\":{},\"pending\":{}}}",
+            offset.x,
+            offset.y,
+            self.inner.index(),
+            self.inner.pending()
+        )
+    }
+
+    /// A copy of both double-precision channels, x followed by y.
+    pub fn samples(&self) -> Vec<f64> {
+        self.inner.samples().iter().flatten().copied().collect()
+    }
+
+    /// A copy of the reshaped double-precision camera weights.
+    pub fn weights(&self) -> Vec<f64> {
+        self.inner.weights().to_vec()
     }
 }

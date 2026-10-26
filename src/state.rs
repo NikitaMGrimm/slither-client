@@ -6,7 +6,10 @@
 //! packet families (including prey, HUD, minimap and game-over) are counted and
 //! ignored without claiming to decode them.
 
-use crate::protocol::{self, ElapsedHeader, ProtocolError};
+use crate::{
+    math,
+    protocol::{self, ElapsedHeader, ProtocolError},
+};
 use std::{collections::BTreeMap, f64::consts::TAU, fmt};
 
 /// Maximum simultaneously retained snakes.
@@ -566,8 +569,8 @@ impl ClientState {
                     anchor_direction = Some(direction);
                     effective_heading = f64::from(direction) * (TAU / 65_536.);
                     if absolute_body.is_some() {
-                        absolute_point.x += effective_heading.cos() * setup.body_spacing;
-                        absolute_point.y += effective_heading.sin() * setup.body_spacing;
+                        absolute_point.x += math::cos(effective_heading) * setup.body_spacing;
+                        absolute_point.y += math::sin(effective_heading) * setup.body_spacing;
                     }
                 } else {
                     let dx = (f64::from(pair[0]) - 127.) / 2.;
@@ -947,8 +950,8 @@ fn centered(setup: &Setup, x: f64, y: f64) -> Result<Point, StateError> {
 fn advance(point: Point, direction: u16, spacing: f64) -> Result<Point, StateError> {
     let angle = f64::from(direction) * TAU / 65_536.;
     checked_point(
-        point.x + angle.cos() * spacing,
-        point.y + angle.sin() * spacing,
+        point.x + math::cos(angle) * spacing,
+        point.y + math::sin(angle) * spacing,
     )
 }
 fn food_key(sector: (u8, u8), rx: u8, ry: u8) -> u32 {
