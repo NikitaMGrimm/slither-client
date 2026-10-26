@@ -185,6 +185,14 @@ from a supplied trusted page realm. It validates their types and readiness
 without copying or loading assets. The wasm32 bindings in `src/browser.rs` expose
 protocol operations and `render_borrowed_assets`.
 
+The optional [trusted skin provider](skin-provider.md) accepts caller-owned
+recipe-resolution/normalization callbacks and a revisioned asset catalog. It
+validates bounded palette runs, variants and represented feature metadata while
+preserving exact existing canvas/image objects. Canvas readiness is explicit;
+missing cosmetics remain pending. It neither loads artwork nor selects renderer
+passes. Unsupported features remain explicit, and no stock recipe tables or host
+member mappings are distributed with it.
+
 The original `render_borrowed_assets` draw remains an integration probe. The
 `Scene` Wasm class owns received state and exposes `apply_frame`, `reset`,
 `snapshot` (numeric JSON diagnostics), and `render`. Its Canvas2D renderer borrows

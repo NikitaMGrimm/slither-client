@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add a separate trusted host recipe provider with bounded metadata, explicit
+  readiness/revisions and exact borrowed asset identities. No recipes or artwork
+  are bundled; renderer and extension integration remain pending.
 - Add standalone desktop quality state and `DesktopQuality` Wasm bindings,
   separating requested preference, connection/preview initialization, blend,
   sampling density and draw-count fallback/recovery. Rendering integration is pending.
