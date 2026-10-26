@@ -405,8 +405,9 @@ appearance metadata and uniform API equivalence. The provider suite has 26 tests
 including opt-in source-mode preservation and legacy output shape. These are
 synthetic checks. The Canvas recorder models alpha/state and records calls; it
 does not rasterize or measure a browser. The earlier planner differential result
-does not establish production collection/submission parity. External-runtime
-production comparisons, performance and all-skin support remain unverified.
+does not establish production collection/submission parity. The production
+comparison below separately covers bounded schedules; performance and all-skin
+support remain unverified.
 See the [API contract](standard-body-renderer.md).
 
 The animated page's synthetic body resolver and mocked-page tests separately
@@ -439,8 +440,31 @@ synthetic demonstration, not an FPS or performance measurement. Test processes,
 listeners and temporary profiles were removed.
 
 These checks establish the tested native Canvas and page behavior. They do not
-establish external-runtime production collection parity, original pixels, full
-skins, extension realms, connected transport or official-server acceptance.
+establish original pixels, full skins, extension realms, connected transport or
+official-server acceptance.
+
+A separate production `render_standard` comparison against the complete pinned
+runtime passed five frozen schedules, 114 operations and 71 draws. All 25,121
+ordered body image calls matched across 502,822 body-call cells. The total,
+including supplemental clocks, camera, entity/eye state and diagnostics, is
+525,983 exact cells, with zero mismatches and no tolerance. Separate translations
+and rotations, source IDs, overloads, requested/effective alpha and blend match.
+The comparison normalizes a leading identity transform; it compares each image's
+logical scoped state rather than equal raw save/restore sequences.
+
+Rust receives authored packets, timestamps, pointer/view controls and normalized
+live recipe/source metadata. Observed geometry, sample flags, cursor seeds,
+camera outputs and commands are not supplied. Independent observed/control runs
+match 119 snapshot pairs and 71 draw pairs, including curve caches, buffers,
+retained flags and fake-network records. No actual network connection is made.
+
+Coverage includes turning/anchors, multiple snakes, culling/retained flags,
+detailed sampling, boost, death and own-ID reuse. All calls use whole sources and
+standard skin zero. HQ and LQ are frozen at their public initialization states;
+adaptive-quality evolution, mixed/custom skins, cropped-use parity and general
+one-anchor bodies are excluded. Equality distinguishes signed zero, but no body
+comparison cell in these schedules contains negative zero. This is Node/Wasm
+numeric evidence, separate from native Canvas, pixel and server acceptance.
 
 ## Dense-scene benchmark
 

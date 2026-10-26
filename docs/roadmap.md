@@ -27,8 +27,9 @@ now retain gaze, pupil motion and deferred draw targets. Full skins, special
 faces, radius easing, HUD, prey and team-mode drawing remain pending. The opt-in
 standard-body renderer now connects ordered body effects and applied quality to
 production geometry; the synthetic page demonstrates three authored recipes.
-Native Firefox checks cover that bounded integration. External-runtime production
-command comparison remains pending; no full-skin or original-pixel parity follows.
+Native Firefox checks cover that bounded integration. Five frozen external-runtime
+schedules match production body commands exactly; full-skin and original-pixel
+parity remain unverified.
 
 ## 3. Measure dense scenes
 

@@ -81,7 +81,8 @@ The separate opt-in [`render_standard` API](docs/standard-body-renderer.md)
 submits standard body plans from trusted borrowed skin-provider snapshots and
 applied quality. The animated page demonstrates it with three authored synthetic
 recipes. Stock Firefox checks cover native Canvas submission and page cadence;
-full skins and external-runtime production parity remain separate.
+a bounded external-runtime comparison matches production body commands exactly.
+Full skins and original-pixel parity remain separate.
 
 CI checks native Rust on Linux and Windows and runs a real Wasm ABI smoke test
 on Linux. Release-plz remains dormant; ordinary pushes do not publish artifacts.

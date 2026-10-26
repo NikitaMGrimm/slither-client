@@ -114,6 +114,13 @@ Body pixels intentionally change with the authored effects. These checks cover
 the tested synthetic recipes and native submission, without an original-pixel or
 external-runtime production parity claim. See [verification](verification.md).
 
+A separate Node/Wasm comparison matched 25,121 ordered production body calls
+across five frozen schedules, 114 operations and 71 draws: all 502,822 body-call
+cells matched exactly. Rust received authored inputs and normalized live recipes,
+without observed geometry, flags, cursor seeds or command outputs. Coverage is
+standard skin zero, whole-source calls and frozen HQ/LQ states; arbitrary skins,
+cropped-use parity and adaptive-quality evolution remain outside that result.
+
 The `/animated` synthetic preview uses this API with three original flat-color
 recipes and generated stand-in effects from `synthetic-body.mjs`. That resolver
 supports only the authored appearances with empty custom data and no cosmetic;
