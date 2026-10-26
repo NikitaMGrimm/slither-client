@@ -34,7 +34,7 @@ test('scene server is local, allowlisted and requires no reference or socket', a
   assert.equal(JSON.parse((await request('/scene/config.json')).text).simulatorUrl, null);
   const policy = page.headers['content-security-policy'];
   assert.match(policy, /connect-src 'self';/); assert.doesNotMatch(policy, /ws:|'unsafe-inline'|'unsafe-eval'/);
-  for (const resource of ['/scene/scene.css', '/scene/scene.mjs', '/scene/synthetic-scene.mjs', '/scene/loopback-session.mjs']) {
+  for (const resource of ['/benchmark', '/scene/benchmark.mjs', '/scene/dense-scene.mjs', '/scene/scene.css', '/scene/scene.mjs', '/scene/synthetic-scene.mjs', '/scene/loopback-session.mjs']) {
     assert.equal((await request(resource)).status, 200);
   }
   for (const resource of ['/Cargo.toml', '/web/scene.html', '/reference/', '/scene/unknown.mjs']) assert.equal((await request(resource)).status, 404);

@@ -13,14 +13,22 @@ synthetic fixtures and optional loopback pointer/boost controls. It previews
 received anchors; prediction, smooth bodies, complete skins, HUD and prey remain
 unimplemented. Simulator results establish only the tested simulator path.
 
-## 2. Measure dense scenes and complete presentation
+## 2. Match desktop presentation
 
-Measure state staging and rendering on representative dense fixtures before
-selecting a batched GPU path. Preserve the separation between protocol state,
-borrowed asset inputs and rendering. Add supported presentation behavior in
-small verified steps rather than treating the preview as full gameplay.
+Target Chrome and Firefox on Windows. Preserve the original client look and
+feel, including animation clocks, head/body corrections, interpolation, camera,
+quality modes, full skin recipes and effects. Validate numeric event/update/draw
+traces before treating a similar screenshot as equivalent behavior. Keep wire
+state, presentation state and drawing distinct, using idiomatic Rust types.
 
-## 3. Package the browser client
+## 3. Measure dense scenes
+
+The offline benchmark provides deterministic received-anchor workloads without
+changing the renderer. Treat performance as secondary to presentation precision.
+Promote optimizations only with evidence that they preserve supported behavior;
+the existing preview does not establish original rendering or gameplay parity.
+
+## 4. Package the browser client
 
 After the state/rendering path works, add extension packaging with a documented
 install and verification procedure. Input, connection flow, and gameplay still

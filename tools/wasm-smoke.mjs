@@ -3,6 +3,7 @@ import { loadWasm } from './reference-context.mjs';
 import { syntheticChallenge } from './reference-parity.mjs';
 import { HandshakeSession } from '../web/handshake-session.mjs';
 import { bundle, syntheticScene, syntheticSetup, syntheticStep } from '../web/synthetic-scene.mjs';
+import { denseScene, DENSE_SCENE_PROFILES } from '../web/dense-scene.mjs';
 
 // Entirely synthetic ABI integration; no reference files or network are used.
 const wasm = await loadWasm();
@@ -40,3 +41,15 @@ assert.equal(removed.snakes, 2); assert.equal(removed.foods, 0); assert.equal(re
 scene.reset(); assert.equal(JSON.parse(scene.snapshot()).protocol, null);
 scene.free();
 console.log('Synthetic Wasm scene ABI transitions and atomic rejection passed.');
+
+for (const [name, profile] of Object.entries(DENSE_SCENE_PROFILES)) {
+  const dense = new wasm.Scene();
+  try {
+    for (const frame of denseScene(profile)) dense.apply_frame(frame, false);
+    const view = JSON.parse(dense.snapshot());
+    assert.equal(view.snakes, profile.snakes, `${name} snakes`);
+    assert.equal(view.foods, profile.foods, `${name} foods`);
+    assert.equal(view.ignored, 0, `${name} supported commands`);
+  } finally { dense.free(); }
+}
+console.log('Synthetic dense fixture presets passed the real Wasm ABI.');

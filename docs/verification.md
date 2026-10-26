@@ -80,6 +80,35 @@ this route does not verify credentials against another service.
 Normal tests and CI never start this host or open a game socket. Optional CLI
 ports are bounded; HTTP serves only literal `127.0.0.1` with exact Host checking.
 
+## Dense-scene benchmark
+
+After `npm run build:web` and `npm run scene`, open
+`http://127.0.0.1:18884/benchmark` and use **Run benchmark**. It generates only
+original synthetic packets/artwork, uses real Wasm state and the existing
+Canvas2D renderer, and exposes the final JSON as `window.slitherBenchmarkReport`.
+It does not start a simulator or connect to game servers.
+
+| Profile | Snakes | Anchors per snake | Food |
+| --- | ---: | ---: | ---: |
+| Baseline | 3 | 16 | 64 |
+| Dense | 64 | 128 | 8192 |
+| Stress | 128 | 512 | 32768 |
+
+Profiles rotate order across rounds. Submission canvases never undergo pixel
+readback; separate canvases measure draw plus forced readback. Unsupported-only
+`p` frames measure full atomic application overhead, including staging, without
+changing geometry. Median/p95 call durations are not presentation FPS or GPU
+timer measurements. MessageChannel yields let the browser service input between
+draws. Browser, driver, viewport and acceleration state affect these results.
+
+A 2026-10-26 T3 Code Windows run (Chrome 152 / Electron 44, 1280x720 backing
+canvas, NVIDIA RTX 5070 Ti through ANGLE/D3D11) used two rounds of five measured
+draws per profile. Submission medians were 4.4 / 7.6 / 38.6 ms; atomic unchanged
+frame medians were below timer resolution / 0.1 / 0.3 ms. These ten-sample results
+are a diagnostic baseline, not a stable performance threshold. Firefox timing
+has not been measured. They establish neither original visual fidelity nor a
+reason to trade precision for speed.
+
 ## Recorded scene results
 
 On 2026-10-26, the T3 Code browser (Chrome 152 / Electron 44, Windows) executed
