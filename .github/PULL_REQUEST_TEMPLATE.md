@@ -1,18 +1,16 @@
 ## Change
 
-Describe the concrete problem and resulting behavior. State whether this changes
-the scaffold, implements new client behavior, or only updates documentation.
+Describe the concrete problem and resulting behavior, including supported inputs
+and relevant limits.
 
 ## Verification
 
-List checks run and their results, plus unrun checks and remaining limits.
-Distinguish compilation, synthetic tests, external reference comparisons, and
-browser or server observations. Do not infer parity from a successful build.
+List checks and results, plus unrun checks. Distinguish synthetic tests, real
+Wasm execution, browser observations, external comparisons, and live acceptance.
+State the scope of each result.
 
 ## Source boundary
 
-Confirm the Git index and reachable history guards pass. Record the origin and
-attribution of added code or assets; a passing guard is not ownership proof.
-Label synthetic fixtures explicitly. Keep official source, translations,
-challenge snippets, source maps, restoration metadata, artwork, assets, and raw
-captures outside this PR and Git history.
+Confirm the index and history guards pass. Record origin and attribution for
+added code or assets, and label synthetic fixtures. Keep official source,
+assets, credentials, and raw captures outside this PR and Git history.

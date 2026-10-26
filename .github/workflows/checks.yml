@@ -31,6 +31,7 @@ jobs:
         with:
           node-version: '24'
       - run: node tools/check-repository.mjs --history
+      - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: node --test tools/*.test.mjs
 
   native:
@@ -64,4 +65,19 @@ jobs:
           persist-credentials: false
       - name: Install pinned Rust and target
         run: rustup toolchain install 1.99.0 --profile minimal --component rustfmt --component clippy --target wasm32-unknown-unknown
-      - run: cargo build --release --locked --target wasm32-unknown-unknown
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+      - name: Install verified binding CLI
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/wasm-bindgen"
+          gh release download 0.2.129 --repo wasm-bindgen/wasm-bindgen --pattern 'wasm-bindgen-0.2.129-x86_64-unknown-linux-musl.tar.gz*' --dir "$RUNNER_TEMP/wasm-bindgen"
+          cd "$RUNNER_TEMP/wasm-bindgen"
+          sha256sum -c wasm-bindgen-0.2.129-x86_64-unknown-linux-musl.tar.gz.sha256sum
+          tar -xzf wasm-bindgen-0.2.129-x86_64-unknown-linux-musl.tar.gz
+          echo "WASM_BINDGEN=$RUNNER_TEMP/wasm-bindgen/wasm-bindgen-0.2.129-x86_64-unknown-linux-musl/wasm-bindgen" >> "$GITHUB_ENV"
+      - run: npm run build:web
+      - run: node tools/wasm-smoke.mjs

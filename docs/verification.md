@@ -1,63 +1,109 @@
 # Verification
 
-The initial scaffold is checked natively and compiled to `wasm32-unknown-unknown`.
-It is not yet a playable client or a browser extension. There are no Rust gameplay
-tests yet because no gameplay code has been ported.
+## Local checks
 
-Run from the repository root with Rust 1.99.0 and Node.js 24 or newer:
+Use Rust **1.99.0**, Node.js **24**, and platform build tools. The pinned Rust
+toolchain includes `wasm32-unknown-unknown`, rustfmt, and Clippy. Install
+**wasm-bindgen CLI 0.2.129** separately on `PATH`, or set `WASM_BINDGEN` to its
+absolute executable path. The build checks the CLI version.
 
 ```sh
-node --test tools/*.test.mjs
+npm ci --ignore-scripts --no-audit --no-fund
+npm test
 cargo fmt --all --check
 cargo test --all-targets --locked
 cargo test --doc --locked
 cargo clippy --all-targets --locked -- -D warnings
-cargo build --release --locked --target wasm32-unknown-unknown
+npm run build:web
+node tools/wasm-smoke.mjs
 ```
 
-The Rust toolchain file installs the required target and components. Cargo's
-`target/` directory belongs to this checkout; do not reuse a running agent's
-target directory or modify `slither-sim` to build this project.
+The web build produces ignored `dist/web` JavaScript bindings and Wasm. The smoke
+test executes that real Wasm ABI with a synthetic challenge/login/setup sequence
+and rejection cases. It needs no browser, external reference, or socket. Keep
+this checkout's `target/` separate from other projects and running jobs.
 
-Before a commit, stage the intended files and inspect the index:
+CI runs repository guards and npm tests, native Rust checks on Linux and Windows,
+and the web build plus Wasm ABI smoke test on Linux. It runs on pushes to `main`,
+pull requests, and manual dispatch. Normal tests and CI require no external
+reference and do not connect to game servers. Dependency and toolchain setup may
+access package sources. Release-plz remains dormant.
+
+## Repository guards
+
+Before committing, review and stage only intended files, then run:
 
 ```sh
-git add <reviewed-paths>
 git diff --cached
 node tools/check-repository.mjs
-```
-
-Before a push, also inspect reachable Git history:
-
-```sh
 node tools/check-repository.mjs --history
 ```
 
-The pre-push hook additionally reads Git's outgoing object IDs and their ancestry,
-including a commit pushed by SHA after local branches stop referencing it.
-The guard reads staged and committed Git blobs rather than trusting the current
-working tree. Its synthetic regression cases cover permitted original code,
-forbidden artifact paths, renamed known content fingerprints, embedded source
-maps, binary payloads, unsafe vector resources, and artifacts removed in a later
-commit, and outgoing history not reachable from current local refs. Synthetic
-forbidden payloads never contain official-client source.
+The guard reads index and committed blobs, so it does not cover unstaged edits.
+The pre-push hook also inspects actual outgoing commits and their ancestry.
+Enable hooks per clone with `git config core.hooksPath tools/hooks`. Passing
+checks establish the guarded file boundaries, not ownership of arbitrary code.
 
-Enable the local pre-commit and pre-push checks in each clone:
+## Optional external checks
+
+These commands use an existing trusted archive outside the checkout. They do not
+download a reference. Build the web bindings first.
 
 ```sh
-git config core.hooksPath tools/hooks
+npm run compare:reference -- --reference-root <external-directory>
+npm run prototype -- --reference-root <external-directory>
 ```
 
-CI runs the guard and its tests on Linux, native Rust checks on Linux and Windows,
-and a release Wasm build on Linux. Actions are SHA-pinned, use read-only repository
-permissions, disable persisted checkout credentials, and have bounded timeouts.
-Old checks are cancelled when superseded. Builds and tests do not contact game
-servers or fetch official-client resources. Toolchain/action installation can
-access their normal package sources.
+The offline comparison requires `raw/game1107249518.js` and
+`tests/browser-double.mjs` under the supplied root. The harness must export
+`startClient` with the runtime interface used by `tools/reference-context.mjs`.
+Only use a trusted harness: the comparison imports and executes it locally.
 
-These checks establish repository boundaries and compilation. They do not prove
-ownership of arbitrary new code, protocol parity, graphical fidelity, official
-server acceptance, browser execution, extension-store approval, or gameplay
-performance. Review origin and attribution for every contribution. Local reference
-comparisons are a separate, explicitly reported check using external reference
-files; see [provenance](provenance.md) and [roadmap](roadmap.md).
+The browser prototype requires the same pinned client, `site/index.html`,
+`site/assets-manifest.json`, and the cached images named by that manifest. The
+manifest has `schema: 1` and a `files` object keyed by `s/<image>` or `s2/<image>`;
+each entry supplies a lowercase SHA-256 and positive byte count. Images reside
+at the corresponding paths under `site/` and are checked when served. The HTML
+must have head/body elements and load the client through `/client.js`.
+
+The prototype serves `http://127.0.0.1:18882/reference/` by default. Its page fence
+blocks WebSockets and maps reference image loads to the local cache. Open the
+printed loopback URL to inspect the Wasm draw and `window.slitherPrototypeReport`:
+`wasmExecuted`, `sourceObjectsReused`, and `pixelsEqual` should all be true.
+
+## Recorded prototype results
+
+- Local loopback verification in the T3 Code browser (Chrome 152 / Electron 44,
+  Windows) executed Wasm, retained exact existing
+  canvas/image object identity, and matched all output pixels for the
+  two-rectangle draw and blank one-pixel gutter. Additional real browser checks
+  passed for resetting caller clip, filter, and transform state, and rejecting
+  an invalid target, incomplete image, and source canvas used as target.
+  No game sockets were opened.
+- The offline external comparison matched four login cases and three synthetic
+  challenge cases byte for byte. This establishes those cases only, without
+  general protocol or gameplay parity.
+- On **2026-10-26**, one Node/WebSocket session to a selected literal-IP official
+  endpoint accepted the handshake through setup protocol 19 with an explicit
+  Origin header and nickname `(Bot) Bottington`. Exactly one WebSocket
+  constructor was used. Rust solved the actual server challenge and matched
+  the external handler; login bytes were identical. The probe stopped immediately
+  after setup, with no movement, gameplay, ping, or retries. It completed in
+  351 ms including teardown. The ledger and raw evidence remain external;
+  that attempt's allowance is consumed. This establishes acceptance for that session only, without
+  browser-origin, extension, gameplay, or general parity proof.
+
+These results do not establish a playable game, full world rendering, or an
+installed extension. Browser evidence is separate from the Node Wasm ABI smoke
+test; use exact environments and procedures when reporting further observations.
+
+## Manual live-check boundary
+
+`tools/live-handshake.mjs` is a separate, explicit manual entry point. It requires
+authorized scope for **one attempt**, a selected literal-IP endpoint, an external
+reference, and a fixed external evidence directory. It reserves
+`official-attempt.json` exclusively before socket construction and limits the
+probe to ten seconds. The ledger remains consumed even if no connection succeeds.
+Never retry, delete or replace the ledger, or select another evidence directory
+to bypass it. Keep raw evidence external and report only a bounded textual result.
+This check is never part of normal tests or CI.

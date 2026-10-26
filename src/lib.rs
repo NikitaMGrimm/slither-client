@@ -1,8 +1,13 @@
-//! Foundation for an independent Rust/Wasm browser client.
+//! Bounded, offline protocol primitives for an independent browser prototype.
 //!
-//! This crate currently establishes native and WebAssembly build targets only.
-//! Protocol handling, gameplay, rendering, and browser integration are not yet
-//! implemented. The development milestones are recorded in `docs/roadmap.md`.
+//! Runtime credentials and existing browser image objects are supplied by callers.
+//! This crate neither opens connections nor fetches assets.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
+
+pub mod challenge;
+pub mod protocol;
+
+#[cfg(target_arch = "wasm32")]
+mod browser;
