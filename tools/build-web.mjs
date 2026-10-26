@@ -10,7 +10,8 @@ export function buildWeb() {
   if (version !== `wasm-bindgen ${expected}`) throw new Error(`Expected wasm-bindgen ${expected}; received ${version}`);
   // Cargo resolves target directories from both environment and configuration.
   // Keep rendered diagnostics on stderr while selecting only this build's artifacts.
-  const output = execFileSync('cargo', ['build', '--release', '--locked', '--lib', '--target', 'wasm32-unknown-unknown', '--message-format=json-render-diagnostics'], { encoding: 'utf8', stdio: ['inherit', 'pipe', 'inherit'] });
+  // Artifact records can exceed Node's default 1 MiB stdout buffer.
+  const output = execFileSync('cargo', ['build', '--release', '--locked', '--lib', '--target', 'wasm32-unknown-unknown', '--message-format=json-render-diagnostics'], { encoding: 'utf8', stdio: ['inherit', 'pipe', 'inherit'], maxBuffer: 16 * 1024 * 1024 });
   const messages = [];
   for (const line of output.split(/\r?\n/).filter(line => line.trim())) {
     // Procedural macros can print non-JSON lines even in Cargo's JSON mode.

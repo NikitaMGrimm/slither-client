@@ -141,14 +141,18 @@ export function qualitySmoke(wasm) {
     assert.equal(view(first).requested, 0, 'negative zero is numeric zero');
     first.begin_connection();
     first.begin_skin_preview();
-    second.update_statistics(1001, 24, true);
     second.advance(sharedStep, true);
+    second.update_statistics(1001, 24, true);
     assert.equal(sharedStep.delta, 1, 'advance borrows rather than consuming the owned step');
     assert.equal('inner' in sharedStep, false, 'crate-private step storage is not a Wasm field');
     first.advance(sharedStep, true);
     assert.equal(view(first).qualityBlend, 1);
+    assert.equal(view(second).qualityBlend, 1, 'statistics defer blending until the next update');
+    assert.equal(view(second).qualityScale, 1, 'statistics defer density until the next update');
+    second.advance(sharedStep, true);
     assert.equal(view(second).qualityBlend, 1 - 0.0075);
     assert.equal(view(second).qualityScale, 1 + 4E-5);
+    assert.equal(sharedStep.delta, 1, 'the same owned step remains reusable after both consumers');
     assert.equal(first.update_statistics(1000, -0, true), true, 'zero count accepts negative zero');
   } finally { sharedStep.free(); sharedClock.free(); first.free(); second.free(); }
 }
