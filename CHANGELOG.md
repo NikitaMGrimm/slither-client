@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add explicit-time presentation clock, signed head prediction and additive
+  Float32 head/angle correction primitives, with native and real Wasm checks.
+  These are separate from the scene packet/render loop.
 - Add atomic protocol-19 setup, snake and food scene state with bounded retention,
   synthetic transition/rejection tests and a real Wasm scene ABI smoke test.
 - Add a Rust/Wasm Canvas2D received-anchor preview with camera/palette controls,

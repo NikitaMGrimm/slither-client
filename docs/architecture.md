@@ -47,6 +47,38 @@ anchors and 65,536 food positions. Centered coordinate magnitudes are bounded by
 16,777,215. Setup's `max_segments` is a score-table index, not a body cap. These
 are client limits rather than assertions about every server.
 
+## Presentation timing primitives
+
+`presentation` provides explicit-time arithmetic separately from received state.
+`FrameClock` clamps elapsed milliseconds divided by eight to 0..=5, applies lag
+decay/recovery, and derives integer steps from differences of accumulated floors.
+The caller supplies timestamps, lag detection and skin-preview state.
+
+`HeadMotion` applies signed turning and target crossing before live-head travel,
+capped at one segment per update. Its `speed_per_32ms` retains the decoded speed
+scalar; multiplication and division order are preserved instead of converting
+through world-units-per-second. Received `ClientState` speed fields still use
+world units per second. These units must not be interchanged.
+
+Head position/fraction corrections have 53 samples; angle corrections have 26.
+Weights and stored samples use `f32`, with arithmetic in `f64` before each stored
+assignment. New corrections accumulate in the current ring. Positive integer
+steps consume and clear samples; consuming the final sample leaves cleanup for
+a later eligible update. Head injection refreshes its displayed offsets
+immediately; heading injection waits for integer advancement.
+
+Wasm exports `AnimationClock`, owned `AnimationStep` values, and `HeadPredictor`.
+Free a step after its consumers advance, and free clocks/predictors when finished.
+Predictor direction accepts exactly 0, 1 or 2. Its correction methods express
+direct numeric discontinuities. `reanchor` applies the head portion of an anchor,
+including its consumed logical segment and an explicitly supplied extrapolated
+distance. Packet validation, body changes and camera corrections remain separate.
+
+These primitives are not yet connected to the scene's packet or render loop.
+Ordered presentation events, body contraction/curves, retained dying anchors,
+camera and draw clocks, eyes, complete skins and HQ/LQ rendering still require
+implementation and comparison. The visible scene remains a received-anchor preview.
+
 ## Browser rendering
 
 `web/asset-bridge.mjs` borrows the exact existing canvas and loaded image objects

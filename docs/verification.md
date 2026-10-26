@@ -80,6 +80,34 @@ this route does not verify credentials against another service.
 Normal tests and CI never start this host or open a game socket. Optional CLI
 ports are bounded; HTTP serves only literal `127.0.0.1` with exact Host checking.
 
+## Presentation primitive checks
+
+Native `tests/presentation.rs` covers fractional clocks, skew/clamps, lag changes,
+turn wrapping/crossing, speed units, exact speed arithmetic, ring overlap/wrap,
+Float32 assignments, deferred cleanup and invalid-input rollback. The real Wasm
+smoke test also exercises owned animation steps, predictor motion/corrections,
+rejection of invalid JavaScript directions before integer narrowing, copied
+sample arrays and atomic failure. These checks use original synthetic inputs.
+
+This verifies the primitives only. The scene still needs ordered presentation
+events, sampled bodies, camera/draw timing, eyes, quality modes and full skins
+before visual or gameplay equivalence can be assessed.
+
+An offline comparison on 2026-10-26 matched all seven timing fields exactly
+across 67 synthetic clock updates against the pinned client runtime. Cases
+included fractional accumulation, zero/backward time, long pauses, lag decay,
+skin-preview timing and recovery. The external harness replaced drawing with
+numeric capture and used no real network. This establishes the tested clock
+sequence; it does not establish full presentation or visual parity.
+
+Five head-motion cases covered 102 updates and 1,428 scalar comparisons with no
+numeric differences observed. A further 68 updates through the original packet
+handler matched 1,022 head/correction scalar values and 13,505 stored Float32
+samples exactly, including immediate injection, overlap, wrap, clearing and
+deferred cleanup. The head-only comparison supplied body-derived turn factors
+from the reference and used zero packet-extrapolation time. It does not verify
+body, camera, curves, skins, rendering or entity death lifetime.
+
 ## Dense-scene benchmark
 
 After `npm run build:web` and `npm run scene`, open
