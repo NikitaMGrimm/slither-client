@@ -2,15 +2,20 @@
 
 ## Unreleased
 
+- Connect ordered packets to head/body/length prediction, draw-driven camera
+  and bounded curve sampling in a separate animated Canvas2D preview. Preserve
+  retained own identity through removal/ID reuse and repeated duplicate removals;
+  test synthetic native, Wasm, Chrome and Firefox transitions. Full skins,
+  eyes, quality effects and team-mode drawing remain pending.
 - Add retained body contraction/correction state, logical visual length and
   draw-driven camera correction primitives, including standalone length/camera
-  Wasm bindings and host trigonometry. Scene integration and curves remain separate.
+  Wasm bindings and host presentation math.
 - Add atomic ordered snake/world presentation events with absolute geometry,
   independent motion fields and direct decoded speed scalars. The native event
-  API remains separate from the browser preview's render loop.
+  API retains individual actions for the animation consumer.
 - Add explicit-time presentation clock, signed head prediction and additive
   Float32 head/angle correction primitives, with native and real Wasm checks.
-  These are separate from the scene packet/render loop.
+  Keep separate update and draw clocks.
 - Add atomic protocol-19 setup, snake and food scene state with bounded retention,
   synthetic transition/rejection tests and a real Wasm scene ABI smoke test.
 - Add a Rust/Wasm Canvas2D received-anchor preview with camera/palette controls,

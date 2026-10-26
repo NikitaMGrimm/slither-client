@@ -10,8 +10,7 @@ See [verification](verification.md) for scope.
 Setup, snake appearance/motion/removal and food state apply atomically with
 bounded retention. The deterministic renderer has a camera, three palettes,
 synthetic fixtures and optional loopback pointer/boost controls. It previews
-received anchors; prediction, smooth bodies, complete skins, HUD and prey remain
-unimplemented. Simulator results establish only the tested simulator path.
+received anchors. Simulator results establish only the tested simulator path.
 
 ## 2. Match desktop presentation
 
@@ -20,6 +19,11 @@ feel, including animation clocks, head/body corrections, interpolation, camera,
 quality modes, full skin recipes and effects. Validate numeric event/update/draw
 traces before treating a similar screenshot as equivalent behavior. Keep wire
 state, presentation state and drawing distinct, using idiomatic Rust types.
+
+The separate animated preview now connects ordered events, head/body/length
+corrections, following camera, draw-driven spacing and sampled curves. Synthetic
+native/Wasm and Windows browser checks exercise this path. Full skins, eyes,
+quality effects, radius easing, HUD, prey and team-mode drawing remain pending.
 
 ## 3. Measure dense scenes
 

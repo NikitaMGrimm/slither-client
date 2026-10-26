@@ -14,11 +14,23 @@ use crate::{math, state::Point};
 
 mod body;
 mod camera;
+mod client;
+mod curve;
+mod follow_camera;
 mod length;
+mod snake;
 
 pub use body::{BODY_SAMPLES, BodyGeometry, BodyPoint, MAX_RETAINED_BODY_POINTS};
 pub use camera::{CAMERA_SAMPLES, CameraCorrections};
+pub use client::{
+    AnimatedClient, ClientPresentationError, MAX_RETAINED_SNAKES, MAX_RETAINED_TOTAL_BODY_POINTS,
+};
+pub use curve::{
+    CurveInput, CurveOutput, CurveSample, CurveVertex, MAX_CURVE_SAMPLES, sample_curve,
+};
+pub use follow_camera::{FollowCamera, INITIAL_ZOOM};
 pub use length::LengthPresentation;
+pub use snake::{AnchorView, SnakeMetrics, SnakePresentation};
 
 /// Number of samples in each head position/fraction correction channel.
 pub const HEAD_SAMPLES: usize = 53;
