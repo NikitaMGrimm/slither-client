@@ -239,7 +239,9 @@ fn fractional_reset_preserves_timeline_and_boundary_without_consuming_a_step() {
     assert_eq!(c.received(), AnimatedClient::new(0.).unwrap().received());
     assert_eq!(c.retained_count(), 0);
     assert!(c.own_snake().is_none());
-    assert_eq!(c.camera(), AnimatedClient::new(0.).unwrap().camera());
+    let mut expected = AnimatedClient::new(0.).unwrap();
+    expected.set_follows(false);
+    assert_eq!(c.camera(), expected.camera());
     assert_eq!(c.boundary(), Some(&ring));
     apply(&mut c, &[setup(1300), target(700)]);
     assert!(c.connected());

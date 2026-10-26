@@ -170,7 +170,7 @@ impl AnimatedScene {
         })
     }
 
-    /// Clear the world and view controls, retaining animation time and restoring lag to one.
+    /// Clear the world and transient view state; retain follow preference and animation time.
     /// Construct a new scene to start a fresh timeline.
     pub fn reset(&mut self) {
         self.client.reset();

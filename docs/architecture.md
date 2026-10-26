@@ -154,13 +154,15 @@ anchor extrapolation time.
 parameterless world resets. They retain the last update timestamp and both
 accumulated animation phases, and restore the lag multiplier to one without
 advancing an update or draw. Construct a new client with `new(start_ms)` to
-start a fresh timeline. Reset still clears received state, retained entities,
-camera controls and the connection gate; shared body-painter flags survive.
+start a fresh timeline. Reset clears received state, retained entities, transient
+camera state and the connection gate; follow preference and shared body-painter
+flags survive.
 The animated page uses this same timeline across Reset, palette changes and
 reconnections, independently of quality-statistics cadence.
 
 The client retains boundary samples and cadence across resets. Setup fills the
 ring and activates its connection gate; ordered radius targets schedule easing.
+Setup also preserves follow preference while clearing transient camera state.
 Updates consume the same clock's whole steps only while connected. Disconnect
 pauses boundary consumption while entity animation continues. Both render paths
 use the displayed radius without consuming samples. A reset hides the retained
