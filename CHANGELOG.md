@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Preserve the camera follow preference through reset and setup, avoiding
+  unexpected camera shifts and visibility changes after respawn.
 - Make `AnimatedClient::reset()` and `AnimatedScene.reset()` parameterless and
   infallible. Preserve animation timestamps and fractional phases while restoring
   full-speed lag state; construct a new client to start a fresh timeline.
