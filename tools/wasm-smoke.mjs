@@ -7,6 +7,7 @@ import { denseScene, DENSE_SCENE_PROFILES } from '../web/dense-scene.mjs';
 import { presentationSmoke } from './presentation-smoke.mjs';
 import { animatedSmoke } from './animated-smoke.mjs';
 import { qualitySmoke } from './quality-smoke.mjs';
+import { bodyRenderSmoke } from './body-render-smoke.mjs';
 
 // Entirely synthetic ABI integration; no reference files or network are used.
 const wasm = await loadWasm();
@@ -62,3 +63,4 @@ animatedSmoke(wasm);
 console.log('Synthetic coupled animation, curve and lifecycle Wasm ABI passed.');
 qualitySmoke(wasm);
 console.log('Synthetic desktop quality preference, timing and rejection Wasm ABI passed.');
+console.log('Synthetic borrowed standard-body Canvas ABI passed:', bodyRenderSmoke(wasm));

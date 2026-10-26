@@ -363,6 +363,26 @@ Canvas-state interpretation, not native raster evidence. Pass labels and final
 cursor output were not directly observed and are excluded from the comparison
 claim. External adapters, source identities and raw evidence remain outside Git.
 
+## Opt-in standard-body renderer checks
+
+`tools/body-render-smoke.mjs` executes the real Wasm `render_standard` ABI with
+an original synthetic Canvas recorder and normalized provider snapshots. Its
+236 assertions cover per-appearance custom/cosmetic requests, duplicate IDs and
+original-own removal/reuse, whole-source versus full/partial crops, exact source
+objects, transforms/destination arithmetic, ordered body/death/eyes, HQ/LQ/blend
+gates, mixed glows, ignored invalid alpha, readiness/revision coherence, short
+bodies, aggregate command limits, pre-reset rejection and Canvas exception model
+rollback. The same checks run from `tools/wasm-smoke.mjs` after the web build.
+
+Two additional native client tests cover heterogeneous sampling/flags, retained
+appearance metadata and uniform API equivalence. The provider suite has 26 tests,
+including opt-in source-mode preservation and legacy output shape. These are
+synthetic checks. The Canvas recorder models alpha/state and records calls; it
+does not rasterize or measure a browser. The earlier planner differential result
+does not establish production collection/submission parity. New browser pixels,
+external-runtime production comparisons, performance, all-skin support and page
+quality cadence remain unverified. See the [API contract](standard-body-renderer.md).
+
 ## Dense-scene benchmark
 
 Native collector tests cover the unrounded sampler seed, original ordinals,

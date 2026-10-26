@@ -32,6 +32,12 @@ pub struct DesktopQuality {
     inner: QualityState,
 }
 
+impl DesktopQuality {
+    pub(crate) fn applied(&self) -> crate::presentation::QualitySnapshot {
+        self.inner.snapshot()
+    }
+}
+
 #[wasm_bindgen]
 impl DesktopQuality {
     /// Store exactly 0 (low) or 1 (high), with an explicit statistics start time.

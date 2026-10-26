@@ -215,8 +215,11 @@ asset entries and 524,304 image commands. Fewer than two active samples,
 coincident stored geometry, absent style metadata and unready referenced assets
 fail explicitly. The provider's opt-in `bodyStyle` and per-palette `boostGlow`
 describe these inputs without distributing host mappings or stock recipes.
-The animated preview still uses its existing stand-in renderer; it does not yet
-submit these commands or apply the standalone quality state to them.
+The animated preview still uses its existing stand-in renderer. The separate
+opt-in [`AnimatedScene.render_standard`](standard-body-renderer.md) consumes
+trusted normalized borrowed recipes, prepares production geometry with each
+recipe's detailed style, and submits these commands using borrowed applied quality.
+It does not evolve quality or change the page's cadence.
 
 Numeric draw preparation also captures owned `PreparedBodyGeometry` snapshots
 for eligible curves. Each keeps original sample ordinals, effective flags and

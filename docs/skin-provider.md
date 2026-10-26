@@ -15,6 +15,7 @@ type Request = {
   customBytes?: Uint8Array;    // provider-realm Uint8Array, at most 255 bytes
   x?: number; y?: number;      // finite, optional factory initialization positions
   attachmentId?: number;      // exact integer 0..65535; adapter interprets selection
+  cosmetic?: number;          // exact opaque wire marker 0..255; no ID mapping
 };
 type CatalogEntry = {
   source: HTMLCanvasElement | HTMLImageElement | null;
@@ -98,6 +99,7 @@ frozen, and each asset use becomes:
     kind: 'canvas' | 'image' | null; width: number; height: number; status: Status;
   };
   sourceRect: readonly [number, number, number, number] | null;
+  sourceMode?: 'whole' | 'crop'; // emitted only when bodyStyle is present
 }
 ```
 
@@ -142,6 +144,15 @@ the existing feature tags and behavior. Supplied per-palette glows still appear
 in the palette output and contribute their asset readiness, without adding a
 feature tag. Older singleton `boost-glow` effects remain valid, including their
 existing opacity range, but cannot substitute for per-palette glows.
+
+Only a present `bodyStyle` adds `sourceMode` to every output asset use (variants,
+glows, effects and attachments): `whole` when the input omitted `sourceRect`,
+`crop` when it supplied one. An explicitly full rectangle remains `crop`, even
+though its numeric rectangle equals the normalized full rectangle of `whole`.
+Pending assets retain that mode while their normalized rectangle is null. The
+legacy output shape without a style remains exact and has no `sourceMode`.
+The opt-in [standard-body renderer](standard-body-renderer.md) consumes this
+distinction as native `None` versus `Some(source_rect)`.
 
 A present style requires all five own data fields; no values are inferred or
 coerced. `detailedSegments` and `rotateSegments` are exact booleans. `swell` is

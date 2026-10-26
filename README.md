@@ -76,6 +76,11 @@ including in the synthetic preview. It uses original stand-in artwork; full
 skins, special faces, attachments and quality-dependent drawing remain pending.
 The received-anchor preview at `/` remains available for comparison.
 
+The separate opt-in [`render_standard` API](docs/standard-body-renderer.md)
+submits standard body plans from trusted borrowed skin-provider snapshots and
+applied quality. It is not yet wired into the animated page; full skins and
+browser/reference validation remain separate.
+
 CI checks native Rust on Linux and Windows and runs a real Wasm ABI smoke test
 on Linux. Release-plz remains dormant; ordinary pushes do not publish artifacts.
 See [releases](docs/releases.md) and the [roadmap](docs/roadmap.md).

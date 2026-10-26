@@ -408,12 +408,31 @@ impl AnimatedClient {
         quality_scale: f64,
         detailed_style: bool,
     ) -> Result<Vec<PreparedSnake>, ClientPresentationError> {
+        self.prepare_draw_resolved_staged(width, height, quality_scale, |_, _, _| {
+            Ok::<_, ClientPresentationError>(detailed_style)
+        })
+    }
+
+    /// Resolve each visible retained object once, after culling and before its
+    /// sampling/flag writes. This client must be a disposable transaction stage.
+    pub(crate) fn prepare_draw_resolved_staged<E, F>(
+        &mut self,
+        width: u32,
+        height: u32,
+        quality_scale: f64,
+        mut resolve_style: F,
+    ) -> Result<Vec<PreparedSnake>, E>
+    where
+        E: From<ClientPresentationError>,
+        F: FnMut(usize, bool, &SnakePresentation) -> Result<bool, E>,
+    {
         validate_draw_inputs(width, height, quality_scale)?;
         let next = self;
         if let Some(own) = next.own_snake() {
             let metrics = own.metrics();
             next.camera
-                .prepare_draw(metrics.corrected_head, metrics.logical_segments as u32)?;
+                .prepare_draw(metrics.corrected_head, metrics.logical_segments as u32)
+                .map_err(ClientPresentationError::from)?;
         }
         let camera = next.camera.position();
         let half_width = f64::from(width) / 2. / next.camera.zoom() + 84.;
@@ -422,7 +441,7 @@ impl AnimatedClient {
         let right = camera.x + half_width;
         let top = camera.y - half_height;
         let bottom = camera.y + half_height;
-        finite(&[left, right, top, bottom])?;
+        finite(&[left, right, top, bottom]).map_err(ClientPresentationError::from)?;
         for entry in next.entries.iter_mut().filter(|entry| entry.drawn) {
             let visible = entry.snake.body().points().iter().any(|point| {
                 let position = point.position();
@@ -445,9 +464,11 @@ impl AnimatedClient {
             if !metrics.visible || metrics.expired {
                 continue;
             }
+            let detailed_style = resolve_style(draw_ordinal, entry.own, &entry.snake)?;
             let (curve, face_heading) = entry
                 .snake
-                .prepare_curve_staged(quality_scale, detailed_style)?;
+                .prepare_curve_staged(quality_scale, detailed_style)
+                .map_err(ClientPresentationError::from)?;
             samples = samples
                 .checked_add(curve.as_ref().map_or(0, |curve| curve.samples.len()))
                 .filter(|count| *count <= MAX_DRAW_SAMPLES)
@@ -584,5 +605,142 @@ impl AnimatedClient {
             .iter()
             .map(|entry| entry.snake.body().points().len())
             .sum()
+    }
+}
+
+#[cfg(test)]
+mod resolved_draw_tests {
+    use super::*;
+
+    // Original synthetic protocol-19 inputs; no external source or fixture.
+    fn u24(v: u32) -> [u8; 3] {
+        [(v >> 16) as u8, (v >> 8) as u8, v as u8]
+    }
+
+    fn setup() -> Vec<u8> {
+        let mut p = vec![b'a'];
+        p.extend(u24(1000));
+        for v in [430_u16, 100, 20] {
+            p.extend(v.to_be_bytes());
+        }
+        p.push(48);
+        for v in [539_u16, 40, 1400, 33, 28, 430] {
+            p.extend(v.to_be_bytes());
+        }
+        p.extend([19, 42]);
+        p
+    }
+
+    fn spawn(custom: u8, cosmetic: u8) -> Vec<u8> {
+        let mut p = vec![b's', 0, 7];
+        p.extend(u24(0));
+        p.push(48);
+        p.extend(u24(0));
+        p.extend(4250_u16.to_be_bytes());
+        p.extend(u24(0));
+        p.push(9);
+        p.extend(u24(10_000));
+        p.extend(u24(5000));
+        p.extend([0, 1, custom, cosmetic]);
+        p.extend(u24(7480));
+        p.extend(u24(5000));
+        for _ in 2..12 {
+            p.extend([211, 127]);
+        }
+        p.extend(0_u16.to_be_bytes());
+        p
+    }
+
+    fn apply(client: &mut AnimatedClient, p: &[u8]) {
+        client.apply_frame(p, ElapsedHeader::Absent).unwrap();
+    }
+
+    #[test]
+    fn resolved_style_uses_each_retained_appearance_and_preserves_original_own() {
+        let mut client = AnimatedClient::new(0.).unwrap();
+        for p in [setup(), spawn(3, 11), spawn(8, 19)] {
+            apply(&mut client, &p);
+        }
+        client.advance(40., false).unwrap();
+        let mut requests = Vec::new();
+        let prepared = client
+            .prepare_draw_resolved_staged(960, 540, 1., |ordinal, own, snake| {
+                requests.push((
+                    ordinal,
+                    own,
+                    snake.metrics().skin,
+                    snake.custom_skin().to_vec(),
+                    snake.cosmetic(),
+                ));
+                Ok::<_, ClientPresentationError>(snake.custom_skin()[0] == 8)
+            })
+            .unwrap();
+        assert_eq!(
+            requests,
+            [(0, true, 9, vec![3], 11), (1, false, 9, vec![8], 19)]
+        );
+        assert!(
+            prepared[0]
+                .body_geometry
+                .as_ref()
+                .unwrap()
+                .samples
+                .iter()
+                .all(|s| s.flag == 2)
+        );
+        let detailed = &prepared[1].body_geometry.as_ref().unwrap().samples;
+        assert!(detailed.len() > 4);
+        for s in detailed {
+            assert_eq!(s.flag, if s.ordinal % 3 == 0 { 2 } else { 1 });
+        }
+        apply(&mut client, &[b's', 0, 7, 0]);
+        apply(&mut client, &spawn(27, 31));
+        assert_eq!(client.own_snake().unwrap().custom_skin(), [3]);
+        let mut requests = Vec::new();
+        client
+            .prepare_draw_resolved_staged(960, 540, 1., |_, own, snake| {
+                requests.push((own, snake.custom_skin().to_vec(), snake.cosmetic()));
+                Ok::<_, ClientPresentationError>(false)
+            })
+            .unwrap();
+        assert_eq!(requests, [(false, vec![8], 19), (false, vec![27], 31)]);
+    }
+
+    #[test]
+    fn uniform_and_resolved_styles_match_and_failed_disposable_stage_does_not_commit() {
+        let mut client = AnimatedClient::new(0.).unwrap();
+        for p in [setup(), spawn(3, 11), spawn(8, 19)] {
+            apply(&mut client, &p);
+        }
+        client.advance(40., false).unwrap();
+        for detailed in [false, true] {
+            let mut uniform = client.clone();
+            let a = uniform
+                .prepare_draw_with_style(960, 540, 1.3, detailed)
+                .unwrap();
+            let mut resolved = client.clone();
+            let b = resolved
+                .prepare_draw_resolved_staged(960, 540, 1.3, |_, _, _| {
+                    Ok::<_, ClientPresentationError>(detailed)
+                })
+                .unwrap();
+            assert_eq!(a, b);
+            assert_eq!(uniform, resolved);
+        }
+        let saved = client.clone();
+        let mut stage = client.clone();
+        assert!(
+            stage
+                .prepare_draw_resolved_staged(960, 540, 1., |ordinal, _, _| {
+                    if ordinal == 1 {
+                        Err(ClientPresentationError::Limit)
+                    } else {
+                        Ok(true)
+                    }
+                })
+                .is_err()
+        );
+        assert_eq!(client, saved);
+        assert_ne!(stage, saved);
     }
 }

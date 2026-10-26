@@ -43,6 +43,42 @@ function bodyFixture() {
   return f;
 }
 
+test('only opt-in body output distinguishes whole-source from an explicit full crop', () => {
+  const f = bodyFixture();
+  f.metadata.palettes[0].variants = [{ asset: 0 }, { asset: 0, sourceRect: [0, 0, 20, 30] }];
+  const result = f.resolve();
+  const [whole, crop] = result.recipe.palettes[0].variants;
+  assert.equal(whole.sourceMode, 'whole');
+  assert.equal(crop.sourceMode, 'crop');
+  assert.deepEqual(whole.sourceRect, crop.sourceRect);
+  assert.equal(whole.asset, crop.asset);
+  assert.equal(result.recipe.palettes[0].boostGlow.sourceMode, 'crop');
+  assert.equal(result.recipe.palettes[1].boostGlow.sourceMode, 'whole');
+  assert(result.recipe.effects.every(use => use.sourceMode === 'whole'));
+  f.metadata.attachment = { asset: 0, anchor: 'head', scale: 1, pivotX: 0, pivotY: 0, opacity: 1 };
+  assert.equal(f.resolve().recipe.attachment.sourceMode, 'whole');
+  f.catalog[0].source = null;
+  const pending = f.resolve().recipe.palettes[0].variants;
+  assert.equal(pending[0].sourceMode, 'whole');
+  assert.equal(pending[1].sourceMode, 'crop');
+  assert.equal(pending[0].sourceRect, null);
+  assert.equal(pending[1].sourceRect, null);
+  delete f.metadata.bodyStyle;
+  const legacy = f.resolve().recipe;
+  for (const use of [...legacy.palettes[0].variants, ...legacy.effects, legacy.attachment]) {
+    assert.equal(Object.hasOwn(use, 'sourceMode'), false);
+  }
+});
+
+test('optional cosmetic request metadata is bounded and copied without changing legacy requests', () => {
+  const f = fixture();
+  f.resolve({ skin: 7, cosmetic: 255, attachmentId: 255 });
+  assert.equal(f.calls.at(-1)[1].cosmetic, 255);
+  for (const cosmetic of [-1, 256, 0.5, null, '0']) assert.throws(() => f.resolve({ skin: 7, cosmetic }));
+  f.resolve({ skin: 7 });
+  assert.equal(Object.hasOwn(f.calls.at(-1)[1], 'cosmetic'), false);
+});
+
 test('absent and null body style preserve the exact legacy shape and feature tags', () => {
   const f = fixture();
   f.metadata.effects = [{ kind: 'boost-glow', asset: 0, opacity: 0.25 }];
