@@ -77,6 +77,10 @@ another connection requires a manual click. No game discovery or official
 endpoint is accepted. The local host accepts placeholder login credentials, so
 this route does not verify credentials against another service.
 
+Use a recent source build of the simulator and record its commit. Its package
+version can remain unchanged between releases; `--version` alone does not
+identify unreleased behavior.
+
 Normal tests and CI never start this host or open a game socket. Optional CLI
 ports are bounded; HTTP serves only literal `127.0.0.1` with exact Host checking.
 
@@ -157,6 +161,17 @@ own appearance with the selected skin, food and subsequent motion/removal frames
 the camera followed the own head. Local life-end handling and manual reset were
 observed. No simulator source was changed. This establishes the tested local
 path, without a full gameplay or official-server acceptance claim.
+
+A follow-up on the same date used a fresh source build of unreleased simulator
+commit `9480608d6c3cd0e6c12c0ec247ca52a4cdede9bc`, whose package version still
+reported `0.4.0`. A small sandbox configuration used one client, no bots or prey,
+fixed radius 1500 and food target 200. Windows Chrome 152 / Electron 44 applied
+119 frames (213 commands, including 34 opaque commands) without rejection through
+the real Wasm client, received protocol 19 and rendered the own snake and food.
+Pointer aim and boost messages were sent, followed by manual disconnection.
+The isolated host and page server were stopped afterward. This refresh verifies
+the local transport/received-state path; the new presentation primitives remain
+separate from it. Firefox and complete presentation equivalence remain unverified.
 
 ## Optional external checks
 
