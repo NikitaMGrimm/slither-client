@@ -10,6 +10,85 @@ export function animatedSmoke(wasm) {
     const length = bytes.getUint32(offset); offset += 4;
     return packed.slice(offset, offset + length);
   }
+  const radius = new wasm.AnimatedScene(0);
+  try {
+    const view = () => JSON.parse(radius.snapshot());
+    const target = value => [122, value >>> 16 & 255, value >>> 8 & 255, value & 255];
+    const setup = value => {
+      const bytes = syntheticSetup(); bytes.set(target(value).slice(1), bytes.length - 3); return bytes;
+    };
+    const tick = (now, lagging = false) => {
+      const step = radius.advance(now, lagging);
+      try { return step.whole_steps; } finally { step.free(); }
+    };
+    const state = () => [radius.snapshot(), Array.from(radius.boundary_samples()),
+      Array.from(radius.own_body_samples()), Array.from(radius.camera_samples())];
+    assert.equal(view().boundary, null);
+    assert.equal(radius.boundary_samples().length, 0);
+    radius.apply_frame(bundle(setup(1000), target(400)), false);
+    assert.deepEqual(view().boundary, { displayed: 1000, target: 400, index: 0, pending: 56, connected: true });
+    assert.equal(view().radius, 400, 'received radius remains the target diagnostic');
+    assert(radius.boundary_samples() instanceof Float64Array);
+    const scheduled = radius.boundary_samples();
+    const copy = radius.boundary_samples(); copy.fill(0);
+    assert.deepEqual(radius.boundary_samples(), scheduled, 'boundary buffers are copied');
+    assert.equal(tick(4), 0);
+    assert.deepEqual(radius.boundary_samples(), scheduled);
+    assert.equal(tick(8), 1);
+    assert.equal(view().boundary.displayed, 1000, 'the first sample retains the setup radius');
+    assert.equal(tick(48), 5);
+    assert.equal(view().boundary.displayed, scheduled[5]);
+    assert.equal(view().boundary.index, 6, 'one shared clock advances the ring exactly once');
+    assert.equal(view().boundary.pending, 50);
+    radius.apply_frame(Uint8Array.from(target(400)), false);
+    assert(radius.boundary_samples()[28] < scheduled[28], 'equal targets still blend pending samples');
+    const savedRing = radius.boundary_samples();
+    radius.apply_frame(bundle(target(800), target(300)), false);
+    assert.equal(view().boundary.target, 300);
+    assert.equal(view().boundary.pending, 56);
+    assert.notDeepEqual(radius.boundary_samples(), savedRing);
+    const beforeDraw = [view().boundary, radius.boundary_samples()];
+    radius.prepare_draw(960, 540); radius.prepare_draw_with_style(960, 540, 1.3, true);
+    assert.deepEqual([view().boundary, radius.boundary_samples()], beforeDraw);
+    radius.set_connected(false);
+    const paused = [view().boundary, radius.boundary_samples()];
+    tick(88); tick(92);
+    assert.deepEqual([view().boundary, radius.boundary_samples()], paused);
+    radius.set_connected(true);
+    assert.equal(tick(96), 1, 'reconnection consumes no disconnected backlog');
+    assert.equal(view().boundary.displayed, paused[1][6]);
+    assert.equal(view().boundary.index, 7);
+    const retained = radius.boundary_samples();
+    const retainedView = view().boundary;
+    radius.reset(100);
+    assert.deepEqual(view().boundary, { ...retainedView, connected: false });
+    assert.deepEqual(radius.boundary_samples(), retained);
+    tick(140);
+    assert.deepEqual(radius.boundary_samples(), retained);
+    radius.apply_frame(bundle(setup(900), target(600), setup(700), target(500)), false);
+    assert.deepEqual(view().boundary, { displayed: 700, target: 500, index: 7, pending: 56, connected: true });
+    assert.equal(radius.boundary_samples()[7], 700, 'midframe Setup fills absolute samples at the retained cursor');
+    assert.equal(view().radius, 500);
+    radius.set_connected(false);
+    const stable = state();
+    const bad = setup(800); bad[10] = 0;
+    for (const bytes of [bundle(target(200), setup(600), [114, 0]),
+      bundle(target(200), setup(600), target(300), bad, ownAppearance())]) {
+      assert.throws(() => radius.apply_frame(bytes, false));
+      assert.deepEqual(state(), stable, 'late received/numeric errors roll back setup, gate and ring together');
+    }
+    for (const operation of [() => radius.advance(NaN, false), () => radius.reset(NaN),
+      () => radius.prepare_draw_with_style(960, 540, NaN, true)]) {
+      assert.throws(operation); assert.deepEqual(state(), stable);
+    }
+    radius.set_connected(true);
+    const samples = radius.boundary_samples();
+    const steps = tick(148, true);
+    assert.equal(steps, 0, 'lag adjustment belongs to the existing shared clock');
+    assert.deepEqual(radius.boundary_samples(), samples);
+    assert.equal(tick(156, true), 1);
+    assert.equal(view().boundary.index, 8);
+  } finally { radius.free(); }
   const scene = new wasm.AnimatedScene(0);
   const view = () => JSON.parse(scene.snapshot());
   function advance(now) {

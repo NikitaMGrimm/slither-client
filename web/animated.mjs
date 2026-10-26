@@ -37,6 +37,7 @@ function disconnect() {
   connection = undefined;
   boost = false;
   heading = 0;
+  animated?.set_connected(false);
   previous?.close();
   updateControls();
 }
@@ -146,6 +147,7 @@ async function start() {
     heading = 0;
     boost = false;
     try {
+      animated.set_connected(false);
       // The existing transport resets without a timestamp; adapt only that call.
       const scene = {
         reset: () => {
@@ -162,8 +164,10 @@ async function start() {
         // Packets apply immediately in the transport; only RAF advances/draws.
         onFrame() {},
         onStatus(text) {
+          if (disposed) return;
           setStatus(text);
           if (text !== 'Connected to local simulator') {
+            animated.set_connected(false);
             connection = undefined;
             boost = false;
             updateControls();

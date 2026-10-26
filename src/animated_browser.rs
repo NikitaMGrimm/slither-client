@@ -175,6 +175,11 @@ impl AnimatedScene {
         self.client.reset(start_ms).map_err(error)
     }
 
+    /// Gate boundary updates only; setup activates this gate and reset clears it.
+    pub fn set_connected(&mut self, connected: bool) {
+        self.client.set_connected(connected);
+    }
+
     /// Commit a complete frame and its presentation actions atomically.
     pub fn apply_frame(&mut self, bytes: &[u8], elapsed_header: bool) -> Result<(), JsValue> {
         self.client
@@ -249,6 +254,7 @@ impl AnimatedScene {
 
     /// Numeric diagnostics. Input-facing ownHead/camera x/y are centered;
     /// nested own geometry and camera absoluteX/absoluteY retain absolute units.
+    /// Radius is the received target; boundary reports the retained display and gate.
     pub fn snapshot(&self) -> String {
         let received = self.client.received();
         let center = received.setup.as_ref().map_or(0., |s| s.grid_center);
@@ -270,6 +276,11 @@ impl AnimatedScene {
             "foods": received.foods.len(), "gridCenter": center,
             "protocol": received.setup.as_ref().map_or_else(|| "null".into(), |s| s.protocol.to_string()),
             "radius": received.setup.as_ref().map_or(0., |s| s.radius),
+            "boundary": self.client.boundary().map_or_else(|| "null".into(), |boundary| object! {
+                "displayed": boundary.displayed(), "target": boundary.target(),
+                "index": boundary.index(), "pending": boundary.pending(),
+                "connected": self.client.connected()
+            }),
             "ownId": received.own_snake_id.map_or_else(|| "null".into(), |id| id.to_string()),
             "ownHead": own_head,
             "retainedSnakes": self.client.retained_count(),
@@ -284,6 +295,13 @@ impl AnimatedScene {
             },
             "own": own.map_or_else(|| "null".into(), snake_snapshot)
         }
+    }
+
+    /// Copied absolute-radius ring, retained across resets; draws never consume it.
+    pub fn boundary_samples(&self) -> Vec<f64> {
+        self.client
+            .boundary()
+            .map_or_else(Vec::new, |boundary| boundary.samples().to_vec())
     }
 
     /// Copied numeric snapshots in draw order, including culled entries. The own
@@ -568,9 +586,9 @@ impl AnimatedScene {
             zoom,
         )?;
         let context = frame.context();
-        if let Some(setup) = &received.setup {
+        if let Some(boundary) = prepared.boundary().filter(|_| received.setup.is_some()) {
             context.begin_path();
-            context.arc(0., 0., setup.radius, 0., TAU)?;
+            context.arc(0., 0., boundary.displayed(), 0., TAU)?;
             context.set_stroke_style_str("#647481");
             context.set_line_width(1. / zoom);
             context.stroke();
@@ -771,9 +789,9 @@ impl AnimatedScene {
             zoom,
         )?;
         let context = frame.context();
-        if let Some(setup) = &received.setup {
+        if let Some(boundary) = prepared.boundary().filter(|_| received.setup.is_some()) {
             context.begin_path();
-            context.arc(0., 0., setup.radius, 0., TAU)?;
+            context.arc(0., 0., boundary.displayed(), 0., TAU)?;
             context.set_stroke_style_str("#647481");
             context.set_line_width(1. / zoom);
             context.stroke();
