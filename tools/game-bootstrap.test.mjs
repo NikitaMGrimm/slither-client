@@ -173,7 +173,7 @@ function wasmDouble(f) {
   class AnimatedScene {
     constructor() { calls.push('scene'); this.connected = false; this.own = null; this.borrowed = false; }
     outside() { assert.equal(this.borrowed, false, 'no native reentry'); }
-    control_view() { this.outside(); controlReads++; return { own: this.own, camera: { x: 100, y: 200 }, zoom: 1, follows: true, connected: this.connected }; }
+    control_view() { this.outside(); controlReads++; f.faults.control?.(); return { own: this.own, camera: { x: 100, y: 200 }, zoom: 1, follows: true, connected: this.connected }; }
     reset_lag() { this.outside(); calls.push('reset_lag'); }
     advance_with_control(now, lagging, callback) {
       this.outside(); const control = this.control_view(); this.borrowed = true;
@@ -191,7 +191,7 @@ function wasmDouble(f) {
     set_gaze_heading(value) { calls.push(['gaze', value]); }
     advance(now, lagging) { calls.push(['advance', now, lagging]); return { free() { stepFrees++; } }; }
     set_connected(value) { this.outside(); this.connected = value; calls.push(['connected', value]); }
-    free() { this.outside(); sceneFrees++; }
+    free() { this.outside(); sceneFrees++; f.faults.cleanup?.('scene.free'); }
     apply_frame_and_render_standard_with_appearance_and_prey(...args) {
       calls.push('packet');
       const appearance = { ...request, skin: f.faults.skin ?? request.skin };
@@ -219,7 +219,7 @@ function wasmDouble(f) {
     advance() { calls.push('quality.advance'); }
     update_statistics(time, count) { calls.push(['statistics', time, count]); return false; }
     begin_connection() { calls.push('quality.connection'); }
-    free() { qualityFrees++; }
+    free() { qualityFrees++; f.faults.cleanup?.('quality.free'); }
   }
   const api = { AnimatedScene, DesktopQuality,
     encode_login() { return Uint8Array.of(115, 1); }, solve_challenge() { return new Uint8Array(27); },
@@ -619,4 +619,199 @@ test('unrelated capture changes keep entity source revisions stable across actua
   assert.notEqual(wasm.values.recipe.revision, transactionRevision);
   assert.equal(runtime.diagnostics().draws, 5);
   runtime.dispose();
+});
+
+// Local synthetic capability facade; actual gate, controller and gameplay factories stay in use.
+function cleanupHarness(options) {
+  const f = fixture(options); f.host(); f.complete(); const wasm = wasmDouble(f);
+  const trace = [], failures = new Map();
+  let runtime, router, pagehide, reenter, inspect;
+  const act = (stage, callback = () => {}) => {
+    trace.push(stage);
+    reenter?.(stage);
+    inspect?.(stage);
+    if (failures.has(stage)) throw failures.get(stage);
+    return callback();
+  };
+  f.faults.cleanup = stage => act(stage);
+  const realm = { ...f.realm, document: f.document, location: f.realm.location };
+  realm.top = realm;
+  realm.addEventListener = (type, handler) => {
+    if (type === 'pagehide') pagehide = handler;
+    f.realm.addEventListener(type, handler);
+  };
+  realm.removeEventListener = (type, handler) => act('removeListener', () => f.realm.removeEventListener(type, handler));
+  realm[Symbol.for('slither.client.gate.v1')] = Object.freeze({ metadata: f.gate.metadata, claim(id) {
+    const native = f.gate.claim(id);
+    return Object.freeze({ ...native,
+      cancelAnimationFrame: id => act('cancel', () => native.cancelAnimationFrame(id)),
+      clearTimeout: id => act('clearTimer', () => native.clearTimeout(id)),
+      clearInterval: id => act('gameplay.clearInterval', () => native.clearInterval(id)),
+      setInput(handler) { return act('setInput', () => { router = handler; native.setInput(handler); }); },
+      status: code => act(`status:${code}`, () => native.status(code)),
+    });
+  } });
+  return { f, wasm, realm, trace, failures,
+    async start(initialize = async () => {}) {
+      runtime = await startGamePage({ realm, wasmApi: wasm.api, initialize });
+      return runtime;
+    },
+    resetTrace() { trace.length = 0; },
+    pagehide: () => pagehide(), route: event => router(event),
+    reenter(callback) { reenter = callback; }, inspect(callback) { inspect = callback; },
+  };
+}
+
+function caught(callback) {
+  try { callback(); return { thrown: false }; }
+  catch (error) { return { thrown: true, error }; }
+}
+
+async function rejected(callback) {
+  try { await callback(); return { thrown: false }; }
+  catch (error) { return { thrown: true, error }; }
+}
+
+const cleanupStages = ['cancel', 'removeListener', 'setInput', 'gameplay.clearInterval', 'scene.free', 'quality.free'];
+const cleanupPrimaries = [undefined, null, false, 0, -0, Object.freeze({ synthetic: true })];
+
+for (const stage of [...cleanupStages, 'status:disposed']) {
+  test(`cleanup exhausts current owners once after ${stage} failure`, async () => {
+    const h = cleanupHarness(), runtime = await h.start(); connect(h.f, runtime); h.resetTrace();
+    const primary = Object.freeze({ stage }); h.failures.set(stage, primary);
+    // Scene freeing occurs after the actual controller has been stopped.
+    h.inspect(current => { if (current === 'scene.free') assert.equal(runtime.diagnostics().stopped, true); });
+    h.reenter(() => { assert.equal(runtime.diagnostics().disposed, true); assert.equal(runtime.dispose(), undefined); });
+    const result = caught(() => runtime.dispose());
+    assert.equal(result.thrown, true); assert.equal(result.error, primary);
+    assert.deepEqual(h.trace, [...cleanupStages, stage === 'status:disposed' ? stage : 'status:client-failed']);
+    assert.equal(runtime.diagnostics().disposed, true); assert.equal(runtime.diagnostics().captureHeld, false);
+    assert.equal(runtime.diagnostics().stopped, true);
+    assert.equal(h.f.socket.closes, 1);
+    assert.deepEqual(h.wasm.counts(), { sceneFrees: 1, qualityFrees: 1, stepFrees: 1 });
+    const before = [...h.trace]; assert.equal(runtime.dispose(), undefined); assert.deepEqual(h.trace, before);
+    const calls = [...h.wasm.calls], controls = h.wasm.controlReads();
+    if (h.f.raf.size) h.f.frame();
+    h.f.flush(); assert.deepEqual(h.wasm.calls, calls); assert.equal(h.wasm.controlReads(), controls);
+    assert.equal(h.f.sockets, 1); assert.equal(h.f.original, 0);
+  });
+}
+
+for (const [index, primary] of cleanupPrimaries.entries()) {
+  test(`cleanup preserves first primary by presence ${index} through later cleanup/status failures`, async () => {
+    const h = cleanupHarness(), runtime = await h.start(); connect(h.f, runtime); h.resetTrace();
+    for (const stage of cleanupStages) h.failures.set(stage, stage === 'cancel' ? primary : new Error(`Secondary ${stage}`));
+    h.failures.set('status:client-failed', new Error('Secondary status'));
+    const result = caught(() => runtime.dispose());
+    assert.equal(result.thrown, true); assert(Object.is(result.error, primary));
+    assert.deepEqual(h.trace, [...cleanupStages, 'status:client-failed']);
+    const before = [...h.trace]; assert.equal(runtime.dispose(), undefined); assert.deepEqual(h.trace, before);
+    assert.equal(runtime.diagnostics().disposed, true); assert.equal(runtime.diagnostics().captureHeld, false);
+    assert.equal(h.f.sockets, 1); assert.equal(h.f.original, 0);
+  });
+}
+
+test('healthy cleanup preserves runtime shape, diagnostics, routes and ordinary reload', async () => {
+  const h = cleanupHarness(), runtime = await h.start();
+  assert.deepEqual(Object.keys(runtime), ['diagnostics', 'play', 'playWithLiveProfile', 'dispose']);
+  assert.equal(h.f.sockets, 0); assert.equal(h.f.original, 0);
+  h.route({ type: 'keydown', code: 'ArrowLeft' });
+  assert.equal(runtime.diagnostics().gameplay.input.leftHeld, true);
+  h.route({ type: 'keyup', code: 'ArrowLeft' });
+  assert.equal(runtime.diagnostics().gameplay.input.leftHeld, false);
+  assert.equal(h.wasm.controlReads(), 2);
+  const before = runtime.diagnostics(), calls = [...h.wasm.calls]; h.resetTrace();
+  assert.equal(runtime.dispose(), undefined);
+  assert.deepEqual(h.trace, ['cancel', 'removeListener', 'setInput', 'scene.free', 'quality.free', 'status:disposed']);
+  const after = runtime.diagnostics();
+  assert.equal(after.draws, before.draws); assert.equal(after.width, before.width); assert.equal(after.height, before.height);
+  assert.equal(after.disposed, true); assert.equal(after.stopped, true); assert.equal(after.captureHeld, false);
+  assert.equal(after.gameplay.disposed, true); assert.equal(after.connected, false);
+  assert.deepEqual(h.wasm.calls, calls); assert.equal(h.wasm.controlReads(), 2);
+  assert.equal(h.f.raf.size, 0); assert.equal(h.f.timers.size, 0); assert.equal(h.f.intervals.size, 0);
+  h.route({ type: 'keydown', code: 'ArrowRight' }); assert.equal(h.wasm.controlReads(), 2);
+  h.route({ type: 'click', target: h.f.document.getElementById('slither-client-reload') });
+  assert.equal(h.f.reloads, 1); assert.equal(h.f.sockets, 0); assert.equal(h.f.original, 0);
+});
+
+test('waiting cleanup wakes startup despite timer/remover/input/status failures and never retries consumed cells', async () => {
+  const h = cleanupHarness({ sourcePending: true }), pending = h.start();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.f.messages.at(-1).code, 'waiting-assets'); assert.equal(h.f.timers.size, 1);
+  h.resetTrace();
+  for (const stage of ['clearTimer', 'removeListener', 'setInput', 'status:client-failed']) h.failures.set(stage, undefined);
+  h.reenter(() => assert.equal(h.pagehide(), undefined));
+  const result = caught(h.pagehide);
+  assert.equal(result.thrown, true); assert.equal(result.error, undefined);
+  assert.deepEqual(h.trace, ['clearTimer', 'removeListener', 'setInput', 'status:client-failed']);
+  const runtime = await pending;
+  assert.deepEqual(Object.keys(runtime), ['dispose']); assert.equal(runtime.dispose(), undefined);
+  const before = [...h.trace]; h.f.timer(); await Promise.resolve();
+  assert.deepEqual(h.trace, before); assert.deepEqual(h.wasm.calls, []);
+  assert.equal(h.f.sockets, 0); assert.equal(h.f.original, 0);
+});
+
+for (const [index, primary] of [...cleanupPrimaries, new Error('Synthetic initialization primary'),
+  Object.freeze({ status: 'unsupported' }), Object.freeze({ get status() { throw new Error('Synthetic status getter'); } })].entries()) {
+  test(`startup preserves exact primary ${index} after best-effort classification and failed cleanup`, async () => {
+    const h = cleanupHarness();
+    const result = await rejected(() => h.start(async () => {
+      h.resetTrace();
+      for (const stage of ['removeListener', 'setInput', 'status:client-failed']) h.failures.set(stage, new Error(`Secondary ${stage}`));
+      throw primary;
+    }));
+    assert.equal(result.thrown, true); assert(Object.is(result.error, primary));
+    assert.deepEqual(h.trace, ['removeListener', 'setInput', 'status:client-failed']);
+    assert.deepEqual(h.wasm.calls, []); assert.equal(h.f.sockets, 0); assert.equal(h.f.original, 0);
+    assert.equal(h.pagehide(), undefined);
+  });
+}
+
+test('startup keeps unsupported mapping and original identity when terminal status alone fails', async () => {
+  for (const primary of [new Error('Synthetic startup primary'), Object.freeze({ status: 'unsupported' })]) {
+    const h = cleanupHarness();
+    const status = primary.status === 'unsupported' ? 'host-unavailable' : 'csp-or-module-unavailable';
+    h.failures.set(`status:${status}`, new Error('Synthetic terminal status failure'));
+    const result = await rejected(() => h.start(async () => { h.resetTrace(); throw primary; }));
+    assert.equal(result.thrown, true); assert.equal(result.error, primary);
+    assert.deepEqual(h.trace, ['removeListener', 'setInput', `status:${status}`]);
+  }
+});
+
+test('startup primary after owner construction survives every later owner/status failure', async () => {
+  for (const primary of cleanupPrimaries) {
+    const h = cleanupHarness();
+    h.failures.set('status:ready-not-connected', primary);
+    h.failures.set('scene.free', new Error('Secondary scene free'));
+    h.failures.set('quality.free', new Error('Secondary quality free'));
+    h.failures.set('status:client-failed', new Error('Secondary terminal status'));
+    const result = await rejected(() => h.start());
+    assert.equal(result.thrown, true); assert(Object.is(result.error, primary));
+    assert.deepEqual(h.trace, ['setInput', 'status:loading', 'status:ready-not-connected',
+      'removeListener', 'setInput', 'scene.free', 'quality.free', 'status:client-failed']);
+    assert.deepEqual(h.wasm.counts(), { sceneFrees: 1, qualityFrees: 1, stepFrees: 0 });
+    assert.equal(h.f.raf.size, 0); assert.equal(h.f.sockets, 0); assert.equal(h.f.original, 0);
+  }
+});
+
+test('runtime fail remains quiet on clean disposal and preserves original primary through secondary failures', async () => {
+  for (const [index, primary] of [...cleanupPrimaries, Object.freeze({ status: 'unsupported' }),
+    Object.freeze({ get status() { throw new Error('Synthetic runtime status getter'); } })].entries()) {
+    for (const secondary of [undefined, 'scene.free', 'status:client-failed']) {
+      const h = cleanupHarness(), runtime = await h.start(); h.resetTrace();
+      h.f.faults.control = () => { throw primary; };
+      const status = index === 6 ? 'host-unavailable' : 'client-failed';
+      if (secondary) h.failures.set(secondary === 'status:client-failed' ? `status:${status}` : secondary,
+        new Error(`Secondary ${secondary}`));
+      const result = caught(() => h.route({ type: 'keydown', code: 'ArrowLeft' }));
+      assert.equal(result.thrown, secondary !== undefined || index === 7);
+      if (result.thrown) assert(Object.is(result.error, primary));
+      const code = secondary === 'scene.free' ? 'client-failed' : status;
+      assert.deepEqual(h.trace, ['status:ready-not-connected', 'cancel', 'removeListener', 'setInput',
+        'scene.free', 'quality.free', `status:${code}`]);
+      assert.equal(runtime.diagnostics().disposed, true); assert.equal(runtime.diagnostics().stopped, true);
+      assert.equal(runtime.diagnostics().captureHeld, false);
+      assert.equal(runtime.dispose(), undefined); assert.equal(h.f.sockets, 0); assert.equal(h.f.original, 0);
+    }
+  }
 });

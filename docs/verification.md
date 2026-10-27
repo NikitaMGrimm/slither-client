@@ -38,6 +38,28 @@ pull requests, and manual dispatch. Normal tests and CI require no external
 reference and do not connect to game servers. Dependency and toolchain setup may
 access package sources. Release-plz remains dormant.
 
+## Bootstrap cleanup failures
+
+The cleanup repair passes 102 focused Node tests across bootstrap, profile,
+editing-default and nickname-policy suites. The 27 additive bootstrap cases
+exercise the actual authored modules through VM, DOM, scheduler, socket and Wasm
+doubles. The corrected tests retain 25 regression failures on the original
+product, with all 24 preexisting bootstrap cases passing. Earlier fixture and
+expectation mistakes remain recorded beside the corrected baseline and results.
+
+Cases cover cleanup ordering and remaining attempts after failure, repeated and
+reentrant disposal, waiting-startup settlement, post-dispose diagnostics and exact
+first failures including falsy values. Startup and runtime primaries survive
+secondary cleanup, status and status-getter failures. Controller disposal is
+observed through stopped diagnostics before scene release; no active-stack
+controller failure or replacement native Promise resolver was injected.
+
+These are synthetic source-path checks. A throwing cleanup may leave its
+resource unreleased, and terminal status cannot report its own failure without
+another attempt. No installed-browser cleanup, native editing, real-Wasm cleanup,
+profile acquisition or server acceptance follows from these tests. The default
+startup still registers no nickname field.
+
 ## Lease-bound nickname input policy
 
 The opt-in policy integration passes 836 Node tests, including 117 focused

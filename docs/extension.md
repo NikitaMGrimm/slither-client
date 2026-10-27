@@ -151,6 +151,18 @@ injected session, releases listeners/capture, disposes the controller and frees
 owned Wasm objects once. Numeric rollback cannot undo native pixels or callback
 effects.
 
+Disposal attempts the remaining owned cleanup steps even when cancellation,
+listener removal, router replacement or an owner release throws. It consumes
+scheduling and listener entries before invoking them, attempts terminal status
+once, then throws the first cleanup failure, including a thrown `undefined`.
+Repeated disposal stays inert. An attempted release that throws is not proof
+that the underlying resource was released.
+
+Startup preserves its original failure through cleanup or status failures.
+Runtime failure handling keeps its existing quiet behavior when cleanup succeeds;
+if classification or cleanup also fails, the original runtime failure takes
+precedence. These paths add no field registration or native editing behavior.
+
 ## Session and input boundary
 
 ### Private nickname-edit defaults
