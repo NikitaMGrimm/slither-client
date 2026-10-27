@@ -102,6 +102,10 @@ rank/readout presentation remains separate. An optional
 Setup samples, retained-own scheduling, leaderboard headers and required
 command-time final captures through additive Wasm/controller/session APIs.
 It adds no clock or visible UI; gameplay must opt in explicitly.
+The separate [semantic reducer](hud-state.md) retains bounded dirty/header/final
+history and requested opacities. Explicit gameplay readout mode stages it through
+packet, same-step lifecycle and successful draw boundaries, with required score
+reads outside the native borrow and after held-source release.
 
 `presentation` provides explicit-time arithmetic separately from received state.
 `FrameClock` clamps elapsed milliseconds divided by eight to 0..=5, applies lag

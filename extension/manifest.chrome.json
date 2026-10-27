@@ -11,7 +11,7 @@
   },
   "web_accessible_resources": [{
     "matches": ["http://slither.io/*", "https://slither.io/*", "http://www.slither.io/*", "https://www.slither.io/*"],
-    "resources": ["game/bootstrap.mjs", "game/stock-host-snapshot.mjs", "game/stock-client.mjs", "game/stock-skin-provider.mjs", "game/stock-skin-rules.mjs", "game/skin-provider.mjs", "game/stock-food-provider.mjs", "game/stock-prey-provider.mjs", "game/stock-asset-sources.mjs", "game/desktop-layout.mjs", "game/client-input.mjs", "game/stock-gameplay.mjs", "game/stock-session.mjs", "game/stock-hud-contract.mjs", "game/handshake-session.mjs", "game/stock-live-profile.mjs", "game/pkg/slither_client.js", "game/pkg/slither_client_bg.wasm"]
+    "resources": ["game/bootstrap.mjs", "game/stock-host-snapshot.mjs", "game/stock-client.mjs", "game/stock-skin-provider.mjs", "game/stock-skin-rules.mjs", "game/skin-provider.mjs", "game/stock-food-provider.mjs", "game/stock-prey-provider.mjs", "game/stock-asset-sources.mjs", "game/desktop-layout.mjs", "game/client-input.mjs", "game/stock-gameplay.mjs", "game/stock-session.mjs", "game/stock-hud-contract.mjs", "game/stock-hud-state.mjs", "game/handshake-session.mjs", "game/stock-live-profile.mjs", "game/pkg/slither_client.js", "game/pkg/slither_client_bg.wasm"]
   }],
   "content_security_policy": {
     "extension_pages": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"

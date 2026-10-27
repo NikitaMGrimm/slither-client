@@ -93,7 +93,8 @@ responsible for score arithmetic and retained-own target resolution.
 session seam to the native command-time journal and real Setup renderer.
 Score tracking requires explicit caller enablement before ingress. Default
 gameplay uses the legacy subscription. See the [journal API](hud-ingress.md).
-Lifecycle fade and visible HUD remain separate.
+The optional [semantic readout mode](hud-state.md) stages lifecycle fade and
+required draw samples after source release; visible HUD remains separate.
 An error after a future native commit or observer effect cannot roll those
 effects back; the session terminates and never replays the packet.
 

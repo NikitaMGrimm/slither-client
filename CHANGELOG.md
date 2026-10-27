@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add explicit semantic HUD reduction and gameplay staging for packet headers,
+  dirty readouts, command-time finals and same-step fade requests. Read required
+  scores after source release; preserve legacy activation and visible UI scope.
+
 - Expose opt-in same-step HUD lifecycle observations beside the existing native
   control actions, sharing the sole session fold and preserving legacy behavior.
   Fade/readout reduction and visible UI remain separate.

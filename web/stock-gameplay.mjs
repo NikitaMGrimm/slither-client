@@ -1,6 +1,7 @@
 import { createStockSession, stockEndpoint } from './stock-session.mjs';
 import { createClientInput } from './client-input.mjs';
 import { createStockLiveProfileAcquirer } from './stock-live-profile.mjs';
+import { createHudState, hudReadoutRequired, reduceHudState } from './stock-hud-state.mjs';
 
 function ownRecord(value, names) {
   if (!value || typeof value !== 'object' || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) {
@@ -47,7 +48,8 @@ function synchronousHudCallback(callback) {
 
 /** Trusted local composition; transports, native time and the scene remain caller-owned. */
 export function createStockGameplay({ scene, quality, controller, wasm, createSocket, now,
-  defer, setInterval, clearInterval, onStatus, onFatal, liveProfile, onHudPacket }) {
+  defer, setInterval, clearInterval, onStatus, onFatal, liveProfile, onHudPacket, hudReadout = false }) {
+  if (typeof hudReadout !== 'boolean') throw new TypeError('Explicit hudReadout boolean required');
   for (const [record, names] of [[scene, ['control_view', 'set_connected', 'reset_lag']],
     [quality, ['begin_connection']], [controller, ['packet', 'frame']]]) {
     for (const name of names) if (typeof record?.[name] !== 'function') throw new TypeError(`Gameplay capability required: ${name}`);
@@ -57,15 +59,23 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
   }
   if (onHudPacket !== undefined) {
     synchronousHudCallback(onHudPacket);
+  }
+  if (hudReadout || onHudPacket !== undefined) {
     if (typeof controller.packetWithHud !== 'function') throw new TypeError('Gameplay capability required: packetWithHud');
   }
+  if (hudReadout && typeof scene.score_view !== 'function') throw new TypeError('Gameplay capability required: score_view');
   const profileOptions = liveProfile === undefined ? undefined
     : ownRecord(liveProfile, ['capabilities', 'isCurrentDocument']);
   if (profileOptions && typeof profileOptions.isCurrentDocument !== 'function') throw new TypeError('Current-document checker required');
   const input = createClientInput({ protocolVersion: 19 });
   const session = createStockSession({ wasm, createSocket, now });
   let disposed = false, active = false, queued = false, dirty = true, hasFatal = false, fatal, uiTimer;
+  let fatalNotified = false;
+  let reconciling = false;
   let nativeConnected = false;
+  const hudIdentity = hudReadout ? Symbol('gameplay scene') : null;
+  let hudState = hudReadout ? createHudState(hudIdentity) : null;
+  let pendingHudState = null;
   let profilePhase = profileOptions ? 'idle' : 'unavailable';
   let profileIntent, checkingCurrent = false;
   const acquiring = () => profilePhase === 'acquiring';
@@ -96,7 +106,15 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
     queued = true;
     defer(() => { queued = false; if (!disposed) reconcile(); });
   };
-  const latchError = error => { if (!hasFatal) { fatal = error; hasFatal = true; } dirty = true; schedule(); };
+  const retainError = error => {
+    if (!hasFatal) { fatal = error; hasFatal = true; }
+    pendingHudState = null;
+    dirty = true;
+  };
+  const latchError = error => {
+    retainError(error);
+    try { schedule(); } catch { /* Scheduling cannot replace the retained primary. */ }
+  };
   const observer = {
     packet(bytes, elapsedHeader) {
       if (disposed || active) throw new Error('Gameplay packet reentry');
@@ -110,18 +128,24 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
     state() { dirty = true; schedule(); },
     error: latchError,
   };
-  const unsubscribe = onHudPacket === undefined ? session.subscribe(observer) : session.subscribeWithHud({
+  const unsubscribe = !hudReadout && onHudPacket === undefined ? session.subscribe(observer) : session.subscribeWithHud({
     ...observer,
     packet(bytes, elapsedHeader, plan) {
       return hudOperation(() => controller.packetWithHud(bytes, elapsedHeader, plan));
     },
     hud(report) {
       return hudOperation(() => {
-        if (onHudPacket(report) !== undefined) throw new TypeError('Synchronous onHudPacket must return undefined');
+        const candidate = hudReadout
+          ? reduceHudState(pendingHudState ?? hudState, hudIdentity, { kind: 'packet', report }) : null;
+        if (onHudPacket !== undefined && onHudPacket(report) !== undefined) {
+          throw new TypeError('Synchronous onHudPacket must return undefined');
+        }
+        if (hudReadout && !hasFatal && !disposed) pendingHudState = candidate;
       });
     },
   });
   function hudOperation(callback) {
+    if (hasFatal) throw fatal;
     if (disposed || active) throw new Error('Gameplay HUD reentry');
     active = true;
     try { return callback(); }
@@ -131,35 +155,46 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
     } finally { active = false; }
   }
   function clearUiTimer() {
-    if (uiTimer !== undefined) { clearInterval(uiTimer); uiTimer = undefined; }
+    if (uiTimer !== undefined) {
+      const timer = uiTimer;
+      uiTimer = undefined;
+      clearInterval(timer);
+    }
   }
   function dispose() {
     if (disposed) return;
     if (active) throw new Error('Gameplay disposal reentry');
     disposed = true;
+    hudState = pendingHudState = null;
     profilePhase = 'disposed';
-    const profileCleanupErrors = [];
+    let cleanupFailed = false;
+    const cleanup = callback => {
+      try { callback(); }
+      catch (error) { cleanupFailed = true; retainError(error); }
+    };
     if (profileIntent) {
       profileIntent.cancelled = true;
-      for (const cleanup of [() => profileIntent.acquirer?.dispose(), () => clearRequest(profileIntent)]) {
-        try { cleanup(); } catch (error) { profileCleanupErrors.push(error); }
-      }
+      cleanup(() => profileIntent.acquirer?.dispose());
+      cleanup(() => clearRequest(profileIntent));
     }
-    clearUiTimer();
-    unsubscribe();
-    input.pagehide();
-    session.close('host-disposed');
-    if (profileCleanupErrors.length) throw profileCleanupErrors[0];
+    cleanup(clearUiTimer);
+    cleanup(unsubscribe);
+    cleanup(() => input.pagehide());
+    cleanup(() => session.close('host-disposed'));
+    if (hasFatal && !fatalNotified) {
+      fatalNotified = true;
+      try { onFatal(fatal); } catch { /* Notification cannot replace its primary. */ }
+    }
+    if (cleanupFailed) throw fatal;
   }
   function reconcile() {
     if (disposed) return;
     if (acquiring()) return;
     if (active) { schedule(); return; }
+    reconciling = true;
     try {
       if (hasFatal) {
-        const error = fatal;
         dispose();
-        onFatal(error);
         return;
       }
       const state = session.snapshot();
@@ -185,16 +220,31 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
         dirty = false;
         onStatus(state.phase === 'ready' ? 'ready-not-connected' : state.connected ? 'connected' : 'disconnected');
       }
+      // Ingress and source release have unwound; all reconciliation must succeed.
+      if (!hasFatal && !disposed && pendingHudState !== null) {
+        hudState = pendingHudState;
+        pendingHudState = null;
+      }
     } catch (error) { latchError(error); }
+    finally { reconciling = false; }
   }
   function run(callback) {
-    if (disposed || active || hasFatal || checkingCurrent) throw new Error('Gameplay stopped or reentrant');
+    // A nested draw cannot bypass an unfinished packet reconciliation barrier.
+    if (disposed || active || hasFatal || checkingCurrent || (hudReadout && reconciling)) {
+      throw new Error('Gameplay stopped or reentrant');
+    }
     reconcile();
     if (disposed || hasFatal) throw new Error('Gameplay stopped');
     active = true;
     try { return callback(); }
     catch (error) { latchError(error); throw error; }
-    finally { active = false; if (dirty) schedule(); }
+    finally {
+      active = false;
+      if (dirty) {
+        try { schedule(); }
+        catch (error) { retainError(error); throw fatal; }
+      }
+    }
   }
   function observeInput() {
     const view = scene.control_view();
@@ -206,6 +256,34 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
     return { clientX: event.clientX, clientY: event.clientY,
       viewportWidth: Math.ceil(viewport.width), viewportHeight: Math.ceil(viewport.height),
       follow: view.follows, camera: view.camera, head: view.own?.rawHead, zoom: view.zoom };
+  }
+  function drawHud(candidate) {
+    if (hasFatal) throw fatal;
+    if (disposed) throw new Error('Gameplay stopped');
+    const playing = session.snapshot().playing;
+    const view = hudReadoutRequired(candidate, playing) ? scene.score_view() : null;
+    const next = reduceHudState(candidate, hudIdentity, { kind: 'draw', playing, view });
+    if (hasFatal) throw fatal;
+    return next;
+  }
+  function checkProfile() {
+    if (profilePhase === 'ready' && !current(profileIntent)) {
+      cancelProfile(profileIntent); profilePhase = 'failed'; throw profileError('stale-intent');
+    }
+  }
+  function draw(method, args) {
+    if (acquiring() && !disposed) return undefined;
+    return run(() => {
+      if (acquiring()) return undefined;
+      checkProfile();
+      const operation = controller[method];
+      if (typeof operation !== 'function') throw new TypeError(`Gameplay capability required: ${method}`);
+      const result = Reflect.apply(operation, controller, args);
+      checkProfile();
+      const candidate = hudReadout ? drawHud(hudState) : null;
+      if (hudReadout && !hasFatal && !disposed) hudState = candidate;
+      return result;
+    });
   }
   return Object.freeze({
     play(request) {
@@ -263,9 +341,8 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
       return run(() => {
         // Reconciliation notifications may start an intent after the entry check.
         if (acquiring()) return undefined;
-        if (profilePhase === 'ready' && !current(profileIntent)) {
-          cancelProfile(profileIntent); profilePhase = 'failed'; throw profileError('stale-intent');
-        }
+        checkProfile();
+        let candidate = hudState;
         const flags = session.beforeUpdate(nowMs);
         const result = controller.frame(nowMs, { lagging: flags.lagging, playing: flags.playing,
           readPlaying: () => session.snapshot().playing,
@@ -273,7 +350,14 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
             input.setConnected(session.snapshot().connected);
             input.setOwn(request.control.own);
             input.accumulateStep({ wholeSteps: request.wholeSteps });
-            const actions = session.afterStep(request);
+            let actions;
+            if (hudReadout) {
+              const observed = session.afterStepWithHud(request);
+              actions = observed.actions;
+              candidate = reduceHudState(candidate, hudIdentity,
+                { kind: 'step', delta: request.delta, lifecycle: observed.lifecycle });
+              if (actions.resetWorld) candidate = reduceHudState(candidate, hudIdentity, { kind: 'world-reset' });
+            } else actions = session.afterStep(request);
             if (actions.resetWorld) { input.reset(); return { ...actions }; }
             input.setConnected(session.snapshot().connected);
             const intent = input.tick({ nowMs: request.nowMs, wholeSteps: 0 },
@@ -282,9 +366,8 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
             return { ...actions, ...(intent.gazeHeading === null ? {} : { gazeHeading: intent.gazeHeading }) };
           },
         });
-        if (profilePhase === 'ready' && !current(profileIntent)) {
-          cancelProfile(profileIntent); profilePhase = 'failed'; throw profileError('stale-intent');
-        }
+        checkProfile();
+        if (hudReadout) candidate = drawHud(candidate);
         // Render, quality, step free AND held source release must all succeed first.
         session.commitControl();
         const state = session.snapshot();
@@ -292,9 +375,13 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
           profilePhase = 'committed'; profileIntent = undefined;
         }
         nativeConnected = state.connected;
+        if (hudReadout && !hasFatal && !disposed) hudState = candidate;
         return result;
       });
     },
+    render() { return draw('render', []); },
+    resize(width, height) { return draw('resize', [width, height]); },
+    hudSnapshot: () => hudState,
     event(event, viewport) {
       return run(() => {
         const view = observeInput();
