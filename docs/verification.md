@@ -38,6 +38,24 @@ pull requests, and manual dispatch. Normal tests and CI require no external
 reference and do not connect to game servers. Dependency and toolchain setup may
 access package sources. Release-plz remains dormant.
 
+## Opt-in session HUD planning
+
+The session integration passes 522 Node tests, including 112 focused session
+cases and the 38 package checks. Authored doubles cover shared control staging,
+per-command guards, exhaustive final indices, closed report copies, reentry,
+observer ordering and cleanup preserving falsy thrown values. A parent probe
+found a cyclic callback prototype could hang validation; the retained failing
+regression passes with bounded cycle detection. Independent review also exposed
+unbounded fresh-prototype chains and reflective subscription reentry; retained
+regressions cover bounded admission and the final ownership/readiness recheck.
+Both package inventories include the
+new shared validator, with 39 files per browser.
+
+These checks cover the session boundary and package graph. They do not exercise
+a native HUD report producer, controller/gameplay HUD routing, lifecycle fade,
+visible UI, browser or server acceptance. Existing default gameplay remains on
+the legacy subscription. See the [planning contract](stock-client.md#opt-in-session-hud-planning).
+
 ## Borrowed HUD packet decoders
 
 The decoder integration passes 469 native all-target tests, formatting,

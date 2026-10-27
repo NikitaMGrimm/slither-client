@@ -1,5 +1,6 @@
 // Authored, caller-clocked session. Profiles and endpoint choices are external data.
 import { unpackCommands } from './handshake-session.mjs';
+import { copyHudIngressPlan, copyHudIngressReport } from './stock-hud-contract.mjs';
 
 const freeze = Object.freeze;
 const byteLength = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype), 'length').get;
@@ -34,6 +35,75 @@ function copiedBytes(value, length, name) {
   return copy;
 }
 
+// Both modes use this one fold. Only the caller's final commit touches live cells.
+function stageControls(commands, receivedMs, initial, includeHudPlan) {
+  const next = { ...initial, actions: { ...initial.actions } };
+  const guards = [], finalCaptureIndices = [];
+  for (let index = 0; index < commands.length; index++) {
+    const command = commands[index];
+    if (includeHudPlan) {
+      guards.push({ playing: next.playing, closeRequested: next.closeRequested, deathPending: next.deathMs !== null });
+      if (command[0] === 118 && command[1] !== 2 && next.playing && !next.closeRequested) finalCaptureIndices.push(index);
+    }
+    if (command[0] === 97) {
+      next.connected = true; next.playing = true; next.phase = 'playing';
+      next.previousUiMs = receivedMs; next.uiPhase = 'in';
+    } else if (command[0] === 112) {
+      next.pingPending = false; next.lagging = false;
+    } else if (command[0] === 118) {
+      if (command[1] === 2) next.closeRequested = true;
+      else {
+        next.deathMs = receivedMs; next.lifeEnded = true; next.lagging = false;
+        next.actions = { ...next.actions, resetLag: true }; next.actionRevision++;
+        if (next.playing && !next.closeRequested) {
+          if (command[1] === 1) next.phase = 'victory';
+          else { next.closeRequested = true; next.phase = 'dead'; }
+        }
+      }
+    }
+  }
+  const plan = includeHudPlan ? copyHudIngressPlan({ schema: 1, commandCount: commands.length, guards, finalCaptureIndices }) : null;
+  return { next, plan };
+}
+
+function matchHudReport(report, commands, plan) {
+  let eventIndex = 0, captureIndex = 0, setups = 0;
+  for (let index = 0; index < commands.length; index++) {
+    const opcode = commands[index][0];
+    let expected;
+    if (opcode === 97) { expected = 'setup'; setups++; }
+    else if (opcode === 108 && plan.guards[index].playing) expected = 'leaderboard';
+    else if (plan.finalCaptureIndices[captureIndex] === index) { expected = 'final-score'; captureIndex++; }
+    const current = report.events[eventIndex];
+    if (expected) {
+      if (!current || current.commandIndex !== index || current.kind !== expected) throw new TypeError('Missing HUD event');
+      if (expected === 'leaderboard' && current.deathPending !== plan.guards[index].deathPending) throw new TypeError('Invalid HUD death guard');
+      eventIndex += expected === 'setup' ? 2 : 1;
+    } else if (current?.commandIndex === index) {
+      if (current.kind !== 'own-length-scheduled' || ![115, 110, 78, 43, 104, 114].includes(opcode)) throw new TypeError('Unexpected HUD event');
+      eventIndex++;
+    }
+  }
+  if (eventIndex !== report.events.length || setups !== report.setupDraws) throw new TypeError('Unexpected HUD events');
+}
+
+const nonSynchronousPrototypes = [async function () {}, function* () {}, async function* () {}].map(Object.getPrototypeOf);
+function synchronousHudSink(callback) {
+  if (typeof callback !== 'function') throw new TypeError('Synchronous HUD sink required');
+  const seen = new Set();
+  let prototype = callback;
+  for (let visits = 0; ; visits++) {
+    // Proxy traps can supply a fresh identity forever; bound all visits as well as cycles.
+    if (visits === 64) throw new TypeError('Synchronous HUD sink required');
+    prototype = Object.getPrototypeOf(prototype);
+    if (prototype === null) break;
+    if (seen.has(prototype) || nonSynchronousPrototypes.includes(prototype)) throw new TypeError('Synchronous HUD sink required');
+    seen.add(prototype);
+  }
+  const source = Function.prototype.toString.call(callback);
+  if (/^(?:\*|function\s*\*|async(?:\s+function\b|\s+[$\w]+|\s*\([^]*?\)\s*=>))/.test(source)) throw new TypeError('Synchronous HUD sink required');
+}
+
 /** One selected literal-IP endpoint; discovery, redirects and probes are separate. */
 export function stockEndpoint(input) {
   if (typeof input !== 'string') throw new TypeError('Endpoint string required');
@@ -58,6 +128,7 @@ export function createStockSession({ wasm, createSocket, now, maxBufferedBytes =
   integer(maxBufferedBytes, 1048576, 'send budget');
   let sink;
   let subscribed = false;
+  let withHud = false;
   let phase = 'ready';
   let connected = false;
   let playing = false;
@@ -99,29 +170,32 @@ export function createStockSession({ wasm, createSocket, now, maxBufferedBytes =
     try { sink?.state(snapshot()); } finally { notifying = false; }
   }
   function requestActions(next) { actions = { ...actions, ...next }; actionRevision++; }
-  function detach() {
+  function detach(onError) {
     if (!socket) return;
-    socket.onopen = null; socket.onmessage = null; socket.onerror = null; socket.onclose = null;
+    for (const key of ['onopen', 'onmessage', 'onerror', 'onclose']) {
+      try { socket[key] = null; } catch (error) { onError(error); }
+    }
   }
-  function stop(nextPhase, code, error) {
+  function stop(nextPhase, code, error, hasError = false) {
     if (terminal()) return;
+    const retainFailure = secondary => { if (!hasError) { hasError = true; error = secondary; } };
     phase = nextPhase; reason = code; connected = false; playing = false;
     lagging = false; pingPending = false; closeRequested = false; uiPhase = 'idle';
-    launch?.login.fill(0); launch = undefined; generation++; detach();
+    launch?.login.fill(0); launch = undefined; generation++; detach(retainFailure);
     requestActions({ resetWorld: true, connected: false });
-    if (socket && !closedSocket && socket.readyState !== 3) {
+    if (socket && !closedSocket) {
       closedSocket = true;
-      try { socket.close(); } catch (closeError) { error ??= closeError; }
+      try { if (socket.readyState !== 3) socket.close(); } catch (closeError) { retainFailure(closeError); }
     }
     // Notifications may run inside a native control callback: they must not reenter the scene.
-    try { publish(); } catch (notificationError) { error ??= notificationError; }
-    if (error) {
+    try { publish(); } catch (notificationError) { retainFailure(notificationError); }
+    if (hasError) {
       notifying = true;
       try { sink?.error(error); } catch { /* Original failure remains authoritative. */ }
       finally { notifying = false; }
     }
   }
-  function fail(error, code = 'session-failed') { stop('failed', code, error); }
+  function fail(error, code = 'session-failed') { stop('failed', code, error, true); }
   function guarded(callback) {
     if (busy) throw new Error('Session reentry');
     busy = true;
@@ -161,30 +235,29 @@ export function createStockSession({ wasm, createSocket, now, maxBufferedBytes =
       if (command[0] === 118 && command.length !== 2) throw new Error('Invalid life control');
     }
     const receivedMs = time();
-    const applied = sink.packet(bytes, false);
-    if (terminal()) throw new Error('Session stopped during packet');
-    if (applied !== undefined && (!Number.isInteger(applied) || applied < 0 || applied > 4096)) {
+    const { next, plan } = stageControls(commands, receivedMs, {
+      phase, connected, playing, lifeEnded, lagging, pingPending, closeRequested, deathMs,
+      previousUiMs, uiPhase, actions, actionRevision,
+    }, withHud);
+    const packetGeneration = generation;
+    const applied = withHud ? sink.packet(bytes, false, plan) : sink.packet(bytes, false);
+    if (terminal() || generation !== packetGeneration) throw new Error('Session stopped during packet');
+    let report;
+    if (withHud) {
+      report = copyHudIngressReport(applied, commands.length);
+      matchHudReport(report, commands, plan);
+    } else if (applied !== undefined && (!Number.isInteger(applied) || applied < 0 || applied > 4096)) {
       throw new TypeError('Synchronous packet result required');
     }
-    // No session control changes precede successful complete Rust world validation/application.
-    for (const command of commands) {
-      if (command[0] === 97) {
-        connected = true; playing = true; phase = 'playing';
-        previousUiMs = receivedMs; uiPhase = 'in';
-      } else if (command[0] === 112) {
-        pingPending = false; lagging = false;
-      } else if (command[0] === 118) {
-        if (command[1] === 2) {
-          closeRequested = true;
-        } else {
-          deathMs = receivedMs; lifeEnded = true; lagging = false;
-          requestActions({ resetLag: true });
-          if (playing && !closeRequested) {
-            if (command[1] === 1) phase = 'victory';
-            else { closeRequested = true; phase = 'dead'; }
-          }
-        }
-      }
+    // Reflection can run Proxy traps too; terminal state must win even then.
+    if (terminal() || generation !== packetGeneration) throw new Error('Session stopped during packet');
+    ({ phase, connected, playing, lifeEnded, lagging, pingPending, closeRequested, deathMs,
+      previousUiMs, uiPhase, actions, actionRevision } = next);
+    if (withHud) {
+      notifying = true;
+      try {
+        if (sink?.hud(report) !== undefined) throw new TypeError('Synchronous HUD notification required');
+      } finally { notifying = false; }
     }
     publish();
   }
@@ -220,6 +293,16 @@ export function createStockSession({ wasm, createSocket, now, maxBufferedBytes =
       const next = record(value, ['packet', 'state', 'error']);
       for (const name of ['packet', 'state', 'error']) if (typeof next[name] !== 'function') throw new TypeError('Synchronous subscriber required');
       subscribed = true; sink = next;
+      return () => { sink = undefined; };
+    },
+    subscribeWithHud(value) {
+      if (subscribed || phase !== 'ready') throw new Error('One subscriber required before Play');
+      if (!value || (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null)) throw new TypeError('Expected data record');
+      const next = record(value, ['packet', 'hud', 'state', 'error']);
+      for (const name of ['packet', 'hud', 'state', 'error']) if (typeof next[name] !== 'function') throw new TypeError('Synchronous subscriber required');
+      synchronousHudSink(next.hud);
+      if (subscribed || phase !== 'ready') throw new Error('One subscriber required before Play');
+      subscribed = true; sink = next; withHud = true;
       return () => { sink = undefined; };
     },
     play(value) {

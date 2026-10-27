@@ -64,6 +64,36 @@ cannot establish pre-motion input order. `reset_lag()` changes only the retained
 clock multiplier; a stock pong clears lag status and permits gradual recovery,
 rather than resetting that multiplier.
 
+## Opt-in session HUD planning
+
+`createStockSession.subscribeWithHud({packet, hud, state, error})` is an
+alternative to the existing subscription, selected before Play. Both use one
+subscriber and the same staged control fold. Its packet callback receives the
+complete packet, elapsed-header flag and a copied frozen plan containing each
+command's incoming lifecycle guards and every required final-score index.
+
+The callback must synchronously return a closed command-indexed report. The
+session copies and validates its shape, Setup pairs, accepted leaderboard
+headers and exhaustive final captures before publishing controls. The
+synchronous `hud` callback receives that frozen report before state notification.
+It must return `undefined`. Callback errors, incompatible reports and cleanup
+failures stop the session without replay; the original thrown value is retained,
+including `undefined`.
+Admission inspects at most 64 callback prototype links and rejects cycles or
+longer chains. It rechecks subscription ownership after reflective validation.
+
+`web/stock-hud-contract.mjs` exports pure `copyHudIngressPlan(value)` and
+`copyHudIngressReport(value, commandCount)` validators. They enforce bounded
+closed records and dense arrays without decoding packets or calculating scores.
+Reports retain BigInt object tokens and command-time score samples. The session
+matches report events to its existing decoded commands; native code remains
+responsible for score arithmetic and retained-own target resolution.
+
+This session seam is covered by authored doubles. Native HUD report production,
+controller/gameplay wiring, lifecycle fade and visible HUD remain separate.
+An error after a future native commit or observer effect cannot roll those
+effects back; the session terminates and never replays the packet.
+
 ## Desktop input
 
 `createClientInput` in `web/client-input.mjs` accepts explicit pointer geometry,
