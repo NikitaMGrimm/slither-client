@@ -1,5 +1,6 @@
 // Authored native-receiver and explicit propagation doubles. No browser semantics.
-export function createGateTestDom({ hud = false, ownedHud = false } = {}) {
+export function createGateTestDom({ hud = false, ownedHud = false, ownedPlay = false } = {}) {
+  ownedPlay = hud && ownedHud && ownedPlay;
   const nodes = new WeakMap(), eventData = new WeakMap();
   const state = value => {
     if (!nodes.has(value)) throw new TypeError('Synthetic native Node receiver');
@@ -71,7 +72,12 @@ export function createGateTestDom({ hud = false, ownedHud = false } = {}) {
       const control = controls.get(name);
       control?.hook?.(this, ...args);
       if (control && Object.hasOwn(control, 'failure')) throw control.failure;
-      return body(this, ...args);
+      const result = body(this, ...args);
+      if (ownedPlay) {
+        control?.afterHook?.(this, ...args);
+        if (control && Object.hasOwn(control, 'afterFailure')) throw control.afterFailure;
+      }
+      return result;
     };
     for (const [owner, names] of [[Node, ['nodeType', 'ownerDocument', 'parentNode', 'isConnected']],
       [Element, ['localName', 'namespaceURI']]]) {
@@ -114,7 +120,7 @@ export function createGateTestDom({ hud = false, ownedHud = false } = {}) {
     if (!inputs.has(receiver)) throw new TypeError('Synthetic Input value receiver');
     return valueState.get(receiver);
   };
-  class Input extends Element {
+  class Input extends (ownedPlay ? hudFixture.HTMLElement : Element) {
     constructor() {
       super('input'); inputs.add(this);
       valueState.set(this, { value: '', gets: 0, sets: 0, trace: [], getHook: undefined, setHook: undefined });
@@ -134,6 +140,42 @@ export function createGateTestDom({ hud = false, ownedHud = false } = {}) {
       data.value = value;
       data.afterSetHook?.(this, value);
     }
+  }
+  let playFixture, Button;
+  if (ownedPlay) {
+    const trace = [], controls = new Map(), buttons = new WeakMap();
+    const buttonState = receiver => {
+      if (!buttons.has(receiver)) throw new TypeError('Synthetic Button receiver');
+      return buttons.get(receiver);
+    };
+    const operation = (name, body) => function (...args) {
+      trace.push([name, this, ...args]);
+      const control = controls.get(name);
+      control?.hook?.(this, ...args);
+      if (control && Object.hasOwn(control, 'failure')) throw control.failure;
+      const result = body(this, ...args);
+      control?.afterHook?.(this, ...args);
+      if (control && Object.hasOwn(control, 'afterFailure')) throw control.afterFailure;
+      return result;
+    };
+    const value = Object.getOwnPropertyDescriptor(Input.prototype, 'value');
+    Object.defineProperty(Input.prototype, 'value', { ...value,
+      get: operation('inputValue', receiver => Reflect.apply(value.get, receiver, [])) });
+    for (const [property, name] of [['maxLength', 'inputMaxLength'], ['autocomplete', 'inputAutocompleteOff']]) {
+      Object.defineProperty(Input.prototype, property, { configurable: true,
+        set: operation(name, (receiver, value) => { inputValue(receiver)[property] = value; }) });
+    }
+    Button = class Button extends hudFixture.HTMLElement {
+      constructor() { super('button'); buttons.set(this, { type: 'submit', disabled: false }); }
+    };
+    for (const [property, name] of [['type', 'buttonType'], ['disabled', 'buttonDisabled']]) {
+      Object.defineProperty(Button.prototype, property, { configurable: true,
+        set: operation(name, (receiver, value) => {
+          buttonState(receiver)[property] = value;
+          if (property === 'disabled') state(receiver).disabled = value;
+        }) });
+    }
+    playFixture = { trace, controls, buttonState };
   }
   const documents = new WeakSet();
   class Document extends Node {
@@ -162,7 +204,9 @@ export function createGateTestDom({ hud = false, ownedHud = false } = {}) {
     };
     operation(Document, 'createElement', (receiver, tag) => {
       documentState(receiver);
-      const element = new hudFixture.HTMLElement(tag); state(element).owner = receiver; return element;
+      const element = ownedPlay && tag === 'input' ? new Input()
+        : ownedPlay && tag === 'button' ? new Button() : new hudFixture.HTMLElement(tag);
+      state(element).owner = receiver; return element;
     });
     operation(Document, 'createTextNode', (receiver, text) => {
       documentState(receiver);
@@ -185,6 +229,20 @@ export function createGateTestDom({ hud = false, ownedHud = false } = {}) {
       super(type, { cancelable: properties.cancelable ?? true });
       eventData.set(this, { type, target: properties.target ?? null, prevented: false, stopped: false,
         trace: [], ...properties });
+      if (ownedPlay && properties.trustedDescriptor !== 'missing') {
+        const descriptor = { configurable: properties.trustedDescriptor === 'configurable', enumerable: true };
+        if (properties.trustedDescriptor === 'data') descriptor.value = properties.trusted === true;
+        else {
+          descriptor.get = function () {
+            if (!eventData.has(this)) throw new TypeError('Synthetic trusted Event receiver');
+            const data = eventData.get(this);
+            if (Object.hasOwn(data, 'getTrustedFailure')) throw data.getTrustedFailure;
+            return data.trusted === true;
+          };
+          if (properties.trustedDescriptor === 'setter') descriptor.set = () => {};
+        }
+        Object.defineProperty(this, 'isTrusted', descriptor);
+      }
       for (const name of ['clientX', 'clientY', 'deltaY']) if (name in properties) this[name] = properties[name];
     }
     get type() {
@@ -202,14 +260,24 @@ export function createGateTestDom({ hud = false, ownedHud = false } = {}) {
     preventDefault() {
       if (!eventData.has(this)) return Reflect.apply(Event.prototype.preventDefault, this, []);
       const data = eventData.get(this); data.trace.push('prevent');
+      if (ownedPlay) data.preventHook?.(this);
       if (Object.hasOwn(data, 'preventFailure')) throw data.preventFailure;
       if (this.cancelable) data.prevented = true;
+      if (ownedPlay) {
+        data.afterPreventHook?.(this);
+        if (Object.hasOwn(data, 'afterPreventFailure')) throw data.afterPreventFailure;
+      }
     }
     stopImmediatePropagation() {
       if (!eventData.has(this)) return Reflect.apply(Event.prototype.stopImmediatePropagation, this, []);
       const data = eventData.get(this); data.trace.push('stop');
+      if (ownedPlay) data.stopHook?.(this);
       if (Object.hasOwn(data, 'stopFailure')) throw data.stopFailure;
       data.stopped = true;
+      if (ownedPlay) {
+        data.afterStopHook?.(this);
+        if (Object.hasOwn(data, 'afterStopFailure')) throw data.afterStopFailure;
+      }
     }
   }
   const eventBrands = new Map();
@@ -241,7 +309,7 @@ export function createGateTestDom({ hud = false, ownedHud = false } = {}) {
   eventBrands.set(Pointer, new WeakSet());
   eventGetter(Pointer, 'pointerId', 1); eventGetter(Pointer, 'pointerType', 'mouse'); eventGetter(Pointer, 'isPrimary', true);
   return { Node, Element, Input, Document, FenceEvent, Keyboard, InputEvent, Mouse, Pointer, state, eventData, inputValue,
-    ...(hudFixture ? { hud: hudFixture } : {}) };
+    ...(hudFixture ? { hud: hudFixture } : {}), ...(playFixture ? { Button, ownedPlay: playFixture } : {}) };
 }
 
 export function attachGateTestRealm(dom, realm, document, actualRealm) {
@@ -250,6 +318,7 @@ export function attachGateTestRealm(dom, realm, document, actualRealm) {
     MouseEvent: dom.Mouse, PointerEvent: dom.Pointer });
   if (dom.hud) Object.assign(realm, { HTMLElement: dom.hud.HTMLElement, CharacterData: dom.hud.CharacterData,
     CSSStyleDeclaration: dom.hud.CSSStyleDeclaration });
+  if (dom.ownedPlay) realm.HTMLButtonElement = dom.Button;
   const location = realm.location;
   let href = location.href;
   Object.defineProperty(location, 'href', { configurable: true, get() {

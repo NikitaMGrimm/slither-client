@@ -38,6 +38,26 @@ pull requests, and manual dispatch. Normal tests and CI require no external
 reference and do not connect to game servers. Dependency and toolchain setup may
 access package sources. Release-plz remains dormant.
 
+## Owned Play entry and controls
+
+The initial frozen runtime integration passes 277 focused Node tests with zero
+skips: 16 new action/runtime cases, 152 existing entry/bootstrap/profile/nickname
+cases, 53 synthetic package cases, 40 native-control capture cases and 16 view
+cases. The complete actual gate/runtime/view/gameplay/profile/session graph runs
+in one VM realm with authored native/environment and generated-Wasm doubles.
+An admitted trusted click reaches the existing acquisition and staged source
+release/socket seam; no real request or socket is used. Genuine unchanged-mode
+and package-selection failures are retained outside Git.
+
+Retained regressions cover foreign bound asynchronous callback rejection before
+initialization and panel adoption into another Document without foreign
+publication/removal. Callback validation uses bounded own-data descriptor checks
+without invoking the callback or tag getters. The accepted attempt stays locked
+and late settlements become inert after disposal. Throwing cleanup establishes
+attempted release only. Browser trusted-event descriptors, native
+editing/default actions, CSS/pixels, installed-host/CSP, profile HTTP and
+game/server acceptance remain separate.
+
 ## Owned HUD entry and construction
 
 The frozen construction/builder/runtime integration passes 245 focused Node
