@@ -6,6 +6,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createStockSkinAdapter } from '../web/stock-skin-provider.mjs';
 import { createStockClient } from '../web/stock-client.mjs';
 import { createStockEntityAssets } from '../web/stock-food-provider.mjs';
+import { createStockGameplay } from '../web/stock-gameplay.mjs';
+import { syntheticChallenge } from './reference-parity.mjs';
 
 // Original authored synthetic packets, live-source doubles and Canvas command
 // recorder. This exercises real Wasm, without raster pixels or a host runtime.
@@ -384,6 +386,110 @@ export function stockRenderSmoke(wasm, { control = true } = {}) {
           ['advance_with_control', 'quality', 'free', 'render']);
         cases.push('real-premotion-control-own-readout-same-tick-gaze');
       } finally { f.close(); }
+      {
+        const f = fixture();
+        try {
+          seed(f);
+          let playing = true, reads = 0;
+          const flags = [];
+          const advance = f.quality.advance.bind(f.quality);
+          const statistics = f.quality.update_statistics.bind(f.quality);
+          f.quality.advance = (step, value) => { flags.push(['quality', value]); return advance(step, value); };
+          f.quality.update_statistics = (...args) => { flags.push(['statistics', args[2]]); return statistics(...args); };
+          checkOperation(f, () => f.client.frame(40, { playing: true,
+            control() { playing = false; return { resetWorld: true, connected: false }; },
+            readPlaying() {
+              reads++;
+              eq(f.scene.control_view().own, null, 'Playing is observed outside the completed native borrow');
+              eq(f.steps.at(-1).freed, false);
+              return playing;
+            },
+            onStep() { playing = true; },
+          }));
+          eq(reads, 1);
+          eq(flags, [['quality', false], ['statistics', false]], 'Both quality phases share the post-lifecycle value');
+          eq(f.scene.food_state().sourceCount, 0);
+          eq(f.scene.prey_state().sourceCount, 0);
+          eq(f.steps.at(-1).freed, true);
+          cases.push('real-post-lifecycle-playing-and-populated-registry-reset');
+        } finally { f.close(); }
+      }
+      {
+        const f = fixture();
+        let gameplay;
+        try {
+          let now = 0, nextTimer = 0;
+          const queue = [], timers = new Map(), sockets = [], fatal = [], flags = [];
+          const advance = f.quality.advance.bind(f.quality);
+          const statistics = f.quality.update_statistics.bind(f.quality);
+          f.quality.advance = (step, value) => { flags.push(['quality', value]); return advance(step, value); };
+          f.quality.update_statistics = (...args) => { flags.push(['statistics', args[2]]); return statistics(...args); };
+          const drain = () => {
+            let count = 0;
+            while (queue.length) {
+              assert.ok(++count <= 1000, 'Bounded authored microtask fixture');
+              queue.shift()();
+            }
+          };
+          gameplay = createStockGameplay({ scene: f.scene, quality: f.quality, controller: f.client, wasm,
+            now: () => now, defer: callback => queue.push(callback),
+            setInterval(callback, period) { eq(period, 25); const id = ++nextTimer; timers.set(id, callback); return id; },
+            clearInterval: id => timers.delete(id), onStatus() {}, onFatal: error => fatal.push(error),
+            createSocket(endpoint) {
+              eq(endpoint, 'ws://192.0.2.9:1234/slither');
+              eq(f.held, null, 'Socket construction follows held-source release');
+              eq(f.steps.at(-1).freed, true, 'Socket construction follows owned-step release');
+              const socket = { readyState: 0, bufferedAmount: 0, sent: [], closes: 0,
+                send(bytes) { this.sent.push(Array.from(bytes)); },
+                close() { this.closes++; this.readyState = 3; } };
+              sockets.push(socket); return socket;
+            },
+          });
+          gameplay.play({ endpoint: 'ws://192.0.2.9:1234/slither',
+            profile: { clientVersion: 7, password: Uint8Array.from({ length: 20 }, (_, i) => i + 1), protocolVersion: 19 },
+            nickname: 'Synthetic', skin: 27, customSkin: new Uint8Array() });
+          eq(sockets.length, 0);
+          gameplay.frame(now); drain();
+          eq(sockets.length, 1);
+          const socket = sockets[0]; socket.readyState = 1; socket.onopen(); drain();
+          eq(socket.sent.slice(0, 2), [[1], [99, 0]]);
+          socket.onmessage({ data: Uint8Array.from([54, ...syntheticChallenge('B'.repeat(27))]).buffer }); drain();
+          eq(socket.sent[2].length, 27); eq(socket.sent[3][0], 115);
+          now = 40;
+          socket.onmessage({ data: bundle(setup(), snake(0, 27), food(), prey(31), setup()).buffer }); drain();
+          eq(gameplay.diagnostics().session.connected, true);
+          ok(f.scene.food_state().sourceCount > 0); ok(f.scene.prey_state().sourceCount > 0);
+          now = 48;
+          gameplay.event({ type: 'pointermove', clientX: 480, clientY: 100 }, { width: 960, height: 540 });
+          gameplay.frame(now); drain();
+          eq(f.scene.control_view().own.gazeHeading, -Math.PI / 2);
+          ok(JSON.parse(f.scene.snapshot()).own.eyes.pupilY < 0);
+          now = 540;
+          for (const callback of [...timers.values()]) callback();
+          drain(); eq(timers.size, 0);
+          now = 600;
+          socket.onmessage({ data: Uint8Array.of(115, 0, 0, 1).buffer }); drain();
+          eq(gameplay.diagnostics().session.playing, true, 'Own removal is not session life-end');
+          now = 640;
+          socket.onmessage({ data: Uint8Array.of(118, 0).buffer }); drain();
+          for (let count = 0; gameplay.diagnostics().session.playing && count < 60; count++) {
+            now = Math.max(now + 40, 2241);
+            if (gameplay.diagnostics().session.pingPending) { socket.onmessage({ data: Uint8Array.of(112).buffer }); drain(); }
+            gameplay.frame(now); drain();
+          }
+          eq(fatal, []);
+          eq(gameplay.diagnostics().session.playing, false);
+          eq(gameplay.diagnostics().session.connected, false);
+          eq(flags.slice(-2), [['quality', false], ['statistics', false]]);
+          eq(socket.closes, 1);
+          eq(f.scene.control_view().own, null);
+          eq(f.scene.food_state().sourceCount, 0); eq(f.scene.prey_state().sourceCount, 0);
+          eq(f.held, null); eq(f.captures, f.ends);
+          cases.push('real-gameplay-session-input-render-and-life-end-composition');
+        } finally {
+          try { gameplay?.dispose(); } finally { f.close(); }
+        }
+      }
       for (const malformed of [() => Promise.resolve({}), () => ({ unknownAction: true }), () => ({ gazeHeading: NaN }),
         () => Object.defineProperty({}, 'gazeHeading', { get() { throw new Error('Getter must not run'); }, enumerable: true })]) {
         const f = fixture();

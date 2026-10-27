@@ -208,6 +208,104 @@ test('optional control routes one native pre-motion advance and shares its retur
   }
 });
 
+test('readPlaying samples the same-frame lifecycle once after native return for both quality and statistics', () => {
+  for (const method of ['update', 'frame']) {
+    const f = fixture(); let playing = true, reads = 0, frees = 0;
+    const step = { whole_steps: 0, delta: 0, free() { frees++; f.events.push('free-step'); } };
+    f.scene.advance_with_control = (now, lagging, control) => {
+      f.events.push(['advance-control', now, lagging]);
+      control({ nowMs: now, wholeSteps: 0, delta: 0, control: {} });
+      f.events.push('native-return'); return step;
+    };
+    const view = f.client[method](8, { playing: true,
+      control() { f.events.push('lifecycle'); playing = false; return {}; },
+      readPlaying(...args) {
+        assert.deepEqual(args, []); assert.equal(frees, 0);
+        assert.equal(f.active, method === 'frame');
+        assert.equal(f.events.at(-1), 'native-return'); reads++; f.events.push('read-playing'); return playing;
+      },
+      onStep() { f.events.push('observed'); playing = true; },
+    });
+    const expected = [...(method === 'frame' ? ['begin'] : []), ['advance-control', 8, false], 'lifecycle',
+      'native-return', 'read-playing', ['quality-advance', false], 'free-step', 'observed', ['statistics', 8, 0, false]];
+    assert.deepEqual(f.events.slice(0, expected.length), expected);
+    assert.equal(reads, 1); assert.equal(frees, 1); assert.equal(view.stopped, false);
+    assert.equal(view.draws, method === 'frame' ? 1 : 0);
+    assert.equal(f.events.filter(event => event === 'render').length, method === 'frame' ? 1 : 0);
+    assert.equal(f.active, false);
+  }
+});
+
+test('readPlaying omission preserves legacy and zero-step control playing paths without extra reads', () => {
+  const legacy = fixture(); legacy.client.update(0, { playing: false, readPlaying: undefined });
+  assert.deepEqual(legacy.events, [['advance', 0, false], ['quality-advance', false], 'free-step', ['statistics', 0, 0, false]]);
+  for (const withReader of [false, true]) {
+    const f = fixture(); let reads = 0, playing = false;
+    f.scene.advance_with_control = (now, _lagging, control) => {
+      f.events.push('advance-control'); control({ nowMs: now, wholeSteps: 0, delta: 0, control: {} });
+      return { free() { f.events.push('free-step'); } };
+    };
+    f.client.update(0, { playing: true, control() { playing = false; return {}; },
+      ...(withReader ? { readPlaying() { reads++; return playing; } } : {}) });
+    assert.deepEqual(f.events, ['advance-control', ['quality-advance', !withReader], 'free-step', ['statistics', 0, 0, !withReader]]);
+    assert.equal(reads, Number(withReader));
+  }
+});
+
+test('readPlaying callback shape and required control reject before capture or any advance', () => {
+  for (const method of ['update', 'frame']) {
+    const f = fixture();
+    for (const readPlaying of [null, false, 0, {}, Promise.resolve(false), async () => false, function* () {}]) {
+      assert.throws(() => f.client[method](8, { control() { return {}; }, readPlaying }), /Synchronous readPlaying/);
+      assert.deepEqual(f.events, []); assert.equal(f.client.diagnostics().stopped, false);
+    }
+    assert.throws(() => f.client[method](8, { readPlaying: () => false }), /readPlaying requires control/);
+    assert.deepEqual(f.events, []); assert.equal(f.client.diagnostics().stopped, false);
+  }
+});
+
+test('readPlaying throw or nonboolean frees once, skips remaining consumers and preserves primary through cleanup failure', () => {
+  const failure = new Error('playing state read failed');
+  const cases = [
+    { read() { throw failure; }, primary: failure },
+    { read() { throw undefined; }, primary: undefined },
+    { read() { throw null; }, primary: null },
+    ...[undefined, null, 0, 1, 'false', {}, Promise.resolve(false), new Boolean(false)].map(value => ({ read: () => value, invalid: true })),
+  ];
+  for (const method of ['update', 'frame']) {
+    for (const example of cases) {
+      const f = fixture(); let reads = 0, frees = 0;
+      f.scene.advance_with_control = (_now, _lagging, control) => {
+        f.events.push('advance-control'); control({ control: {} });
+        return { free() { frees++; f.events.push('free-step'); } };
+      };
+      const end = f.adapter.endOperation;
+      f.adapter.endOperation = () => { end(); throw new Error('secondary cleanup failure'); };
+      let caught = false;
+      try { f.client[method](8, { control: () => ({}), readPlaying() { reads++; return example.read(); } }); }
+      catch (error) {
+        caught = true;
+        if (example.invalid) assert.match(String(error), /Explicit boolean required/);
+        else assert.equal(error, example.primary);
+      }
+      assert.equal(caught, true); assert.equal(reads, 1); assert.equal(frees, 1);
+      assert.deepEqual(f.events, [...(method === 'frame' ? ['begin'] : []), 'advance-control', 'free-step', ...(method === 'frame' ? ['end'] : [])]);
+      assert.equal(f.active, false); assert.equal(f.client.diagnostics().stopped, true);
+      assert.equal(f.client.diagnostics().draws, 0);
+      assert.throws(() => f.client[method](16), /stopped/);
+      assert.doesNotThrow(() => f.client.dispose(), 'operation guard released despite both failures');
+    }
+  }
+});
+
+test('native control failure never samples readPlaying or consumes quality/statistics', () => {
+  const f = fixture(); let reads = 0; const failure = new Error('native control failed');
+  f.scene.advance_with_control = () => { throw failure; };
+  assert.throws(() => f.client.frame(8, { control: () => ({}), readPlaying() { reads++; return false; } }), error => error === failure);
+  assert.equal(reads, 0); assert.deepEqual(f.events, ['begin', 'end']);
+  assert.equal(f.active, false); assert.equal(f.client.diagnostics().stopped, true);
+});
+
 test('control validation rejects invalid hooks, missing native capability and competing legacy gaze before effects', () => {
   for (const method of ['update', 'frame']) {
     const f = fixture();

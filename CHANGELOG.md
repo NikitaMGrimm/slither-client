@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add explicit armed-reload game-page activation, MAIN-world source borrowing
+  and authored session/input composition to both extension packages. Require
+  successful paint commitments for generated sources and sample post-lifecycle
+  playing state for current quality/statistics. Full live-host/gameplay
+  acceptance and profile acquisition remain separate.
+
 - Add a caller-owned stock session with explicit profiles/endpoints, staged Play,
   complete Setup ingress, ping/lag and life-end actions. Synthetic socket and
   real-Wasm checks remain separate from active extension gameplay acceptance.
