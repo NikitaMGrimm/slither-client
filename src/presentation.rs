@@ -28,6 +28,7 @@ mod length;
 mod prey;
 mod prey_painter;
 mod quality;
+mod score;
 mod single_eye;
 mod snake;
 
@@ -80,6 +81,7 @@ pub use prey_painter::{
     PreyPaintPass, PreyPaintPlan, plan_prey,
 };
 pub use quality::{QualityMode, QualitySnapshot, QualityState};
+pub use score::{ScoreError, ScoreTables};
 pub use single_eye::{FaceGeometry, SingleEyeGeometry, SingleEyeLayout};
 pub use snake::{AnchorView, SnakeMetrics, SnakePresentation};
 
