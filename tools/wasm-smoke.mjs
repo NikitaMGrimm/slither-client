@@ -13,6 +13,7 @@ import { stockRenderSmoke } from './stock-render-smoke.mjs';
 import { stockSessionSmoke } from './stock-session-smoke.mjs';
 import { stockProfileSmoke } from './stock-profile-smoke.mjs';
 import { stockScoreSmoke } from './stock-score-smoke.mjs';
+import { stockHudSmoke } from './stock-hud-smoke.mjs';
 
 // Entirely synthetic ABI integration; no reference files or network are used.
 const wasm = await loadWasm();
@@ -106,3 +107,4 @@ console.log('Synthetic live-source stock adapter ABI passed:', stockRenderSmoke(
 console.log('Synthetic caller-owned stock session ABI passed:', stockSessionSmoke(wasm));
 console.log('Synthetic explicit profile/Play composition ABI passed:', await stockProfileSmoke(wasm));
 console.log('Synthetic retained-own score-state ABI passed:', stockScoreSmoke(wasm));
+console.log('Synthetic command-indexed HUD ABI passed:', stockHudSmoke(wasm));

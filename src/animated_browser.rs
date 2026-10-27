@@ -19,7 +19,8 @@ use crate::{
         AppearancePresentation, ArenaEdgeInput, ArenaEdgePlan, BodyPaintError, BodyPaintInput,
         BodyPaintPlan, BodyPaintQuality, BodyPaintView, BodyPaintVisual, ClientControlActions,
         ClientControlView, ClientScoreView, CurveInput, CurveOutput, EyeLayoutInput, FaceGeometry,
-        FacePresentation, FoodImageCommand, FoodPaintInput, FoodPaintPlan, MAX_BODY_PAINT_COMMANDS,
+        FacePresentation, FoodImageCommand, FoodPaintInput, FoodPaintPlan, HudCommandGuard,
+        HudIngressEventKind, HudIngressPlan, HudIngressReport, MAX_BODY_PAINT_COMMANDS,
         MAX_DRAW_SAMPLES, MAX_RETAINED_SNAKES, OrdinaryAntennaGeometry, PairedSideLayout,
         PreparedAntenna, PreparedSnake, PreyEaterPose, PreyImageCommand, PreyPaintInput,
         PreyPaintPlan, QualitySnapshot, ScoreError, ScoreStatus, SingleEyeLayout,
@@ -126,6 +127,142 @@ fn score_view_record(view: ClientScoreView) -> Result<JsValue, JsValue> {
         ("score", score),
         ("error", reason),
     ])
+}
+
+// Both helpers catch every JavaScript reflection/copy/freeze failure at the
+// borrowed Wasm boundary. The shared authored contract owns the closed grammar.
+#[wasm_bindgen(module = "/web/stock-hud-contract.mjs")]
+extern "C" {
+    #[wasm_bindgen(catch, js_name = copyHudIngressPlan)]
+    fn copy_hud_plan(value: &JsValue) -> Result<JsValue, JsValue>;
+    #[wasm_bindgen(catch, js_name = copyHudIngressReport)]
+    fn copy_hud_report(value: &JsValue, command_count: usize) -> Result<JsValue, JsValue>;
+}
+
+struct OwnedHudPlan {
+    guards: Vec<HudCommandGuard>,
+    captures: Vec<usize>,
+}
+
+impl OwnedHudPlan {
+    fn parse(value: &JsValue) -> Result<Self, JsValue> {
+        let value = copy_hud_plan(value)?;
+        let get = |value: &JsValue, key: &str| js_sys::Reflect::get(value, &key.into());
+        let count = crate::body_browser::integer(get(&value, "commandCount")?, 1, 4096)?;
+        let guards = get(&value, "guards")?;
+        let captures = get(&value, "finalCaptureIndices")?;
+        let capture_count = crate::body_browser::integer(get(&captures, "length")?, 0, count)?;
+        let mut result = Self {
+            guards: Vec::new(),
+            captures: Vec::new(),
+        };
+        result
+            .guards
+            .try_reserve(count)
+            .map_err(|_| error("HUD plan allocation failed"))?;
+        result
+            .captures
+            .try_reserve(capture_count)
+            .map_err(|_| error("HUD plan allocation failed"))?;
+        for index in 0..count {
+            let guard = get(&guards, &index.to_string())?;
+            result.guards.push(HudCommandGuard {
+                playing: crate::body_browser::flag(get(&guard, "playing")?)?,
+                close_requested: crate::body_browser::flag(get(&guard, "closeRequested")?)?,
+                death_pending: crate::body_browser::flag(get(&guard, "deathPending")?)?,
+            });
+        }
+        for index in 0..capture_count {
+            result.captures.push(crate::body_browser::integer(
+                get(&captures, &index.to_string())?,
+                0,
+                count - 1,
+            )?);
+        }
+        Ok(result)
+    }
+
+    fn borrowed(&self) -> HudIngressPlan<'_> {
+        HudIngressPlan {
+            schema: 1,
+            command_count: self.guards.len(),
+            guards: &self.guards,
+            final_capture_indices: &self.captures,
+        }
+    }
+}
+
+fn hud_report_record(report: &HudIngressReport) -> Result<JsValue, JsValue> {
+    let events = js_sys::Array::new();
+    for (index, event) in report.events().iter().enumerate() {
+        let command = ("commandIndex", JsValue::from(event.command_index as f64));
+        let value = match event.kind {
+            HudIngressEventKind::Setup { table_max } => record([
+                command,
+                ("kind", "setup".into()),
+                ("tableMax", table_max.into()),
+            ])?,
+            HudIngressEventKind::SetupDraw { view } => record([
+                command,
+                ("kind", "setup-draw".into()),
+                ("view", score_view_record(view)?),
+            ])?,
+            HudIngressEventKind::OwnLengthScheduled { token } => record([
+                command,
+                ("kind", "own-length-scheduled".into()),
+                ("token", serial(token.serial())),
+            ])?,
+            HudIngressEventKind::Leaderboard {
+                local_row,
+                rank,
+                population,
+                death_pending,
+            } => record([
+                command,
+                ("kind", "leaderboard".into()),
+                ("localRow", local_row.into()),
+                ("rank", rank.into()),
+                ("population", population.into()),
+                ("deathPending", death_pending.into()),
+            ])?,
+            HudIngressEventKind::FinalScore { view } => record([
+                command,
+                ("kind", "final-score".into()),
+                ("view", score_view_record(view)?),
+            ])?,
+        };
+        if !js_sys::Reflect::set(&events, &(index as u32).into(), &value)? {
+            return Err(error("could not construct HUD events"));
+        }
+    }
+    let value = record([
+        ("schema", report.schema().into()),
+        ("commandCount", (report.command_count() as f64).into()),
+        ("setupDraws", (report.setup_draws() as f64).into()),
+        ("events", events.into()),
+    ])?;
+    copy_hud_report(&value, report.command_count())
+}
+
+enum ApplyRenderResult {
+    Legacy(u32),
+    Hud(JsValue),
+}
+
+impl ApplyRenderResult {
+    fn legacy(self) -> Result<u32, JsValue> {
+        match self {
+            Self::Legacy(count) => Ok(count),
+            Self::Hud(_) => Err(error("unexpected HUD render result")),
+        }
+    }
+
+    fn hud(self) -> Result<JsValue, JsValue> {
+        match self {
+            Self::Hud(report) => Ok(report),
+            Self::Legacy(_) => Err(error("missing HUD render result")),
+        }
+    }
 }
 
 fn control_actions(value: &JsValue) -> Result<ClientControlActions, JsValue> {
@@ -769,7 +906,9 @@ impl AnimatedScene {
                 face: resolve_draw_face,
             },
             quality.applied(),
+            None,
         )
+        .and_then(ApplyRenderResult::legacy)
     }
 
     /// Standard-body counterpart of the ordered Setup transaction.
@@ -802,7 +941,9 @@ impl AnimatedScene {
             DrawSize::new(width, height)?,
             DrawLane::Standard(resolve_recipe),
             quality.applied(),
+            None,
         )
+        .and_then(ApplyRenderResult::legacy)
     }
 
     /// Apply all factories and draw every Setup using basic bodies and retained prey.
@@ -841,7 +982,9 @@ impl AnimatedScene {
                 face: resolve_draw_face,
             },
             quality.applied(),
+            None,
         )
+        .and_then(ApplyRenderResult::legacy)
     }
 
     /// Standard-body counterpart including retained prey in every ordered Setup draw.
@@ -875,7 +1018,9 @@ impl AnimatedScene {
             DrawSize::new(width, height)?,
             DrawLane::Standard(resolve_recipe),
             quality.applied(),
+            None,
         )
+        .and_then(ApplyRenderResult::legacy)
     }
 
     /// Submit one retained-food draw at the desired backing size, without update.
@@ -966,7 +1111,9 @@ impl AnimatedScene {
                 random: resolve_random,
             },
             quality.applied(),
+            None,
         )
+        .and_then(ApplyRenderResult::legacy)
     }
 
     /// Draw with retained appearance metadata and explicit ordered random units.
@@ -1003,7 +1150,9 @@ impl AnimatedScene {
                 random: resolve_random,
             },
             quality.applied(),
+            None,
         )
+        .and_then(ApplyRenderResult::legacy)
     }
 
     /// Draw with retained appearance metadata and explicit ordered random units.
@@ -1043,7 +1192,9 @@ impl AnimatedScene {
                 random: resolve_random,
             },
             quality.applied(),
+            None,
         )
+        .and_then(ApplyRenderResult::legacy)
     }
 
     /// Draw with retained appearance metadata and explicit ordered random units.
@@ -1081,7 +1232,9 @@ impl AnimatedScene {
                 random: resolve_random,
             },
             quality.applied(),
+            None,
         )
+        .and_then(ApplyRenderResult::legacy)
     }
 
     /// Draw with retained appearance metadata and explicit ordered random units.
@@ -1277,7 +1430,9 @@ impl AnimatedScene {
                 random: resolve_random,
             },
             quality.applied(),
+            None,
         )
+        .and_then(ApplyRenderResult::legacy)
     }
 
     /// Submit ordered standard-body Setup draws with complete tagged face metadata.
@@ -1314,7 +1469,9 @@ impl AnimatedScene {
                 random: resolve_random,
             },
             quality.applied(),
+            None,
         )
+        .and_then(ApplyRenderResult::legacy)
     }
 
     /// Include retained prey in every ordered tagged-face Setup draw.
@@ -1354,7 +1511,9 @@ impl AnimatedScene {
                 random: resolve_random,
             },
             quality.applied(),
+            None,
         )
+        .and_then(ApplyRenderResult::legacy)
     }
 
     /// Share source and image budgets across standard-body Setup draws with prey.
@@ -1392,7 +1551,52 @@ impl AnimatedScene {
                 random: resolve_random,
             },
             quality.applied(),
+            None,
         )
+        .and_then(ApplyRenderResult::legacy)
+    }
+
+    /// Apply one HUD-enabled transaction and report command-time score observations.
+    /// Requires explicitly enabled score tracking; output is deeply frozen before submission.
+    #[allow(clippy::too_many_arguments)]
+    pub fn apply_frame_and_render_standard_with_face_presentation_and_prey_and_hud(
+        &mut self,
+        bytes: &[u8],
+        elapsed_header: bool,
+        resolve_appearance: &js_sys::Function,
+        resolve_food: &js_sys::Function,
+        resolve_prey: &js_sys::Function,
+        target: HtmlCanvasElement,
+        palette_0: HtmlCanvasElement,
+        palette_1: HtmlCanvasElement,
+        palette_2: HtmlCanvasElement,
+        background: HtmlImageElement,
+        width: f64,
+        height: f64,
+        resolve_recipe: &js_sys::Function,
+        resolve_random: &js_sys::Function,
+        quality: &DesktopQuality,
+        plan: JsValue,
+    ) -> Result<JsValue, JsValue> {
+        let plan = OwnedHudPlan::parse(&plan)?;
+        self.apply_and_render(
+            bytes,
+            elapsed_header,
+            resolve_appearance,
+            resolve_food,
+            Some(resolve_prey),
+            target,
+            [palette_0, palette_1, palette_2],
+            background,
+            DrawSize::new(width, height)?,
+            DrawLane::StandardFace {
+                recipe: resolve_recipe,
+                random: resolve_random,
+            },
+            quality.applied(),
+            Some(plan.borrowed()),
+        )
+        .and_then(ApplyRenderResult::hud)
     }
 
     /// Draw tagged faces at the requested backing size without advancing update clocks.
@@ -2461,7 +2665,8 @@ impl AnimatedScene {
         size: DrawSize,
         lane: DrawLane<'_>,
         applied: QualitySnapshot,
-    ) -> Result<u32, JsValue> {
+        hud: Option<HudIngressPlan<'_>>,
+    ) -> Result<ApplyRenderResult, JsValue> {
         let entry = DrawSize::entry(&target);
         let mut prepared = self.client.clone();
         let food_sources = RefCell::new(self.food_sources.clone());
@@ -2548,62 +2753,88 @@ impl AnimatedScene {
                 Ok(())
             };
         let header = elapsed_header_kind(elapsed_header);
-        if lane.with_face_presentation() && resolve_prey.is_some() {
-            prepared.apply_frame_with_face_presentation_and_all_factories_and_setup(
-                bytes,
-                header,
-                &mut appearance,
-                &mut food_factory,
-                &mut prey_factory,
-                &mut on_setup,
-            )
-        } else if lane.with_face_presentation() {
-            prepared.apply_frame_with_face_presentation_and_factories_and_setup(
-                bytes,
-                header,
-                &mut appearance,
-                &mut food_factory,
-                &mut on_setup,
-            )
-        } else if lane.with_antenna() && resolve_prey.is_some() {
-            prepared.apply_frame_with_appearance_and_all_factories_and_setup(
-                bytes,
-                header,
-                |input| paired_presentation(appearance(input)?),
-                &mut food_factory,
-                &mut prey_factory,
-                &mut on_setup,
-            )
-        } else if lane.with_antenna() {
-            prepared.apply_frame_with_appearance_and_factories_and_setup(
-                bytes,
-                header,
-                |input| paired_presentation(appearance(input)?),
-                &mut food_factory,
-                &mut on_setup,
-            )
-        } else if resolve_prey.is_some() {
-            prepared.apply_frame_with_all_factories_and_setup(
-                bytes,
-                header,
-                |input| Ok::<_, ResolveError>(paired_presentation(appearance(input)?)?.face),
-                &mut food_factory,
-                &mut prey_factory,
-                &mut on_setup,
+        let report = if let Some(plan) = hud {
+            Some(
+                prepared
+                    .apply_frame_with_face_presentation_and_all_factories_and_setup_and_hud(
+                        bytes,
+                        header,
+                        &mut appearance,
+                        &mut food_factory,
+                        &mut prey_factory,
+                        &mut on_setup,
+                        plan,
+                    )
+                    .map_err(|e: ResolveError| e.0)?,
             )
         } else {
-            prepared.apply_frame_with_factories_and_setup(
-                bytes,
-                header,
-                |input| Ok::<_, ResolveError>(paired_presentation(appearance(input)?)?.face),
-                &mut food_factory,
-                &mut on_setup,
-            )
-        }
-        .map_err(|e| e.0)?;
+            if lane.with_face_presentation() && resolve_prey.is_some() {
+                prepared.apply_frame_with_face_presentation_and_all_factories_and_setup(
+                    bytes,
+                    header,
+                    &mut appearance,
+                    &mut food_factory,
+                    &mut prey_factory,
+                    &mut on_setup,
+                )
+            } else if lane.with_face_presentation() {
+                prepared.apply_frame_with_face_presentation_and_factories_and_setup(
+                    bytes,
+                    header,
+                    &mut appearance,
+                    &mut food_factory,
+                    &mut on_setup,
+                )
+            } else if lane.with_antenna() && resolve_prey.is_some() {
+                prepared.apply_frame_with_appearance_and_all_factories_and_setup(
+                    bytes,
+                    header,
+                    |input| paired_presentation(appearance(input)?),
+                    &mut food_factory,
+                    &mut prey_factory,
+                    &mut on_setup,
+                )
+            } else if lane.with_antenna() {
+                prepared.apply_frame_with_appearance_and_factories_and_setup(
+                    bytes,
+                    header,
+                    |input| paired_presentation(appearance(input)?),
+                    &mut food_factory,
+                    &mut on_setup,
+                )
+            } else if resolve_prey.is_some() {
+                prepared.apply_frame_with_all_factories_and_setup(
+                    bytes,
+                    header,
+                    |input| Ok::<_, ResolveError>(paired_presentation(appearance(input)?)?.face),
+                    &mut food_factory,
+                    &mut prey_factory,
+                    &mut on_setup,
+                )
+            } else {
+                prepared.apply_frame_with_factories_and_setup(
+                    bytes,
+                    header,
+                    |input| Ok::<_, ResolveError>(paired_presentation(appearance(input)?)?.face),
+                    &mut food_factory,
+                    &mut on_setup,
+                )
+            }
+            .map_err(|e| e.0)?;
+            None
+        };
         let foods = food_sources.into_inner();
         let preys = prey_sources.into_inner();
         let count = plans.len() as u32;
+        // Finish all fallible output work before any Canvas submission or commit.
+        let result = if let Some(report) = report {
+            if report.setup_draws() != plans.len() {
+                return Err(error("HUD Setup draw count mismatch"));
+            }
+            ApplyRenderResult::Hud(hud_report_record(&report)?)
+        } else {
+            ApplyRenderResult::Legacy(count)
+        };
         submit_plans(
             plans,
             &target,
@@ -2615,7 +2846,7 @@ impl AnimatedScene {
             &preys,
         )?;
         self.commit_all(prepared, foods, preys)?;
-        Ok(count)
+        Ok(result)
     }
 
     #[allow(clippy::too_many_arguments)]

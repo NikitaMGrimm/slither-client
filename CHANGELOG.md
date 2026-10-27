@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add an opt-in indexed HUD journal with event-time Setup/final scores,
+  retained-own scheduling and leaderboard headers through native, Wasm and
+  controller/gameplay boundaries. Package its verified shared validator;
+  visible HUD, fade scheduling and installed gameplay remain separate.
+
 - Add opt-in session HUD planning with command-indexed lifecycle guards, closed
   copied reports and terminal failure handling that preserves every thrown value.
   Native report production, gameplay wiring and visible HUD remain separate.
