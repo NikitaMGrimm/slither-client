@@ -41,8 +41,11 @@ parity remain unverified.
 
 Retained desktop food now connects ordered events, duplicate instances, captured
 eater objects, creation-selected sources and quality-dependent paint passes in
-both Wasm renderers and the authored page. Synthetic native and ABI checks pass;
-full-runtime numeric and native browser verification remain pending. Prey and
+both Wasm renderers and the authored page. Bounded numeric and native Windows
+browser checks cover the food engine and explicit draws; complete host parity is
+not established. Target-aware application now stages ordered Setup draws, with
+explicit resize APIs and synchronous page sizing/counting. New host-cadence
+reference/browser acceptance remains pending. Prey and
 the existing stand-in boundary remain separate rendering work.
 
 ## 3. Measure dense scenes

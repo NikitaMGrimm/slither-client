@@ -1,8 +1,10 @@
 import { bundle, syntheticScene, syntheticSetup } from '../web/synthetic-scene.mjs';
+import { setupRenderSmoke } from './setup-render-smoke.mjs';
 
 // Authored full packet -> retained animation -> native Wasm render submissions.
 // The shared Canvas recorder has no pixels and opens no connection.
 export function foodRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok, rejects }) {
+  setupRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok, rejects });
   const spawn = [70, 108, 108, 9, 128, 128, 25, 18, 128, 128, 30];
   const face = () => ({ eyes: vanillaEyes(), decoration: { kind: 'none' } });
   for (const path of ['standard', 'basic']) {

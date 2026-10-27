@@ -13,7 +13,7 @@ use crate::{
     protocol::ElapsedHeader,
     state::{
         Appearance, ClientState, FoodSpawnInput, FrameReport, MAX_SNAKES, MAX_TOTAL_BODY_POINTS,
-        Point, PresentationEvent, SnakeTarget, StateError,
+        Point, PresentationEvent, Setup, SnakeTarget, StateError,
     },
 };
 
@@ -295,7 +295,14 @@ impl AnimatedClient {
         E: From<ClientPresentationError>,
         F: FnMut(&Appearance) -> Result<PairedFaceGeometry, E>,
     {
-        self.apply_frame_resolved(bytes, header, resolve, |_, _| Ok(None), false)
+        self.apply_frame_resolved(
+            bytes,
+            header,
+            resolve,
+            |_, _| Ok(None),
+            false,
+            |_, _| Ok(()),
+        )
     }
 
     /// Apply ordered appearances and food creations with explicit factory inputs.
@@ -320,21 +327,51 @@ impl AnimatedClient {
             resolve_face,
             |spawn, zoom| resolve_food(spawn, zoom).map(Some),
             true,
+            |_, _| Ok(()),
         )
     }
 
-    fn apply_frame_resolved<E, F, G>(
+    /// Plan each Setup draw in event order on the disposable transaction stage.
+    /// Received validation precedes all callbacks; any error discards the stage.
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(crate) fn apply_frame_with_factories_and_setup<E, F, G, H>(
+        &mut self,
+        bytes: &[u8],
+        header: ElapsedHeader,
+        resolve_face: F,
+        mut resolve_food: G,
+        on_setup: H,
+    ) -> Result<FrameReport, E>
+    where
+        E: From<ClientPresentationError>,
+        F: FnMut(&Appearance) -> Result<PairedFaceGeometry, E>,
+        G: FnMut(&FoodSpawnInput, f64) -> Result<FoodFactory, E>,
+        H: FnMut(&mut AnimatedClient, &Setup) -> Result<(), E>,
+    {
+        self.apply_frame_resolved(
+            bytes,
+            header,
+            resolve_face,
+            |spawn, zoom| resolve_food(spawn, zoom).map(Some),
+            true,
+            on_setup,
+        )
+    }
+
+    fn apply_frame_resolved<E, F, G, H>(
         &mut self,
         bytes: &[u8],
         header: ElapsedHeader,
         mut resolve: F,
         mut resolve_food: G,
         enable_food: bool,
+        mut on_setup: H,
     ) -> Result<FrameReport, E>
     where
         E: From<ClientPresentationError>,
         F: FnMut(&Appearance) -> Result<PairedFaceGeometry, E>,
         G: FnMut(&FoodSpawnInput, f64) -> Result<Option<FoodFactory>, E>,
+        H: FnMut(&mut AnimatedClient, &Setup) -> Result<(), E>,
     {
         let mut received = self.received.clone();
         let applied = received
@@ -374,7 +411,7 @@ impl AnimatedClient {
                             .map_err(ClientPresentationError::from)?;
                     }
                     next.connected = true;
-                    setup = Some(value);
+                    on_setup(&mut next, setup.insert(value))?;
                 }
                 PresentationEvent::SnakeAppearance(appearance) => {
                     let setup = setup
@@ -670,6 +707,29 @@ impl AnimatedClient {
         width: u32,
         height: u32,
         quality_scale: f64,
+        resolve_style: F,
+    ) -> Result<Vec<PreparedSnake>, E>
+    where
+        E: From<ClientPresentationError>,
+        F: FnMut(usize, bool, &SnakePresentation) -> Result<bool, E>,
+    {
+        self.prepare_draw_resolved_limited_staged(
+            width,
+            height,
+            quality_scale,
+            MAX_DRAW_SAMPLES,
+            resolve_style,
+        )
+    }
+
+    /// Prepare on a disposable stage with the caller's remaining aggregate sample budget.
+    /// Zero permits empty/face-only draws; only actual curve samples spend the budget.
+    pub(crate) fn prepare_draw_resolved_limited_staged<E, F>(
+        &mut self,
+        width: u32,
+        height: u32,
+        quality_scale: f64,
+        sample_limit: usize,
         mut resolve_style: F,
     ) -> Result<Vec<PreparedSnake>, E>
     where
@@ -677,6 +737,7 @@ impl AnimatedClient {
         F: FnMut(usize, bool, &SnakePresentation) -> Result<bool, E>,
     {
         validate_draw_inputs(width, height, quality_scale)?;
+        let sample_limit = sample_limit.min(MAX_DRAW_SAMPLES);
         let next = self;
         if let Some(own) = next.own_snake() {
             let metrics = own.metrics();
@@ -730,7 +791,7 @@ impl AnimatedClient {
                 .map_err(ClientPresentationError::from)?;
             samples = samples
                 .checked_add(curve.as_ref().map_or(0, |curve| curve.samples.len()))
-                .filter(|count| *count <= MAX_DRAW_SAMPLES)
+                .filter(|count| *count <= sample_limit)
                 .ok_or(ClientPresentationError::Limit)?;
             let body_geometry = curve.as_ref().and_then(|curve| {
                 let distance_cursor_seed = curve.distance_cursor_seed()?;
@@ -902,6 +963,8 @@ impl AnimatedClient {
 #[cfg(test)]
 mod resolved_draw_tests {
     use super::*;
+    use crate::presentation::{BodyAsset, BodyAssetStatus, FoodSource, food_palette};
+    use std::{cell::RefCell, rc::Rc};
 
     // Original synthetic protocol-19 inputs; no external source or fixture.
     fn u24(v: u32) -> [u8; 3] {
@@ -944,6 +1007,419 @@ mod resolved_draw_tests {
 
     fn apply(client: &mut AnimatedClient, p: &[u8]) {
         client.apply_frame(p, ElapsedHeader::Absent).unwrap();
+    }
+
+    fn bundle(commands: &[Vec<u8>]) -> Vec<u8> {
+        commands
+            .iter()
+            .flat_map(|p| {
+                let mut bytes = (p.len() as u16).to_be_bytes().to_vec();
+                bytes.extend(p);
+                bytes
+            })
+            .collect()
+    }
+
+    fn factory(spawn: &FoodSpawnInput, _: f64) -> Result<FoodFactory, ClientPresentationError> {
+        let sources: Vec<_> = (1..=8)
+            .map(|handle| {
+                FoodSource::new(
+                    BodyAsset {
+                        handle,
+                        revision: 1,
+                        width: 20,
+                        height: 16,
+                        status: BodyAssetStatus::Ready,
+                    },
+                    20.,
+                    16.,
+                    10.,
+                    8.,
+                )
+                .unwrap()
+            })
+            .collect();
+        Ok(FoodFactory {
+            random_phase_unit: 0.,
+            random_wobble_unit: 0.5,
+            palette: food_palette(spawn.raw_color),
+            image_count: sources.len(),
+            bodies: sources.clone(),
+            outlines: sources.clone(),
+            glows: sources,
+        })
+    }
+
+    fn apply_factories(client: &mut AnimatedClient, p: &[u8]) {
+        client
+            .apply_frame_with_factories(
+                p,
+                ElapsedHeader::Absent,
+                |_| Ok(PairedFaceGeometry::default()),
+                factory,
+            )
+            .unwrap();
+    }
+
+    fn assert_exact_client(actual: &AnimatedClient, expected: &AnimatedClient) {
+        assert_eq!(actual, expected);
+        // Debug also distinguishes finite signed zero throughout the owned state.
+        assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
+    }
+
+    #[test]
+    fn initial_empty_setup_hook_prepares_once_without_advancing_update_or_camera() {
+        let mut client = AnimatedClient::new(3.).unwrap();
+        client
+            .set_camera_position(Point { x: -0., y: 17. })
+            .unwrap();
+        client.set_zoom(0.9).unwrap();
+        let before = client.clone();
+        let mut calls = 0;
+        client
+            .apply_frame_with_factories_and_setup(
+                &setup(),
+                ElapsedHeader::Absent,
+                |_| panic!("no appearance"),
+                |_, _| panic!("no food"),
+                |stage, setup| {
+                    calls += 1;
+                    assert!(stage.connected());
+                    assert_eq!(stage.boundary().unwrap().displayed(), setup.radius);
+                    assert!(stage.received().setup.is_none());
+                    assert!(
+                        stage
+                            .prepare_draw_resolved_limited_staged::<ClientPresentationError, _>(
+                                960,
+                                540,
+                                1.,
+                                0,
+                                |_, _, _| { panic!("no snake") }
+                            )?
+                            .is_empty()
+                    );
+                    Ok::<_, ClientPresentationError>(())
+                },
+            )
+            .unwrap();
+        assert_eq!(calls, 1);
+        assert_eq!(client.clock, before.clock);
+        assert_eq!(client.camera, before.camera);
+        assert_eq!(client.camera.position().x.to_bits(), (-0_f64).to_bits());
+        assert!(client.food_bounds().is_none());
+        let mut control = before;
+        apply_factories(&mut control, &setup());
+        assert_exact_client(&client, &control);
+    }
+
+    #[test]
+    fn bundled_setup_draws_match_ordered_packet_and_draw_controls() {
+        let mut client = AnimatedClient::new(0.).unwrap();
+        apply_factories(&mut client, &bundle(&[setup(), spawn(3, 11)]));
+        client.advance(3., false).unwrap();
+        apply_factories(&mut client, &[b'g', 0, 7, 131, 129]);
+        // Consecutive own draws straddle a food source-selection threshold.
+        client.set_zoom(0.8247).unwrap();
+        let mut control = client.clone();
+        let mut changed_setup = setup();
+        changed_setup[1..4].copy_from_slice(&u24(1400));
+        let mut appearance = spawn(8, 19);
+        appearance[1..3].copy_from_slice(&8_u16.to_be_bytes());
+        let commands = [
+            setup(),
+            appearance,
+            vec![b'f', 1, 2, 3, 4, 7, 25],
+            changed_setup.clone(),
+            vec![b'f', 1, 2, 8, 9, 8, 25],
+            vec![b's', 0, 8, 0],
+            changed_setup,
+        ];
+        let order = RefCell::new(Vec::new());
+        let mut draws = Vec::new();
+        let mut factory_zooms = Vec::new();
+        client
+            .apply_frame_with_factories_and_setup(
+                &bundle(&commands),
+                ElapsedHeader::Absent,
+                |_| {
+                    order.borrow_mut().push("face");
+                    Ok(PairedFaceGeometry::default())
+                },
+                |spawn, zoom| {
+                    order.borrow_mut().push("food");
+                    factory_zooms.push(zoom);
+                    factory(spawn, zoom)
+                },
+                |stage, setup| {
+                    order.borrow_mut().push("setup");
+                    assert_eq!(stage.clock, control.clock);
+                    assert_eq!(stage.boundary().unwrap().displayed(), setup.radius);
+                    let draw = stage.prepare_draw_with_style_staged(960, 540, 1.3, true)?;
+                    draws.push((setup.clone(), draw, stage.clone()));
+                    Ok::<_, ClientPresentationError>(())
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            order.into_inner(),
+            ["setup", "face", "food", "setup", "food", "setup"]
+        );
+        let mut expected_zooms = Vec::new();
+        let mut draw_index = 0;
+        for packet in &commands {
+            control
+                .apply_frame_with_factories(
+                    packet,
+                    ElapsedHeader::Absent,
+                    |_| Ok(PairedFaceGeometry::default()),
+                    |spawn, zoom| {
+                        expected_zooms.push(zoom);
+                        factory(spawn, zoom)
+                    },
+                )
+                .unwrap();
+            if packet[0] == b'a' {
+                let draw = control
+                    .prepare_draw_with_style(960, 540, 1.3, true)
+                    .unwrap();
+                let (setup, actual_draw, stage) = &draws[draw_index];
+                assert_eq!(setup, control.received().setup.as_ref().unwrap());
+                assert_eq!(*actual_draw, draw);
+                assert_eq!(format!("{actual_draw:?}"), format!("{draw:?}"));
+                // Received state commits once after the bundle, independently of draws.
+                let mut expected_stage = control.clone();
+                expected_stage.received = stage.received.clone();
+                assert_exact_client(stage, &expected_stage);
+                draw_index += 1;
+            }
+        }
+        assert_eq!(draw_index, 3);
+        assert_eq!(
+            draws.iter().map(|d| d.1.len()).collect::<Vec<_>>(),
+            [1, 2, 1]
+        );
+        assert_eq!(factory_zooms, expected_zooms);
+        assert_ne!(factory_zooms[0], factory_zooms[1]);
+        let foods = client.foods().foods();
+        assert_ne!(
+            foods[0].snapshot().sources.indices,
+            foods[1].snapshot().sources.indices
+        );
+        let mut expected_received = draws[0].2.received.clone();
+        expected_received
+            .apply_frame(&bundle(&commands), ElapsedHeader::Absent)
+            .unwrap();
+        assert_eq!(client.received, expected_received);
+        control.received = expected_received;
+        assert_exact_client(&client, &control);
+    }
+
+    #[derive(Debug)]
+    enum HookError {
+        Model(ClientPresentationError),
+        Callback(Rc<()>),
+    }
+
+    impl From<ClientPresentationError> for HookError {
+        fn from(error: ClientPresentationError) -> Self {
+            Self::Model(error)
+        }
+    }
+
+    #[test]
+    fn rejected_setup_draw_preserves_complete_client_and_callback_error_identity() {
+        let mut client = AnimatedClient::new(0.).unwrap();
+        apply_factories(&mut client, &bundle(&[setup(), spawn(3, 11)]));
+        client.advance(3., false).unwrap();
+        apply_factories(&mut client, &[b'g', 0, 7, 131, 129]);
+        client.set_own_gaze_heading(-0.).unwrap();
+        let before = client.clone();
+        let commands = bundle(&[
+            spawn(8, 19),
+            vec![b'f', 1, 2, 3, 4, 7, 25],
+            setup(),
+            vec![b'g', 0, 7, 129, 130],
+            setup(),
+            setup(),
+        ]);
+        for reject_at in 1..=3 {
+            let sentinel = Rc::new(());
+            let mut calls = 0;
+            let error = client
+                .apply_frame_with_factories_and_setup(
+                    &commands,
+                    ElapsedHeader::Absent,
+                    |_| Ok(PairedFaceGeometry::default()),
+                    |spawn, zoom| factory(spawn, zoom).map_err(HookError::from),
+                    |stage, _| {
+                        calls += 1;
+                        stage.prepare_draw_with_style_staged(960, 540, 1., true)?;
+                        if calls == reject_at {
+                            Err(HookError::Callback(Rc::clone(&sentinel)))
+                        } else {
+                            Ok(())
+                        }
+                    },
+                )
+                .unwrap_err();
+            match error {
+                HookError::Callback(actual) => assert!(Rc::ptr_eq(&actual, &sentinel)),
+                HookError::Model(error) => panic!("unexpected model failure: {error}"),
+            }
+            assert_eq!(calls, reject_at);
+            assert_exact_client(&client, &before);
+        }
+    }
+
+    #[test]
+    fn malformed_late_packet_prevents_every_factory_and_setup_callback() {
+        let mut client = AnimatedClient::new(0.).unwrap();
+        let before = client.clone();
+        let calls = RefCell::new(Vec::new());
+        let error = client
+            .apply_frame_with_factories_and_setup::<ClientPresentationError, _, _, _>(
+                &bundle(&[
+                    setup(),
+                    spawn(3, 11),
+                    vec![b'f', 1, 2, 3, 4, 7, 25],
+                    setup(),
+                    vec![b'g', 0],
+                ]),
+                ElapsedHeader::Absent,
+                |_| {
+                    calls.borrow_mut().push("face");
+                    Ok(PairedFaceGeometry::default())
+                },
+                |spawn, zoom| {
+                    calls.borrow_mut().push("food");
+                    factory(spawn, zoom)
+                },
+                |_, _| {
+                    calls.borrow_mut().push("setup");
+                    Ok(())
+                },
+            )
+            .unwrap_err();
+        assert!(matches!(error, ClientPresentationError::State(_)));
+        assert!(calls.into_inner().is_empty());
+        assert_exact_client(&client, &before);
+    }
+
+    #[test]
+    fn targetless_wrappers_preserve_draw_state_and_match_noop_setup_hook() {
+        let mut client = AnimatedClient::new(0.).unwrap();
+        apply_factories(&mut client, &bundle(&[setup(), spawn(3, 11)]));
+        client.advance(3., false).unwrap();
+        client.prepare_draw(960, 540).unwrap();
+        apply_factories(&mut client, &[b'g', 0, 7, 131, 129]);
+        let packets = bundle(&[setup(), setup()]);
+        let mut expected = client.clone();
+        expected
+            .apply_frame_with_factories_and_setup(
+                &packets,
+                ElapsedHeader::Absent,
+                |_| Ok(PairedFaceGeometry::default()),
+                factory,
+                |_, _| Ok(()),
+            )
+            .unwrap();
+        assert_eq!(expected.clock, client.clock);
+        assert_eq!(expected.camera, client.camera);
+        assert_eq!(expected.body_paint_flags, client.body_paint_flags);
+        assert_eq!(expected.food_bounds, client.food_bounds);
+        assert_eq!(expected.entries, client.entries);
+        for wrapper in 0..4 {
+            let mut targetless = client.clone();
+            match wrapper {
+                0 => targetless
+                    .apply_frame(&packets, ElapsedHeader::Absent)
+                    .unwrap(),
+                1 => targetless
+                    .apply_frame_with_eye_geometry::<ClientPresentationError, _>(
+                        &packets,
+                        ElapsedHeader::Absent,
+                        |_| Ok(StandardEyeGeometry::default()),
+                    )
+                    .unwrap(),
+                2 => targetless
+                    .apply_frame_with_face_geometry::<ClientPresentationError, _>(
+                        &packets,
+                        ElapsedHeader::Absent,
+                        |_| Ok(PairedFaceGeometry::default()),
+                    )
+                    .unwrap(),
+                _ => targetless
+                    .apply_frame_with_factories(
+                        &packets,
+                        ElapsedHeader::Absent,
+                        |_| Ok(PairedFaceGeometry::default()),
+                        factory,
+                    )
+                    .unwrap(),
+            };
+            assert_exact_client(&targetless, &expected);
+        }
+    }
+
+    #[test]
+    fn limited_draw_accepts_exact_aggregate_budget_and_rejects_one_less() {
+        let mut client = AnimatedClient::new(0.).unwrap();
+        for p in [setup(), spawn(3, 11), spawn(8, 19)] {
+            apply(&mut client, &p);
+        }
+        client.advance(40., false).unwrap();
+        let mut control = client.clone();
+        let expected = control.prepare_draw_with_style(960, 540, 1., true).unwrap();
+        let sample_count: usize = expected
+            .iter()
+            .filter_map(|snake| snake.curve.as_ref())
+            .map(|curve| curve.samples.len())
+            .sum();
+        assert!(expected.len() == 2 && sample_count > 2);
+        let mut stage = client.clone();
+        let actual = stage
+            .prepare_draw_resolved_limited_staged(960, 540, 1., sample_count, |_, _, _| {
+                Ok::<_, ClientPresentationError>(true)
+            })
+            .unwrap();
+        assert_eq!(actual, expected);
+        assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
+        assert_exact_client(&stage, &control);
+        let mut stage = client.clone();
+        assert_eq!(
+            stage.prepare_draw_resolved_limited_staged(
+                960,
+                540,
+                1.,
+                sample_count - 1,
+                |_, _, _| { Ok::<_, ClientPresentationError>(true) }
+            ),
+            Err(ClientPresentationError::Limit)
+        );
+        // A nonempty face-only scene still runs its draw with no samples remaining.
+        for anchors in 0..=1 {
+            let mut short = spawn(3, 11);
+            short.truncate(26 + anchors * 6);
+            let mut client = AnimatedClient::new(0.).unwrap();
+            for p in [setup(), short] {
+                apply(&mut client, &p);
+            }
+            client.set_zoom(0.9).unwrap();
+            let mut control = client.clone();
+            let expected = control
+                .prepare_draw_with_style(960, 540, 1., false)
+                .unwrap();
+            let actual = client
+                .prepare_draw_resolved_limited_staged(960, 540, 1., 0, |_, _, _| {
+                    Ok::<_, ClientPresentationError>(false)
+                })
+                .unwrap();
+            assert_eq!(actual.len(), anchors);
+            assert!(actual.iter().all(|snake| snake.curve.is_none()));
+            assert_eq!(actual, expected);
+            assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
+            assert_exact_client(&client, &control);
+        }
     }
 
     #[test]

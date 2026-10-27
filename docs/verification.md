@@ -504,10 +504,65 @@ predates the Wasm/face/page integration.
 
 These are synthetic state and logical Canvas checks. Independent combined review
 found a signed-zero source-revision coherence defect; the corrected alias boundary
-passes the new regressions, with focused independent recheck pending.
-Complete-runtime numeric food comparison and native Windows Canvas/page
-verification remain pending. No food original-pixel, installed
+passes the new regressions and a focused independent recheck. At the corrected
+food revision, a bounded numeric comparison matches 124,356 food-engine cells;
+the same six Setup/layout submission-presence differences remain failures.
+Separate corrected stock Windows Chrome and Firefox checks pass 20,172 and
+10,805 assertions respectively, using authored textures and timestamps. These
+earlier results cover the food engine and explicit draws. No food original-pixel, installed
 extension or live-server acceptance is claimed. See [the food contract](food-presentation.md).
+
+## Target-aware Setup and resize checks
+
+The initial host change passed 314 native tests, 127 Node tests, formatting,
+doctests, strict rustdoc, native/Wasm Clippy, a fresh web build and full real-Wasm
+smoke. The body/face/food/Setup recorder passes 2,093 assertions, including 439
+new Setup/resize assertions. These are synthetic native-call doubles rather than
+browser rasterization.
+
+The new host route has separate synthetic tests for ordered per-Setup plans,
+event-time configuration, draw-driven camera/spacing changes, creation-time food
+zoom and source retention through later removals. Real-Wasm recorder checks cover
+both target-aware application and size-aware render APIs, multi-Setup ordering,
+preclear callback/metadata/readiness/alias rejection, aggregate resource limits,
+changed/unchanged dimensions and late Canvas-failure model rollback.
+
+Page doubles cover initial and repeated Setup counts, synchronous unchanged-size
+and changed-size resize, renderer selection before reset packets, exact shared
+RAF/quality/statistics ownership, CSS-to-backing input coordinates and teardown.
+The pure desktop layout tests use authored viewport/expected-dimension pairs and
+invalid/overflow inputs. Fullscreen login/HUD layout and mobile insets are not
+represented by the contained zero-inset demo page.
+
+These checks compare actual candidate operations against authored ordered
+controls. Independent review found no supported defect and passed 493 focused
+Wasm assertions and 28 page/layout tests. Stock Windows Chrome and Firefox
+checks passed 1,722 accepted assertions across six successful runs, including
+exact copied state, ordered painting, decoded pixels and authored-page cadence.
+Five failed/incomplete attempts remain preserved and excluded. The browser task
+exceeded its required 100 MiB artifact cap before lossless compression; its
+result is qualified and is not cap-compliant.
+
+A separate offline runtime comparison retained 40,602 projected cells with 18
+camera-cursor differences from pre-existing reset behavior. Initial Setup, resize
+and strict quality cases matched within its projection. Its three-Setup axis
+remains inconclusive after a control VM timeout with missing durable operation
+data; no retry occurred. All 86 reservations remain charged. The reset correction
+preserves the camera-ring cursor while clearing offsets; its native regression
+first reproduced the old mismatch. Corrected-build comparison and the new
+background-budget boundary checks are recorded separately when completed. Earlier food
+evidence and its six retained host mismatches are unchanged; no full-client,
+original-pixel, extension or official-server acceptance follows from these tests.
+
+The correction passes 315 native tests, 127 Node tests and full real-Wasm smoke
+with 2,228 recorder assertions, plus formatting, doctests, strict rustdoc and
+native/Wasm Clippy. Both renderer lanes accept exactly 64 tiny Setup draws or
+four 4096-square draws and reject the next excess before context/pattern
+acquisition or renderer mutation. Tests preserve the independent sample,
+catalog and image budget probes, explicit maximum-size rendering and late
+callback side-effect boundaries. Native and Wasm reset regressions retain the
+camera cursor while clearing corrections. These corrected results are synthetic;
+the earlier browser observations remain evidence for their pinned prior build.
 
 ## Opt-in standard-body renderer checks
 

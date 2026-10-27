@@ -1,27 +1,28 @@
 //! Browser ownership of the coupled model; caller-supplied time and borrowed assets.
 
-use std::f64::consts::TAU;
+use std::{cell::RefCell, f64::consts::TAU};
 
 use wasm_bindgen::prelude::*;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, HtmlImageElement};
 
 use crate::{
     body_browser::{
-        BorrowedSources, ResolveError, appearance_request, paired_face, request, same_decoration,
-        same_eyes, standard_eyes,
+        BorrowedSources, FaceDecoration, Recipe, ResolveError, appearance_request, paired_face,
+        request, same_decoration, same_eyes, standard_eyes,
     },
-    canvas_browser::{CanvasFrame, draw_sprite},
+    canvas_browser::{CanvasFrame, CanvasPreflight, draw_sprite},
     food_browser::FoodSources,
     presentation::{
-        AnimatedClient, BodyPaintError, BodyPaintInput, BodyPaintQuality, BodyPaintView,
-        BodyPaintVisual, CurveInput, CurveOutput, EyeLayoutInput, FoodImageCommand, FoodPaintInput,
-        FoodPaintPlan, MAX_BODY_PAINT_COMMANDS, MAX_RETAINED_SNAKES, SnakePresentation,
+        AnimatedClient, BodyPaintError, BodyPaintInput, BodyPaintPlan, BodyPaintQuality,
+        BodyPaintView, BodyPaintVisual, CurveInput, CurveOutput, EyeLayoutInput, FoodImageCommand,
+        FoodPaintInput, FoodPaintPlan, MAX_BODY_PAINT_COMMANDS, MAX_DRAW_SAMPLES,
+        MAX_RETAINED_SNAKES, PairedSideLayout, PreparedSnake, QualitySnapshot, SnakePresentation,
         StandardEyeLayout, Turn, plan_food, plan_standard_body, sample_curve_with_heading,
     },
     presentation_browser::AnimationStep,
     protocol::ElapsedHeader,
     quality_browser::DesktopQuality,
-    state::Point,
+    state::{Food, Point, Setup},
 };
 
 fn error(message: impl std::fmt::Display) -> JsValue {
@@ -322,6 +323,127 @@ impl AnimatedScene {
         self.commit_client(prepared, sources)
     }
 
+    /// Apply retained factories and submit each Setup draw in wire order.
+    /// Callback/preflight failures preserve model and sources before any clear.
+    #[allow(clippy::too_many_arguments)]
+    pub fn apply_frame_and_render_with_food(
+        &mut self,
+        bytes: &[u8],
+        elapsed_header: bool,
+        resolve_appearance: &js_sys::Function,
+        resolve_food: &js_sys::Function,
+        target: HtmlCanvasElement,
+        palette_0: HtmlCanvasElement,
+        palette_1: HtmlCanvasElement,
+        palette_2: HtmlCanvasElement,
+        background: HtmlImageElement,
+        width: f64,
+        height: f64,
+        detailed_style: bool,
+        resolve_draw_face: &js_sys::Function,
+        quality: &DesktopQuality,
+    ) -> Result<u32, JsValue> {
+        self.apply_and_render(
+            bytes,
+            elapsed_header,
+            resolve_appearance,
+            resolve_food,
+            target,
+            [palette_0, palette_1, palette_2],
+            background,
+            DrawSize::new(width, height)?,
+            DrawLane::Basic {
+                detailed: detailed_style,
+                face: resolve_draw_face,
+            },
+            quality.applied(),
+        )
+    }
+
+    /// Standard-body counterpart of the ordered Setup transaction.
+    #[allow(clippy::too_many_arguments)]
+    pub fn apply_frame_and_render_standard(
+        &mut self,
+        bytes: &[u8],
+        elapsed_header: bool,
+        resolve_appearance: &js_sys::Function,
+        resolve_food: &js_sys::Function,
+        target: HtmlCanvasElement,
+        palette_0: HtmlCanvasElement,
+        palette_1: HtmlCanvasElement,
+        palette_2: HtmlCanvasElement,
+        background: HtmlImageElement,
+        width: f64,
+        height: f64,
+        resolve_recipe: &js_sys::Function,
+        quality: &DesktopQuality,
+    ) -> Result<u32, JsValue> {
+        self.apply_and_render(
+            bytes,
+            elapsed_header,
+            resolve_appearance,
+            resolve_food,
+            target,
+            [palette_0, palette_1, palette_2],
+            background,
+            DrawSize::new(width, height)?,
+            DrawLane::Standard(resolve_recipe),
+            quality.applied(),
+        )
+    }
+
+    /// Submit one retained-food draw at the desired backing size, without update.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_with_food_at_size(
+        &mut self,
+        target: HtmlCanvasElement,
+        palette_0: HtmlCanvasElement,
+        palette_1: HtmlCanvasElement,
+        palette_2: HtmlCanvasElement,
+        background: HtmlImageElement,
+        width: f64,
+        height: f64,
+        detailed_style: bool,
+        resolve_draw_face: &js_sys::Function,
+        quality: &DesktopQuality,
+    ) -> Result<(), JsValue> {
+        self.render_at_size(
+            target,
+            [palette_0, palette_1, palette_2],
+            background,
+            DrawSize::new(width, height)?,
+            DrawLane::Basic {
+                detailed: detailed_style,
+                face: resolve_draw_face,
+            },
+            quality.applied(),
+        )
+    }
+
+    /// Standard-body retained-food draw at an explicit desired backing size.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_standard_at_size(
+        &mut self,
+        target: HtmlCanvasElement,
+        palette_0: HtmlCanvasElement,
+        palette_1: HtmlCanvasElement,
+        palette_2: HtmlCanvasElement,
+        background: HtmlImageElement,
+        width: f64,
+        height: f64,
+        resolve_recipe: &js_sys::Function,
+        quality: &DesktopQuality,
+    ) -> Result<(), JsValue> {
+        self.render_at_size(
+            target,
+            [palette_0, palette_1, palette_2],
+            background,
+            DrawSize::new(width, height)?,
+            DrawLane::Standard(resolve_recipe),
+            quality.applied(),
+        )
+    }
+
     /// Advance the animation clock and drawn entities; free the returned step.
     pub fn advance(&mut self, now_ms: f64, lagging: bool) -> Result<AnimationStep, JsValue> {
         let inner = self.client.advance(now_ms, lagging).map_err(error)?;
@@ -494,10 +616,7 @@ impl AnimatedScene {
                     .own_token()
                     .map_or(JsValue::NULL, |t| serial(t.serial())),
             ),
-            (
-                "sourceCount",
-                (self.food_sources.assets().len() as f64).into(),
-            ),
+            ("sourceCount", (self.food_sources.len() as f64).into()),
             ("bounds", bounds),
             ("foods", rows.into()),
         ])
@@ -827,252 +946,174 @@ impl AnimatedScene {
         resolve_recipe: &js_sys::Function,
         quality: &DesktopQuality,
     ) -> Result<(), JsValue> {
-        let width = dimensions(f64::from(target.width()))?;
-        let height = dimensions(f64::from(target.height()))?;
-        let applied = quality.applied();
+        let size = DrawSize::new(f64::from(target.width()), f64::from(target.height()))?;
+        let entry = size;
         let sprites = [food_0, food_1, food_2];
         let mut prepared = self.client.clone();
+        let context = SceneDrawContext::committed(&prepared, size);
         let mut sources = BorrowedSources::default();
-        let mut recipes = Vec::new();
-        let snakes = prepared
-            .prepare_draw_resolved_staged(
-                width,
-                height,
-                applied.quality_scale,
-                |ordinal, own, snake| -> Result<bool, ResolveError> {
-                    let recipe =
-                        sources.resolve(resolve_recipe, &request(ordinal, own, snake)?, &target)?;
-                    if let Some(eyes) = &recipe.eyes
-                        && !same_eyes(eyes, snake.eye_geometry())
-                    {
-                        return Err(
-                            error("recipe eyes differ from retained appearance geometry").into(),
-                        );
-                    }
-                    if !same_decoration(
-                        recipe.decoration.as_ref(),
-                        snake.face_geometry().decoration.as_ref(),
-                    ) {
-                        return Err(error(
-                            "recipe decoration differs from retained appearance geometry",
-                        )
-                        .into());
-                    }
-                    let detailed = recipe.style.detailed_segments;
-                    recipes.push(recipe);
-                    Ok(detailed)
-                },
-            )
-            .map_err(|e| e.0)?;
-        if snakes.len() > MAX_RETAINED_SNAKES {
-            return Err(error("face command budget exceeded"));
-        }
-        let received = prepared.received();
-        let center = received.setup.as_ref().map_or(0., |s| s.grid_center);
-        let camera = prepared.camera().position();
-        let zoom = prepared.camera().zoom();
-        let viewport_half = Point {
-            x: f64::from(width) / 2.,
-            y: f64::from(height) / 2.,
-        };
-        let mut draws = Vec::new();
-        let mut budget = MAX_BODY_PAINT_COMMANDS;
-        // Every ordinary face completes with an unconditional root alpha one,
-        // including eye-less and nondecorated faces. Standalone planner callers
-        // still control their own entry alpha.
-        let entry_alpha = 1.;
-        for (snake, recipe) in snakes.iter().zip(&recipes) {
-            if recipe.decoration.is_some() {
-                budget = budget
-                    .checked_sub(2)
-                    .ok_or_else(|| error("scene image budget exceeded"))?;
-            }
-            let m = snake.metrics;
-            let layout = if recipe.eyes.is_some() {
-                Some(
-                    snake
-                        .eye_geometry
-                        .layout(
-                            snake.face_heading,
-                            snake.pupil,
-                            EyeLayoutInput {
-                                corrected_head: m.corrected_head,
-                                camera,
-                                viewport_half,
-                                scale: m.scale,
-                                zoom,
-                                death_progress: m.death_progress,
-                            },
-                        )
-                        .map_err(error)?,
-                )
-            } else {
-                None
-            };
-            let mut root_alpha = entry_alpha;
-            let plan = if let Some(geometry) = &snake.body_geometry {
-                let palettes = recipe.palettes();
-                let maximum_speed = m.maximum_speed;
-                let input = BodyPaintInput {
-                    geometry: geometry.as_paint_geometry(),
-                    recipe: recipe.borrowed(&palettes),
-                    assets: &recipe.assets,
-                    view: BodyPaintView {
-                        camera,
-                        zoom,
-                        half_width: viewport_half.x,
-                        half_height: viewport_half.y,
-                    },
-                    quality: BodyPaintQuality {
-                        high_quality: applied.high_quality,
-                        blend: applied.quality_blend,
-                    },
-                    visual: BodyPaintVisual {
-                        scale: m.scale,
-                        spawn: m.spawn_progress,
-                        death: m.death_progress,
-                        dead: !m.alive,
-                        smoothed_speed: m.visual_speed,
-                        boost_threshold: m.boost_threshold_speed,
-                        cruise_speed: m.cruise_speed,
-                        maximum_speed,
-                        boost_phase: m.boost_phase,
-                    },
-                    entry_alpha,
-                    command_limit: budget,
-                };
-                match plan_standard_body(input) {
-                    Ok(plan) => {
-                        budget -= plan.commands.len();
-                        let mut opacity = m.spawn_progress * (1. - m.death_progress);
-                        opacity *= opacity;
-                        let boost = if m.visual_speed > m.boost_threshold_speed {
-                            m.spawn_progress
-                                * (1. - m.death_progress)
-                                * ((m.visual_speed - m.cruise_speed)
-                                    / (maximum_speed - m.cruise_speed))
-                                    .clamp(0., 1.)
-                        } else {
-                            0.
-                        };
-                        root_alpha = opacity * (1. - boost);
-                        Some(plan)
-                    }
-                    // Coincident/short stored geometry has no production body.
-                    // Its independently valid eyes still complete in draw order.
-                    Err(BodyPaintError::UnsupportedGeometry) => None,
-                    Err(e) => return Err(error(e)),
-                }
-            } else {
-                None
-            };
-            let decoration_layout = recipe
-                .decoration
-                .as_ref()
-                .map(|d| {
-                    d.geometry
-                        .layout(
-                            snake.face_heading,
-                            EyeLayoutInput {
-                                corrected_head: m.corrected_head,
-                                camera,
-                                viewport_half,
-                                scale: m.scale,
-                                zoom,
-                                death_progress: m.death_progress,
-                            },
-                        )
-                        .map_err(error)
-                })
-                .transpose()?;
-            draws.push((plan, layout, root_alpha, decoration_layout));
-        }
-        let food_plan = self.food_plan(
-            &prepared,
+        let mut budget = DrawBudget::default();
+        let plan = PlannedScene::build(
+            &mut prepared,
+            &self.food_sources,
+            &mut sources,
             &target,
-            BodyPaintView {
-                camera,
-                zoom,
-                half_width: viewport_half.x,
-                half_height: viewport_half.y,
-            },
-            BodyPaintQuality {
-                high_quality: applied.high_quality,
-                blend: applied.quality_blend,
-            },
-            budget,
+            context,
+            DrawLane::Standard(resolve_recipe),
+            quality.applied(),
+            &mut budget,
         )?;
-        // Later callbacks may have changed an earlier borrowed DOM source.
-        // Recheck native readiness/dimensions and the target after all callbacks.
         sources.validate(&target)?;
         sources.validate_food(&self.food_sources)?;
-        if target.width() != width || target.height() != height {
-            return Err(error("target dimensions changed during recipe resolution"));
-        }
+        entry.validate_entry(&target)?;
         let frame = CanvasFrame::new(
             &target,
             &sprites,
             &background,
-            camera.x - center,
-            camera.y - center,
-            zoom,
+            plan.camera.x - context.center,
+            plan.camera.y - context.center,
+            plan.zoom,
         )?;
-        let context = frame.context();
-        if let Some(boundary) = prepared.boundary().filter(|_| received.setup.is_some()) {
-            context.begin_path();
-            context.arc(0., 0., boundary.displayed(), 0., TAU)?;
-            context.set_stroke_style_str("#647481");
-            context.set_line_width(1. / zoom);
-            context.stroke();
-        }
-        if let Some(plan) = &food_plan {
-            self.submit_food(context, &plan.early[..plan.outline_barrier])?;
-            self.submit_food(context, &plan.early[plan.outline_barrier..])?;
-        } else {
-            for food in received.foods.values() {
-                if frame.visible(food.position.x, food.position.y, food.size.max(1.)) {
-                    draw_sprite(
-                        context,
-                        &sprites[usize::from(food.color) % 3],
-                        food.position.x,
-                        food.position.y,
-                        food.size.max(1.),
-                    )?;
-                }
-            }
-        }
-        for ((plan, layout, root_alpha, decoration_layout), recipe) in
-            draws.into_iter().zip(&recipes)
-        {
-            if let Some(plan) = plan {
-                for command in &plan.commands {
-                    sources.submit(context, command)?;
-                }
-            }
-            context.set_global_alpha(root_alpha);
-            context.set_global_composite_operation("source-over")?;
-            if let Some(layout) = layout {
-                draw_eyes(context, layout)?;
-            }
-            context.set_global_alpha(1.);
-            if let Some(layouts) = decoration_layout {
-                sources.submit_face(
-                    context,
-                    recipe.decoration.as_ref().expect("planned decoration"),
-                    layouts,
-                )?;
-            }
-        }
-        if let Some(plan) = &food_plan {
-            self.submit_food(context, &plan.late)?;
-        }
-        drop(frame);
+        plan.submit(frame, &sprites, &sources, &self.food_sources)?;
         self.client = prepared;
         Ok(())
     }
 }
 
 impl AnimatedScene {
+    #[allow(clippy::too_many_arguments)]
+    fn apply_and_render(
+        &mut self,
+        bytes: &[u8],
+        elapsed_header: bool,
+        resolve_appearance: &js_sys::Function,
+        resolve_food: &js_sys::Function,
+        target: HtmlCanvasElement,
+        sprites: [HtmlCanvasElement; 3],
+        background: HtmlImageElement,
+        size: DrawSize,
+        lane: DrawLane<'_>,
+        applied: QualitySnapshot,
+    ) -> Result<u32, JsValue> {
+        let entry = DrawSize::entry(&target);
+        let mut prepared = self.client.clone();
+        let food_sources = RefCell::new(self.food_sources.clone());
+        let mut sources = BorrowedSources::default();
+        let mut plans = Vec::new();
+        let mut budget = DrawBudget::default();
+        let mut setup_budget = SetupDrawBudget::default();
+        prepared
+            .apply_frame_with_factories_and_setup(
+                bytes,
+                if elapsed_header {
+                    ElapsedHeader::TwoBytes
+                } else {
+                    ElapsedHeader::Absent
+                },
+                |appearance| -> Result<_, ResolveError> {
+                    let raw = resolve_appearance
+                        .call1(&JsValue::UNDEFINED, &appearance_request(appearance)?.into())?;
+                    Ok(paired_face(&raw)?)
+                },
+                |spawn, zoom| -> Result<_, ResolveError> {
+                    Ok(food_sources
+                        .try_borrow_mut()
+                        .map_err(|_| error("food registry already borrowed"))?
+                        .resolve(resolve_food, spawn, zoom)?)
+                },
+                |client, setup| -> Result<(), ResolveError> {
+                    setup_budget.charge(size)?;
+                    let context = SceneDrawContext::at_setup(client, size, Some(setup));
+                    // Finish host callbacks before borrowing the food registry.
+                    let paint = build_paint(
+                        client,
+                        &mut sources,
+                        &target,
+                        size,
+                        lane,
+                        applied,
+                        &mut budget,
+                    )?;
+                    let mut foods = food_sources
+                        .try_borrow_mut()
+                        .map_err(|_| error("food registry already borrowed"))?;
+                    let plan = PlannedScene::finish(
+                        client,
+                        &foods,
+                        &target,
+                        context,
+                        paint,
+                        applied,
+                        &mut budget,
+                    )?;
+                    if let Some(food) = &plan.food {
+                        foods.observe_draw_sources(food)?;
+                    }
+                    push(&mut plans, plan)?;
+                    Ok(())
+                },
+            )
+            .map_err(|e| e.0)?;
+        let foods = food_sources.into_inner();
+        let count = plans.len() as u32;
+        submit_plans(
+            plans,
+            &target,
+            &sprites,
+            &background,
+            entry,
+            &sources,
+            &foods,
+        )?;
+        self.commit_client(prepared, foods)?;
+        Ok(count)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_at_size(
+        &mut self,
+        target: HtmlCanvasElement,
+        sprites: [HtmlCanvasElement; 3],
+        background: HtmlImageElement,
+        size: DrawSize,
+        lane: DrawLane<'_>,
+        applied: QualitySnapshot,
+    ) -> Result<(), JsValue> {
+        if !self.client.food_enabled() {
+            return Err(error(
+                "retained food factories must be enabled before rendering food",
+            ));
+        }
+        let entry = DrawSize::entry(&target);
+        let mut prepared = self.client.clone();
+        let context = SceneDrawContext::committed(&prepared, size);
+        let mut sources = BorrowedSources::default();
+        let mut budget = DrawBudget::default();
+        let plan = PlannedScene::build(
+            &mut prepared,
+            &self.food_sources,
+            &mut sources,
+            &target,
+            context,
+            lane,
+            applied,
+            &mut budget,
+        )?;
+        let mut plans = Vec::new();
+        push(&mut plans, plan)?;
+        submit_plans(
+            plans,
+            &target,
+            &sprites,
+            &background,
+            entry,
+            &sources,
+            &self.food_sources,
+        )?;
+        self.client = prepared;
+        Ok(())
+    }
+
     fn commit_client(
         &mut self,
         client: AnimatedClient,
@@ -1083,45 +1124,6 @@ impl AnimatedScene {
         self.client = client;
         self.food_sources = sources;
         Ok(())
-    }
-
-    fn food_plan(
-        &self,
-        prepared: &AnimatedClient,
-        target: &HtmlCanvasElement,
-        view: BodyPaintView,
-        quality: BodyPaintQuality,
-        budget: usize,
-    ) -> Result<Option<FoodPaintPlan>, JsValue> {
-        if !prepared.food_enabled() {
-            return Ok(None);
-        }
-        self.food_sources.validate(target)?;
-        plan_food(FoodPaintInput {
-            foods: prepared.foods().foods(),
-            view,
-            quality,
-            bounds: prepared.food_bounds(),
-            assets: &self.food_sources.assets(),
-            target_handle: None,
-            entry_alpha: 1.,
-            command_limit: budget,
-        })
-        .map(Some)
-        .map_err(error)
-    }
-
-    fn submit_food(
-        &self,
-        context: &CanvasRenderingContext2d,
-        commands: &[FoodImageCommand],
-    ) -> Result<(), JsValue> {
-        context.save();
-        let result = commands
-            .iter()
-            .try_for_each(|command| self.food_sources.submit(context, command));
-        context.restore();
-        result
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1141,144 +1143,743 @@ impl AnimatedScene {
                 "retained food requires the basic renderer's applied-quality API",
             ));
         }
-        let width = dimensions(f64::from(target.width()))?;
-        let height = dimensions(f64::from(target.height()))?;
+        let size = DrawSize::new(f64::from(target.width()), f64::from(target.height()))?;
         let mut prepared = self.client.clone();
+        let context = SceneDrawContext::committed(&prepared, size);
         let mut sources = BorrowedSources::default();
-        let mut decorations = Vec::new();
-        let snakes = prepared
-            .prepare_draw_resolved_staged(
-                width,
-                height,
-                quality_scale,
-                |ordinal, own, snake| -> Result<bool, ResolveError> {
-                    let decoration = if let Some(resolve_face) = resolve_face {
-                        sources.resolve_face(
-                            resolve_face,
-                            &request(ordinal, own, snake)?,
-                            snake.face_geometry(),
-                            &target,
-                        )?
-                    } else {
-                        if snake.face_geometry().decoration.is_some() {
-                            return Err(error(
-                                "decorated face requires render_with_face_decorations",
-                            )
-                            .into());
-                        }
-                        None
-                    };
-                    decorations.push(decoration);
-                    Ok(detailed_style)
-                },
-            )
-            .map_err(|e| e.0)?;
-        if snakes.len() > MAX_RETAINED_SNAKES {
-            return Err(error("face command budget exceeded"));
-        }
-        let received = prepared.received();
-        let center = received.setup.as_ref().map_or(0., |s| s.grid_center);
+        let mut budget = DrawBudget::default();
+        let paint = build_basic(
+            &mut prepared,
+            &mut sources,
+            &target,
+            size,
+            quality_scale,
+            detailed_style,
+            resolve_face,
+            &mut budget,
+        )?;
         let camera = prepared.camera().position();
         let zoom = prepared.camera().zoom();
-        let viewport_half = Point {
-            x: f64::from(target.width()) / 2.,
-            y: f64::from(target.height()) / 2.,
+        let food = food_quality
+            .map(|q| {
+                food_plan(
+                    &self.food_sources,
+                    &prepared,
+                    &target,
+                    view(size, camera, zoom),
+                    q,
+                    &mut budget,
+                )
+            })
+            .transpose()?
+            .flatten();
+        let fallback = fallback_food(&prepared, food.is_none())?;
+        let plan = PlannedScene {
+            context,
+            camera,
+            zoom,
+            food,
+            fallback,
+            paint,
         };
-        // Complete numeric validation before the target's destructive width reset.
-        let layouts = snakes
-            .iter()
-            .map(|snake| {
+        sources.validate(&target)?;
+        sources.validate_food(&self.food_sources)?;
+        size.validate_entry(&target)?;
+        let frame = CanvasFrame::new(
+            &target,
+            &sprites,
+            &background,
+            camera.x - context.center,
+            camera.y - context.center,
+            zoom,
+        )?;
+        plan.submit(frame, &sprites, &sources, &self.food_sources)?;
+        self.client = prepared;
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy)]
+struct DrawSize {
+    width: u32,
+    height: u32,
+}
+
+impl DrawSize {
+    fn new(width: f64, height: f64) -> Result<Self, JsValue> {
+        Ok(Self {
+            width: dimensions(width)?,
+            height: dimensions(height)?,
+        })
+    }
+    fn entry(target: &HtmlCanvasElement) -> Self {
+        Self {
+            width: target.width(),
+            height: target.height(),
+        }
+    }
+    fn half(self) -> Point {
+        Point {
+            x: f64::from(self.width) / 2.,
+            y: f64::from(self.height) / 2.,
+        }
+    }
+    fn validate_entry(self, target: &HtmlCanvasElement) -> Result<(), JsValue> {
+        if target.width() != self.width || target.height() != self.height {
+            return Err(error("target dimensions changed during recipe resolution"));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy)]
+struct SceneDrawContext {
+    size: DrawSize,
+    center: f64,
+    boundary: Option<f64>,
+}
+
+impl SceneDrawContext {
+    fn at_setup(client: &AnimatedClient, size: DrawSize, setup: Option<&Setup>) -> Self {
+        Self {
+            size,
+            center: setup.map_or(0., |s| s.grid_center),
+            boundary: setup.and(client.boundary()).map(|b| b.displayed()),
+        }
+    }
+    fn committed(client: &AnimatedClient, size: DrawSize) -> Self {
+        Self::at_setup(client, size, client.received().setup.as_ref())
+    }
+}
+
+// Empty Setup draws still reset and repaint the complete desired target.
+// Charge those draws independently of geometry before invoking draw resolvers.
+struct SetupDrawBudget {
+    remaining_draws: u32,
+    remaining_pixels: u64,
+}
+
+impl Default for SetupDrawBudget {
+    fn default() -> Self {
+        Self {
+            remaining_draws: 64,
+            remaining_pixels: 67_108_864,
+        }
+    }
+}
+
+impl SetupDrawBudget {
+    fn charge(&mut self, size: DrawSize) -> Result<(), JsValue> {
+        let draws = self
+            .remaining_draws
+            .checked_sub(1)
+            .ok_or_else(|| error("Setup draw count budget exceeded"))?;
+        let area = u64::from(size.width)
+            .checked_mul(u64::from(size.height))
+            .ok_or_else(|| error("Setup background pixel budget exceeded"))?;
+        let pixels = self
+            .remaining_pixels
+            .checked_sub(area)
+            .ok_or_else(|| error("Setup background pixel budget exceeded"))?;
+        self.remaining_draws = draws;
+        self.remaining_pixels = pixels;
+        Ok(())
+    }
+}
+
+struct DrawBudget {
+    samples: usize,
+    images: usize,
+    layouts: usize,
+}
+impl Default for DrawBudget {
+    fn default() -> Self {
+        Self {
+            samples: MAX_DRAW_SAMPLES,
+            images: MAX_BODY_PAINT_COMMANDS,
+            layouts: MAX_DRAW_SAMPLES,
+        }
+    }
+}
+impl DrawBudget {
+    fn prepared(&mut self, snakes: &[PreparedSnake]) -> Result<(), JsValue> {
+        self.layouts = self
+            .layouts
+            .checked_sub(snakes.len())
+            .ok_or_else(|| error("scene layout budget exceeded"))?;
+        for snake in snakes {
+            self.samples = self
+                .samples
+                .checked_sub(snake.curve.as_ref().map_or(0, |c| c.samples.len()))
+                .ok_or_else(|| error("scene sample budget exceeded"))?;
+        }
+        Ok(())
+    }
+}
+
+fn push<T>(values: &mut Vec<T>, value: T) -> Result<(), JsValue> {
+    values
+        .try_reserve(1)
+        .map_err(|_| error("scene plan allocation failed"))?;
+    values.push(value);
+    Ok(())
+}
+
+fn collect_layouts<T>(values: impl Iterator<Item = Result<T, JsValue>>) -> Result<Vec<T>, JsValue> {
+    let mut layouts = Vec::new();
+    for value in values {
+        push(&mut layouts, value?)?;
+    }
+    Ok(layouts)
+}
+
+#[derive(Clone, Copy)]
+enum DrawLane<'a> {
+    Basic {
+        detailed: bool,
+        face: &'a js_sys::Function,
+    },
+    Standard(&'a js_sys::Function),
+}
+
+enum PlannedSnakePaint {
+    Basic {
+        snakes: Vec<PreparedSnake>,
+        layouts: Vec<StandardEyeLayout>,
+        decorations: Vec<Option<FaceDecoration>>,
+        decoration_layouts: Vec<Option<[PairedSideLayout; 2]>>,
+    },
+    Standard {
+        draws: Vec<StandardDraw>,
+        recipes: Vec<Recipe>,
+    },
+}
+struct StandardDraw {
+    plan: Option<BodyPaintPlan>,
+    layout: Option<StandardEyeLayout>,
+    root_alpha: f64,
+    decoration_layout: Option<[PairedSideLayout; 2]>,
+}
+struct PlannedScene {
+    context: SceneDrawContext,
+    camera: Point,
+    zoom: f64,
+    food: Option<FoodPaintPlan>,
+    fallback: Vec<Food>,
+    paint: PlannedSnakePaint,
+}
+
+fn view(size: DrawSize, camera: Point, zoom: f64) -> BodyPaintView {
+    let half = size.half();
+    BodyPaintView {
+        camera,
+        zoom,
+        half_width: half.x,
+        half_height: half.y,
+    }
+}
+
+fn fallback_food(prepared: &AnimatedClient, needed: bool) -> Result<Vec<Food>, JsValue> {
+    let mut foods = Vec::new();
+    if needed {
+        foods
+            .try_reserve(prepared.received().foods.len())
+            .map_err(|_| error("scene plan allocation failed"))?;
+        foods.extend(prepared.received().foods.values().cloned());
+    }
+    Ok(foods)
+}
+
+fn food_plan(
+    sources: &FoodSources,
+    prepared: &AnimatedClient,
+    target: &HtmlCanvasElement,
+    view: BodyPaintView,
+    quality: BodyPaintQuality,
+    budget: &mut DrawBudget,
+) -> Result<Option<FoodPaintPlan>, JsValue> {
+    if !prepared.food_enabled() {
+        return Ok(None);
+    }
+    sources.validate(target)?;
+    let plan = plan_food(FoodPaintInput {
+        foods: prepared.foods().foods(),
+        view,
+        quality,
+        bounds: prepared.food_bounds(),
+        assets: &sources.assets()?,
+        target_handle: None,
+        entry_alpha: 1.,
+        command_limit: budget.images,
+    })
+    .map_err(error)?;
+    budget.images = budget
+        .images
+        .checked_sub(plan.early.len())
+        .and_then(|n| n.checked_sub(plan.late.len()))
+        .ok_or_else(|| error("scene image budget exceeded"))?;
+    Ok(Some(plan))
+}
+
+fn submit_food(
+    sources: &FoodSources,
+    context: &CanvasRenderingContext2d,
+    commands: &[FoodImageCommand],
+) -> Result<(), JsValue> {
+    context.save();
+    let result = commands
+        .iter()
+        .try_for_each(|command| sources.submit(context, command));
+    context.restore();
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_standard(
+    prepared: &mut AnimatedClient,
+    sources: &mut BorrowedSources,
+    target: &HtmlCanvasElement,
+    size: DrawSize,
+    resolve_recipe: &js_sys::Function,
+    applied: QualitySnapshot,
+    budget: &mut DrawBudget,
+) -> Result<PlannedSnakePaint, JsValue> {
+    let DrawSize { width, height } = size;
+    let mut recipes = Vec::new();
+    let snakes = prepared
+        .prepare_draw_resolved_limited_staged(
+            width,
+            height,
+            applied.quality_scale,
+            budget.samples,
+            |ordinal, own, snake| -> Result<bool, ResolveError> {
+                let recipe =
+                    sources.resolve(resolve_recipe, &request(ordinal, own, snake)?, target)?;
+                if let Some(eyes) = &recipe.eyes
+                    && !same_eyes(eyes, snake.eye_geometry())
+                {
+                    return Err(
+                        error("recipe eyes differ from retained appearance geometry").into(),
+                    );
+                }
+                if !same_decoration(
+                    recipe.decoration.as_ref(),
+                    snake.face_geometry().decoration.as_ref(),
+                ) {
+                    return Err(error(
+                        "recipe decoration differs from retained appearance geometry",
+                    )
+                    .into());
+                }
+                let detailed = recipe.style.detailed_segments;
+                push(&mut recipes, recipe)?;
+                Ok(detailed)
+            },
+        )
+        .map_err(|e| e.0)?;
+    if snakes.len() > MAX_RETAINED_SNAKES {
+        return Err(error("face command budget exceeded"));
+    }
+    let camera = prepared.camera().position();
+    let zoom = prepared.camera().zoom();
+    let viewport_half = Point {
+        x: f64::from(width) / 2.,
+        y: f64::from(height) / 2.,
+    };
+    let mut draws = Vec::new();
+    budget.prepared(&snakes)?;
+    let mut remaining = budget.images;
+    // Every ordinary face completes with an unconditional root alpha one,
+    // including eye-less and nondecorated faces. Standalone planner callers
+    // still control their own entry alpha.
+    let entry_alpha = 1.;
+    for (snake, recipe) in snakes.iter().zip(&recipes) {
+        if recipe.decoration.is_some() {
+            remaining = remaining
+                .checked_sub(2)
+                .ok_or_else(|| error("scene image budget exceeded"))?;
+        }
+        let m = snake.metrics;
+        let layout = if recipe.eyes.is_some() {
+            Some(
                 snake
                     .eye_geometry
                     .layout(
                         snake.face_heading,
                         snake.pupil,
                         EyeLayoutInput {
-                            corrected_head: snake.metrics.corrected_head,
+                            corrected_head: m.corrected_head,
                             camera,
                             viewport_half,
-                            scale: snake.metrics.scale,
+                            scale: m.scale,
                             zoom,
-                            death_progress: snake.metrics.death_progress,
+                            death_progress: m.death_progress,
                         },
                     )
-                    .map_err(error)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let decoration_layouts = snakes
-            .iter()
-            .zip(&decorations)
-            .map(|(snake, decoration)| {
-                decoration
-                    .as_ref()
-                    .map(|d| {
-                        d.geometry
-                            .layout(
-                                snake.face_heading,
-                                EyeLayoutInput {
-                                    corrected_head: snake.metrics.corrected_head,
-                                    camera,
-                                    viewport_half,
-                                    scale: snake.metrics.scale,
-                                    zoom,
-                                    death_progress: snake.metrics.death_progress,
-                                },
-                            )
-                            .map_err(error)
-                    })
-                    .transpose()
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let image_count = snakes
-            .iter()
-            .map(|snake| snake.curve.as_ref().map_or(0, |curve| curve.samples.len()))
-            .sum::<usize>()
-            + decorations.iter().filter(|d| d.is_some()).count() * 2;
-        let budget = MAX_BODY_PAINT_COMMANDS
-            .checked_sub(image_count)
-            .ok_or_else(|| error("scene image budget exceeded"))?;
-        let food_plan = if let Some(quality) = food_quality {
-            self.food_plan(
-                &prepared,
-                &target,
-                BodyPaintView {
+                    .map_err(error)?,
+            )
+        } else {
+            None
+        };
+        let mut root_alpha = entry_alpha;
+        let plan = if let Some(geometry) = &snake.body_geometry {
+            let palettes = recipe.palettes();
+            let maximum_speed = m.maximum_speed;
+            let input = BodyPaintInput {
+                geometry: geometry.as_paint_geometry(),
+                recipe: recipe.borrowed(&palettes),
+                assets: &recipe.assets,
+                view: BodyPaintView {
                     camera,
                     zoom,
                     half_width: viewport_half.x,
                     half_height: viewport_half.y,
                 },
-                quality,
-                budget,
-            )?
+                quality: BodyPaintQuality {
+                    high_quality: applied.high_quality,
+                    blend: applied.quality_blend,
+                },
+                visual: BodyPaintVisual {
+                    scale: m.scale,
+                    spawn: m.spawn_progress,
+                    death: m.death_progress,
+                    dead: !m.alive,
+                    smoothed_speed: m.visual_speed,
+                    boost_threshold: m.boost_threshold_speed,
+                    cruise_speed: m.cruise_speed,
+                    maximum_speed,
+                    boost_phase: m.boost_phase,
+                },
+                entry_alpha,
+                command_limit: remaining,
+            };
+            match plan_standard_body(input) {
+                Ok(plan) => {
+                    remaining = remaining
+                        .checked_sub(plan.commands.len())
+                        .ok_or_else(|| error("scene image budget exceeded"))?;
+                    let mut opacity = m.spawn_progress * (1. - m.death_progress);
+                    opacity *= opacity;
+                    let boost = if m.visual_speed > m.boost_threshold_speed {
+                        m.spawn_progress
+                            * (1. - m.death_progress)
+                            * ((m.visual_speed - m.cruise_speed) / (maximum_speed - m.cruise_speed))
+                                .clamp(0., 1.)
+                    } else {
+                        0.
+                    };
+                    root_alpha = opacity * (1. - boost);
+                    Some(plan)
+                }
+                // Coincident/short stored geometry has no production body.
+                // Its independently valid eyes still complete in draw order.
+                Err(BodyPaintError::UnsupportedGeometry) => None,
+                Err(e) => return Err(error(e)),
+            }
         } else {
             None
         };
-        sources.validate(&target)?;
-        sources.validate_food(&self.food_sources)?;
-        if target.width() != width || target.height() != height {
-            return Err(error("target dimensions changed during recipe resolution"));
-        }
-        let frame = CanvasFrame::new(
-            &target,
-            &sprites,
-            &background,
-            camera.x - center,
-            camera.y - center,
-            zoom,
+        let decoration_layout = recipe
+            .decoration
+            .as_ref()
+            .map(|d| {
+                d.geometry
+                    .layout(
+                        snake.face_heading,
+                        EyeLayoutInput {
+                            corrected_head: m.corrected_head,
+                            camera,
+                            viewport_half,
+                            scale: m.scale,
+                            zoom,
+                            death_progress: m.death_progress,
+                        },
+                    )
+                    .map_err(error)
+            })
+            .transpose()?;
+        push(
+            &mut draws,
+            StandardDraw {
+                plan,
+                layout,
+                root_alpha,
+                decoration_layout,
+            },
         )?;
+    }
+    budget.images = remaining;
+    Ok(PlannedSnakePaint::Standard { draws, recipes })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_basic(
+    prepared: &mut AnimatedClient,
+    sources: &mut BorrowedSources,
+    target: &HtmlCanvasElement,
+    size: DrawSize,
+    quality_scale: f64,
+    detailed_style: bool,
+    resolve_face: Option<&js_sys::Function>,
+    budget: &mut DrawBudget,
+) -> Result<PlannedSnakePaint, JsValue> {
+    let DrawSize { width, height } = size;
+    let mut decorations = Vec::new();
+    let snakes = prepared
+        .prepare_draw_resolved_limited_staged(
+            width,
+            height,
+            quality_scale,
+            budget.samples,
+            |ordinal, own, snake| -> Result<bool, ResolveError> {
+                let decoration = if let Some(resolve_face) = resolve_face {
+                    sources.resolve_face(
+                        resolve_face,
+                        &request(ordinal, own, snake)?,
+                        snake.face_geometry(),
+                        target,
+                    )?
+                } else {
+                    if snake.face_geometry().decoration.is_some() {
+                        return Err(
+                            error("decorated face requires render_with_face_decorations").into(),
+                        );
+                    }
+                    None
+                };
+                push(&mut decorations, decoration)?;
+                Ok(detailed_style)
+            },
+        )
+        .map_err(|e| e.0)?;
+    if snakes.len() > MAX_RETAINED_SNAKES {
+        return Err(error("face command budget exceeded"));
+    }
+    let camera = prepared.camera().position();
+    let zoom = prepared.camera().zoom();
+    let viewport_half = Point {
+        x: f64::from(width) / 2.,
+        y: f64::from(height) / 2.,
+    };
+    budget.prepared(&snakes)?;
+    // Complete numeric validation before the target's destructive width reset.
+    let layouts = collect_layouts(snakes.iter().map(|snake| {
+        snake
+            .eye_geometry
+            .layout(
+                snake.face_heading,
+                snake.pupil,
+                EyeLayoutInput {
+                    corrected_head: snake.metrics.corrected_head,
+                    camera,
+                    viewport_half,
+                    scale: snake.metrics.scale,
+                    zoom,
+                    death_progress: snake.metrics.death_progress,
+                },
+            )
+            .map_err(error)
+    }))?;
+    let decoration_layouts =
+        collect_layouts(snakes.iter().zip(&decorations).map(|(snake, decoration)| {
+            decoration
+                .as_ref()
+                .map(|d| {
+                    d.geometry
+                        .layout(
+                            snake.face_heading,
+                            EyeLayoutInput {
+                                corrected_head: snake.metrics.corrected_head,
+                                camera,
+                                viewport_half,
+                                scale: snake.metrics.scale,
+                                zoom,
+                                death_progress: snake.metrics.death_progress,
+                            },
+                        )
+                        .map_err(error)
+                })
+                .transpose()
+        }))?;
+    let image_count = snakes
+        .iter()
+        .try_fold(0_usize, |count, snake| {
+            count.checked_add(snake.curve.as_ref().map_or(0, |curve| curve.samples.len()))
+        })
+        .and_then(|count| {
+            decorations
+                .iter()
+                .filter(|d| d.is_some())
+                .count()
+                .checked_mul(2)
+                .and_then(|sides| count.checked_add(sides))
+        })
+        .ok_or_else(|| error("scene image budget exceeded"))?;
+    budget.images = budget
+        .images
+        .checked_sub(image_count)
+        .ok_or_else(|| error("scene image budget exceeded"))?;
+    Ok(PlannedSnakePaint::Basic {
+        snakes,
+        layouts,
+        decorations,
+        decoration_layouts,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_paint(
+    prepared: &mut AnimatedClient,
+    sources: &mut BorrowedSources,
+    target: &HtmlCanvasElement,
+    size: DrawSize,
+    lane: DrawLane<'_>,
+    applied: QualitySnapshot,
+    budget: &mut DrawBudget,
+) -> Result<PlannedSnakePaint, JsValue> {
+    match lane {
+        DrawLane::Basic { detailed, face } => build_basic(
+            prepared,
+            sources,
+            target,
+            size,
+            applied.quality_scale,
+            detailed,
+            Some(face),
+            budget,
+        ),
+        DrawLane::Standard(recipe) => {
+            build_standard(prepared, sources, target, size, recipe, applied, budget)
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn submit_plans(
+    plans: Vec<PlannedScene>,
+    target: &HtmlCanvasElement,
+    sprites: &[HtmlCanvasElement; 3],
+    background: &HtmlImageElement,
+    entry: DrawSize,
+    sources: &BorrowedSources,
+    foods: &FoodSources,
+) -> Result<(), JsValue> {
+    sources.validate(target)?;
+    foods.validate(target)?;
+    sources.validate_food(foods)?;
+    entry.validate_entry(target)?;
+    let mut frames = Vec::new();
+    frames
+        .try_reserve(plans.len())
+        .map_err(|_| error("scene preflight allocation failed"))?;
+    // Acquire every native context and pattern before the first destructive draw.
+    for plan in &plans {
+        frames.push(CanvasPreflight::new(
+            target,
+            sprites,
+            background,
+            plan.context.size.width,
+            plan.context.size.height,
+            plan.camera.x - plan.context.center,
+            plan.camera.y - plan.context.center,
+            plan.zoom,
+        )?);
+    }
+    entry.validate_entry(target)?;
+    for (plan, frame) in plans.into_iter().zip(frames) {
+        plan.submit(frame.begin(target)?, sprites, sources, foods)?;
+    }
+    Ok(())
+}
+
+impl PlannedScene {
+    #[allow(clippy::too_many_arguments)]
+    fn build(
+        prepared: &mut AnimatedClient,
+        food_sources: &FoodSources,
+        sources: &mut BorrowedSources,
+        target: &HtmlCanvasElement,
+        context: SceneDrawContext,
+        lane: DrawLane<'_>,
+        applied: QualitySnapshot,
+        budget: &mut DrawBudget,
+    ) -> Result<Self, JsValue> {
+        let paint = build_paint(
+            prepared,
+            sources,
+            target,
+            context.size,
+            lane,
+            applied,
+            budget,
+        )?;
+        Self::finish(
+            prepared,
+            food_sources,
+            target,
+            context,
+            paint,
+            applied,
+            budget,
+        )
+    }
+
+    fn finish(
+        prepared: &AnimatedClient,
+        food_sources: &FoodSources,
+        target: &HtmlCanvasElement,
+        context: SceneDrawContext,
+        paint: PlannedSnakePaint,
+        applied: QualitySnapshot,
+        budget: &mut DrawBudget,
+    ) -> Result<Self, JsValue> {
+        let camera = prepared.camera().position();
+        let zoom = prepared.camera().zoom();
+        let food = food_plan(
+            food_sources,
+            prepared,
+            target,
+            view(context.size, camera, zoom),
+            BodyPaintQuality {
+                high_quality: applied.high_quality,
+                blend: applied.quality_blend,
+            },
+            budget,
+        )?;
+        let fallback = fallback_food(prepared, food.is_none())?;
+        Ok(Self {
+            context,
+            camera,
+            zoom,
+            food,
+            fallback,
+            paint,
+        })
+    }
+
+    fn submit(
+        self,
+        frame: CanvasFrame,
+        sprites: &[HtmlCanvasElement; 3],
+        sources: &BorrowedSources,
+        food_sources: &FoodSources,
+    ) -> Result<(), JsValue> {
         let context = frame.context();
-        if let Some(boundary) = prepared.boundary().filter(|_| received.setup.is_some()) {
+        let camera = self.camera;
+        let zoom = self.zoom;
+        let viewport_half = self.context.size.half();
+        if let Some(boundary) = self.context.boundary {
             context.begin_path();
-            context.arc(0., 0., boundary.displayed(), 0., TAU)?;
+            context.arc(0., 0., boundary, 0., TAU)?;
             context.set_stroke_style_str("#647481");
             context.set_line_width(1. / zoom);
             context.stroke();
         }
-        if let Some(plan) = &food_plan {
-            self.submit_food(context, &plan.early[..plan.outline_barrier])?;
-            self.submit_food(context, &plan.early[plan.outline_barrier..])?;
+        if let Some(plan) = &self.food {
+            submit_food(food_sources, context, &plan.early[..plan.outline_barrier])?;
+            submit_food(food_sources, context, &plan.early[plan.outline_barrier..])?;
         } else {
-            for food in received.foods.values() {
+            for food in &self.fallback {
                 if frame.visible(food.position.x, food.position.y, food.size.max(1.)) {
                     draw_sprite(
                         context,
@@ -1290,56 +1891,94 @@ impl AnimatedScene {
                 }
             }
         }
-        // Preserve subtraction-before-scaling for body screen coordinates. The
-        // borrowed background/food preview above retains its existing transform.
-        for (((snake, layout), decoration), side_layouts) in snakes
-            .into_iter()
-            .zip(layouts)
-            .zip(&decorations)
-            .zip(decoration_layouts)
-        {
-            context.set_transform(1., 0., 0., 1., viewport_half.x, viewport_half.y)?;
-            let m = snake.metrics;
-            let opacity = m.spawn_progress * (1. - m.death_progress);
-            context.set_global_alpha(opacity * opacity);
-            if let Some(curve) = snake.curve {
-                for point in curve.samples.iter().rev() {
-                    context.save();
-                    let result = (|| {
-                        context.translate(
-                            (f64::from(point.x) - camera.x) * zoom,
-                            (f64::from(point.y) - camera.y) * zoom,
-                        )?;
-                        context.rotate(f64::from(point.angle))?;
-                        draw_sprite(
+        match self.paint {
+            PlannedSnakePaint::Basic {
+                snakes,
+                layouts,
+                decorations,
+                decoration_layouts,
+            } => {
+                // Preserve subtraction-before-scaling for body screen coordinates. The
+                // borrowed background/food preview above retains its existing transform.
+                for (((snake, layout), decoration), side_layouts) in snakes
+                    .into_iter()
+                    .zip(layouts)
+                    .zip(&decorations)
+                    .zip(decoration_layouts)
+                {
+                    context.set_transform(1., 0., 0., 1., viewport_half.x, viewport_half.y)?;
+                    let m = snake.metrics;
+                    let opacity = m.spawn_progress * (1. - m.death_progress);
+                    context.set_global_alpha(opacity * opacity);
+                    if let Some(curve) = snake.curve {
+                        for point in curve.samples.iter().rev() {
+                            context.save();
+                            let result = (|| {
+                                context.translate(
+                                    (f64::from(point.x) - camera.x) * zoom,
+                                    (f64::from(point.y) - camera.y) * zoom,
+                                )?;
+                                context.rotate(f64::from(point.angle))?;
+                                draw_sprite(
+                                    context,
+                                    &sprites[usize::from(m.skin) % 3],
+                                    0.,
+                                    0.,
+                                    zoom * (29. * m.scale),
+                                )?;
+                                Ok::<_, JsValue>(())
+                            })();
+                            context.restore();
+                            result?;
+                        }
+                    }
+                    draw_eyes(context, layout)?;
+                    context.set_global_alpha(1.);
+                    context.set_global_composite_operation("source-over")?;
+                    if let Some(side_layouts) = side_layouts {
+                        sources.submit_face(
                             context,
-                            &sprites[usize::from(m.skin) % 3],
-                            0.,
-                            0.,
-                            zoom * (29. * m.scale),
+                            decoration.as_ref().expect("planned decoration"),
+                            side_layouts,
                         )?;
-                        Ok::<_, JsValue>(())
-                    })();
-                    context.restore();
-                    result?;
+                    }
                 }
             }
-            draw_eyes(context, layout)?;
-            context.set_global_alpha(1.);
-            context.set_global_composite_operation("source-over")?;
-            if let Some(side_layouts) = side_layouts {
-                sources.submit_face(
-                    context,
-                    decoration.as_ref().expect("planned decoration"),
-                    side_layouts,
-                )?;
+            PlannedSnakePaint::Standard { draws, recipes } => {
+                for (
+                    StandardDraw {
+                        plan,
+                        layout,
+                        root_alpha,
+                        decoration_layout,
+                    },
+                    recipe,
+                ) in draws.into_iter().zip(&recipes)
+                {
+                    if let Some(plan) = plan {
+                        for command in &plan.commands {
+                            sources.submit(context, command)?;
+                        }
+                    }
+                    context.set_global_alpha(root_alpha);
+                    context.set_global_composite_operation("source-over")?;
+                    if let Some(layout) = layout {
+                        draw_eyes(context, layout)?;
+                    }
+                    context.set_global_alpha(1.);
+                    if let Some(layouts) = decoration_layout {
+                        sources.submit_face(
+                            context,
+                            recipe.decoration.as_ref().expect("planned decoration"),
+                            layouts,
+                        )?;
+                    }
+                }
             }
         }
-        if let Some(plan) = &food_plan {
-            self.submit_food(context, &plan.late)?;
+        if let Some(plan) = &self.food {
+            submit_food(food_sources, context, &plan.late)?;
         }
-        drop(frame);
-        self.client = prepared;
         Ok(())
     }
 }

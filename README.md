@@ -95,6 +95,9 @@ An additive [food factory API](docs/food-presentation.md) retains duplicate food
 captured eater objects and creation-selected sources. Both renderers place early
 outlines/body and late glows around snake drawing, using applied quality. Setup
 preserves the existing world; explicit reset clears it on the retained timeline.
+Additive target-aware APIs also stage a draw at each ordered Setup. The animated
+page uses these calls and synchronous resize draws with desktop backing sizes;
+its contained demo layout does not implement the original login/HUD layout.
 
 An additive [paired-face API](docs/standard-body-renderer.md#complete-ordinary-paired-faces)
 also retains optional geometric side images and composes the complete represented

@@ -338,6 +338,7 @@ export function animatedSmoke(wasm) {
 
   const scene = new wasm.AnimatedScene(0);
   const view = () => JSON.parse(scene.snapshot());
+  const initialZoom = view().camera.zoom;
   function advance(now) {
     const step = scene.advance(now, false);
     try { return step.whole_steps; }
@@ -390,8 +391,26 @@ export function animatedSmoke(wasm) {
     advance(16);
     assert.equal(view().own.headPending, 52);
     assert.equal(view().camera.pending, 61, 'updates do not consume camera samples');
+    scene.set_follows(false);
+    scene.set_camera_position(32123, 32789);
+    scene.set_zoom(1.75);
+    const beforeReset = view().camera;
+    assert.notEqual(beforeReset.index, 0, 'reset regression starts from a consumed camera ring slot');
+    assert.equal(scene.camera_samples().some(value => value !== 0), true);
     scene.reset();
+    const clearedCamera = view().camera;
+    assert.equal(clearedCamera.index, beforeReset.index, 'world reset preserves the camera correction cursor');
+    assert.equal(clearedCamera.pending, 0);
+    assert.deepEqual([clearedCamera.offsetX, clearedCamera.offsetY], [0, 0]);
+    assert.deepEqual(Array.from(scene.camera_samples()), Array(124).fill(0), 'world reset clears both camera sample lanes');
+    assert.equal(clearedCamera.zoom, initialZoom, 'world reset restores the exact initial zoom');
+    assert.deepEqual([clearedCamera.absoluteX, clearedCamera.absoluteY],
+      [beforeReset.absoluteX, beforeReset.absoluteY], 'world reset retains camera position');
+    assert.equal(clearedCamera.follows, false);
+    scene.reset();
+    assert.deepEqual(view().camera, clearedCamera, 'repeated reset neither advances nor rewinds the cleared cursor');
     scene.apply_frame(syntheticScene(), false);
+    assert.equal(view().camera.index, beforeReset.index, 'fresh Setup/appearance do not rewind the retained cursor');
     const resetState = scene.snapshot();
     assert.throws(() => scene.apply_frame(new Uint8Array(), false));
     assert.equal(scene.snapshot(), resetState);
