@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add a caller-owned stock session with explicit profiles/endpoints, staged Play,
+  complete Setup ingress, ping/lag and life-end actions. Synthetic socket and
+  real-Wasm checks remain separate from active extension gameplay acceptance.
+
 - Add authored stock skin, food and prey adapters with explicit live-source
   readiness and content revisions, including single-image skin 27. Add desktop
   input intents and a same-clock pre-motion control callback; full game-page
