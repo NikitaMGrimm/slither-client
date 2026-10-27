@@ -10,6 +10,7 @@ import { qualitySmoke } from './quality-smoke.mjs';
 import { bodyRenderSmoke } from './body-render-smoke.mjs';
 import { clientControlSmoke } from './client-control-smoke.mjs';
 import { stockRenderSmoke } from './stock-render-smoke.mjs';
+import { stockSessionSmoke } from './stock-session-smoke.mjs';
 
 // Entirely synthetic ABI integration; no reference files or network are used.
 const wasm = await loadWasm();
@@ -100,3 +101,4 @@ console.log('Synthetic desktop quality preference, timing and rejection Wasm ABI
 console.log('Synthetic borrowed standard-body Canvas ABI passed:', bodyRenderSmoke(wasm));
 console.log('Synthetic pre-motion control ABI passed:', clientControlSmoke(wasm));
 console.log('Synthetic live-source stock adapter ABI passed:', stockRenderSmoke(wasm));
+console.log('Synthetic caller-owned stock session ABI passed:', stockSessionSmoke(wasm));
