@@ -24,6 +24,7 @@ mod face;
 mod follow_camera;
 mod food;
 mod food_painter;
+mod hud;
 mod length;
 mod prey;
 mod prey_painter;
@@ -69,6 +70,10 @@ pub use food::{
 pub use food_painter::{
     FoodCullBounds, FoodImageCommand, FoodImageDraw, FoodPaintCounts, FoodPaintError,
     FoodPaintInput, FoodPaintPass, FoodPaintPlan, MAX_FOOD_PAINT_COMMANDS, plan_food,
+};
+pub use hud::{
+    HudCommandGuard, HudIngressError, HudIngressEvent, HudIngressEventKind, HudIngressPlan,
+    HudIngressReport,
 };
 pub use length::LengthPresentation;
 pub use prey::{

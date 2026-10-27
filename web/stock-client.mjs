@@ -1,6 +1,9 @@
 // Original controller seam for the parent extension's actual packet and draw path.
 // Scene, quality, transport, scheduling and borrowed artwork remain caller-owned.
+import { copyHudIngressPlan, copyHudIngressReport } from './stock-hud-contract.mjs';
+
 const freeze = Object.freeze;
+const byteLength = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype), 'length').get;
 
 function size(value) {
   if (!Number.isSafeInteger(value) || value <= 0 || value > 4096) throw new RangeError('Invalid stock backing size');
@@ -48,7 +51,7 @@ export function createStockClient({ scene, quality, adapter, hostAssets, target,
   const resolvePrey = request => withinOperation(() => hostAssets.resolvePrey(request, operation));
 
   function diagnostics() { return freeze({ draws, drawsSinceStatistics, width: backingWidth, height: backingHeight, stopped }); }
-  function run(callback, snapshot = false) {
+  function run(callback, snapshot = false, preflight) {
     if (busy) throw new Error('Stock controller reentry');
     if (stopped) throw new Error('Stock controller stopped');
     busy = true;
@@ -56,6 +59,7 @@ export function createStockClient({ scene, quality, adapter, hostAssets, target,
     let result, failure;
     let failed = false;
     try {
+      if (preflight !== undefined) preflight();
       if (snapshot) { operation = adapter.beginOperation(); began = true; }
       result = callback();
     } catch (error) {
@@ -125,6 +129,25 @@ export function createStockClient({ scene, quality, adapter, hostAssets, target,
     if (quality.update_statistics(nowMs, drawsSinceStatistics, currentPlaying)) drawsSinceStatistics = 0;
   }
   return freeze({
+    packetWithHud(bytes, elapsedHeader, plan) {
+      let copiedPlan, apply;
+      return run(() => {
+        const nativeReport = Reflect.apply(apply, scene, [bytes, elapsedHeader,
+          resolveAppearance, resolveFood, resolvePrey, target, ...contextPalettes, background, backingWidth,
+          backingHeight, resolveRecipe, resolveRandom, quality, copiedPlan]);
+        const report = copyHudIngressReport(nativeReport, copiedPlan.commandCount);
+        countDraws(report.setupDraws);
+        return report;
+      }, true, () => {
+        // Reflection and capability getters can call back too; guard before capture.
+        if (!(bytes instanceof Uint8Array)) throw new TypeError('Packet Uint8Array required');
+        Reflect.apply(byteLength, bytes, []);
+        flag(elapsedHeader);
+        copiedPlan = copyHudIngressPlan(plan);
+        apply = scene.apply_frame_and_render_standard_with_face_presentation_and_prey_and_hud;
+        if (typeof apply !== 'function') throw new TypeError('Stock capability required: apply_frame_and_render_standard_with_face_presentation_and_prey_and_hud');
+      });
+    },
     packet(bytes, elapsedHeader = false) {
       if (!(bytes instanceof Uint8Array)) throw new TypeError('Packet Uint8Array required');
       flag(elapsedHeader);

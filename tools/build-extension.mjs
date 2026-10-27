@@ -78,7 +78,7 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir } 
 
   const bindings = new Map(bindingFiles.map(name => [name, readFile(path.join(webDir, name))]));
   const buildInputs = [
-    'Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'tools/build-web.mjs',
+    'Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'tools/build-web.mjs', 'web/stock-hud-contract.mjs',
   ].map(name => path.join(projectRoot, name)).concat(sourceFiles(path.join(projectRoot, 'src')));
   const newestSource = Math.max(...buildInputs.map(filename => { readFile(filename); return fs.statSync(filename).mtimeMs; }));
   for (const name of bindingFiles) {
@@ -97,8 +97,21 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir } 
     || !/export\s*\{[^}]*\b__wbg_init as default\s*\}/.test(glue)) {
     throw new Error('Expected the generated web entrypoint for slither_client');
   }
+  // Bindgen's crate identifier may change; admit only its one byte-exact authored helper.
+  const snippetImports = [...glue.matchAll(/\bfrom\s*['"]\.\/(snippets\/[^'"]+)['"]/g)];
+  if (snippetImports.length !== 1
+    || !/^snippets\/slither-client-[0-9a-f]{16}\/web\/stock-hud-contract\.mjs$/.test(snippetImports[0][1])) {
+    throw new Error('Expected exactly one generated HUD validator module');
+  }
+  const snippetName = snippetImports[0][1];
+  const snippet = readFile(path.join(webDir, snippetName));
+  if (!snippet.equals(readFile(path.join(projectRoot, 'web/stock-hud-contract.mjs')))) {
+    throw new Error('Generated HUD validator differs from its authored source; rebuild before packaging');
+  }
+  bindings.set(snippetName, snippet);
   for (const name of ['memory', 'animatedscene_new', 'desktopquality_new',
     'animatedscene_apply_frame_and_render_standard_with_face_presentation_and_prey',
+    'animatedscene_apply_frame_and_render_standard_with_face_presentation_and_prey_and_hud',
     'animatedscene_render_standard_with_face_presentation_at_size',
     'animatedscene_control_view', 'animatedscene_advance_with_control', 'animatedscene_reset_lag',
     'encode_login', 'solve_challenge', 'decode_frame', 'setup_protocol_version',
@@ -145,7 +158,9 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir } 
       || declarations[0].resources.some(name => !expected.delete(name)) || expected.size) {
       throw new Error('Game web-accessible resources must match the exact local module graph and host origins');
     }
-    files.set(`${browser}/manifest.json`, manifestBytes);
+    // Source manifests declare fixed resources; bind the generated import to its exact path.
+    declarations[0].resources.push(`game/pkg/${snippetName}`);
+    files.set(`${browser}/manifest.json`, Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`));
     for (const [name, bytes] of common) files.set(`${browser}/${name}`, bytes);
   }
   const inventory = [...files.keys()].sort();

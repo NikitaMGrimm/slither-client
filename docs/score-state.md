@@ -72,10 +72,11 @@ admitted: this slice has no required HUD or final-result lookup.
 
 ## Scope and verification
 
-The feature does not enable itself in gameplay. Rank, leaderboard, dirty-readout
-scheduling, command-time final capture, HUD display and login UI remain separate.
-`score_view()` is an out-of-borrow read, not an event-time replacement for future
-final-result or intermediate Setup-draw sampling.
+The feature does not enable itself in gameplay. The optional
+[packet journal](hud-ingress.md) supplies command-time final capture,
+intermediate Setup samples and leaderboard headers. Dirty-readout scheduling,
+HUD display and login UI remain separate. `score_view()` is an out-of-borrow
+read and cannot replace event-time journal samples.
 
 Native synthetic tests cover legacy behavior, canonical admission, rollback,
 cache ownership, reset, event-time Setup and retained-own identity. The authored
