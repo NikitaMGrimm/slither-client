@@ -120,7 +120,7 @@ test('only selected IP/explicit port/exact route is accepted without DNS or fall
 
 test('profile and login validate before mutation, reject getters/truncation, copy caller bytes', () => {
   for (const modify of [r => { r.profile.clientVersion = 65536; }, r => { r.profile.password = new Uint8Array(19); },
-    r => { r.profile.protocolVersion = 18; }, r => { r.nickname = '\u007f'; }, r => { r.skin = 256; },
+    r => { r.profile.protocolVersion = 18; }, r => { r.nickname = '\u0080'; }, r => { r.skin = 256; },
     r => { r.customSkin = new Uint8Array(256); }]) {
     const h = harness(), r = request(); modify(r); assert.throws(() => h.session.play(r));
     assert.equal(h.session.snapshot().phase, 'ready'); assert.equal(h.sockets.length, 0);
@@ -135,7 +135,7 @@ test('profile and login validate before mutation, reject getters/truncation, cop
 });
 
 for (const [name, modify] of [
-  ['DEL nickname', r => { r.nickname = '\u007f'; }],
+  ['non-ASCII nickname', r => { r.nickname = '\u0080'; }],
   ['long nickname', r => { r.nickname = 'x'.repeat(25); }],
   ['negative skin', r => { r.skin = -1; }],
   ['large skin', r => { r.skin = 256; }],

@@ -343,7 +343,7 @@ export function createStockSession({ wasm, createSocket, now, maxBufferedBytes =
       let endpoint, login;
       try {
         const custom = copiedBytes(request.customSkin, undefined, 'custom skin');
-        if (custom.length > 255 || typeof request.nickname !== 'string' || !/^[ -~]{0,24}$/.test(request.nickname)) throw new TypeError('Invalid login fields');
+        if (custom.length > 255 || typeof request.nickname !== 'string' || !/^[\x20-\x7f]{0,24}$/.test(request.nickname)) throw new TypeError('Invalid login fields');
         integer(request.skin, 255, 'skin');
         endpoint = stockEndpoint(request.endpoint);
         login = copiedBytes(wasm.encode_login(profile.clientVersion, password, request.nickname, request.skin, custom), undefined, 'encoded login');

@@ -38,6 +38,28 @@ pull requests, and manual dispatch. Normal tests and CI require no external
 reference and do not connect to game servers. Dependency and toolchain setup may
 access package sources. Release-plz remains dormant.
 
+## DEL nickname admission
+
+The aligned session/Rust nickname boundary passes 791 Node and 492 native
+all-target tests. Formatting, doctest checks and strict native/Wasm Clippy pass.
+Focused native/Node tests cover every admitted byte at lengths 0..24, exact
+24-byte DEL wire layout, controls/non-ASCII/overlong rejection and password
+clearing. Legacy rejection fixtures use U+0080 and retain their original cleanup
+assertions; new staging tests use no constructor overrides.
+
+A fresh build passes the full real-Wasm suite. Direct ABI checks preserve all
+24 DEL bytes and reject both adjacent domain boundaries and excessive length.
+The profile helper passes 768 assertions across 11 cases, including a separate
+DEL intent through the actual acquirer/session/Rust encoder/control/handshake
+composition. Fetch/digest/socket inputs are authored doubles; all network
+sentinels remain unused. Both 44-file packages build with the new native payload.
+
+Worker Rust/Node DEL baselines, its initial test lint failure and the parent's
+stale synthetic encoder failure remain retained. Aligning that double and its
+invalid-name fixture passes without a production acquirer change. These results
+establish authored domain and wire consistency, not native editing, sanitization,
+digit policy, actual profile HTTP, browser or server acceptance.
+
 ## Semantic HUD view and passive renderer
 
 The integrated view/renderer revision passes 786 Node tests, including 11 pure
