@@ -21,6 +21,83 @@ export async function startGamePage({ realm = globalThis, initialize = init, was
   const native = gate.claim(armed.id);
   let scene, quality, controller, gameplay, held, frame, waiting, wakeWaiting, reload;
   let disposed = false;
+  let nickname, bindingOperation, handlingNickname, routing = 0;
+  const ownKeys = Reflect.ownKeys, apply = Reflect.apply, prototype = Object.getPrototypeOf;
+  const descriptor = Object.getOwnPropertyDescriptor, hasOwn = Object.hasOwn;
+  const recordPrototype = Object.prototype, freeze = Object.freeze;
+  function nicknameBusy() {
+    const operation = bindingOperation ?? handlingNickname;
+    const error = new Error('Nickname owner operation active');
+    if (operation) {
+      // A caller trap may catch the error; publication must still fail afterward.
+      if (!operation.failed) { operation.failed = true; operation.primary = error; }
+      throw operation.primary;
+    }
+    throw error;
+  }
+  function guardNicknameOperation() {
+    if (bindingOperation || handlingNickname) nicknameBusy();
+  }
+  function detachNickname(value) {
+    if (!value || nickname !== value) return;
+    nickname = undefined;
+    let unregister = value.unregister;
+    value.unregister = value.handleInput = undefined;
+    try { apply(unregister, undefined, []); }
+    finally { unregister = undefined; }
+  }
+  function bindNicknameField(request) {
+    guardNicknameOperation();
+    if (disposed) throw new Error('Client disposed');
+    if (nickname) throw new Error('Nickname field already bound');
+    if (routing || held) nicknameBusy();
+    const operation = { failed: false, primary: undefined };
+    bindingOperation = operation;
+    const candidate = { __proto__: null, unregister: undefined, handleInput: undefined };
+    let record, lease;
+    try {
+      const ticket = freeze({ unbind() {
+        if (nickname !== candidate) return;
+        guardNicknameOperation();
+        if (routing || held) nicknameBusy();
+        detachNickname(candidate);
+      } });
+      if (request === null || typeof request !== 'object'
+        || ![recordPrototype, null].includes(prototype(request))) throw new TypeError('Closed nickname owner record required');
+      const keys = ownKeys(request);
+      if (keys.length !== 3 || !['schema', 'element', 'parent'].every(name => keys.includes(name))) {
+        throw new TypeError('Closed nickname owner record required');
+      }
+      record = { __proto__: null, schema: undefined, element: undefined, parent: undefined, inputPolicy: 'nickname-ascii-24' };
+      for (const name of keys) {
+        const field = descriptor(request, name);
+        if (!field || !hasOwn(field, 'value')) throw new TypeError('Nickname owner data fields required');
+        record[name] = field.value;
+      }
+      if (record.schema !== 1) throw new TypeError('Nickname owner schema required');
+      if (operation.failed) throw operation.primary;
+      lease = native.registerNicknameEditField(record);
+      candidate.unregister = descriptor(lease, 'unregister')?.value;
+      candidate.handleInput = descriptor(lease, 'handleInput')?.value;
+      if (typeof candidate.unregister !== 'function' || typeof candidate.handleInput !== 'function') {
+        throw new TypeError('Nickname gate lease required');
+      }
+      if (operation.failed) throw operation.primary;
+      if (disposed || nickname) throw new Error('Nickname owner changed during registration');
+      nickname = candidate;
+      return ticket;
+    } catch (error) {
+      if (operation.failed) error = operation.primary;
+      let unregister = candidate.unregister;
+      candidate.unregister = candidate.handleInput = undefined;
+      try { if (unregister) apply(unregister, undefined, []); } catch { /* Registration primary remains authoritative. */ }
+      finally { unregister = undefined; }
+      throw error;
+    } finally {
+      record = lease = request = undefined;
+      bindingOperation = undefined; operation.primary = undefined;
+    }
+  }
   const listeners = [];
   const listen = (object, type, handler) => {
     object.addEventListener(type, handler);
@@ -28,6 +105,7 @@ export async function startGamePage({ realm = globalThis, initialize = init, was
   };
   function dispose(code = 'disposed') {
     if (disposed) return;
+    guardNicknameOperation();
     disposed = true;
     let failed = false, primary;
     const cleanup = callback => {
@@ -36,6 +114,7 @@ export async function startGamePage({ realm = globalThis, initialize = init, was
         code = 'client-failed';
       }
     };
+    cleanup(() => detachNickname(nickname));
     if (frame !== undefined) {
       const current = frame; frame = undefined;
       cleanup(() => native.cancelAnimationFrame(current));
@@ -74,14 +153,31 @@ export async function startGamePage({ realm = globalThis, initialize = init, was
   const size = () => desktopBackingSize(realm.innerWidth, realm.innerHeight);
   native.setInput(event => {
     if (event.type === 'click' && event.target === reload) { native.ordinaryReload(); return; }
-    if (editNotifications.has(event.type)) return;
-    if (disposed || !controller) return;
-    if (event.type === 'resize') {
-      try { const backing = size(); controller.resize(backing.width, backing.height); } catch (error) { fail(error); }
-      return;
-    }
-    try { gameplay?.event(event, { width: realm.innerWidth, height: realm.innerHeight }); }
-    catch (error) { fail(error); }
+    guardNicknameOperation();
+    routing++;
+    try {
+      if (nickname) {
+        const value = nickname, operation = { failed: false, primary: undefined };
+        handlingNickname = operation;
+        try {
+          apply(value.handleInput, undefined, [event]);
+          if (operation.failed) throw operation.primary;
+        } catch (error) {
+          if (operation.failed) error = operation.primary;
+          // Keep native game owners alive until this gate delivery has unwound.
+          try { detachNickname(value); } catch { /* Field cleanup cannot replace the input primary. */ }
+          throw error;
+        } finally { handlingNickname = undefined; operation.primary = undefined; }
+      }
+      if (editNotifications.has(event.type)) return;
+      if (disposed || !controller) return;
+      if (event.type === 'resize') {
+        try { const backing = size(); controller.resize(backing.width, backing.height); } catch (error) { fail(error); }
+        return;
+      }
+      try { gameplay?.event(event, { width: realm.innerWidth, height: realm.innerHeight }); }
+      catch (error) { fail(error); }
+    } finally { routing--; }
   });
   try {
     report('loading');
@@ -165,11 +261,13 @@ export async function startGamePage({ realm = globalThis, initialize = init, was
         connected: gameplay.diagnostics().session.connected, gameplay: gameplay.diagnostics(), disposed, captureHeld: Boolean(held) }),
       // Local capability only. The auto-entry supplies no profile and never calls Play.
       play(request) {
+        guardNicknameOperation();
         if (disposed) throw new Error('Client disposed');
         captureReady();
         return gameplay.play(request);
       },
-      playWithLiveProfile(request) { return gameplay.playWithLiveProfile(request); },
+      playWithLiveProfile(request) { guardNicknameOperation(); return gameplay.playWithLiveProfile(request); },
+      bindNicknameField,
       dispose,
     });
   } catch (error) {

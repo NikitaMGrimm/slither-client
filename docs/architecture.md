@@ -4,8 +4,10 @@
 
 The extension's optional [private nickname-edit gate](extension.md#private-nickname-edit-defaults)
 permits bounded native defaults for one exact registered text field while
-fencing original handlers. It preserves raw gameplay input and activates no
-field binding or login UI; native editing behavior remains unverified.
+fencing original handlers. A private runtime can explicitly bind a caller-owned
+field through [its local owner API](extension.md#local-nickname-field-owner).
+Startup remains unbound and creates no login UI. The new owner composition has
+synthetic VM coverage; broader native editing and host/UI acceptance remain separate.
 
 The Rust library builds as `rlib` and `cdylib`. It opens no sockets and fetches no
 assets. Native code has no runtime dependencies; browser bindings use wasm32-only

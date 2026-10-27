@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import { createGateTestDom, attachGateTestRealm } from './game-gate-test-fixture.mjs';
 import { Script, createContext, runInContext } from 'node:vm';
 import { activateGamePage, armDocument, gamePage } from '../extension/game-activation.mjs';
@@ -10,6 +10,17 @@ import { createStockClient } from '../web/stock-client.mjs';
 import { createStockEntityAssets } from '../web/stock-food-provider.mjs';
 import { desktopBackingSize } from '../web/desktop-layout.mjs';
 import { createStockGameplay } from '../web/stock-gameplay.mjs';
+
+const networkGlobals = ['fetch', 'WebSocket'].map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)]);
+let networkAttempts = 0;
+for (const [name] of networkGlobals) Object.defineProperty(globalThis, name, { configurable: true, writable: true,
+  value() { networkAttempts++; throw new Error('Real network forbidden in authored bootstrap tests'); } });
+after(() => {
+  for (const [name, descriptor] of networkGlobals) {
+    if (descriptor) Object.defineProperty(globalThis, name, descriptor); else delete globalThis[name];
+  }
+  assert.equal(networkAttempts, 0);
+});
 
 // Original synthetic DOM/native API and Wasm doubles; no original code/artwork/socket.
 const gateSource = readFileSync(new URL('../extension/game-gate.js', import.meta.url), 'utf8');
@@ -209,6 +220,7 @@ function wasmDouble(f) {
     }
     render_standard_with_antenna_at_size(...args) {
       calls.push(['render', args[5], args[6]]);
+      f.faults.renderOperation?.();
       values.recipe = args[7](request);
       values.random = args[8]({ nodeCount: 8, randomPairCount: 7 });
       if (f.faults.render) throw new Error('synthetic render failure');
@@ -251,6 +263,24 @@ test('an unarmed/expired/wrong-host document leaves scheduling and sockets untou
     assert.equal(value.gate, undefined);
     assert.equal(value.realm.requestAnimationFrame, value.nativeRaf);
   }
+});
+
+test('local nickname owner exposes only an opt-in frozen unbind ticket', async () => {
+  const h = nicknameOwnerHarness(), runtime = await h.start();
+  assert.equal(typeof runtime.bindNicknameField, 'function');
+  assert.equal(h.registrations.length, 0);
+  const ticket = runtime.bindNicknameField(h.request());
+  assert.equal(Object.isFrozen(ticket), true); assert.deepEqual(Object.keys(ticket), ['unbind']);
+  assert.equal(typeof Object.getOwnPropertyDescriptor(ticket, 'unbind').value, 'function');
+  assert.equal(h.registrations.length, 1);
+  assert.deepEqual(Object.keys(h.registrations[0]).sort(), ['schema', 'element', 'parent', 'inputPolicy'].sort());
+  assert.equal(h.registrations[0].inputPolicy, 'nickname-ascii-24');
+  assert.equal(h.registrations[0].element, h.field); assert.equal(h.registrations[0].parent, h.parent);
+  assert.equal(h.value().gets, 0); assert.equal(h.value().sets, 0);
+  const unbind = ticket.unbind; assert.equal(unbind.call({}), undefined); assert.equal(unbind(), undefined);
+  assert.equal(h.ownerTrace.filter(stage => stage === 'unregister').length, 1);
+  assert.equal(h.f.sockets, 0); assert.equal(h.wasm.controlReads(), 0);
+  runtime.dispose();
 });
 
 test('armed document holds original callbacks/socket, privately claims native scheduling once and consumes arm', () => {
@@ -696,6 +726,32 @@ function caught(callback) {
   catch (error) { return { thrown: true, error }; }
 }
 
+// Test-only facade over the same actual gate claim and bootstrap router. No product injector.
+function nicknameOwnerHarness(options) {
+  const h = cleanupHarness(options), slot = Symbol.for('slither.client.gate.v1');
+  const gate = h.realm[slot], registrations = [], ownerTrace = [], hooks = {};
+  const parent = h.f.document.createElement('div'), field = h.f.document.createElement('input');
+  h.f.document.body.appendChild(parent); parent.appendChild(field); h.f.edit.state(h.f.document).active = field;
+  h.realm[slot] = Object.freeze({ metadata: gate.metadata, claim(id) {
+    const native = gate.claim(id);
+    return Object.freeze({ ...native, registerNicknameEditField(request) {
+      ownerTrace.push('register'); hooks.beforeRegister?.(request); registrations.push(request);
+      const lease = native.registerNicknameEditField(request);
+      hooks.afterRegister?.(lease);
+      return Object.freeze({ unregister() {
+        ownerTrace.push('unregister'); hooks.unregister?.(); return lease.unregister();
+      }, handleInput(event) {
+        ownerTrace.push('handle'); hooks.handle?.(event); return lease.handleInput(event);
+      } });
+    } });
+  } });
+  return { ...h, parent, field, registrations, ownerTrace, hooks,
+    request: () => ({ __proto__: null, schema: 1, element: field, parent }),
+    value: () => h.f.edit.inputValue(field),
+    input: properties => h.f.edit.dispatch('input', { target: field, ...properties }),
+  };
+}
+
 async function rejected(callback) {
   try { await callback(); return { thrown: false }; }
   catch (error) { return { thrown: true, error }; }
@@ -742,7 +798,7 @@ for (const [index, primary] of cleanupPrimaries.entries()) {
 
 test('healthy cleanup preserves runtime shape, diagnostics, routes and ordinary reload', async () => {
   const h = cleanupHarness(), runtime = await h.start();
-  assert.deepEqual(Object.keys(runtime), ['diagnostics', 'play', 'playWithLiveProfile', 'dispose']);
+  assert.deepEqual(Object.keys(runtime), ['diagnostics', 'play', 'playWithLiveProfile', 'bindNicknameField', 'dispose']);
   assert.equal(h.f.sockets, 0); assert.equal(h.f.original, 0);
   h.route({ type: 'keydown', code: 'ArrowLeft' });
   assert.equal(runtime.diagnostics().gameplay.input.leftHeld, true);
@@ -843,4 +899,283 @@ test('runtime fail remains quiet on clean disposal and preserves original primar
       assert.equal(runtime.dispose(), undefined); assert.equal(h.f.sockets, 0); assert.equal(h.f.original, 0);
     }
   }
+});
+
+test('nickname owner rejects closed-grammar violations without getters, then, coercion or registration', async () => {
+  const h = nicknameOwnerHarness(), runtime = await h.start(); let touched = 0;
+  const trip = () => { touched++; throw new Error('caller property touched'); };
+  const requests = [null, [], Promise.resolve(), {}, Object.create(h.request()), { ...h.request() }];
+  for (const name of ['schema', 'element', 'parent']) {
+    const request = h.request(); Object.defineProperty(request, name, { get: trip }); requests.push(request);
+    const missing = h.request(); delete missing[name]; requests.push(missing);
+  }
+  for (const name of ['then', 'inputPolicy', 'extra']) {
+    const request = h.request(); Object.defineProperty(request, name, { get: trip }); requests.push(request);
+  }
+  const symbol = h.request(); symbol[Symbol()] = 1; requests.push(symbol);
+  for (const schema of [undefined, null, false, 0, '1', { toString: trip }]) requests.push({ ...h.request(), __proto__: null, schema });
+  for (const request of requests) assert.equal(caught(() => runtime.bindNicknameField(request)).thrown, true);
+  assert.equal(touched, 0); assert.equal(h.registrations.length, 0);
+  const ticket = runtime.bindNicknameField(h.request()); ticket.unbind(); runtime.dispose();
+});
+
+test('nickname owner accepts its actual current realm record and has no auto-entry binding', async () => {
+  const f = fixture(); f.host(); f.complete(); const wasm = wasmDouble(f);
+  Object.assign(f.realm, { createStockHostSnapshot, createStockSkinAdapter, createStockClient,
+    createStockEntityAssets, desktopBackingSize, createStockGameplay, init: async () => {}, wasm: wasm.api });
+  const source = bootstrapSource.replace(/^import .+;\r?$/gm, '').replace(/^export /gm, '');
+  const module = new Script(`${source}\n({gamePageRuntime});`).runInContext(f.context);
+  const runtime = await module.gamePageRuntime;
+  const parent = f.document.createElement('div'), field = f.document.createElement('input');
+  f.document.body.appendChild(parent); parent.appendChild(field); f.edit.state(f.document).active = field;
+  const request = runInContext('({schema:1,element:null,parent:null})', f.context); request.element = field; request.parent = parent;
+  const value = f.edit.inputValue(field); value.value = '\u00e9';
+  f.edit.dispatch('input', { target: field }); assert.equal(value.gets, 0);
+  const ticket = runtime.bindNicknameField(request); assert.equal(value.gets, 0);
+  f.edit.dispatch('input', { target: field }); assert.equal(value.value, ' '); assert.equal(value.gets, 1);
+  ticket.unbind(); runtime.dispose();
+});
+
+test('nickname owner reflection primaries retain exact presence and clear the transaction', async () => {
+  for (const trap of ['getPrototypeOf', 'ownKeys', 'getOwnPropertyDescriptor']) for (const primary of cleanupPrimaries) {
+    const h = nicknameOwnerHarness(), runtime = await h.start();
+    const request = new Proxy(h.request(), { [trap]() { throw primary; } });
+    const result = caught(() => runtime.bindNicknameField(request));
+    assert.equal(result.thrown, true); assert(Object.is(result.error, primary));
+    assert.equal(h.registrations.length, 0); assert.equal(runtime.diagnostics().disposed, false);
+    runtime.bindNicknameField(h.request()).unbind(); runtime.dispose();
+  }
+});
+
+test('caught reflection reentry cannot publish or cause play, disposal, router or native effects', async () => {
+  for (const trap of ['getPrototypeOf', 'ownKeys', 'getOwnPropertyDescriptor']) for (const action of ['bind', 'play', 'livePlay', 'dispose', 'router']) {
+    const h = nicknameOwnerHarness(), runtime = await h.start(); let first, entered = false;
+    const before = { calls: [...h.wasm.calls], controls: h.wasm.controlReads(), trace: [...h.trace], messages: [...h.f.messages], raf: [...h.f.raf.keys()] };
+    const actions = { bind: () => runtime.bindNicknameField(h.request()), play: () => runtime.play(playRequest()),
+      livePlay: () => runtime.playWithLiveProfile(playRequest()), dispose: () => runtime.dispose(),
+      router: () => h.route({ type: 'keydown', code: 'ArrowLeft' }) };
+    const proxy = new Proxy(h.request(), { [trap](...args) {
+      if (!entered) { entered = true; first = caught(actions[action]); assert.equal(first.thrown, true); }
+      return Reflect[trap](...args);
+    } });
+    const result = caught(() => runtime.bindNicknameField(proxy));
+    assert.equal(result.thrown, true); assert.equal(result.error, first.error);
+    assert.equal(h.registrations.length, 0); assert.equal(h.f.sockets, 0);
+    assert.deepEqual({ calls: h.wasm.calls, controls: h.wasm.controlReads(), trace: h.trace, messages: h.f.messages, raf: [...h.f.raf.keys()] }, before);
+    runtime.bindNicknameField(h.request()).unbind(); runtime.dispose();
+  }
+});
+
+test('registration failure or caught late violation never publishes and cleans only the acquired lease', async () => {
+  for (const late of [false, true]) for (const primary of cleanupPrimaries) {
+    const h = nicknameOwnerHarness(), runtime = await h.start(); let expected = primary;
+    if (late) h.hooks.afterRegister = () => { expected = caught(() => runtime.dispose()).error; };
+    else h.hooks.beforeRegister = () => { throw primary; };
+    h.hooks.unregister = () => { throw primary; };
+    const result = caught(() => runtime.bindNicknameField(h.request()));
+    assert.equal(result.thrown, true); assert(Object.is(result.error, expected));
+    assert.equal(h.ownerTrace.filter(stage => stage === 'unregister').length, late ? 1 : 0);
+    assert.equal(runtime.diagnostics().disposed, false); assert.equal(h.value().gets, 0);
+    h.hooks.beforeRegister = h.hooks.afterRegister = h.hooks.unregister = undefined;
+    // A throwing unregister cannot certify gate revocation; permanent disposal revokes its router.
+    if (!late) runtime.bindNicknameField(h.request()).unbind();
+    runtime.dispose();
+  }
+});
+
+test('late registration violation unregisters once, drops candidate and permits a later explicit bind', async () => {
+  const h = nicknameOwnerHarness(), runtime = await h.start(); let first;
+  h.hooks.afterRegister = () => { first = caught(() => h.route({ type: 'input' })).error; };
+  assert.equal(caught(() => runtime.bindNicknameField(h.request())).error, first);
+  assert.deepEqual(h.ownerTrace, ['register', 'unregister']);
+  h.hooks.afterRegister = undefined;
+  const ticket = runtime.bindNicknameField(h.request()); ticket.unbind(); runtime.dispose();
+});
+
+test('authoritative native registration rejection leaves owner unbound without value work', async () => {
+  for (const change of [h => { h.f.edit.state(h.field).type = 'password'; }, h => h.parent.removeChild(h.field),
+    h => { h.f.edit.state(h.field).owner = new h.f.edit.Document(); }]) {
+    const h = nicknameOwnerHarness(), runtime = await h.start(); change(h);
+    assert.equal(caught(() => runtime.bindNicknameField(h.request())).thrown, true);
+    assert.equal(h.value().gets, 0); assert.equal(h.value().sets, 0); assert.equal(runtime.diagnostics().disposed, false);
+    h.f.edit.state(h.field).type = 'text'; h.parent.appendChild(h.field);
+    runtime.bindNicknameField(h.request()).unbind(); runtime.dispose();
+  }
+});
+
+test('explicit unbind is idempotent and old tickets are inert before newer owner operations', async () => {
+  const h = nicknameOwnerHarness(), runtime = await h.start(); const old = runtime.bindNicknameField(h.request());
+  assert.equal(caught(() => runtime.bindNicknameField(new Proxy({}, { getPrototypeOf() { assert.fail('occupied request reflected'); } }))).thrown, true);
+  const before = runtime.diagnostics(), calls = [...h.wasm.calls], controls = h.wasm.controlReads();
+  old.unbind(); assert.equal(runtime.diagnostics().disposed, false);
+  assert.deepEqual(runtime.diagnostics(), before); assert.deepEqual(h.wasm.calls, calls); assert.equal(h.wasm.controlReads(), controls);
+  h.hooks.afterRegister = () => { assert.equal(old.unbind(), undefined); };
+  const next = runtime.bindNicknameField(h.request()); old.unbind();
+  h.value().value = '\u00e9'; h.input(); assert.equal(h.value().value, ' ');
+  assert.equal(h.ownerTrace.filter(stage => stage === 'unregister').length, 1);
+  next.unbind(); runtime.dispose(); assert.equal(next.unbind(), undefined);
+  assert.equal(caught(() => runtime.bindNicknameField(h.request())).thrown, true);
+});
+
+test('failed explicit unregister drops owner references once without certifying gate revocation', async () => {
+  for (const primary of cleanupPrimaries) {
+    const h = nicknameOwnerHarness(), runtime = await h.start(), ticket = runtime.bindNicknameField(h.request());
+    h.hooks.unregister = () => { throw primary; };
+    const result = caught(ticket.unbind); assert.equal(result.thrown, true); assert(Object.is(result.error, primary));
+    const before = [...h.ownerTrace]; assert.equal(ticket.unbind(), undefined); assert.deepEqual(h.ownerTrace, before);
+    h.hooks.unregister = undefined;
+    const next = caught(() => runtime.bindNicknameField(h.request()));
+    assert.equal(next.thrown, true); assert.match(String(next.error), /already registered/,
+      'owner slot is gone but throwing mock did not revoke the actual gate permission');
+    assert.equal(h.value().gets, 0); assert.equal(h.value().sets, 0); runtime.dispose();
+  }
+});
+
+test('opaque gate-only revocation retains occupied slot until explicit unbind', async () => {
+  const h = nicknameOwnerHarness(), runtime = await h.start(), ticket = runtime.bindNicknameField(h.request());
+  h.f.edit.state(h.field).type = 'password';
+  h.f.edit.dispatch('keydown', { target: h.field, key: 'ArrowLeft', code: 'ArrowLeft' });
+  assert.equal(runtime.diagnostics().gameplay.input.leftHeld, true);
+  h.f.edit.state(h.field).type = 'text';
+  assert.equal(caught(() => runtime.bindNicknameField(h.request())).thrown, true);
+  h.f.edit.dispatch('keyup', { target: h.parent, code: 'ArrowLeft', key: 'ArrowLeft' });
+  assert.equal(runtime.diagnostics().gameplay.input.leftHeld, false);
+  ticket.unbind(); runtime.bindNicknameField(h.request()).unbind(); runtime.dispose();
+});
+
+test('actual nickname router corrects once before filter without extra gameplay or native observations', async () => {
+  const h = nicknameOwnerHarness(), runtime = await h.start(); runtime.bindNicknameField(h.request());
+  const observe = () => ({ diagnostic: runtime.diagnostics(), controls: h.wasm.controlReads(), calls: [...h.wasm.calls],
+    log: [...h.f.log], messages: [...h.f.messages], raf: [...h.f.raf.keys()], timers: [...h.f.timers.keys()], intervals: [...h.f.intervals.keys()] });
+  const before = observe(); h.value().value = '\u00e9'; const event = h.input();
+  assert.equal(h.value().value, ' '); assert.equal(h.value().gets, 1); assert.equal(h.value().sets, 1);
+  assert.equal(event.defaultPrevented, true); assert.deepEqual(observe(), before);
+  assert.deepEqual(h.f.edit.eventData.get(event).trace, ['window-capture', 'stop', 'prevent']);
+  const handles = h.ownerTrace.filter(stage => stage === 'handle').length;
+  for (const type of ['beforeinput', 'compositionstart', 'compositionupdate', 'compositionend', 'copy', 'cut', 'paste', 'select', 'selectionchange']) {
+    h.f.edit.dispatch(type, { target: type === 'selectionchange' ? h.f.document : h.field, inputType: 'insertCompositionText' });
+  }
+  assert.equal(h.ownerTrace.filter(stage => stage === 'handle').length, handles + 9);
+  assert.equal(h.value().gets, 1); assert.equal(h.value().sets, 1); assert.deepEqual(observe(), before);
+  runtime.dispose();
+});
+
+test('nickname owner preserves original raw delivery and exact baseline input state through editing changes', async () => {
+  const h = nicknameOwnerHarness(), runtime = await h.start(), reference = cleanupHarness(), baseline = await reference.start();
+  const ticket = runtime.bindNicknameField(h.request());
+  for (const code of ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'Space']) for (const extra of [{}, { ctrlKey: true }, { isComposing: true }, { altKey: true }]) {
+    const properties = { key: code === 'Space' ? ' ' : code, code, ...extra };
+    h.f.edit.dispatch('keydown', { target: h.field, ...properties }); reference.route({ type: 'keydown', ...properties });
+    assert.deepEqual(runtime.diagnostics().gameplay.input, baseline.diagnostics().gameplay.input);
+    h.f.edit.state(h.field).readOnly = true; h.f.edit.state(h.parent).visible = false;
+    h.f.edit.dispatch('keyup', { target: h.parent, ...properties }); reference.route({ type: 'keyup', ...properties });
+    assert.deepEqual(runtime.diagnostics().gameplay.input, baseline.diagnostics().gameplay.input);
+    h.f.edit.state(h.field).readOnly = false; h.f.edit.state(h.parent).visible = true;
+  }
+  for (const type of ['pointerdown', 'pointerup', 'pointermove', 'mousedown', 'mouseup', 'mousemove', 'touchstart', 'touchend', 'touchmove', 'click', 'wheel']) {
+    const properties = { type, clientX: 400, clientY: 200, buttons: 1 };
+    h.f.edit.dispatch(type, { target: h.field, ...properties }); reference.route(properties);
+    assert.deepEqual(runtime.diagnostics().gameplay.input, baseline.diagnostics().gameplay.input);
+  }
+  assert.equal(h.wasm.controlReads(), reference.wasm.controlReads()); assert.deepEqual(h.wasm.calls, reference.wasm.calls);
+  assert.equal(h.value().gets, 0); assert.equal(h.value().sets, 0);
+  ticket.unbind(); runtime.dispose(); baseline.dispose();
+});
+
+test('handler primaries detach field only and survive unregister failure without active native cleanup', async () => {
+  for (const primary of cleanupPrimaries) for (const unregisterFails of [false, true]) {
+    const h = nicknameOwnerHarness(), runtime = await h.start(); const ticket = runtime.bindNicknameField(h.request());
+    const before = { counts: h.wasm.counts(), messages: [...h.f.messages], trace: [...h.trace], raf: [...h.f.raf.keys()], timers: [...h.f.timers.keys()] };
+    h.value().getFailure = primary; h.hooks.unregister = () => {
+      if (unregisterFails) {
+        assert.equal(caught(() => runtime.dispose()).thrown, true, 'cleanup cannot dispose the active owner');
+        throw new Error('secondary unregister');
+      }
+    };
+    const result = caught(() => h.input()); assert.equal(result.thrown, true); assert(Object.is(result.error, primary));
+    assert.equal(runtime.diagnostics().disposed, false); assert.equal(h.ownerTrace.filter(stage => stage === 'unregister').length, 1);
+    assert.deepEqual({ counts: h.wasm.counts(), messages: h.f.messages, trace: h.trace, raf: [...h.f.raf.keys()], timers: [...h.f.timers.keys()] }, before);
+    assert.equal(ticket.unbind(), undefined); delete h.value().getFailure; h.hooks.unregister = undefined;
+    // Actual gate revoked on the getter failure before owner cleanup, even if mock unregister failed.
+    runtime.bindNicknameField(h.request()).unbind(); runtime.dispose();
+  }
+});
+
+test('handler critical section rejects caught owner operations and remains field-only on failure', async () => {
+  for (const action of ['bind', 'play', 'livePlay', 'dispose', 'unbind', 'router']) {
+    const h = nicknameOwnerHarness(), runtime = await h.start(), ticket = runtime.bindNicknameField(h.request()); let first;
+    const actions = { bind: () => runtime.bindNicknameField(h.request()), play: () => runtime.play(playRequest()),
+      livePlay: () => runtime.playWithLiveProfile(playRequest()), dispose: () => runtime.dispose(), unbind: () => ticket.unbind(),
+      router: () => h.route({ type: 'keyup', code: 'ArrowLeft' }) };
+    h.value().getHook = () => { first = caught(actions[action]); assert.equal(first.thrown, true); };
+    const result = caught(() => h.input()); assert.equal(result.thrown, true); assert.equal(result.error, first.error);
+    assert.equal(runtime.diagnostics().disposed, false); assert.equal(h.wasm.counts().sceneFrees, 0); assert.equal(h.wasm.counts().qualityFrees, 0);
+    assert.equal(h.value().sets, 0); h.value().getHook = undefined;
+    runtime.bindNicknameField(h.request()).unbind(); runtime.dispose();
+  }
+});
+
+test('caught owner violation is reported after the native handler completes, without promising value rollback', async () => {
+  const h = nicknameOwnerHarness(), runtime = await h.start(); runtime.bindNicknameField(h.request()); let first;
+  h.value().value = '\u00e9';
+  h.value().getHook = () => { first = caught(() => runtime.dispose()).error; };
+  const result = caught(() => h.input()); assert.equal(result.thrown, true); assert.equal(result.error, first);
+  assert.equal(h.value().gets, 1); assert.equal(h.value().sets, 1); assert.equal(h.value().value, ' ');
+  assert.equal(runtime.diagnostics().disposed, false); assert.equal(h.wasm.counts().sceneFrees, 0);
+  h.value().getHook = undefined; runtime.dispose();
+});
+
+test('bind and active unbind reject known router and held-capture paths without blocking gameplay failure cleanup', async () => {
+  const h = nicknameOwnerHarness(), runtime = await h.start(), ticket = runtime.bindNicknameField(h.request());
+  let sawRouter = false;
+  h.f.faults.control = () => {
+    sawRouter = true; assert.equal(caught(ticket.unbind).thrown, true);
+    assert.equal(caught(() => runtime.bindNicknameField(h.request())).thrown, true);
+  };
+  h.f.edit.dispatch('keydown', { target: h.field, code: 'ArrowLeft', key: 'ArrowLeft' }); assert.equal(sawRouter, true);
+  ticket.unbind(); let sawHeld = 0;
+  h.f.faults.control = undefined;
+  h.f.faults.renderOperation = () => {
+    assert.equal(runtime.diagnostics().captureHeld, true); sawHeld++;
+    assert.equal(caught(() => runtime.bindNicknameField(h.request())).thrown, true);
+  };
+  h.f.frame(); assert.equal(sawHeld, 1);
+  const active = runtime.bindNicknameField(h.request());
+  h.f.faults.renderOperation = () => {
+    assert.equal(runtime.diagnostics().captureHeld, true); sawHeld++;
+    assert.equal(caught(active.unbind).thrown, true);
+  };
+  h.f.frame(); assert.equal(sawHeld, 2); h.f.faults.renderOperation = undefined;
+  const primary = { failure: 'gameplay' }; h.f.faults.control = () => { throw primary; };
+  h.f.edit.dispatch('keydown', { target: h.field, code: 'ArrowLeft', key: 'ArrowLeft' });
+  assert.equal(runtime.diagnostics().disposed, true); assert.equal(h.wasm.counts().sceneFrees, 1);
+  assert.equal(h.wasm.counts().qualityFrees, 1);
+});
+
+test('permanent idle disposal detaches first and preserves PR48 cleanup order and falsy failures', async () => {
+  for (const primary of cleanupPrimaries) {
+    const h = nicknameOwnerHarness(), runtime = await h.start(), ticket = runtime.bindNicknameField(h.request());
+    connect(h.f, runtime); h.resetTrace(); const order = [];
+    h.hooks.unregister = () => { order.push('unregister'); assert.equal(ticket.unbind(), undefined); throw primary; };
+    h.inspect(stage => { order.push(stage); assert.equal(ticket.unbind(), undefined); });
+    h.failures.set('cancel', new Error('secondary cancel')); h.failures.set('status:client-failed', new Error('secondary status'));
+    const result = caught(() => runtime.dispose()); assert.equal(result.thrown, true); assert(Object.is(result.error, primary));
+    assert.deepEqual(order, ['unregister', ...cleanupStages, 'status:client-failed']);
+    assert.equal(h.wasm.counts().sceneFrees, 1); assert.equal(h.wasm.counts().qualityFrees, 1);
+    assert.equal(runtime.dispose(), undefined); assert.equal(ticket.unbind(), undefined);
+  }
+});
+
+test('ordinary reload wins before handle and pre-router gate failures remain outside owner observation', async () => {
+  const h = nicknameOwnerHarness(), runtime = await h.start(); const ticket = runtime.bindNicknameField(h.request());
+  const primary = { failure: 'stop before router' };
+  const event = h.f.edit.make('input', { target: h.field, stopFailure: primary });
+  assert.equal(caught(() => h.f.edit.deliver(event)).error, primary);
+  assert.equal(h.ownerTrace.filter(stage => stage === 'handle').length, 0);
+  assert.equal(h.ownerTrace.filter(stage => stage === 'unregister').length, 0);
+  assert.equal(caught(() => runtime.bindNicknameField(h.request())).thrown, true);
+  h.hooks.handle = () => assert.fail('reload must precede nickname handling');
+  h.route({ type: 'click', target: h.f.document.getElementById('slither-client-reload') });
+  assert.equal(h.f.reloads, 1); assert.equal(runtime.diagnostics().disposed, false);
+  ticket.unbind(); runtime.dispose();
 });
