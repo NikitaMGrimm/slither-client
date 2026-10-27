@@ -6,6 +6,7 @@ Canvas2D rendering and an optional local simulator connection.
 - [Architecture](architecture.md): modules, supported inputs, and browser scope.
 - [Trusted skin provider](skin-provider.md): caller-owned recipes and borrowed-asset readiness.
 - [Stock asset and input adapters](stock-client.md): held captures, source revisions and same-clock control.
+- [Caller-owned stock session](stock-session.md): explicit profiles, handshake, ping and lifecycle ownership.
 - [Retained desktop food](food-presentation.md): factories, source ownership and ordered paint passes.
 - [Retained prey](prey-presentation.md): independent appearances, motion, capture and borrowed sources.
 - [Ordinary antennas](antenna-presentation.md): appearance state, draw cadence, supplied randomness and borrowed bulbs.
