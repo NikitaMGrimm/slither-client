@@ -83,9 +83,14 @@ factor and cumulative tables for a positive u16 Setup parameter, followed by
 2048 copies of both endpoint values. `score(index, fractional_mass)` admits
 indices through N+2048 and finite mass in 0..=1, preserving ordered arithmetic
 and negative or above-32-bit results. Equal-parameter reconfiguration retains
-allocations; a changed parameter replaces both tables atomically. It is not yet
-wired to received commands, own-state lifecycle, the Wasm ABI or a HUD. Native
-math tests do not establish browser bit equality.
+allocations; a changed parameter replaces both tables atomically. Native math
+tests do not establish browser bit equality.
+
+An explicit [score-tracking mode](score-state.md) in `AnimatedClient` caches
+those tables at ordered Setup events and retains the original own object's
+replacement R byte. Pure native/Wasm observations use latest logical count and
+mass, including after death or ID reuse. Default ingestion remains legacy;
+rank, readout scheduling, final capture and HUD wiring remain separate.
 
 `presentation` provides explicit-time arithmetic separately from received state.
 `FrameClock` clamps elapsed milliseconds divided by eight to 0..=5, applies lag

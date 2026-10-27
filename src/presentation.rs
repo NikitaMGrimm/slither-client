@@ -50,9 +50,9 @@ pub use boundary::{BOUNDARY_SAMPLES, BoundaryRadius};
 pub use camera::{CAMERA_SAMPLES, CameraCorrections};
 pub use client::{
     AnimatedClient, AntennaDrawBudget, AntennaRandomRequest, AppearancePresentation,
-    ClientControlActions, ClientControlView, ClientPresentationError, FacePresentation,
-    MAX_DRAW_SAMPLES, MAX_RETAINED_SNAKES, MAX_RETAINED_TOTAL_BODY_POINTS, OwnControlView,
-    PreparedBodyGeometry, PreparedSnake,
+    ClientControlActions, ClientControlView, ClientPresentationError, ClientScoreView,
+    FacePresentation, MAX_DRAW_SAMPLES, MAX_RETAINED_SNAKES, MAX_RETAINED_TOTAL_BODY_POINTS,
+    OwnControlView, OwnScoreView, PreparedBodyGeometry, PreparedSnake, ScoreStatus,
 };
 pub use curve::{
     CurveInput, CurveOutput, CurveSample, CurveVertex, MAX_CURVE_SAMPLES, sample_curve,
