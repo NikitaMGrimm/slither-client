@@ -150,6 +150,10 @@ additional connection.
 
 Focused native and real-Wasm recorder checks cover packet/lifecycle ownership,
 arithmetic, painting barriers, copied diagnostics, source retention and rollback.
-Page tests use explicit authored doubles. These results do not establish
-source-runtime bit parity, stock-browser raster parity, original artwork/loading
+Page tests use explicit authored doubles. A separate bounded external-runtime
+comparison of historical candidate `993322a` matched 26,398 frozen minimal
+numeric and submitted-command cells exactly; see
+[verification](verification.md#retained-prey-integration) for its fixture and
+coverage limits. These results do not establish current-client or full-state
+source-runtime parity, stock-browser raster parity, original artwork/loading
 equivalence, extension packaging or gameplay/server acceptance.
