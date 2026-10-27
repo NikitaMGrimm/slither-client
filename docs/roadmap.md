@@ -66,9 +66,11 @@ the existing preview does not establish original rendering or gameplay parity.
 
 ## 4. Package the browser client
 
-After the state/rendering path works, add extension packaging with a documented
-install and verification procedure. Input, connection flow, and gameplay still
-need implemented and tested paths before claiming a fully playable client.
+The [extension package](extension.md) bundles the authored client and Rust/Wasm
+for Chrome and Firefox with local installation instructions. Its launcher opens
+the current client surface. This establishes packaging, not game-page replacement.
+Complete host asset mapping, input/connection flow, HUD/login and gameplay still
+need implemented and tested paths before claiming a fully playable extension.
 
 Keep [release configuration](releases.md) dormant until a releasable milestone
 and its packaged contents have been reviewed.

@@ -8,6 +8,7 @@
   "scripts": {
     "test": "node --test tools/*.test.mjs",
     "build:web": "node tools/build-web.mjs",
+    "build:extension": "node tools/build-extension.mjs",
     "prototype": "node tools/prototype-server.mjs",
     "scene": "node tools/scene-server.mjs",
     "compare:reference": "node tools/reference-parity.mjs"
