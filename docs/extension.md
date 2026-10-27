@@ -42,10 +42,13 @@ The default produces both ignored directories:
 - `dist/extension/chrome`
 - `dist/extension/firefox`
 
-Each contains exactly 42 files: the original preview package, fixed game
-activation/gate/link/bootstrap/CSS, sixteen authored game modules and a generated
+Each contains exactly 44 files: the original preview package, fixed game
+activation/gate/link/bootstrap/CSS, eighteen authored game modules and a generated
 JS/Wasm/validator module graph for each renderer. Preview HTML/modules are copied unchanged
 under `scene/`; null simulator configuration disables its local connection.
+
+The [semantic HUD view and passive renderer](hud-view.md) are fixed local
+resources. The bootstrap does not activate or attach them.
 The game entry imports no synthetic resolver or fixture.
 
 Source manifests declare the fixed resource list. Packaging adds the verified

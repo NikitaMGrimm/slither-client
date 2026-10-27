@@ -38,6 +38,38 @@ pull requests, and manual dispatch. Normal tests and CI require no external
 reference and do not connect to game servers. Dependency and toolchain setup may
 access package sources. Release-plz remains dormant.
 
+## Semantic HUD view and passive renderer
+
+The integrated view/renderer revision passes 786 Node tests, including 11 pure
+view and 21 passive renderer cases. The combined reducer/view/renderer command
+passes 65 cases. Pure independent review adds four private probes, including
+103 exact BigInt decimal-boundary comparisons. Histories, negative-zero scores,
+safe integer limits, closed readiness combinations, weak admission and alias
+isolation are covered without a native score lookup.
+
+Renderer tests use authored native-capability doubles with receiver brands and
+fixed topology. They cover both scopes, missing/stale nodes, styles, identities,
+never promoting old nonready views, current-ready/final-pending writes, operation
+reentry and exact first-primary preservation at every one of 16 setter positions.
+The retained first failed fixture had an original child still in its synthetic
+tree, correctly becoming pending before the intended brand check. Correcting
+the fixture passes without a product change for that failure.
+
+A fresh web build preserves the generated JS/Wasm/validator fingerprints. The
+full real-Wasm suite passes with 1428 stock assertions across 16 cases. Actual
+gameplay/session/controller/reducer history flows through the real view and
+renderer against an authored fixed-tree capability double. Source-release
+tripwires and counters verify publication adds no score, source, step or draw
+operation. It covers missing histories, current before final, command-time final
+versus later Setup, retained histories after reset, raw negative requested opacity
+and disposed data. Both 44-file packages build with the fixed module graph.
+
+Native sources remain unchanged. These are synthetic Node/real-Wasm Canvas and
+DOM-capability-recorder checks, not actual DOM/CSS, garbage collection, browser
+pixels, installed-host/CSP, wording, login or server acceptance. The bootstrap
+and gate remain unchanged; no labels, mount, final visibility or activation are
+selected by these passive modules. See [view and binding limits](hud-view.md).
+
 ## Semantic HUD readout composition
 
 The integrated semantic reducer and gameplay path pass 754 Node tests. The pure
