@@ -75,14 +75,50 @@ No success receipt, rollback, replay or replacement host follows. Disposal drops
 references and performs no DOM removal or restoration. Reference release is not
 a claim of measured garbage collection. Actual owner cleanup remains separate.
 
+## Explicit bootstrap owner
+
+Trusted local initialization may select `startGamePage({ hudReadout: true })`.
+The default and automatic entry remain false and expose no HUD binding method.
+The option must be a boolean. True requires the gate's complete optional frozen
+`native.hudDom` capability, enables score tracking before gameplay starts and
+selects the existing gameplay readout mode. It does not create a visible HUD.
+
+Only the completed opt-in runtime exposes:
+
+```js
+const ticket = runtime.bindHudReadout({ schema: 1, scope, nodes });
+ticket.unbind();
+```
+
+The request has exactly three own data fields on the current realm's Object or
+null prototype. The existing fixed-node grammar above applies; its Document must
+be the gate's captured Document. One binding occupies the private slot. A stale
+binding stays occupied until explicit unbind. Old tickets cannot release a newer
+binding. The owner supplies labels, mount, layout and final visibility.
+
+Binding projects genuine committed history at an idle boundary. Later publication
+follows a successful frame or selected gameplay resize, after source/native work
+returns. The existing deferred callback publishes only when its committed
+snapshot identity changes to a nonnull value; there is no extra queue or timer.
+Packet, source, control and status callbacks do not render the HUD. Freshness
+uses the captured document predicate without checking asset readiness or profile
+acquisition.
+
+Nickname and HUD ownership share guards against reentry, including violations
+caught by a caller. Publication failures stop the runtime after active native
+work returns. Cleanup detaches nickname first, releases the HUD binding next,
+then attempts the remaining owners while preserving the first thrown value.
+Partial native text/style writes cannot be rolled back. Unbind/disposal removes
+no nodes and restores no DOM values.
+
 ## Activation and evidence limits
 
-The bootstrap remains unchanged and does not enable score tracking or HUD
-readout. These passive APIs add no input/Play route, listener, timer, source
-acquisition, game socket, message/global command, CSP change or permission.
-Any future attachment must publish after gameplay/source operations and committed
-semantic publication complete; packet/control/status callbacks are not that seam.
+The passive APIs and explicit owner add no Play route, input listener, timer,
+source acquisition, game socket, message/global command, CSP change or permission.
+Default startup remains unbound and supplies no HUD nodes or text policy.
 
 Authored Node capability doubles and real-Wasm/Canvas-recorder composition cover
 the documented checks in [verification](verification.md). They do not establish
-actual DOM/CSS, installed-browser, pixels, wording, login or server acceptance.
+the opt-in bootstrap's actual DOM/CSS, installed-browser, pixels, wording, login
+or server acceptance. Earlier isolated native renderer evidence does not prove
+this new owner composition.

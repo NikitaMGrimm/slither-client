@@ -1,5 +1,5 @@
 // Authored native-receiver and explicit propagation doubles. No browser semantics.
-export function createGateTestDom() {
+export function createGateTestDom({ hud = false } = {}) {
   const nodes = new WeakMap(), eventData = new WeakMap();
   const state = value => {
     if (!nodes.has(value)) throw new TypeError('Synthetic native Node receiver');
@@ -57,6 +57,57 @@ export function createGateTestDom() {
       return true;
     }
     setAttribute() {}
+  }
+  // Opt-in operation doubles keep the default editing fixture's shape unchanged.
+  let hudFixture;
+  if (hud) {
+    const trace = [], controls = new Map(), styles = new WeakMap(), html = new WeakMap(), characters = new WeakMap();
+    const branded = (store, receiver) => {
+      if (!store.has(receiver)) throw new TypeError('Synthetic HUD native receiver');
+      return store.get(receiver);
+    };
+    const operation = (name, body) => function (...args) {
+      trace.push([name, this, ...args]);
+      const control = controls.get(name);
+      control?.hook?.(this, ...args);
+      if (control && Object.hasOwn(control, 'failure')) throw control.failure;
+      return body(this, ...args);
+    };
+    for (const [owner, names] of [[Node, ['nodeType', 'ownerDocument', 'parentNode', 'isConnected']],
+      [Element, ['localName', 'namespaceURI']]]) {
+      for (const name of names) {
+        const descriptor = Object.getOwnPropertyDescriptor(owner.prototype, name);
+        Object.defineProperty(owner.prototype, name, { ...descriptor, get: operation(name, receiver => {
+          if (name === 'nodeType' && characters.has(receiver)) return 3;
+          return Reflect.apply(descriptor.get, receiver, []);
+        }) });
+      }
+    }
+    Object.defineProperty(Node.prototype, 'firstChild', { configurable: true,
+      get: operation('firstChild', receiver => { state(receiver); return receiver.children[0] ?? null; }) });
+    Object.defineProperty(Node.prototype, 'nextSibling', { configurable: true,
+      get: operation('nextSibling', receiver => {
+        const parent = state(receiver).parent;
+        return parent ? parent.children[parent.children.indexOf(receiver) + 1] ?? null : null;
+      }) });
+    class CSSStyleDeclaration {
+      constructor() { styles.set(this, new Map()); }
+    }
+    Object.defineProperty(CSSStyleDeclaration.prototype, 'setProperty', { configurable: true, writable: true,
+      value: operation('setStyle', (receiver, name, value) => { branded(styles, receiver).set(name, value); }) });
+    class HTMLElement extends Element {
+      constructor(tag) { super(tag); html.set(this, new CSSStyleDeclaration()); }
+    }
+    Object.defineProperty(HTMLElement.prototype, 'style', { configurable: true,
+      get: operation('style', receiver => branded(html, receiver)) });
+    class CharacterData extends Node {
+      constructor(data = '') { super('#text'); characters.set(this, { data }); }
+    }
+    Object.defineProperty(CharacterData.prototype, 'data', { configurable: true,
+      get() { return branded(characters, this).data; },
+      set: operation('setText', (receiver, value) => { branded(characters, receiver).data = value; }) });
+    hudFixture = { HTMLElement, CharacterData, CSSStyleDeclaration, trace, controls,
+      character: receiver => branded(characters, receiver), style: receiver => branded(styles, receiver) };
   }
   const inputs = new WeakSet(), valueState = new WeakMap();
   const inputValue = receiver => {
@@ -152,13 +203,16 @@ export function createGateTestDom() {
   class Pointer extends Mouse { constructor(...args) { super(...args); eventBrands.get(Pointer).add(this); } }
   eventBrands.set(Pointer, new WeakSet());
   eventGetter(Pointer, 'pointerId', 1); eventGetter(Pointer, 'pointerType', 'mouse'); eventGetter(Pointer, 'isPrimary', true);
-  return { Node, Element, Input, Document, FenceEvent, Keyboard, InputEvent, Mouse, Pointer, state, eventData, inputValue };
+  return { Node, Element, Input, Document, FenceEvent, Keyboard, InputEvent, Mouse, Pointer, state, eventData, inputValue,
+    ...(hudFixture ? { hud: hudFixture } : {}) };
 }
 
 export function attachGateTestRealm(dom, realm, document, actualRealm) {
   Object.assign(realm, { Node: dom.Node, Element: dom.Element, HTMLInputElement: dom.Input, Document: dom.Document,
     Event: dom.FenceEvent, KeyboardEvent: dom.Keyboard, InputEvent: dom.InputEvent,
     MouseEvent: dom.Mouse, PointerEvent: dom.Pointer });
+  if (dom.hud) Object.assign(realm, { HTMLElement: dom.hud.HTMLElement, CharacterData: dom.hud.CharacterData,
+    CSSStyleDeclaration: dom.hud.CSSStyleDeclaration });
   const location = realm.location;
   let href = location.href;
   Object.defineProperty(location, 'href', { configurable: true, get() {

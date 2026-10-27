@@ -165,6 +165,31 @@ Runtime failure handling keeps its existing quiet behavior when cleanup succeeds
 if classification or cleanup also fails, the original runtime failure takes
 precedence. These paths add no field registration or native editing behavior.
 
+## Explicit local HUD owner
+
+Trusted initialization can select `startGamePage({ hudReadout: true })` and then
+bind caller-owned nodes through `runtime.bindHudReadout({ schema: 1, scope,
+nodes })`. The default and automatic entry stay false and expose no HUD binding
+method. This option adds no UI, labels, mount, field registration or Play action.
+See [the fixed-node contract and publication seams](hud-view.md#explicit-bootstrap-owner).
+
+The gate optionally supplies frozen `native.hudDom` in the existing one-shot
+claim. It captures own native Node/Element/HTMLElement getters, the CharacterData
+setter and CSSStyleDeclaration method with exact receivers. Capture failure omits
+the whole group independently of editing and profile support. Its freshness
+predicate checks the captured document/location, initially armed URL and gate
+ownership without asset, source, profile or router observations. It creates,
+searches for and writes no nodes during capture.
+
+The opt-in owner requires that complete group and enables score tracking before
+gameplay. A single local binding renders genuine committed history after idle
+bind, successful frame/resize and changed deferred publication. No new queue or
+timer is added. Native/source/owner reentry stays guarded; cleanup releases the
+nickname field before the HUD and native owners. Stale bindings require explicit
+unbind; old tickets are inert. Native writes may partially complete before a
+failure and are not restored. Default startup remains unbound. Installed host,
+full UI and native owner composition remain unverified.
+
 ## Session and input boundary
 
 ### Local nickname-field owner

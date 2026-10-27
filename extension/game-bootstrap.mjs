@@ -5,6 +5,8 @@ import { createStockEntityAssets } from './stock-food-provider.mjs';
 import { createStockHostSnapshot } from './stock-host-snapshot.mjs';
 import { desktopBackingSize } from './desktop-layout.mjs';
 import { createStockGameplay } from './stock-gameplay.mjs';
+import { bindStockHudDom } from './stock-hud-dom.mjs';
+import { projectHudView } from './stock-hud-view.mjs';
 
 // Gate-only notifications must not add gameplay control/source observations.
 const editNotifications = new Set(['keypress', 'beforeinput', 'input', 'compositionstart', 'compositionupdate', 'compositionend',
@@ -14,7 +16,8 @@ const editNotifications = new Set(['keypress', 'beforeinput', 'input', 'composit
   'dragstart', 'drag', 'dragenter', 'dragleave', 'dragover', 'drop', 'dragend']);
 
 /** Actual MAIN entry. Session binding is local capability injection, never a page-message command. */
-export async function startGamePage({ realm = globalThis, initialize = init, wasmApi = wasm } = {}) {
+export async function startGamePage({ realm = globalThis, initialize = init, wasmApi = wasm, hudReadout = false } = {}) {
+  if (typeof hudReadout !== 'boolean') throw new TypeError('Explicit hudReadout boolean required');
   const gate = realm[Symbol.for('slither.client.gate.v1')];
   if (!gate || gate.metadata().code !== 'held') throw new Error('Armed document-start gate required');
   const armed = gate.metadata(), document = realm.document, pageUrl = realm.location.href;
@@ -22,12 +25,14 @@ export async function startGamePage({ realm = globalThis, initialize = init, was
   let scene, quality, controller, gameplay, held, frame, waiting, wakeWaiting, reload;
   let disposed = false;
   let nickname, bindingOperation, handlingNickname, routing = 0;
+  let hud, hudOperation, nativeOperation, sourceOperation, hudCapabilities, cleanupActive = false;
+  const documentIdentity = hudReadout ? Symbol('HUD document') : undefined;
   const ownKeys = Reflect.ownKeys, apply = Reflect.apply, prototype = Object.getPrototypeOf;
   const descriptor = Object.getOwnPropertyDescriptor, hasOwn = Object.hasOwn;
   const recordPrototype = Object.prototype, freeze = Object.freeze;
   function nicknameBusy() {
-    const operation = bindingOperation ?? handlingNickname;
-    const error = new Error('Nickname owner operation active');
+    const operation = bindingOperation ?? handlingNickname ?? hudOperation ?? nativeOperation ?? sourceOperation;
+    const error = new Error(hudOperation || nativeOperation || sourceOperation ? 'HUD owner operation active' : 'Nickname owner operation active');
     if (operation) {
       // A caller trap may catch the error; publication must still fail afterward.
       if (!operation.failed) { operation.failed = true; operation.primary = error; }
@@ -36,7 +41,116 @@ export async function startGamePage({ realm = globalThis, initialize = init, was
     throw error;
   }
   function guardNicknameOperation() {
-    if (bindingOperation || handlingNickname) nicknameBusy();
+    if (bindingOperation || handlingNickname || hudOperation || nativeOperation || sourceOperation) nicknameBusy();
+  }
+  function checkHudOperation() {
+    if (hudOperation?.failed) throw hudOperation.primary;
+  }
+  function copyRecord(value, fields) {
+    if (value === null || typeof value !== 'object'
+      || ![recordPrototype, null].includes(prototype(value))) throw new TypeError('Closed HUD owner record required');
+    const keys = ownKeys(value);
+    if (keys.length !== fields.length || keys.some(key => !fields.includes(key))) throw new TypeError('Closed HUD owner record required');
+    const copy = { __proto__: null };
+    for (const name of keys) {
+      const field = descriptor(value, name);
+      if (!field || !hasOwn(field, 'value')) throw new TypeError('HUD owner data fields required');
+      copy[name] = field.value;
+    }
+    return copy;
+  }
+  function runNative(callback) {
+    guardNicknameOperation();
+    const operation = { failed: false, primary: undefined };
+    nativeOperation = operation;
+    try {
+      const result = callback();
+      if (operation.failed) throw operation.primary;
+      return result;
+    } catch (error) { throw operation.failed ? operation.primary : error; }
+    finally { nativeOperation = undefined; operation.primary = undefined; }
+  }
+  function hudIdle() {
+    guardNicknameOperation();
+    if (disposed) throw new Error('Client disposed');
+    if (routing || held || cleanupActive) nicknameBusy();
+  }
+  function detachHud(value) {
+    if (!value || hud !== value) return;
+    hud = undefined;
+    let release = value.dispose;
+    value.readiness = value.render = value.dispose = undefined;
+    try { apply(release, undefined, []); }
+    finally { release = undefined; }
+  }
+  function renderHud(value, snapshot) {
+    const ready = apply(value.readiness, undefined, []);
+    checkHudOperation();
+    const view = projectHudView(snapshot, ready);
+    checkHudOperation();
+    apply(value.render, undefined, [view]);
+    checkHudOperation();
+  }
+  function publishHud(...snapshots) {
+    if (!hud || disposed || cleanupActive) return;
+    // This is a post-operation seam, never a held-source or native callback.
+    guardNicknameOperation();
+    if (held) nicknameBusy();
+    const operation = { failed: false, primary: undefined };
+    hudOperation = operation;
+    try { renderHud(hud, snapshots.length ? snapshots[0] : gameplay.hudSnapshot()); }
+    catch (error) { throw operation.failed ? operation.primary : error; }
+    finally { hudOperation = undefined; operation.primary = undefined; }
+  }
+  function bindHudReadout(request) {
+    hudIdle();
+    if (hud) throw new Error('HUD readout already bound');
+    const operation = { failed: false, primary: undefined };
+    const candidate = { __proto__: null, readiness: undefined, render: undefined, dispose: undefined };
+    let committed = false;
+    try {
+      hudOperation = operation;
+      try {
+        // Allocate the inert ticket before any reflection or publication.
+        const ticket = freeze({ unbind() {
+          if (hud !== candidate) return;
+          hudIdle();
+          const operation = { failed: false, primary: undefined };
+          hudOperation = operation;
+          try { detachHud(candidate); checkHudOperation(); }
+          catch (error) { throw operation.failed ? operation.primary : error; }
+          finally { hudOperation = undefined; operation.primary = undefined; }
+        } });
+        const record = copyRecord(request, ['schema', 'scope', 'nodes']);
+        if (record.schema !== 1 || !['readout', 'readout-and-final'].includes(record.scope)) throw new TypeError('HUD owner schema/scope required');
+        const nodes = copyRecord(record.nodes, ['schema', 'document', 'mount', 'textPolicy', 'readout', 'final']);
+        if (nodes.document !== hudCapabilities.document) throw new TypeError('Captured HUD document required');
+        checkHudOperation();
+        const snapshot = gameplay.hudSnapshot();
+        const binding = bindStockHudDom({ __proto__: null,
+          sceneIdentity: snapshot.sceneIdentity, documentIdentity, scope: record.scope,
+          dom: hudCapabilities.dom, nodes, isCurrentDocument: hudCapabilities.isCurrentDocument });
+        candidate.readiness = binding.readiness;
+        candidate.render = binding.render;
+        candidate.dispose = binding.dispose;
+        checkHudOperation();
+        hud = candidate; committed = true;
+        renderHud(candidate, snapshot);
+        return ticket;
+      } catch (error) {
+        if (operation.failed) error = operation.primary;
+        if (!committed) {
+          let release = candidate.dispose;
+          candidate.readiness = candidate.render = candidate.dispose = undefined;
+          try { if (release) apply(release, undefined, []); } catch { /* Caller primary wins. */ }
+          finally { release = undefined; }
+        }
+        throw error;
+      } finally { request = undefined; hudOperation = undefined; operation.primary = undefined; }
+    } catch (error) {
+      if (committed) { try { fail(error); } catch { /* Publication primary wins. */ } }
+      throw error;
+    }
   }
   function detachNickname(value) {
     if (!value || nickname !== value) return;
@@ -60,7 +174,14 @@ export async function startGamePage({ realm = globalThis, initialize = init, was
         if (nickname !== candidate) return;
         guardNicknameOperation();
         if (routing || held) nicknameBusy();
-        detachNickname(candidate);
+        if (!hudReadout) { detachNickname(candidate); return; }
+        const operation = { failed: false, primary: undefined };
+        bindingOperation = operation;
+        try {
+          detachNickname(candidate);
+          if (operation.failed) throw operation.primary;
+        } catch (error) { throw operation.failed ? operation.primary : error; }
+        finally { bindingOperation = undefined; operation.primary = undefined; }
       } });
       if (request === null || typeof request !== 'object'
         || ![recordPrototype, null].includes(prototype(request))) throw new TypeError('Closed nickname owner record required');
@@ -107,6 +228,7 @@ export async function startGamePage({ realm = globalThis, initialize = init, was
     if (disposed) return;
     guardNicknameOperation();
     disposed = true;
+    cleanupActive = true;
     let failed = false, primary;
     const cleanup = callback => {
       try { callback(); } catch (error) {
@@ -115,6 +237,7 @@ export async function startGamePage({ realm = globalThis, initialize = init, was
       }
     };
     cleanup(() => detachNickname(nickname));
+    cleanup(() => detachHud(hud));
     if (frame !== undefined) {
       const current = frame; frame = undefined;
       cleanup(() => native.cancelAnimationFrame(current));
@@ -131,6 +254,7 @@ export async function startGamePage({ realm = globalThis, initialize = init, was
       () => scene?.free(), () => quality?.free()]) cleanup(action);
     held = undefined;
     cleanup(() => native.status(code));
+    cleanupActive = false;
     if (failed) throw primary;
   }
   const fail = error => {
@@ -152,6 +276,7 @@ export async function startGamePage({ realm = globalThis, initialize = init, was
   const report = code => { output.textContent = `SlitherClient: ${code}`; native.status(code); };
   const size = () => desktopBackingSize(realm.innerWidth, realm.innerHeight);
   native.setInput(event => {
+    if (hudReadout && (hudOperation || nativeOperation || sourceOperation)) guardNicknameOperation();
     if (event.type === 'click' && event.target === reload) { native.ordinaryReload(); return; }
     guardNicknameOperation();
     routing++;
@@ -172,14 +297,40 @@ export async function startGamePage({ realm = globalThis, initialize = init, was
       if (editNotifications.has(event.type)) return;
       if (disposed || !controller) return;
       if (event.type === 'resize') {
-        try { const backing = size(); controller.resize(backing.width, backing.height); } catch (error) { fail(error); }
+        try {
+          const backing = size();
+          if (hudReadout) {
+            runNative(() => gameplay.resize(backing.width, backing.height));
+            publishHud();
+          } else controller.resize(backing.width, backing.height);
+        } catch (error) { fail(error); }
         return;
       }
-      try { gameplay?.event(event, { width: realm.innerWidth, height: realm.innerHeight }); }
+      try {
+        const deliver = () => gameplay?.event(event, { width: realm.innerWidth, height: realm.innerHeight });
+        if (hudReadout) runNative(deliver); else deliver();
+      }
       catch (error) { fail(error); }
     } finally { routing--; }
   });
   try {
+    if (hudReadout) {
+      const group = copyRecord(descriptor(native, 'hudDom')?.value, ['schema', 'document', 'dom', 'isCurrentDocument']);
+      const names = ['nodeType', 'ownerDocument', 'parentNode', 'firstChild', 'nextSibling',
+        'isConnected', 'localName', 'namespaceURI', 'style', 'setText', 'setStyle'];
+      const dom = copyRecord(group.dom, names);
+      if (group.schema !== 1 || group.document !== document || !Object.isFrozen(descriptor(native, 'hudDom').value)
+        || !Object.isFrozen(group.dom) || typeof group.isCurrentDocument !== 'function'
+        || names.some(name => typeof dom[name] !== 'function')) throw new TypeError('Complete native HUD DOM group required');
+      const guarded = callback => (...args) => {
+        checkHudOperation();
+        const result = apply(callback, undefined, args);
+        checkHudOperation();
+        return result;
+      };
+      for (const name of names) dom[name] = guarded(dom[name]);
+      hudCapabilities = { document: group.document, dom, isCurrentDocument: guarded(group.isCurrentDocument) };
+    }
     report('loading');
     await initialize();
     if (disposed) return Object.freeze({ dispose });
@@ -216,9 +367,20 @@ export async function startGamePage({ realm = globalThis, initialize = init, was
     } });
     const wrapped = { ...adapter,
       beginOperation() {
-        try { return adapter.beginOperation(); } catch (error) { held = undefined; throw error; }
+        if (hudReadout) sourceOperation = { failed: false, primary: undefined };
+        try { return adapter.beginOperation(); }
+        catch (error) {
+          if (sourceOperation?.failed) error = sourceOperation.primary;
+          sourceOperation = held = undefined; throw error;
+        }
       },
-      endOperation() { try { adapter.endOperation(); } finally { held = undefined; } },
+      endOperation() {
+        try {
+          adapter.endOperation();
+          if (sourceOperation?.failed) throw sourceOperation.primary;
+        } catch (error) { throw sourceOperation?.failed ? sourceOperation.primary : error; }
+        finally { held = sourceOperation = undefined; }
+      },
     };
     const hostAssets = createStockEntityAssets({ realm, random: native.random,
       snapshotForOperation(operation) {
@@ -228,6 +390,7 @@ export async function startGamePage({ realm = globalThis, initialize = init, was
     const startMs = native.now();
     context = { palettes: initial.palettes, background: initial.background };
     scene = new wasmApi.AnimatedScene(startMs);
+    if (hudReadout) scene.enable_score_tracking();
     quality = new wasmApi.DesktopQuality(1, startMs);
     const backing = size();
     controller = createStockClient({ scene, quality, adapter: wrapped, hostAssets, target,
@@ -244,14 +407,30 @@ export async function startGamePage({ realm = globalThis, initialize = init, was
       } catch { return false; }
     };
     gameplay = createStockGameplay({ scene, quality, controller, wasm: wasmApi,
-      createSocket: native.createSocket, now: native.now, defer: native.queueMicrotask,
+      createSocket: native.createSocket, now: native.now,
+      defer: hudReadout ? callback => native.queueMicrotask(() => {
+        if (disposed) return;
+        try {
+          const before = gameplay.hudSnapshot();
+          runNative(callback);
+          const after = gameplay.hudSnapshot();
+          if (after !== null && after !== before) publishHud(after);
+        } catch (error) { fail(error); }
+      }) : native.queueMicrotask,
       setInterval: native.setInterval, clearInterval: native.clearInterval,
-      onStatus: report, onFatal: fail,
+      onStatus: hudReadout ? code => nativeOperation ? report(code) : runNative(() => report(code)) : report,
+      onFatal: hudReadout ? error => {
+        if (!nativeOperation) return fail(error);
+        if (!nativeOperation.failed) { nativeOperation.failed = true; nativeOperation.primary = error; }
+      } : fail,
+      ...(hudReadout ? { hudReadout: true } : {}),
       ...(native.liveProfile === undefined ? {} : { liveProfile: { capabilities: native.liveProfile, isCurrentDocument } }) });
     const tick = now => {
       frame = undefined;
       if (disposed) return;
-      try { gameplay.frame(now);
+      try {
+        if (hudReadout) { runNative(() => gameplay.frame(now)); publishHud(); }
+        else gameplay.frame(now);
         frame = native.requestAnimationFrame(tick); } catch (error) { fail(error); }
     };
     report('ready-not-connected');
@@ -263,11 +442,16 @@ export async function startGamePage({ realm = globalThis, initialize = init, was
       play(request) {
         guardNicknameOperation();
         if (disposed) throw new Error('Client disposed');
+        if (hudReadout) return runNative(() => { captureReady(); return gameplay.play(request); });
         captureReady();
         return gameplay.play(request);
       },
-      playWithLiveProfile(request) { guardNicknameOperation(); return gameplay.playWithLiveProfile(request); },
+      playWithLiveProfile(request) {
+        guardNicknameOperation();
+        return hudReadout ? runNative(() => gameplay.playWithLiveProfile(request)) : gameplay.playWithLiveProfile(request);
+      },
       bindNicknameField,
+      ...(hudReadout ? { bindHudReadout } : {}),
       dispose,
     });
   } catch (error) {
