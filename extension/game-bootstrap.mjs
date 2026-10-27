@@ -29,17 +29,37 @@ export async function startGamePage({ realm = globalThis, initialize = init, was
   function dispose(code = 'disposed') {
     if (disposed) return;
     disposed = true;
-    if (frame !== undefined) native.cancelAnimationFrame(frame);
-    if (waiting !== undefined) native.clearTimeout(waiting);
-    wakeWaiting?.();
-    for (const remove of listeners.splice(0)) remove();
-    native.setInput(event => { if (event.type === 'click' && event.target === reload) native.ordinaryReload(); });
-    for (const cleanup of [() => gameplay?.dispose(), () => controller?.dispose(),
-      () => scene?.free(), () => quality?.free()]) { try { cleanup(); } catch { code = 'client-failed'; } }
+    let failed = false, primary;
+    const cleanup = callback => {
+      try { callback(); } catch (error) {
+        if (!failed) { failed = true; primary = error; }
+        code = 'client-failed';
+      }
+    };
+    if (frame !== undefined) {
+      const current = frame; frame = undefined;
+      cleanup(() => native.cancelAnimationFrame(current));
+    }
+    if (waiting !== undefined) {
+      const current = waiting; waiting = undefined;
+      cleanup(() => native.clearTimeout(current));
+    }
+    const wake = wakeWaiting; wakeWaiting = undefined;
+    cleanup(() => wake?.());
+    for (const remove of listeners.splice(0)) cleanup(remove);
+    cleanup(() => native.setInput(event => { if (event.type === 'click' && event.target === reload) native.ordinaryReload(); }));
+    for (const action of [() => gameplay?.dispose(), () => controller?.dispose(),
+      () => scene?.free(), () => quality?.free()]) cleanup(action);
     held = undefined;
-    native.status(code);
+    cleanup(() => native.status(code));
+    if (failed) throw primary;
   }
-  const fail = error => { dispose(error?.status === 'unsupported' ? 'host-unavailable' : 'client-failed'); };
+  const fail = error => {
+    let code = 'client-failed', failed = false;
+    try { if (error?.status === 'unsupported') code = 'host-unavailable'; } catch { failed = true; }
+    try { dispose(code); } catch { failed = true; }
+    if (failed) throw error;
+  };
   listen(realm, 'pagehide', () => dispose());
   let root = realm.document.getElementById('slither-client-root');
   if (!root) { root = realm.document.createElement('section'); root.id = 'slither-client-root';
@@ -153,7 +173,9 @@ export async function startGamePage({ realm = globalThis, initialize = init, was
       dispose,
     });
   } catch (error) {
-    dispose(error?.status === 'unsupported' ? 'host-unavailable' : 'csp-or-module-unavailable');
+    let code = 'csp-or-module-unavailable';
+    try { if (error?.status === 'unsupported') code = 'host-unavailable'; } catch { /* Classification is best effort. */ }
+    try { dispose(code); } catch { /* Cleanup cannot replace the startup primary. */ }
     throw error;
   }
 }
