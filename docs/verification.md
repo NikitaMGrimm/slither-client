@@ -38,6 +38,19 @@ pull requests, and manual dispatch. Normal tests and CI require no external
 reference and do not connect to game servers. Dependency and toolchain setup may
 access package sources. Release-plz remains dormant.
 
+## Native score arithmetic
+
+The caller-owned score primitive passes 444 native all-target tests, doctests,
+strict rustdoc, formatting and native/Wasm Clippy. Independent review passes
+36 focused native tests and finds no supported defect in ordered arithmetic,
+table boundaries, cache ownership or resource bounds. A retained mutation that
+reassociates the score arithmetic fails the exact fractional-floor witness.
+
+A fresh web build passes the full ABI suite recorded below, and both extension
+packages contain 38 files. This checks existing ABI behavior with the new native
+module present; `ScoreTables` has no Wasm export or gameplay/HUD binding yet.
+Native powf results do not establish browser Math.pow parity.
+
 ## Explicit game-page composition
 
 The composed extension sources pass 449 Node tests. A fresh Wasm build passes

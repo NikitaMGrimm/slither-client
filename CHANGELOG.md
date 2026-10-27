@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add caller-owned native score tables with ordered f64 arithmetic, bounded
+  plateau entries and atomic cache replacement. Gameplay score/HUD wiring and
+  browser arithmetic parity remain separate.
+
 - Add optional bounded profile acquisition for an explicit trusted Play request
   on canonical HTTPS, with captured native capabilities, full pinned-byte
   verification, closed parsing and staged-launch cancellation. Keep external
