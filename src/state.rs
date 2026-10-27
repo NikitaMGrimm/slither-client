@@ -99,16 +99,18 @@ pub struct Snake {
     /// Fixed six-unit presentation radius, not a decoded physical hitbox.
     pub radius: f64,
     anchor_direction: Option<u16>,
+    segment_length: f64,
 }
 
-/// One food position keyed by its four wire sector/offset bytes.
+/// Latest received food at one key, without retained multiplicity or animation.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Food {
     /// Centered world position.
     pub position: Point,
     /// Transmitted size in world units.
     pub size: f64,
-    /// Color byte; zero when the compact packet omits it.
+    /// Raw color: `F` supplies it directly; `f/b` omissions reuse their shared cache.
+    /// The cache starts at zero; explicit reset and first own appearance restore it.
     pub color: u8,
     /// Owning sector coordinates.
     pub sector: (u8, u8),
@@ -179,10 +181,29 @@ pub struct Appearance {
     pub wire_direction: Direction,
 }
 
+/// One food creation, independent of the lossy unique-key received map.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FoodSpawnInput {
+    /// Packed sector and offset bytes, preserving the complete wire bit pattern.
+    pub key: u32,
+    /// Original sector coordinates, independent of later animation.
+    pub sector: (u8, u8),
+    /// Absolute world position, decoded before centering.
+    pub absolute_position: Point,
+    /// Original size byte, including zero.
+    pub size_byte: u8,
+    /// Original size byte divided by five in world units.
+    pub base_size: f64,
+    /// Raw explicit or cached color, before presentation palette selection.
+    pub raw_color: u8,
+    /// True for `F` and `b`; false for the slower `f` appearance.
+    pub rapid: bool,
+}
+
 /// A validated presentation change in wire order, without advancing any clock.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PresentationEvent {
-    /// Reset presentation entities and apply this configuration.
+    /// Apply configuration while preserving entities, own identity, caches and camera state.
     Setup(Setup),
     /// Create or replace a snake with complete initial presentation inputs.
     SnakeAppearance(Appearance),
@@ -236,6 +257,20 @@ pub enum PresentationEvent {
     },
     /// Replace the target arena radius, without advancing displayed easing.
     RadiusTarget(f64),
+    /// Append one food instance, including repeated keys and equal creations.
+    FoodSpawn(FoodSpawnInput),
+    /// Consume the newest matching retained instance, even if the received map is empty.
+    FoodConsume {
+        /// Packed sector and offset bytes.
+        key: u32,
+        /// Explicit or cached eater ID, including zero; absent means immediate removal.
+        eater_id: Option<u16>,
+    },
+    /// Clear all retained instances from a sector, including consumed foods.
+    FoodSectorClear {
+        /// Original sector coordinates.
+        sector: (u8, u8),
+    },
 }
 
 /// A completely committed frame and its ordered presentation changes.
@@ -294,13 +329,15 @@ impl From<ProtocolError> for StateError {
 /// Deterministically ordered received scene, independent of browser and network I/O.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ClientState {
-    /// Current configuration. A new setup clears entities and compact caches.
+    /// Current configuration. Setup preserves existing entities and compact caches.
     pub setup: Option<Setup>,
     /// Current snakes, in wire identifier order.
     pub snakes: BTreeMap<u16, Snake>,
-    /// Current foods, in packed `(sector x, sector y, offset x, offset y)` order.
+    /// Lossy unique-key projection in packed sector/offset order. Creation replaces
+    /// the latest value and consumption removes it immediately. This map cannot
+    /// represent duplicate instances, insertion order, or consumption animation.
     pub foods: BTreeMap<u32, Food>,
-    /// First full appearance after setup; retained when that snake is removed.
+    /// First full appearance in this world; retained through removal and setup.
     pub own_snake_id: Option<u16>,
     /// Successfully committed frames; saturates rather than overflowing.
     pub frames_applied: u64,
@@ -312,6 +349,8 @@ pub struct ClientState {
     pub last_elapsed_ms: Option<u16>,
     added_sector: Option<(u8, u8)>,
     eaten_sector: Option<(u8, u8)>,
+    added_color: u8,
+    eater_id: Option<u16>,
 }
 
 impl ClientState {
@@ -331,11 +370,12 @@ impl ClientState {
 
     /// Atomically apply a frame and return every supported presentation change.
     ///
-    /// Events retain wire order, including replacements and mid-frame resets.
+    /// Events retain wire order, including replacements and mid-frame configuration.
     /// Removal requests always emit, including unknown or already removed IDs,
-    /// so retained presentation duplicates remain reachable. Other unknown
-    /// explicit-ID updates and food commands emit no events. Compact own commands
-    /// retain `Own` targeting after received-state removal, until setup. Elapsed
+    /// so retained presentation duplicates remain reachable. Every food creation,
+    /// consume and sector clear emits directly in command/record order, including
+    /// unknown keys; other unknown explicit-ID updates emit no events. Compact own
+    /// commands retain `Own` targeting after received-state removal and setup. Elapsed
     /// headers never advance presentation here.
     /// Appearance direction metadata must be ASCII `0`, `1` or `2`; received-only
     /// `apply_frame` keeps ignoring this field for compatibility.
@@ -385,15 +425,30 @@ impl ClientState {
         let code = p[0];
         if code == b'a' {
             let setup = parse_setup(p)?;
+            if let Some(previous) = &self.setup
+                && previous.grid_center != setup.grid_center
+            {
+                // The received preview is centered; retained presentation stays absolute.
+                let old_center = previous.grid_center;
+                for snake in self.snakes.values_mut() {
+                    snake.head =
+                        centered(&setup, snake.head.x + old_center, snake.head.y + old_center)?;
+                    for point in &mut snake.body {
+                        *point = centered(&setup, point.x + old_center, point.y + old_center)?;
+                    }
+                }
+                for food in self.foods.values_mut() {
+                    food.position = centered(
+                        &setup,
+                        food.position.x + old_center,
+                        food.position.y + old_center,
+                    )?;
+                }
+            }
             if let Some(events) = events {
                 events.push(PresentationEvent::Setup(setup.clone()));
             }
             self.setup = Some(setup);
-            self.snakes.clear();
-            self.foods.clear();
-            self.own_snake_id = None;
-            self.added_sector = None;
-            self.eaten_sector = None;
             return Ok(true);
         }
         if !matches!(
@@ -467,8 +522,19 @@ impl ClientState {
                 require(p, p.len() >= 3 && (p.len() - 3).is_multiple_of(4))?;
                 let sector = (p[1], p[2]);
                 // F is a possibly split listing, not a replacement of the sector.
+                let mut events = events;
                 for food in p[3..].as_chunks::<4>().0 {
-                    self.insert_food(&setup, sector, food[1], food[2], food[3], food[0])?;
+                    let input = self.insert_food(
+                        &setup,
+                        sector,
+                        (food[1], food[2]),
+                        food[3],
+                        food[0],
+                        true,
+                    )?;
+                    if let Some(events) = &mut events {
+                        events.push(PresentationEvent::FoodSpawn(input));
+                    }
                 }
             }
             b'f' | b'b' => {
@@ -480,9 +546,21 @@ impl ClientState {
                     self.added_sector.ok_or(StateError::MissingSector)?
                 };
                 let at = if explicit { 3 } else { 1 };
-                let color = if p.len() == at + 4 { p[at + 2] } else { 0 };
-                self.insert_food(&setup, sector, p[at], p[at + 1], p[p.len() - 1], color)?;
+                if p.len() == at + 4 {
+                    self.added_color = p[at + 2];
+                }
+                let input = self.insert_food(
+                    &setup,
+                    sector,
+                    (p[at], p[at + 1]),
+                    p[p.len() - 1],
+                    self.added_color,
+                    code == b'b',
+                )?;
                 self.added_sector = Some(sector);
+                if let Some(events) = events {
+                    events.push(PresentationEvent::FoodSpawn(input));
+                }
             }
             b'c' | b'C' | b'<' => {
                 let extra = if code == b'<' { 2 } else { 0 };
@@ -494,12 +572,29 @@ impl ClientState {
                     self.eaten_sector.ok_or(StateError::MissingSector)?
                 };
                 let at = if explicit { 3 } else { 1 };
-                self.foods.remove(&food_key(sector, p[at], p[at + 1]));
+                let eater_id = match code {
+                    b'<' => {
+                        self.eater_id = Some(word(p, at + 2)?);
+                        self.eater_id
+                    }
+                    b'C' => self.eater_id,
+                    _ => None,
+                };
+                let key = food_key(sector, p[at], p[at + 1]);
+                self.foods.remove(&key);
                 self.eaten_sector = Some(sector);
+                if let Some(events) = events {
+                    events.push(PresentationEvent::FoodConsume { key, eater_id });
+                }
             }
             b'w' => {
                 require(p, p.len() == 3)?;
                 self.foods.retain(|_, food| food.sector != (p[1], p[2]));
+                if let Some(events) = events {
+                    events.push(PresentationEvent::FoodSectorClear {
+                        sector: (p[1], p[2]),
+                    });
+                }
             }
             b'z' => {
                 require(p, p.len() == 4)?;
@@ -626,10 +721,17 @@ impl ClientState {
             fam: fraction(p, 12)?,
             radius: 6.,
             anchor_direction,
+            segment_length: setup.body_spacing,
         };
         self.snakes.insert(id, snake);
         self.check_total_body()?;
-        self.own_snake_id.get_or_insert(id);
+        if self.own_snake_id.is_none() {
+            self.own_snake_id = Some(id);
+            self.added_sector = None;
+            self.eaten_sector = None;
+            self.added_color = 0;
+            self.eater_id = None;
+        }
         if let Some((events, absolute_body)) = events.zip(absolute_body) {
             let snake = &self.snakes[&id];
             events.push(PresentationEvent::SnakeAppearance(Appearance {
@@ -732,7 +834,7 @@ impl ClientState {
                     .first()
                     .ok_or(StateError::MissingAnchor(snake.id))?,
                 next_direction.ok_or(StateError::MissingAnchor(snake.id))?,
-                setup.body_spacing,
+                snake.segment_length,
             )?
         };
         let next_len = snake.body.len() + usize::from(grow || snake.body.is_empty());
@@ -828,11 +930,12 @@ impl ClientState {
         &mut self,
         setup: &Setup,
         sector: (u8, u8),
-        rx: u8,
-        ry: u8,
+        offset: (u8, u8),
         size: u8,
         color: u8,
-    ) -> Result<(), StateError> {
+        rapid: bool,
+    ) -> Result<FoodSpawnInput, StateError> {
+        let (rx, ry) = offset;
         let key = food_key(sector, rx, ry);
         if !self.foods.contains_key(&key) && self.foods.len() >= MAX_FOODS {
             return Err(StateError::Limit);
@@ -852,7 +955,18 @@ impl ClientState {
                 sector,
             },
         );
-        Ok(())
+        Ok(FoodSpawnInput {
+            key,
+            sector,
+            absolute_position: Point {
+                x: f64::from(rx) * (unit / 256.) + f64::from(sector.0) * unit,
+                y: f64::from(ry) * (unit / 256.) + f64::from(sector.1) * unit,
+            },
+            size_byte: size,
+            base_size: f64::from(size) / 5.,
+            raw_color: color,
+            rapid,
+        })
     }
 
     fn check_total_body(&self) -> Result<(), StateError> {

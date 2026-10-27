@@ -2,6 +2,7 @@ import init, * as wasm from './pkg/slither_client.js';
 import { syntheticScene, syntheticStep } from './synthetic-scene.mjs';
 import { connectLoopback, loopbackEndpoint, sceneHeading } from './loopback-session.mjs';
 import { createSyntheticBodyResolver } from './synthetic-body.mjs';
+import { createSyntheticFoodResolver } from './synthetic-food.mjs';
 
 const control = id => document.querySelector(`#${id}`);
 const target = control('scene');
@@ -22,6 +23,8 @@ let renders = 0;
 let drawsSinceStatistics = 0;
 let lastReadout = -Infinity;
 let renderedCamera;
+let applyFrame;
+let foodRandomState;
 
 function setStatus(text) { control('status').textContent = text; }
 function updateControls() {
@@ -63,7 +66,8 @@ function reset() {
   disconnect();
   animated.reset();
   quality.begin_skin_preview();
-  animated.apply_frame(syntheticScene(Number(control('skin').value)), false);
+  foodRandomState = 0x5eed1;
+  applyFrame(syntheticScene(Number(control('skin').value)), false);
   animated.set_follows(control('follow').checked);
   animated.set_zoom(Number(control('zoom').value));
   anchorStep = 0;
@@ -101,6 +105,19 @@ async function start() {
   animated = new wasm.AnimatedScene(startMs);
   quality = new wasm.DesktopQuality(Number(control('quality').value), startMs);
   const resolveSynthetic = createSyntheticBodyResolver(palettes, globalThis);
+  const face = {
+    eyes: { kind: 'standard', distance: 6, separation: 6, radius: 6, pupilRadius: 3.5,
+      pupilTravel: 2.3, outlineWidth: 0, eyeColor: 0xffffff, pupilColor: 0,
+      outlineColor: 0, eyeOpacity: 0.75, pupilOpacity: 1, angleSmoothing: 0.12 },
+    decoration: { kind: 'none' },
+  };
+  const resolveFace = () => ({ revision: 'synthetic-face-1', eyes: face.eyes, decoration: null });
+  const resolveFood = createSyntheticFoodResolver(globalThis, () => {
+    // A repeatable caller-owned tape supplies two independent units per creation.
+    foodRandomState = (Math.imul(foodRandomState, 1664525) + 1013904223) >>> 0;
+    return foodRandomState / 4294967296;
+  });
+  applyFrame = (bytes, header) => animated.apply_frame_with_factories(bytes, header, () => face, resolveFood);
 
   function frame(nowMs) {
     pendingFrame = undefined;
@@ -115,7 +132,7 @@ async function start() {
       if (quality.update_statistics(nowMs, drawsSinceStatistics, true)) drawsSinceStatistics = 0;
       const qualityView = JSON.parse(quality.snapshot());
       if (mode === 'synthetic') animated.render_standard(target, ...palettes, background, resolveSynthetic, quality);
-      else animated.render(target, ...palettes, background, qualityView.qualityScale, false);
+      else animated.render_with_food(target, ...palettes, background, false, resolveFace, quality);
       drawsSinceStatistics++;
       renders++;
       const view = JSON.parse(animated.snapshot());
@@ -123,8 +140,10 @@ async function start() {
       if (nowMs - lastReadout >= 100) {
         lastReadout = nowMs;
         const count = (value, width) => String(value).padStart(width);
-        control('counts').textContent = `Snakes ${count(view.snakes, 3)}   Retained ${count(view.retainedSnakes, 3)}   Drawn ${count(view.drawnSnakes, 3)}\nFood ${count(view.foods, 5)}   Frames ${count(view.frames, 8)}   Ignored ${count(view.ignored, 8)}\nQuality ${qualityView.highQuality ? 'HQ' : 'LQ'}   Blend ${qualityView.qualityBlend.toFixed(4)}   Spacing ${qualityView.qualityScale.toFixed(5)}`;
-        window.slitherAnimatedSceneReport = { ...view, quality: qualityView, wasmExecuted: true, renders, mode, connected: Boolean(connection) };
+        const food = animated.food_state();
+        control('counts').textContent = `Snakes ${count(view.snakes, 3)}   Retained ${count(view.retainedSnakes, 3)}   Drawn ${count(view.drawnSnakes, 3)}\nFood ${count(food.foods.length, 5)}   Frames ${count(view.frames, 8)}   Ignored ${count(view.ignored, 8)}\nQuality ${qualityView.highQuality ? 'HQ' : 'LQ'}   Blend ${qualityView.qualityBlend.toFixed(4)}   Spacing ${qualityView.qualityScale.toFixed(5)}`;
+        window.slitherAnimatedSceneReport = { ...view, retainedFoods: food.foods.length,
+          foodSources: food.sourceCount, quality: qualityView, wasmExecuted: true, renders, mode, connected: Boolean(connection) };
       }
       pendingFrame = requestAnimationFrame(frame);
     } catch (error) { fail(error); }
@@ -133,7 +152,7 @@ async function start() {
   listen(control('reset'), 'click', reset);
   listen(control('step'), 'click', () => {
     if (mode !== 'synthetic') return;
-    animated.apply_frame(syntheticStep(++anchorStep), false);
+    applyFrame(syntheticStep(++anchorStep), false);
     setStatus('Synthetic anchor advanced');
     lastReadout = -Infinity;
   });
@@ -151,12 +170,13 @@ async function start() {
       const scene = {
         reset: () => {
           animated.reset();
+          foodRandomState = 0x5eed1;
           quality.begin_connection();
           animated.set_follows(control('follow').checked);
           animated.set_zoom(Number(control('zoom').value));
           renderedCamera = undefined;
         },
-        apply_frame: animated.apply_frame.bind(animated),
+        apply_frame: applyFrame,
         snapshot: animated.snapshot.bind(animated),
       };
       connection = connectLoopback({ url: simulatorUrl, wasm, scene, skin: Number(control('skin').value),

@@ -27,6 +27,12 @@ impl Default for FollowCamera {
 }
 
 impl FollowCamera {
+    /// Clear draw corrections and restore initial zoom, retaining position and preference.
+    pub(crate) fn reset_world(&mut self) {
+        self.zoom = INITIAL_ZOOM;
+        self.corrections = CameraCorrections::default();
+    }
+
     /// Initialize at the newest own body anchor; the head remains separate.
     pub fn new(position: Point, zoom: f64) -> Result<Self, PresentationError> {
         finite(&[position.x, position.y, zoom])?;

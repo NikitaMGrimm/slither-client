@@ -4,6 +4,7 @@ import { createSkinProvider } from '../web/skin-provider.mjs';
 import { bundle, syntheticScene, syntheticSetup, syntheticStep } from '../web/synthetic-scene.mjs';
 import { denseScene } from '../web/dense-scene.mjs';
 import { faceRenderSmoke } from './face-render-smoke.mjs';
+import { foodRenderSmoke } from './food-render-smoke.mjs';
 
 // Original synthetic sources and Canvas recorder. This executes the real Wasm
 // ABI, but models Canvas state; it is neither a browser nor a raster oracle.
@@ -50,7 +51,7 @@ export function bodyRenderSmoke(wasm) {
   }
   class HTMLCanvasElement {
     context = new CanvasRenderingContext2D(); _width = 32; height = 32;
-    constructor(name = 'canvas') { this.name = name; }
+    constructor(name = 'canvas') { this.name = name; this.context.canvas = this; }
     get width() { return this._width; }
     set width(value) { this._width = value; this.context.reset(); }
     getContext(kind) { assert.equal(kind, '2d'); return this.context; }
@@ -133,6 +134,7 @@ export function bodyRenderSmoke(wasm) {
   }
   try {
     faceRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok, rejects, checkAtomic, bodyImages });
+    foodRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok, rejects });
     const style = { ...vanillaEyes(), distance: 9.25, separation: 4.75, radius: 4.25,
       pupilRadius: 1.5, pupilTravel: 0.02, outlineWidth: 2.5,
       eyeColor: 0x123456, pupilColor: 0xabcdef, eyeOpacity: 0.6, pupilOpacity: 0.8 };

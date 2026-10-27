@@ -1,17 +1,19 @@
 //! Atomic received events and bounded animation state, with separate update/draw clocks.
 
-use std::{error::Error, fmt};
+use std::{collections::BTreeSet, error::Error, fmt};
 
 use super::{
-    AnchorView, BodyPaintGeometry, BodyPaintSample, BoundaryRadius, CurveOutput, FollowCamera,
-    FrameClock, FrameStep, MAX_CURVE_SAMPLES, PairedFaceGeometry, PairedSideGeometry,
-    PresentationError, SnakeMetrics, SnakePresentation, StandardEyeGeometry, finite,
+    AnchorView, BodyPaintGeometry, BodyPaintSample, BodyPaintView, BoundaryRadius, CurveOutput,
+    FollowCamera, FoodConsume, FoodCullBounds, FoodEaterPose, FoodError, FoodFactory, FoodSpawn,
+    FoodWorld, FrameClock, FrameStep, MAX_CURVE_SAMPLES, PairedFaceGeometry, PairedSideGeometry,
+    PresentationError, SnakeMetrics, SnakeObjectToken, SnakePresentation, StandardEyeGeometry,
+    finite,
 };
 use crate::{
     protocol::ElapsedHeader,
     state::{
-        Appearance, ClientState, FrameReport, MAX_SNAKES, MAX_TOTAL_BODY_POINTS, Point,
-        PresentationEvent, SnakeTarget, StateError,
+        Appearance, ClientState, FoodSpawnInput, FrameReport, MAX_SNAKES, MAX_TOTAL_BODY_POINTS,
+        Point, PresentationEvent, SnakeTarget, StateError,
     },
 };
 
@@ -75,6 +77,12 @@ pub enum ClientPresentationError {
     State(StateError),
     /// A presentation input or arithmetic result is invalid.
     Presentation(PresentationError),
+    /// Food creation, animation or captured eater invariants failed.
+    Food(FoodError),
+    /// Enabled food presentation requires creation metadata for every new food.
+    FoodFactoryRequired,
+    /// Food presentation must start before packets, or immediately after an explicit reset.
+    FoodModeRequiresReset,
     /// The presentation world or prepared draw would exceed a retention/sample bound.
     Limit,
     /// Presentation requires an unimplemented mode-specific skin/color ordering.
@@ -86,6 +94,11 @@ impl fmt::Display for ClientPresentationError {
         match self {
             Self::State(error) => error.fmt(f),
             Self::Presentation(error) => error.fmt(f),
+            Self::Food(error) => error.fmt(f),
+            Self::FoodFactoryRequired => f.write_str("food creation requires a factory resolver"),
+            Self::FoodModeRequiresReset => {
+                f.write_str("enable food presentation before packets or after reset")
+            }
             Self::Limit => f.write_str("retained presentation capacity exceeded"),
             Self::UnsupportedMode(mode) => write!(f, "unsupported presentation mode {mode}"),
         }
@@ -97,7 +110,11 @@ impl Error for ClientPresentationError {
         match self {
             Self::State(error) => Some(error),
             Self::Presentation(error) => Some(error),
-            Self::Limit | Self::UnsupportedMode(_) => None,
+            Self::Food(error) => Some(error),
+            Self::Limit
+            | Self::UnsupportedMode(_)
+            | Self::FoodFactoryRequired
+            | Self::FoodModeRequiresReset => None,
         }
     }
 }
@@ -114,8 +131,15 @@ impl From<PresentationError> for ClientPresentationError {
     }
 }
 
+impl From<FoodError> for ClientPresentationError {
+    fn from(error: FoodError) -> Self {
+        Self::Food(error)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct Entry {
+    token: SnakeObjectToken,
     // A duplicate keeps its original wire identity for oldest-first removal,
     // while only the newest appearance remains in the packet lookup.
     wire_id: Option<u16>,
@@ -142,6 +166,10 @@ pub struct AnimatedClient {
     connected: bool,
     entries: Vec<Entry>,
     body_paint_flags: Vec<u8>,
+    foods: FoodWorld,
+    food_bounds: Option<FoodCullBounds>,
+    food_enabled: bool,
+    last_snake_serial: u64,
 }
 
 fn validate_draw_inputs(
@@ -167,12 +195,16 @@ impl AnimatedClient {
             connected: false,
             entries: Vec::new(),
             body_paint_flags: vec![0; MAX_CURVE_SAMPLES],
+            foods: FoodWorld::new(),
+            food_bounds: None,
+            food_enabled: false,
+            last_snake_serial: 0,
         })
     }
 
-    /// Clear the world and transient view state, and restore the lag multiplier to one.
+    /// Clear the world and draw corrections, and restore the lag multiplier to one.
     /// Preserve the clock's timestamp and both accumulated phases, boundary state,
-    /// caller follow preference and shared body-painter flag history. Use `new`
+    /// camera position, caller follow preference and shared body-painter flag history. Use `new`
     /// to start a fresh timeline.
     pub fn reset(&mut self) {
         self.received = ClientState::default();
@@ -180,13 +212,17 @@ impl AnimatedClient {
         self.reset_camera();
         self.connected = false;
         self.entries.clear();
+        self.foods.clear();
     }
 
     fn reset_camera(&mut self) {
-        // Following is a caller preference that survives world/connection resets.
-        let follows = self.camera.follows();
-        self.camera = FollowCamera::default();
-        self.camera.set_follows(follows);
+        self.camera.reset_world();
+    }
+
+    fn retire_entries(&mut self) {
+        let referenced: BTreeSet<_> = self.foods.referenced_tokens().collect();
+        self.entries
+            .retain(|entry| entry.drawn || entry.own || referenced.contains(&entry.token));
     }
 
     fn target_index(&self, target: SnakeTarget) -> Option<usize> {
@@ -214,7 +250,7 @@ impl AnimatedClient {
 
     /// Commit a complete received frame and its presentation events together.
     /// Elapsed headers are retained by received state; anchor extrapolation is zero.
-    /// A setup clears the world and camera without resetting the fractional clock.
+    /// Setup updates configuration without clearing the world, camera or fractional clock.
     /// Shared body-painter ordinal flags survive setup on the same client.
     pub fn apply_frame(
         &mut self,
@@ -253,21 +289,67 @@ impl AnimatedClient {
         &mut self,
         bytes: &[u8],
         header: ElapsedHeader,
-        mut resolve: F,
+        resolve: F,
     ) -> Result<FrameReport, E>
     where
         E: From<ClientPresentationError>,
         F: FnMut(&Appearance) -> Result<PairedFaceGeometry, E>,
     {
+        self.apply_frame_resolved(bytes, header, resolve, |_, _| Ok(None), false)
+    }
+
+    /// Apply ordered appearances and food creations with explicit factory inputs.
+    /// Start this path before any packets or after reset. Once enabled, other apply
+    /// APIs reject food creation instead of silently dropping animation. Resolvers
+    /// run after complete received validation; their side effects cannot roll back.
+    pub fn apply_frame_with_factories<E, F, G>(
+        &mut self,
+        bytes: &[u8],
+        header: ElapsedHeader,
+        resolve_face: F,
+        mut resolve_food: G,
+    ) -> Result<FrameReport, E>
+    where
+        E: From<ClientPresentationError>,
+        F: FnMut(&Appearance) -> Result<PairedFaceGeometry, E>,
+        G: FnMut(&FoodSpawnInput, f64) -> Result<FoodFactory, E>,
+    {
+        self.apply_frame_resolved(
+            bytes,
+            header,
+            resolve_face,
+            |spawn, zoom| resolve_food(spawn, zoom).map(Some),
+            true,
+        )
+    }
+
+    fn apply_frame_resolved<E, F, G>(
+        &mut self,
+        bytes: &[u8],
+        header: ElapsedHeader,
+        mut resolve: F,
+        mut resolve_food: G,
+        enable_food: bool,
+    ) -> Result<FrameReport, E>
+    where
+        E: From<ClientPresentationError>,
+        F: FnMut(&Appearance) -> Result<PairedFaceGeometry, E>,
+        G: FnMut(&FoodSpawnInput, f64) -> Result<Option<FoodFactory>, E>,
+    {
         let mut received = self.received.clone();
         let applied = received
             .apply_frame_with_events(bytes, header)
             .map_err(ClientPresentationError::from)?;
+        if enable_food && !self.food_enabled && self.received.frames_applied != 0 {
+            return Err(ClientPresentationError::FoodModeRequiresReset.into());
+        }
         if applied.events.is_empty() {
             self.received = received;
+            self.food_enabled |= enable_food;
             return Ok(applied.report);
         }
         let mut next = self.clone();
+        next.food_enabled |= enable_food;
         let mut setup = self.received.setup.clone();
         for event in applied.events {
             match event {
@@ -285,10 +367,14 @@ impl AnimatedClient {
                                 .map_err(ClientPresentationError::from)?,
                         );
                     }
+                    for entry in &mut next.entries {
+                        entry
+                            .snake
+                            .apply_setup(&value)
+                            .map_err(ClientPresentationError::from)?;
+                    }
                     next.connected = true;
                     setup = Some(value);
-                    next.entries.clear();
-                    next.reset_camera();
                 }
                 PresentationEvent::SnakeAppearance(appearance) => {
                     let setup = setup
@@ -320,7 +406,13 @@ impl AnimatedClient {
                             entry.addressed = false;
                         }
                     }
+                    next.last_snake_serial = next
+                        .last_snake_serial
+                        .checked_add(1)
+                        .ok_or(ClientPresentationError::Limit)?;
                     next.entries.push(Entry {
+                        token: SnakeObjectToken::new(next.last_snake_serial)
+                            .map_err(ClientPresentationError::from)?,
                         wire_id: Some(appearance.id),
                         addressed: true,
                         own,
@@ -415,12 +507,11 @@ impl AnimatedClient {
                         entry.wire_id = None;
                         if died {
                             entry.snake.mark_dead();
-                        } else if entry.own {
-                            entry.drawn = false;
                         } else {
-                            next.entries.remove(index);
+                            entry.drawn = false;
                         }
                     }
+                    next.retire_entries();
                 }
                 PresentationEvent::RadiusTarget(radius) => {
                     if let Some(boundary) = &mut next.boundary {
@@ -431,6 +522,41 @@ impl AnimatedClient {
                     if let Some(setup) = &mut setup {
                         setup.radius = radius;
                     }
+                }
+                PresentationEvent::FoodSpawn(spawn) => {
+                    if let Some(factory) = resolve_food(&spawn, next.camera.zoom())? {
+                        next.foods
+                            .spawn(
+                                FoodSpawn {
+                                    key: spawn.key,
+                                    sector: spawn.sector,
+                                    position: spawn.absolute_position,
+                                    base_size: spawn.base_size,
+                                    raw_color: spawn.raw_color,
+                                    rapid: spawn.rapid,
+                                },
+                                factory.input(next.camera.zoom()),
+                            )
+                            .map_err(ClientPresentationError::from)?;
+                    } else if next.food_enabled {
+                        return Err(ClientPresentationError::FoodFactoryRequired.into());
+                    }
+                }
+                PresentationEvent::FoodConsume { key, eater_id } => {
+                    if next.food_enabled {
+                        let consume = match eater_id {
+                            None => FoodConsume::Immediate,
+                            Some(id) => FoodConsume::Eaten(
+                                next.lookup_index(id).map(|i| next.entries[i].token),
+                            ),
+                        };
+                        next.foods.consume(key, consume);
+                        next.retire_entries();
+                    }
+                }
+                PresentationEvent::FoodSectorClear { sector } => {
+                    next.foods.clear_sector(sector);
+                    next.retire_entries();
                 }
             }
         }
@@ -456,7 +582,26 @@ impl AnimatedClient {
                 entry.drawn = false;
             }
         }
-        next.entries.retain(|entry| entry.drawn || entry.own);
+        let entries = &next.entries;
+        next.foods.advance(step, |token| {
+            let snake = &entries
+                .iter()
+                .find(|entry| entry.token == token)
+                .ok_or(FoodError::MissingEater(token))?
+                .snake;
+            let m = snake.metrics();
+            let offset = snake.head_corrections().offset();
+            Ok(FoodEaterPose {
+                head: m.raw_head,
+                head_offset: Point {
+                    x: offset[0],
+                    y: offset[1],
+                },
+                heading: m.heading,
+                angle_offset: snake.angle_corrections().offset(),
+            })
+        })?;
+        next.retire_entries();
         *self = next;
         Ok(step)
     }
@@ -538,6 +683,15 @@ impl AnimatedClient {
             next.camera
                 .prepare_draw(metrics.corrected_head, metrics.logical_segments as u32)
                 .map_err(ClientPresentationError::from)?;
+            next.food_bounds = Some(
+                FoodCullBounds::from_view(BodyPaintView {
+                    camera: next.camera.position(),
+                    zoom: next.camera.zoom(),
+                    half_width: f64::from(width) / 2.,
+                    half_height: f64::from(height) / 2.,
+                })
+                .map_err(|_| ClientPresentationError::Presentation(PresentationError))?,
+            );
         }
         let camera = next.camera.position();
         let half_width = f64::from(width) / 2. / next.camera.zoom() + 84.;
@@ -657,6 +811,37 @@ impl AnimatedClient {
     /// Latest committed received state, including food and protocol caches/counters.
     pub fn received(&self) -> &ClientState {
         &self.received
+    }
+
+    /// Retained food instances in dense insertion/swap order, including flights.
+    pub fn foods(&self) -> &FoodWorld {
+        &self.foods
+    }
+
+    /// Retained inclusive food cull bounds; initialized only by an own-object draw.
+    pub fn food_bounds(&self) -> Option<FoodCullBounds> {
+        self.food_bounds
+    }
+
+    /// Whether explicit factory ownership is enabled for this session.
+    pub fn food_enabled(&self) -> bool {
+        self.food_enabled
+    }
+
+    /// Stable identity of the retained original own object.
+    pub fn own_token(&self) -> Option<SnakeObjectToken> {
+        self.entries
+            .iter()
+            .find(|entry| entry.own)
+            .map(|entry| entry.token)
+    }
+
+    /// Address a captured object independently of wire-ID reuse or draw membership.
+    pub fn snake_object(&self, token: SnakeObjectToken) -> Option<&SnakePresentation> {
+        self.entries
+            .iter()
+            .find(|entry| entry.token == token)
+            .map(|entry| &entry.snake)
     }
 
     /// Read-only draw-driven camera and correction samples.

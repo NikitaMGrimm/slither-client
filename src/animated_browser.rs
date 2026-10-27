@@ -11,11 +11,12 @@ use crate::{
         same_eyes, standard_eyes,
     },
     canvas_browser::{CanvasFrame, draw_sprite},
+    food_browser::FoodSources,
     presentation::{
         AnimatedClient, BodyPaintError, BodyPaintInput, BodyPaintQuality, BodyPaintView,
-        BodyPaintVisual, CurveInput, CurveOutput, EyeLayoutInput, MAX_BODY_PAINT_COMMANDS,
-        MAX_RETAINED_SNAKES, SnakePresentation, StandardEyeLayout, Turn, plan_standard_body,
-        sample_curve_with_heading,
+        BodyPaintVisual, CurveInput, CurveOutput, EyeLayoutInput, FoodImageCommand, FoodPaintInput,
+        FoodPaintPlan, MAX_BODY_PAINT_COMMANDS, MAX_RETAINED_SNAKES, SnakePresentation,
+        StandardEyeLayout, Turn, plan_food, plan_standard_body, sample_curve_with_heading,
     },
     presentation_browser::AnimationStep,
     protocol::ElapsedHeader,
@@ -25,6 +26,34 @@ use crate::{
 
 fn error(message: impl std::fmt::Display) -> JsValue {
     JsValue::from_str(&message.to_string())
+}
+
+fn record<const N: usize>(fields: [(&str, JsValue); N]) -> Result<JsValue, JsValue> {
+    let value = js_sys::Object::new();
+    for (key, field) in fields {
+        if !js_sys::Reflect::set(&value, &JsValue::from_str(key), &field)? {
+            return Err(error("could not construct food diagnostics"));
+        }
+    }
+    Ok(value.into())
+}
+
+fn serial(value: u64) -> JsValue {
+    js_sys::BigInt::from(value).into()
+}
+
+fn food_source_snapshot(source: crate::presentation::FoodSource) -> Result<JsValue, JsValue> {
+    let asset = source.asset();
+    record([
+        ("handle", serial(asset.handle)),
+        ("revision", serial(asset.revision)),
+        ("intrinsicWidth", asset.width.into()),
+        ("intrinsicHeight", asset.height.into()),
+        ("width", source.width().into()),
+        ("height", source.height().into()),
+        ("halfWidth", source.half_width().into()),
+        ("halfHeight", source.half_height().into()),
+    ])
 }
 
 // Values are finite numbers, booleans, null, or objects assembled here. Packet
@@ -162,6 +191,7 @@ fn draw_eyes(context: &CanvasRenderingContext2d, layout: StandardEyeLayout) -> R
 #[wasm_bindgen]
 pub struct AnimatedScene {
     client: AnimatedClient,
+    food_sources: FoodSources,
 }
 
 #[wasm_bindgen]
@@ -171,6 +201,7 @@ impl AnimatedScene {
     pub fn new(start_ms: f64) -> Result<AnimatedScene, JsValue> {
         Ok(Self {
             client: AnimatedClient::new(start_ms).map_err(error)?,
+            food_sources: FoodSources::default(),
         })
     }
 
@@ -178,6 +209,7 @@ impl AnimatedScene {
     /// Construct a new scene to start a fresh timeline.
     pub fn reset(&mut self) {
         self.client.reset();
+        self.food_sources.clear();
     }
 
     /// Gate boundary updates only; setup activates this gate and reset clears it.
@@ -187,7 +219,8 @@ impl AnimatedScene {
 
     /// Commit a complete frame and its presentation actions atomically.
     pub fn apply_frame(&mut self, bytes: &[u8], elapsed_header: bool) -> Result<(), JsValue> {
-        self.client
+        let mut prepared = self.client.clone();
+        prepared
             .apply_frame(
                 bytes,
                 if elapsed_header {
@@ -197,7 +230,7 @@ impl AnimatedScene {
                 },
             )
             .map_err(error)?;
-        Ok(())
+        self.commit_client(prepared, self.food_sources.clone())
     }
 
     /// Install explicit normalized paired eyes once per appearance, before its
@@ -210,7 +243,8 @@ impl AnimatedScene {
         elapsed_header: bool,
         resolve_eyes: &js_sys::Function,
     ) -> Result<(), JsValue> {
-        self.client
+        let mut prepared = self.client.clone();
+        prepared
             .apply_frame_with_eye_geometry(
                 bytes,
                 if elapsed_header {
@@ -225,7 +259,7 @@ impl AnimatedScene {
                 },
             )
             .map_err(|e| e.0)?;
-        Ok(())
+        self.commit_client(prepared, self.food_sources.clone())
     }
 
     /// Install owned numeric paired-face metadata atomically before any update.
@@ -236,7 +270,8 @@ impl AnimatedScene {
         elapsed_header: bool,
         resolve_face: &js_sys::Function,
     ) -> Result<(), JsValue> {
-        self.client
+        let mut prepared = self.client.clone();
+        prepared
             .apply_frame_with_face_geometry(
                 bytes,
                 if elapsed_header {
@@ -251,14 +286,47 @@ impl AnimatedScene {
                 },
             )
             .map_err(|e| e.0)?;
-        Ok(())
+        self.commit_client(prepared, self.food_sources.clone())
+    }
+
+    /// Retain complete appearance geometry and food factory inputs in one packet
+    /// transaction. Start before packets or after reset; sources remain owned until
+    /// their last food disappears. Callback side effects remain caller-owned.
+    pub fn apply_frame_with_factories(
+        &mut self,
+        bytes: &[u8],
+        elapsed_header: bool,
+        resolve_face: &js_sys::Function,
+        resolve_food: &js_sys::Function,
+    ) -> Result<(), JsValue> {
+        let mut prepared = self.client.clone();
+        let mut sources = self.food_sources.clone();
+        prepared
+            .apply_frame_with_factories(
+                bytes,
+                if elapsed_header {
+                    ElapsedHeader::TwoBytes
+                } else {
+                    ElapsedHeader::Absent
+                },
+                |appearance| -> Result<_, ResolveError> {
+                    let metadata = resolve_face
+                        .call1(&JsValue::UNDEFINED, &appearance_request(appearance)?.into())?;
+                    Ok(paired_face(&metadata)?)
+                },
+                |spawn, zoom| -> Result<_, ResolveError> {
+                    Ok(sources.resolve(resolve_food, spawn, zoom)?)
+                },
+            )
+            .map_err(|e| e.0)?;
+        self.commit_client(prepared, sources)
     }
 
     /// Advance the animation clock and drawn entities; free the returned step.
     pub fn advance(&mut self, now_ms: f64, lagging: bool) -> Result<AnimationStep, JsValue> {
-        Ok(AnimationStep {
-            inner: self.client.advance(now_ms, lagging).map_err(error)?,
-        })
+        let inner = self.client.advance(now_ms, lagging).map_err(error)?;
+        self.food_sources.retain(self.client.foods().foods());
+        Ok(AnimationStep { inner })
     }
 
     /// Prepare one numeric draw without rasterization, for deterministic clients.
@@ -354,6 +422,85 @@ impl AnimatedScene {
             },
             "own": own.map_or_else(|| "null".into(), snake_snapshot)
         }
+    }
+
+    /// Copied retained-food diagnostics with lossless BigInt identities and native
+    /// Number cells, preserving signed zeros. This is separate from the received
+    /// map count in `snapshot`; returned objects cannot mutate the model.
+    pub fn food_state(&self) -> Result<JsValue, JsValue> {
+        let rows = js_sys::Array::new();
+        for food in self.client.foods().foods() {
+            let f = food.snapshot();
+            let sources = js_sys::Array::new();
+            for source in [
+                f.sources.body,
+                f.sources.outline,
+                f.sources.inner,
+                f.sources.outer,
+            ] {
+                sources.push(&food_source_snapshot(source)?);
+            }
+            let indices = js_sys::Array::new();
+            for index in f.sources.indices {
+                indices.push(&JsValue::from_f64(index as f64));
+            }
+            rows.push(&record([
+                ("instance", serial(f.instance.serial())),
+                ("key", f.key.into()),
+                ("sectorX", f.sector.0.into()),
+                ("sectorY", f.sector.1.into()),
+                ("x", f.position.x.into()),
+                ("y", f.position.y.into()),
+                ("rawColor", f.raw_color.into()),
+                ("palette", f.effective_palette.into()),
+                ("size", f.base_size.into()),
+                ("spawnSpeed", f.spawn_speed.into()),
+                ("renderX", f.render_position.x.into()),
+                ("renderY", f.render_position.y.into()),
+                ("fade", f.fade.into()),
+                ("scale", f.scale.into()),
+                ("uneatenScale", f.uneaten_scale.into()),
+                ("phase", f.animation_phase.into()),
+                ("rate", f.animation_rate.into()),
+                ("wobbleRate", f.wobble_rate.into()),
+                ("eaten", f.eaten.into()),
+                ("progress", f.consumption_progress.into()),
+                (
+                    "eater",
+                    f.eater.map_or(JsValue::NULL, |t| serial(t.serial())),
+                ),
+                ("creationZoom", f.creation_zoom.into()),
+                ("indices", indices.into()),
+                ("sources", sources.into()),
+            ])?);
+        }
+        let bounds = self.client.food_bounds().map_or(JsValue::NULL, |bounds| {
+            bounds
+                .limits()
+                .into_iter()
+                .map(JsValue::from_f64)
+                .collect::<js_sys::Array>()
+                .into()
+        });
+        record([
+            ("enabled", self.client.food_enabled().into()),
+            (
+                "receivedCount",
+                (self.client.received().foods.len() as f64).into(),
+            ),
+            (
+                "ownToken",
+                self.client
+                    .own_token()
+                    .map_or(JsValue::NULL, |t| serial(t.serial())),
+            ),
+            (
+                "sourceCount",
+                (self.food_sources.assets().len() as f64).into(),
+            ),
+            ("bounds", bounds),
+            ("foods", rows.into()),
+        ])
     }
 
     /// Copied absolute-radius ring, retained across resets; draws never consume it.
@@ -601,6 +748,7 @@ impl AnimatedScene {
             quality_scale,
             detailed_style,
             None,
+            None,
         )
     }
 
@@ -625,6 +773,41 @@ impl AnimatedScene {
             quality_scale,
             detailed_style,
             Some(resolve_face),
+            None,
+        )
+    }
+
+    /// Basic bodies and complete paired faces with retained two-pass food.
+    /// Borrow applied quality without advancing its clock or statistics.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_with_food(
+        &mut self,
+        target: HtmlCanvasElement,
+        palette_0: HtmlCanvasElement,
+        palette_1: HtmlCanvasElement,
+        palette_2: HtmlCanvasElement,
+        background: HtmlImageElement,
+        detailed_style: bool,
+        resolve_face: &js_sys::Function,
+        quality: &DesktopQuality,
+    ) -> Result<(), JsValue> {
+        if !self.client.food_enabled() {
+            return Err(error(
+                "retained food factories must be enabled before rendering food",
+            ));
+        }
+        let applied = quality.applied();
+        self.render_basic(
+            target,
+            [palette_0, palette_1, palette_2],
+            background,
+            applied.quality_scale,
+            detailed_style,
+            Some(resolve_face),
+            Some(BodyPaintQuality {
+                high_quality: applied.high_quality,
+                blend: applied.quality_blend,
+            }),
         )
     }
 
@@ -699,6 +882,11 @@ impl AnimatedScene {
         // still control their own entry alpha.
         let entry_alpha = 1.;
         for (snake, recipe) in snakes.iter().zip(&recipes) {
+            if recipe.decoration.is_some() {
+                budget = budget
+                    .checked_sub(2)
+                    .ok_or_else(|| error("scene image budget exceeded"))?;
+            }
             let m = snake.metrics;
             let layout = if recipe.eyes.is_some() {
                 Some(
@@ -724,11 +912,7 @@ impl AnimatedScene {
             let mut root_alpha = entry_alpha;
             let plan = if let Some(geometry) = &snake.body_geometry {
                 let palettes = recipe.palettes();
-                let maximum_speed = received
-                    .setup
-                    .as_ref()
-                    .ok_or_else(|| error("missing body setup"))?
-                    .nsp3;
+                let maximum_speed = m.maximum_speed;
                 let input = BodyPaintInput {
                     geometry: geometry.as_paint_geometry(),
                     recipe: recipe.borrowed(&palettes),
@@ -803,9 +987,25 @@ impl AnimatedScene {
                 .transpose()?;
             draws.push((plan, layout, root_alpha, decoration_layout));
         }
+        let food_plan = self.food_plan(
+            &prepared,
+            &target,
+            BodyPaintView {
+                camera,
+                zoom,
+                half_width: viewport_half.x,
+                half_height: viewport_half.y,
+            },
+            BodyPaintQuality {
+                high_quality: applied.high_quality,
+                blend: applied.quality_blend,
+            },
+            budget,
+        )?;
         // Later callbacks may have changed an earlier borrowed DOM source.
         // Recheck native readiness/dimensions and the target after all callbacks.
         sources.validate(&target)?;
+        sources.validate_food(&self.food_sources)?;
         if target.width() != width || target.height() != height {
             return Err(error("target dimensions changed during recipe resolution"));
         }
@@ -825,15 +1025,20 @@ impl AnimatedScene {
             context.set_line_width(1. / zoom);
             context.stroke();
         }
-        for food in received.foods.values() {
-            if frame.visible(food.position.x, food.position.y, food.size.max(1.)) {
-                draw_sprite(
-                    context,
-                    &sprites[usize::from(food.color) % 3],
-                    food.position.x,
-                    food.position.y,
-                    food.size.max(1.),
-                )?;
+        if let Some(plan) = &food_plan {
+            self.submit_food(context, &plan.early[..plan.outline_barrier])?;
+            self.submit_food(context, &plan.early[plan.outline_barrier..])?;
+        } else {
+            for food in received.foods.values() {
+                if frame.visible(food.position.x, food.position.y, food.size.max(1.)) {
+                    draw_sprite(
+                        context,
+                        &sprites[usize::from(food.color) % 3],
+                        food.position.x,
+                        food.position.y,
+                        food.size.max(1.),
+                    )?;
+                }
             }
         }
         for ((plan, layout, root_alpha, decoration_layout), recipe) in
@@ -858,6 +1063,9 @@ impl AnimatedScene {
                 )?;
             }
         }
+        if let Some(plan) = &food_plan {
+            self.submit_food(context, &plan.late)?;
+        }
         drop(frame);
         self.client = prepared;
         Ok(())
@@ -865,6 +1073,57 @@ impl AnimatedScene {
 }
 
 impl AnimatedScene {
+    fn commit_client(
+        &mut self,
+        client: AnimatedClient,
+        mut sources: FoodSources,
+    ) -> Result<(), JsValue> {
+        sources.validate_ready()?;
+        sources.retain(client.foods().foods());
+        self.client = client;
+        self.food_sources = sources;
+        Ok(())
+    }
+
+    fn food_plan(
+        &self,
+        prepared: &AnimatedClient,
+        target: &HtmlCanvasElement,
+        view: BodyPaintView,
+        quality: BodyPaintQuality,
+        budget: usize,
+    ) -> Result<Option<FoodPaintPlan>, JsValue> {
+        if !prepared.food_enabled() {
+            return Ok(None);
+        }
+        self.food_sources.validate(target)?;
+        plan_food(FoodPaintInput {
+            foods: prepared.foods().foods(),
+            view,
+            quality,
+            bounds: prepared.food_bounds(),
+            assets: &self.food_sources.assets(),
+            target_handle: None,
+            entry_alpha: 1.,
+            command_limit: budget,
+        })
+        .map(Some)
+        .map_err(error)
+    }
+
+    fn submit_food(
+        &self,
+        context: &CanvasRenderingContext2d,
+        commands: &[FoodImageCommand],
+    ) -> Result<(), JsValue> {
+        context.save();
+        let result = commands
+            .iter()
+            .try_for_each(|command| self.food_sources.submit(context, command));
+        context.restore();
+        result
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn render_basic(
         &mut self,
@@ -874,8 +1133,14 @@ impl AnimatedScene {
         quality_scale: f64,
         detailed_style: bool,
         resolve_face: Option<&js_sys::Function>,
+        food_quality: Option<BodyPaintQuality>,
     ) -> Result<(), JsValue> {
         quality(quality_scale)?;
+        if self.client.food_enabled() && food_quality.is_none() {
+            return Err(error(
+                "retained food requires the basic renderer's applied-quality API",
+            ));
+        }
         let width = dimensions(f64::from(target.width()))?;
         let height = dimensions(f64::from(target.height()))?;
         let mut prepared = self.client.clone();
@@ -964,7 +1229,32 @@ impl AnimatedScene {
                     .transpose()
             })
             .collect::<Result<Vec<_>, _>>()?;
+        let image_count = snakes
+            .iter()
+            .map(|snake| snake.curve.as_ref().map_or(0, |curve| curve.samples.len()))
+            .sum::<usize>()
+            + decorations.iter().filter(|d| d.is_some()).count() * 2;
+        let budget = MAX_BODY_PAINT_COMMANDS
+            .checked_sub(image_count)
+            .ok_or_else(|| error("scene image budget exceeded"))?;
+        let food_plan = if let Some(quality) = food_quality {
+            self.food_plan(
+                &prepared,
+                &target,
+                BodyPaintView {
+                    camera,
+                    zoom,
+                    half_width: viewport_half.x,
+                    half_height: viewport_half.y,
+                },
+                quality,
+                budget,
+            )?
+        } else {
+            None
+        };
         sources.validate(&target)?;
+        sources.validate_food(&self.food_sources)?;
         if target.width() != width || target.height() != height {
             return Err(error("target dimensions changed during recipe resolution"));
         }
@@ -984,15 +1274,20 @@ impl AnimatedScene {
             context.set_line_width(1. / zoom);
             context.stroke();
         }
-        for food in received.foods.values() {
-            if frame.visible(food.position.x, food.position.y, food.size.max(1.)) {
-                draw_sprite(
-                    context,
-                    &sprites[usize::from(food.color) % 3],
-                    food.position.x,
-                    food.position.y,
-                    food.size.max(1.),
-                )?;
+        if let Some(plan) = &food_plan {
+            self.submit_food(context, &plan.early[..plan.outline_barrier])?;
+            self.submit_food(context, &plan.early[plan.outline_barrier..])?;
+        } else {
+            for food in received.foods.values() {
+                if frame.visible(food.position.x, food.position.y, food.size.max(1.)) {
+                    draw_sprite(
+                        context,
+                        &sprites[usize::from(food.color) % 3],
+                        food.position.x,
+                        food.position.y,
+                        food.size.max(1.),
+                    )?;
+                }
             }
         }
         // Preserve subtraction-before-scaling for body screen coordinates. The
@@ -1039,6 +1334,9 @@ impl AnimatedScene {
                     side_layouts,
                 )?;
             }
+        }
+        if let Some(plan) = &food_plan {
+            self.submit_food(context, &plan.late)?;
         }
         drop(frame);
         self.client = prepared;

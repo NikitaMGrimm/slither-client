@@ -481,6 +481,7 @@ fn one_sample_or_one_anchor_omits_geometry_seed_and_flag_writes() {
         } else {
             assert_eq!(points, 1);
         }
+        c.reset();
         apply(&mut c, &[setup(), appearance(8, 2100, 2)]);
         fixed_view(&mut c, Point { x: 2000., y: 1000. });
         let output = c.prepare_draw_with_style(1, 600, 1., false).unwrap();
@@ -548,6 +549,7 @@ fn aggregate_sample_bound_rolls_back_retained_flags_and_every_draw_channel() {
     );
     assert_eq!(c, before);
     // Probe the retained detailed flag after the failed ordinary writes.
+    c.reset();
     apply(&mut c, &[setup(), appearance(8, 2200, 6)]);
     fixed_view(&mut c, Point { x: 2000., y: 1000. });
     let output = c.prepare_draw_with_style(1, 600, 1., false).unwrap();
@@ -583,6 +585,7 @@ fn late_curve_cap_failure_rolls_back_successful_prior_collection_camera_eyes_and
     let before = c.clone();
     assert!(c.prepare_draw_with_style(800, 600, 0.001, false).is_err());
     assert_eq!(c, before);
+    c.reset();
     apply(&mut c, &[setup(), appearance(8, 2200, 6)]);
     fixed_view(&mut c, Point { x: 2000., y: 1000. });
     let output = c.prepare_draw_with_style(1, 600, 1., false).unwrap();

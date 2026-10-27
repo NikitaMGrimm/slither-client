@@ -5,6 +5,7 @@ import { Script } from 'node:vm';
 import { loopbackEndpoint, sceneHeading } from '../web/loopback-session.mjs';
 import { syntheticScene, syntheticSetup, syntheticStep } from '../web/synthetic-scene.mjs';
 import { createSyntheticBodyResolver } from '../web/synthetic-body.mjs';
+import { createSyntheticFoodResolver } from '../web/synthetic-food.mjs';
 
 // Original synthetic page/Wasm doubles. No generated bindings, browser or sockets.
 // Execute the authored page body with its imports supplied in the isolated realm.
@@ -97,6 +98,16 @@ function pageFixture(t, { initialize = async () => {}, decode = async () => {},
       calls.push(['apply', [...bytes], elapsed]);
       if (bytes[0] === 97 || bytes[2] === 97) view.boundary.connected = true;
     }
+    apply_frame_with_factories(bytes, elapsed, face, food) {
+      assert.equal(face().eyes.kind, 'standard');
+      assert.equal(face().decoration.kind, 'none');
+      const factory = food({ palette: 9 });
+      assert.equal(factory.palette.color, 9);
+      assert.ok(factory.randomPhaseUnit >= 0 && factory.randomPhaseUnit < 1);
+      assert.ok(factory.randomWobbleUnit >= 0 && factory.randomWobbleUnit < 1);
+      this.apply_frame(bytes, elapsed);
+    }
+    food_state() { return { foods: Array.from({ length: view.foods }), sourceCount: 0 }; }
     set_connected(connected) {
       assert.equal(sceneFrees, 0, 'connection changes require a live owner');
       calls.push(['connected', connected]);
@@ -128,6 +139,11 @@ function pageFixture(t, { initialize = async () => {}, decode = async () => {},
       if (faults.render) throw faults.render;
       renderMethods.push('basic');
       renderScales.push(scale);
+    }
+    render_with_food(target, p0, p1, p2, background, detailed, face, quality) {
+      assert(quality instanceof DesktopQuality);
+      assert.equal(face().decoration, null);
+      this.render(target, p0, p1, p2, background, qualityView.qualityScale, detailed);
     }
     render_standard(target, p0, p1, p2, background, resolve, quality) {
       assert.equal(target, elements.scene);
@@ -162,7 +178,8 @@ function pageFixture(t, { initialize = async () => {}, decode = async () => {},
   }
   class PageImage { decode() { return decode(); } }
   const ready = pageScript.runInNewContext({
-    init: initialize, wasm: { AnimatedScene, DesktopQuality }, syntheticScene, syntheticStep, createSyntheticBodyResolver,
+    init: initialize, wasm: { AnimatedScene, DesktopQuality }, syntheticScene, syntheticStep,
+    createSyntheticBodyResolver, createSyntheticFoodResolver,
     loopbackEndpoint, sceneHeading, connectLoopback, window, AbortController,
     document: {
       querySelector(selector) {

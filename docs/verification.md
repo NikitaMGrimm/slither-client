@@ -476,6 +476,39 @@ Canvas-state interpretation, not native raster evidence. Pass labels and final
 cursor output were not directly observed and are excluded from the comparison
 claim. External adapters, source identities and raw evidence remain outside Git.
 
+## Retained food integration checks
+
+The combined local suite passes 308 native tests, 119 Node tests, formatting,
+doctests, native/Wasm Clippy, a fresh web build and the full real-Wasm ABI smoke.
+The combined body/face/food recorder passes 1,654 assertions. Of these, 99 exercise
+the integrated food factory/state/render path through both actual renderer APIs:
+duplicate instances versus the received map, raw/effective colors, BigInt
+identities and copied diagnostics, initial/zero-delta/full-size scale, early/late
+order and exact overloads, glow projection, HQ/LQ/blend, creation-selected sources,
+configuration-only Setup, retained eater ID zero through removal/reuse, expiry/GC,
+late factory failure and Canvas-fault rollback. The basic legacy quality-less API
+rejects an enabled food session before clearing. The page uses the same complete
+factory path, preserves shared update/quality/statistics/draw cadence and passes
+23 focused page/server tests included in the 119-test suite. Another 72 recorder
+assertions cover 16 signed-zero revision schedules across both render APIs:
+matching positive or negative zero is accepted, while every conflicting alias
+observation rejects before target clear and preserves the complete model.
+
+A separate synthetic harness passed 243 real-Wasm registry assertions, including
+own-data parsing, all canvas/image overloads, source aliases, revisions, signed
+zero, resource caps, GC and exception identity. It executes the actual registry
+against a frozen native component; it is separate from production integration.
+Independent native review at the earlier native integration revision passed 122
+focused tests and found one stale cache comment, since corrected. That review
+predates the Wasm/face/page integration.
+
+These are synthetic state and logical Canvas checks. Independent combined review
+found a signed-zero source-revision coherence defect; the corrected alias boundary
+passes the new regressions, with focused independent recheck pending.
+Complete-runtime numeric food comparison and native Windows Canvas/page
+verification remain pending. No food original-pixel, installed
+extension or live-server acceptance is claimed. See [the food contract](food-presentation.md).
+
 ## Opt-in standard-body renderer checks
 
 The integrated paired-face completion adds six native geometry/ownership tests,
@@ -489,11 +522,18 @@ partial provider projections, readiness/revision/alias rejection, late source
 mutation and Canvas-exception model rollback. Legacy default forms retain the
 same recorded commands under the corrected unconditional end-of-face alpha reset.
 
-These are authored synthetic native/Node/Wasm checks using a logical Canvas
-recorder. No external runtime or native browser was executed for this lane.
-The older external/browser results below predate it. Ready trusted sources bound
-the capability; startup blank-source draws, general host mapping, original pixels,
-other face families, extension installation and server acceptance remain separate.
+Those authored synthetic checks use a logical Canvas recorder. Separately, the
+paired-face production revision passed independent review, 97,624 exact frozen
+complete-runtime comparisons with zero mismatches, and 1,667 accepted Windows
+Firefox 158.0.1 assertions across 40 native checkpoints and ten fresh-context
+repeats. Numeric coverage includes paired-eye/image transforms, shared source
+identity, logical alpha and body/face/next-body barriers; body artwork remained
+synthetic. Firefox uses original asymmetric artwork and preserves default
+numeric state and pixels. No compared numeric cells contained negative zero.
+These results predate the food/setup integration and do not establish its parity.
+Ready trusted sources bound the capability; startup blank-source draws, general
+host mapping, original pixels, other face families, extension installation and
+server acceptance remain separate.
 
 `tools/body-render-smoke.mjs` executes the real Wasm `render_standard` ABI with
 an original synthetic Canvas recorder and normalized provider snapshots. Its

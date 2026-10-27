@@ -43,7 +43,9 @@ export function animatedSmoke(wasm) {
     assert.equal(count, 3, 'face callback resolves each appearance once, including removal and bundled setup');
     face.eyes.pupilTravel = 200; geometry.forward = 400;
     pairedFace.advance(4, false).free();
-    assert.equal(JSON.parse(pairedFace.snapshot()).own.eyes.pupilX, 0.02);
+    assert.equal(JSON.parse(pairedFace.snapshot()).own.eyes.pupilX, 0,
+      'the removed original own object stays undrawn across configuration-only setup');
+    assert.deepEqual(JSON.parse(pairedFace.drawn_snakes()).map(row => row.snake.eyes.pupilX), [0.02, 0.02]);
     const before = [pairedFace.snapshot(), pairedFace.drawn_snakes(), pairedFace.camera_samples()];
     const valid = { eyes: standardEyes(), decoration: { kind: 'none' } };
     for (const key of ['eyes', 'decoration']) {
@@ -91,7 +93,7 @@ export function animatedSmoke(wasm) {
       [115, 0, 0, 0], ownAppearance(), syntheticSetup(), short), false, () => {
       count++; return standardEyes();
     });
-    assert.equal(count, 3, 'resolve short, immediately removed and mid-frame-reset appearances');
+    assert.equal(count, 3, 'resolve short, immediately removed and mid-frame-reconfigured appearances');
   } finally { coupledEyes.free(); }
 
   const validation = new wasm.AnimatedScene(0);
@@ -126,7 +128,7 @@ export function animatedSmoke(wasm) {
       bundle(ownAppearance(), numericSetup, ownAppearance()), false, () => {
         numericCalls++; return standardEyes();
       }));
-    assert.equal(numericCalls, 2, 'later presentation failure cannot undo resolver side effects');
+    assert.equal(numericCalls, 1, 'invalid reconfiguration follows the first callback and cannot undo its side effects');
     assert.deepEqual(state(), before);
     const bad = [null, undefined, Promise.resolve(standardEyes()),
       Object.assign(Promise.resolve(), standardEyes()), { kind: 'none' },
@@ -326,6 +328,7 @@ export function animatedSmoke(wasm) {
       assert.notEqual(fixed.ownHead.x, fixed.camera.x, 'the head advances while the camera stays fixed');
     }
     follow.set_follows(true);
+    follow.reset();
     follow.apply_frame(syntheticScene(), false);
     follow.prepare_draw(800, 600);
     const view = JSON.parse(follow.snapshot());

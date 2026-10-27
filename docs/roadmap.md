@@ -39,6 +39,12 @@ Native Firefox checks cover that bounded integration. Five frozen external-runti
 schedules match production body commands exactly; full-skin and original-pixel
 parity remain unverified.
 
+Retained desktop food now connects ordered events, duplicate instances, captured
+eater objects, creation-selected sources and quality-dependent paint passes in
+both Wasm renderers and the authored page. Synthetic native and ABI checks pass;
+full-runtime numeric and native browser verification remain pending. Prey and
+the existing stand-in boundary remain separate rendering work.
+
 ## 3. Measure dense scenes
 
 The offline benchmark provides deterministic received-anchor workloads without

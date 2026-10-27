@@ -48,6 +48,36 @@ scene.reset(); assert.equal(JSON.parse(scene.snapshot()).protocol, null);
 scene.free();
 console.log('Synthetic Wasm scene ABI transitions and atomic rejection passed.');
 
+// Received-only food projection and compact-cache reset through the real ABI.
+const foodScene = new wasm.Scene();
+try {
+  foodScene.apply_frame(syntheticSetup(), false);
+  foodScene.apply_frame(bundle([102, 1, 2, 3, 4, 255, 5], [60, 6, 7, 8, 9, 0, 0]), false);
+  const foodBefore = foodScene.snapshot();
+  assert.throws(() => foodScene.apply_frame(bundle(
+    [102, 9, 8, 7, 6, 18, 5], [60, 5, 4, 3, 2, 255, 255], [70, 1, 2, 0]), false));
+  assert.equal(foodScene.snapshot(), foodBefore, 'late food failure preserves received state and counters');
+  foodScene.apply_frame(Uint8Array.of(98, 10, 11, 5), false);
+  assert.equal(JSON.parse(foodScene.snapshot()).foods, 2);
+  // Original zero-body own appearance; no external packet or reference is used.
+  const own = Uint8Array.from([115, 0, 0, 0, 0, 0, 48, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 2, 123, 192, 2, 123, 192, 0, 0, 0]);
+  foodScene.apply_frame(own, false);
+  const afterOwn = foodScene.snapshot();
+  for (const compact of [[102, 3, 4, 5], [98, 3, 4, 255, 5], [99, 8, 9], [67, 8, 9], [60, 8, 9, 0, 0]]) {
+    assert.throws(() => foodScene.apply_frame(Uint8Array.from(compact), false));
+    assert.equal(foodScene.snapshot(), afterOwn, 'first own invalidates both compact sector streams');
+  }
+  foodScene.apply_frame(bundle(
+    [70, 1, 2, 9, 3, 4, 10, 18, 3, 4, 15], [70, 1, 2], [87, 1, 2]), false);
+  assert.equal(JSON.parse(foodScene.snapshot()).foods, 2, 'duplicates replace the received projection; empty F is additive');
+  foodScene.apply_frame(bundle([99, 1, 2, 3, 4], [67, 3, 4]), false);
+  assert.equal(JSON.parse(foodScene.snapshot()).foods, 1, 'received consumption is immediate even for duplicate spawns');
+  foodScene.apply_frame(Uint8Array.of(119, 1, 2), false);
+  assert.equal(JSON.parse(foodScene.snapshot()).foods, 0);
+} finally { foodScene.free(); }
+console.log('Synthetic received-food compact-cache and lossy-projection Wasm ABI passed.');
+
 for (const [name, profile] of Object.entries(DENSE_SCENE_PROFILES)) {
   const dense = new wasm.Scene();
   try {

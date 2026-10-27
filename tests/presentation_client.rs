@@ -117,7 +117,7 @@ fn eye_style(travel: f64) -> StandardEyeGeometry {
 }
 
 #[test]
-fn appearance_resolver_visits_wire_order_including_short_removed_and_reset_objects() {
+fn appearance_resolver_visits_wire_order_including_short_removed_and_reconfigured_objects() {
     let mut c = AnimatedClient::new(0.).unwrap();
     let mut seen = Vec::new();
     c.apply_frame_with_eye_geometry::<ClientPresentationError, _>(
@@ -139,9 +139,9 @@ fn appearance_resolver_visits_wire_order_including_short_removed_and_reset_objec
     )
     .unwrap();
     assert_eq!(seen, [(7, 2000.), (7, 2100.), (9, 5000.), (9, 6000.)]);
-    assert_eq!(c.own_snake().unwrap().eye_geometry(), &eye_style(0.03));
+    assert_eq!(c.own_snake().unwrap().eye_geometry(), &eye_style(0.01));
     assert_eq!(c.snake(9).unwrap().eye_geometry(), &eye_style(0.04));
-    assert_eq!(c.retained_count(), 2);
+    assert_eq!(c.retained_count(), 3);
     assert!(c.drawn_own_snake().is_none());
 }
 
@@ -315,6 +315,7 @@ fn late_presentation_failure_rolls_back_prior_events_midframe_setup_and_clock() 
     let frame = bundle(&[
         anchor(Some(7), 2000, 1000, true),
         mass(7, 1),
+        appearance(8, 2800, 2),
         bad_setup,
         appearance(9, 3000, 4),
     ]);
@@ -480,12 +481,11 @@ fn cached_direction_compact_anchors_keep_addressing_undrawn_original_own() {
 #[test]
 fn follow_preference_survives_first_setup_reset_and_repeated_setup() {
     for follows in [false, true] {
-        let mut c = AnimatedClient::new(0.).unwrap();
-        c.set_follows(follows);
-        apply(&mut c, &[setup(), appearance(7, 2000, 12)]);
-        assert_eq!(c.camera().follows(), follows);
         for reset in [false, true] {
+            let mut c = AnimatedClient::new(0.).unwrap();
+            c.set_follows(follows);
             if reset {
+                apply(&mut c, &[setup(), appearance(7, 2000, 12)]);
                 c.reset();
                 assert_eq!(c.camera().follows(), follows);
             }
@@ -503,12 +503,101 @@ fn follow_preference_survives_first_setup_reset_and_repeated_setup() {
                 }
             );
             assert_eq!(c.snake(8).unwrap().metrics().visible, follows);
+            let camera = c.camera().clone();
+            apply(&mut c, &[setup()]);
+            assert_eq!(c.camera(), &camera);
         }
     }
 }
 
 #[test]
-fn setup_resets_identity_and_camera_but_preserves_fractional_update_timeline() {
+fn repeated_setup_preserves_existing_world_camera_and_animation_phase() {
+    let mut c = client();
+    apply(&mut c, &[vec![b'f', 1, 2, 30, 40, 4, 50]]);
+    c.set_follows(false);
+    c.advance(3., false).unwrap();
+    c.prepare_draw(800, 600).unwrap();
+    let own = c.own_snake().unwrap().clone();
+    let camera = c.camera().clone();
+    let foods = c.received().foods.clone();
+    let received_own = c.received().own_snake_id;
+
+    apply(&mut c, &[setup()]);
+
+    assert_eq!(c.retained_count(), 1);
+    assert_eq!(c.own_snake().unwrap(), &own);
+    assert_eq!(c.camera(), &camera);
+    assert_eq!(c.received().own_snake_id, received_own);
+    assert_eq!(c.received().foods, foods);
+    assert!(c.connected());
+    let step = c.advance(8., false).unwrap();
+    assert_eq!(step.delta, 5. / 8.);
+    assert_eq!(step.accumulated, 1.);
+    assert_eq!(step.whole_steps, 1);
+}
+
+#[test]
+fn repeated_setup_refreshes_globals_but_retains_appearance_segment_length_and_maximum_speed() {
+    let mut c = client();
+    let metrics = c.own_snake().unwrap().metrics();
+    let mut configuration = setup();
+    configuration[10] = 96;
+    configuration[11..13].copy_from_slice(&1000_u16.to_be_bytes());
+    configuration[13..15].copy_from_slice(&0_u16.to_be_bytes());
+    configuration[15..17].copy_from_slice(&2000_u16.to_be_bytes());
+    configuration[17..19].copy_from_slice(&100_u16.to_be_bytes());
+    configuration[21..23].copy_from_slice(&800_u16.to_be_bytes());
+    configuration[24] = 84;
+    apply(&mut c, &[configuration, appearance(8, 3000, 12)]);
+    assert_eq!(c.own_snake().unwrap().metrics(), metrics);
+    assert_eq!(c.own_snake().unwrap().body().segment_length(), 42.);
+    assert_eq!(c.own_snake().unwrap().body().contraction(), 0.8);
+    assert_eq!(c.snake(8).unwrap().body().segment_length(), 84.);
+    assert_eq!(c.snake(8).unwrap().metrics().maximum_speed, 20.);
+    assert_eq!(c.own_snake().unwrap().metrics().maximum_speed, 14.);
+
+    let received_x = c.received().snakes[&7].body[0].x;
+    apply(&mut c, &[vec![b'G']]);
+    assert_eq!(c.received().snakes[&7].head.x, received_x + 42.);
+    assert_eq!(c.own_snake().unwrap().metrics().raw_head.x, 2000.);
+    assert_eq!(
+        c.own_snake().unwrap().body().points()[3].position().x,
+        1882.4
+    );
+    assert_eq!(c.own_snake().unwrap().metrics().cruise_speed, 10.);
+    apply(&mut c, &[vec![b'3', 18]]);
+    assert_eq!(c.own_snake().unwrap().metrics().speed_turn_factor, 1. / 9.6);
+}
+
+#[test]
+fn setup_rebases_received_projection_without_moving_retained_absolute_geometry() {
+    let mut c = client();
+    apply(&mut c, &[vec![b'f', 1, 2, 30, 40, 4, 50]]);
+    let own = c.own_snake().unwrap().clone();
+    let received_head = c.received().snakes[&7].head;
+    let food = c.received().foods.values().next().unwrap().position;
+    let mut configuration = setup();
+    configuration[1..4].copy_from_slice(&u24(2000));
+    apply(&mut c, &[configuration]);
+    assert_eq!(c.own_snake(), Some(&own));
+    assert_eq!(
+        c.received().snakes[&7].head,
+        Point {
+            x: received_head.x - 1000.,
+            y: received_head.y - 1000.
+        }
+    );
+    assert_eq!(
+        c.received().foods.values().next().unwrap().position,
+        Point {
+            x: food.x - 1000.,
+            y: food.y - 1000.
+        }
+    );
+}
+
+#[test]
+fn setup_preserves_identity_camera_and_fractional_update_timeline() {
     let mut c = client();
     assert_eq!(c.advance(3., false).unwrap().whole_steps, 0);
     c.set_follows(false);
@@ -522,11 +611,11 @@ fn setup_resets_identity_and_camera_but_preserves_fractional_update_timeline() {
             mass(9, 1),
         ],
     );
-    assert_eq!(c.retained_count(), 1);
-    assert_eq!(c.own_snake().unwrap().metrics().id, 9);
-    assert_eq!(c.camera().zoom(), INITIAL_ZOOM);
+    assert_eq!(c.retained_count(), 3);
+    assert_eq!(c.own_snake().unwrap().metrics().id, 7);
+    assert_eq!(c.camera().zoom(), 0.5);
     assert!(!c.camera().follows());
-    assert!(c.snake(7).is_none());
+    assert!(c.snake(7).is_some());
     let step = c.advance(8., false).unwrap();
     assert_eq!(step.delta, 5. / 8.);
     assert_eq!(step.accumulated, 1.);

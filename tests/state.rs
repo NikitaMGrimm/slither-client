@@ -206,8 +206,8 @@ fn synthetic_spawn_anchors_growth_mass_tail_and_removal() {
     apply(&mut state, &spawn(3, 2));
     assert_eq!(state.own_snake_id, Some(17));
     apply(&mut state, &setup_with_score_index(430));
-    assert!(state.snakes.is_empty());
-    assert_eq!(state.own_snake_id, None);
+    assert!(state.snakes.contains_key(&3));
+    assert_eq!(state.own_snake_id, Some(17));
 }
 
 #[test]
@@ -278,6 +278,7 @@ fn synthetic_food_list_add_compact_eat_and_sector_clear() {
     assert_eq!(state.foods.len(), 2); // Split sector listing must preserve earlier chunk.
     apply(&mut state, &[b'f', 10, 11, 3, 4, 9, 35]);
     apply(&mut state, &[b'b', 5, 6, 40]);
+    assert_eq!(state.foods[&u32::from_be_bytes([10, 11, 5, 6])].color, 9);
     apply(&mut state, &[b'f', 7, 8, 10, 45]);
     assert_eq!(state.foods.len(), 5);
     assert_eq!(state.foods[&u32::from_be_bytes([10, 11, 7, 8])].color, 10);
