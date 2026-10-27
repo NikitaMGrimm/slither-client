@@ -11,6 +11,10 @@ profile containing `clientVersion`, a 20-byte `password` and protocol version
 fetch, persist or supply defaults for them. Missing or invalid input leaves the
 session ready with zero socket constructors.
 
+Nicknames contain 0..24 ASCII bytes in `0x20..=0x7f`. Literal DEL passes unchanged
+through staging and the Rust encoder. Controls, non-ASCII and overlong names
+reject before staging. This boundary adds no editor sanitizer or name policy.
+
 Play validates and encodes the request, then stages a world reset. In the native
 pre-motion callback, `afterStep` offers closed reset/connection actions. Only
 `commitControl`, called after the entire successful controller operation outside

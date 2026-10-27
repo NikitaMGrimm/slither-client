@@ -12,7 +12,7 @@ pub const MAX_FRAME_COMMANDS: usize = 4096;
 /// Validation failures for the prototype protocol boundary.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProtocolError {
-    /// Nicknames contain at most 24 printable ASCII bytes.
+    /// Nicknames contain at most 24 ASCII bytes in 0x20..=0x7f.
     Nickname,
     /// Custom skin data contains at most 255 bytes.
     CustomSkin,
@@ -39,7 +39,7 @@ pub enum ProtocolError {
 impl fmt::Display for ProtocolError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Self::Nickname => "nickname must contain at most 24 printable ASCII bytes",
+            Self::Nickname => "nickname must contain at most 24 ASCII bytes in 0x20..=0x7f",
             Self::CustomSkin => "custom skin must contain at most 255 bytes",
             Self::EmptyFrame => "frame has no command payload",
             Self::FrameTooLarge => "frame exceeds 1048576 bytes",
@@ -67,7 +67,7 @@ pub fn encode_login(
     skin: u8,
     custom_skin: Option<&[u8]>,
 ) -> Result<Vec<u8>, ProtocolError> {
-    if nickname.len() > 24 || !nickname.bytes().all(|b| (b' '..=b'~').contains(&b)) {
+    if nickname.len() > 24 || !nickname.bytes().all(|b| (b' '..=b'\x7f').contains(&b)) {
         return Err(ProtocolError::Nickname);
     }
     let custom_skin = custom_skin.unwrap_or_default();
