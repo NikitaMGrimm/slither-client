@@ -7,6 +7,7 @@ Canvas2D rendering and an optional local simulator connection.
 - [Trusted skin provider](skin-provider.md): caller-owned recipes and borrowed-asset readiness.
 - [Stock asset and input adapters](stock-client.md): held captures, source revisions and same-clock control.
 - [Caller-owned stock session](stock-session.md): explicit profiles, handshake, ping and lifecycle ownership.
+- [Opt-in score state](score-state.md): retained-own score inputs, table caching and copied observations.
 - [Retained desktop food](food-presentation.md): factories, source ownership and ordered paint passes.
 - [Retained prey](prey-presentation.md): independent appearances, motion, capture and borrowed sources.
 - [Ordinary antennas](antenna-presentation.md): appearance state, draw cadence, supplied randomness and borrowed bulbs.

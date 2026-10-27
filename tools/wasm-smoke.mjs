@@ -12,6 +12,7 @@ import { clientControlSmoke } from './client-control-smoke.mjs';
 import { stockRenderSmoke } from './stock-render-smoke.mjs';
 import { stockSessionSmoke } from './stock-session-smoke.mjs';
 import { stockProfileSmoke } from './stock-profile-smoke.mjs';
+import { stockScoreSmoke } from './stock-score-smoke.mjs';
 
 // Entirely synthetic ABI integration; no reference files or network are used.
 const wasm = await loadWasm();
@@ -104,3 +105,4 @@ console.log('Synthetic pre-motion control ABI passed:', clientControlSmoke(wasm)
 console.log('Synthetic live-source stock adapter ABI passed:', stockRenderSmoke(wasm));
 console.log('Synthetic caller-owned stock session ABI passed:', stockSessionSmoke(wasm));
 console.log('Synthetic explicit profile/Play composition ABI passed:', await stockProfileSmoke(wasm));
+console.log('Synthetic retained-own score-state ABI passed:', stockScoreSmoke(wasm));

@@ -1,6 +1,6 @@
 //! Atomic received events and bounded animation state, with separate update/draw clocks.
 
-use std::{collections::BTreeSet, error::Error, fmt};
+use std::{collections::BTreeSet, error::Error, fmt, sync::Arc};
 
 use super::{
     AnchorView, AntennaCullBounds, AntennaDrawInput, AntennaError, AntennaSnapshot, AntennaState,
@@ -8,8 +8,8 @@ use super::{
     FaceGeometry, FollowCamera, FoodConsume, FoodCullBounds, FoodEaterPose, FoodError, FoodFactory,
     FoodSpawn, FoodWorld, FrameClock, FrameStep, MAX_CURVE_SAMPLES, OrdinaryAntennaGeometry,
     PairedFaceGeometry, PairedSideGeometry, PreparedAntenna, PresentationError, PreyError,
-    PreyFactory, PreyWorld, SnakeMetrics, SnakeObjectToken, SnakePresentation, StandardEyeGeometry,
-    finite,
+    PreyFactory, PreyWorld, ScoreError, ScoreTables, SnakeMetrics, SnakeObjectToken,
+    SnakePresentation, StandardEyeGeometry, finite,
 };
 use crate::{
     protocol::ElapsedHeader,
@@ -25,6 +25,51 @@ pub const MAX_RETAINED_SNAKES: usize = MAX_SNAKES * 2;
 pub const MAX_RETAINED_TOTAL_BODY_POINTS: usize = MAX_TOTAL_BODY_POINTS * 2;
 /// Aggregate active curve samples permitted in one prepared numeric draw.
 pub const MAX_DRAW_SAMPLES: usize = MAX_RETAINED_TOTAL_BODY_POINTS * 2;
+
+/// A copied score result; unavailable or unsupported inputs never invent a value.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ScoreStatus {
+    /// Tracking has not been explicitly enabled.
+    Disabled,
+    /// No enabled Setup has built a table yet.
+    NoTables,
+    /// No original own appearance exists in this world.
+    NoOwn,
+    /// The composed index or latest mass is outside the score-table domain.
+    Unsupported(ScoreError),
+    /// Integer-valued native f64 score, including negative and above-32-bit values.
+    Ready(f64),
+}
+
+/// Original own score inputs, independent of wire lookup, draw membership and smoothing.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OwnScoreView {
+    /// Scene-local original own identity, retained until reset.
+    pub token: SnakeObjectToken,
+    /// Original wire identifier; reuse does not transfer ownership.
+    pub id: u16,
+    /// Latest logical membership, never a physical-point recount.
+    pub logical_segments: usize,
+    /// Latest unsmoothed decoded wire mass.
+    pub fractional_mass: f64,
+    /// Replacement u8 R value; separate from geometry and logical count.
+    pub score_adjustment: u8,
+    /// Logical count plus R, without clamping to table bounds.
+    pub score_index: usize,
+}
+
+/// Pure copied native score observation; reading advances no update or draw.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ClientScoreView {
+    /// Whether canonical R admission and Setup caching are enabled.
+    pub enabled: bool,
+    /// Cached positive Setup parameter, retained even across world reset.
+    pub table_max: Option<u16>,
+    /// Retained original own inputs, including after death and draw expiry.
+    pub own: Option<OwnScoreView>,
+    /// Ready only for finite mass in 0..=1 and index through N+2048 inclusive.
+    pub status: ScoreStatus,
+}
 
 /// Retained original own control data, independent of wire lookup and draw membership.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -247,6 +292,12 @@ pub struct PreparedSnake {
 /// A failed received, numeric, or retention transition; the entire client is preserved.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ClientPresentationError {
+    /// Score admission must start before packets or after reset.
+    ScoreModeRequiresReset,
+    /// Canonical R requires an original own object at its event position.
+    ScoreOwnRequired,
+    /// Score-table construction failed without changing the cache or world.
+    Score(ScoreError),
     /// Antenna configuration, random inputs or numeric preparation failed.
     Antenna(AntennaError),
     /// Full appearance metadata must be enabled before packets or after reset.
@@ -286,6 +337,13 @@ pub enum ClientPresentationError {
 impl fmt::Display for ClientPresentationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ScoreModeRequiresReset => {
+                f.write_str("enable score tracking before packets or after reset")
+            }
+            Self::ScoreOwnRequired => {
+                f.write_str("score adjustment requires retained original own")
+            }
+            Self::Score(error) => error.fmt(f),
             Self::Antenna(error) => error.fmt(f),
             Self::AppearanceModeRequiresReset => {
                 f.write_str("enable full appearance presentation before packets or after reset")
@@ -326,12 +384,15 @@ impl fmt::Display for ClientPresentationError {
 impl Error for ClientPresentationError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
+            Self::Score(error) => Some(error),
             Self::Antenna(error) => Some(error),
             Self::State(error) => Some(error),
             Self::Presentation(error) => Some(error),
             Self::Food(error) => Some(error),
             Self::Prey(error) => Some(error),
             Self::Limit
+            | Self::ScoreModeRequiresReset
+            | Self::ScoreOwnRequired
             | Self::AppearanceModeRequiresReset
             | Self::AppearanceResolverRequired
             | Self::AntennaRandomRequired
@@ -350,6 +411,12 @@ impl Error for ClientPresentationError {
 impl From<StateError> for ClientPresentationError {
     fn from(error: StateError) -> Self {
         Self::State(error)
+    }
+}
+
+impl From<ScoreError> for ClientPresentationError {
+    fn from(error: ScoreError) -> Self {
+        Self::Score(error)
     }
 }
 
@@ -417,6 +484,10 @@ impl Entry {
 #[derive(Clone, Debug, PartialEq)]
 pub struct AnimatedClient {
     received: ClientState,
+    score_enabled: bool,
+    // Immutable sharing keeps equal-N caches intact across disposable transaction clones.
+    score_tables: Option<Arc<ScoreTables>>,
+    own_score_adjustment: u8,
     clock: FrameClock,
     camera: FollowCamera,
     boundary: Option<BoundaryRadius>,
@@ -453,6 +524,9 @@ impl AnimatedClient {
     pub fn new(start_ms: f64) -> Result<Self, ClientPresentationError> {
         Ok(Self {
             received: ClientState::default(),
+            score_enabled: false,
+            score_tables: None,
+            own_score_adjustment: 0,
             clock: FrameClock::new(start_ms)?,
             camera: FollowCamera::default(),
             boundary: None,
@@ -483,8 +557,59 @@ impl AnimatedClient {
         self.reset_camera();
         self.connected = false;
         self.entries.clear();
+        self.own_score_adjustment = 0;
         self.foods.clear();
         self.preys.clear();
+    }
+
+    /// Opt into canonical R and ordered Setup score tables before packets or after reset.
+    /// Idempotent once enabled; reset preserves enablement and the immutable table cache.
+    /// Other score/HUD families remain opaque. This adds no Wasm export or clock.
+    pub fn enable_score_tracking(&mut self) -> Result<(), ClientPresentationError> {
+        if !self.score_enabled && self.received.frames_applied != 0 {
+            return Err(ClientPresentationError::ScoreModeRequiresReset);
+        }
+        self.score_enabled = true;
+        Ok(())
+    }
+
+    /// Observe latest logical count/mass plus original-own R without changing any state.
+    /// No required HUD lookup occurs during ingress: out-of-range geometry remains
+    /// admitted and reports Unsupported here, without a fabricated or clamped score.
+    pub fn score_view(&self) -> ClientScoreView {
+        let own = self
+            .own_token()
+            .zip(self.own_snake())
+            .map(|(token, snake)| {
+                let metrics = snake.metrics();
+                OwnScoreView {
+                    token,
+                    id: metrics.id,
+                    logical_segments: metrics.logical_segments,
+                    fractional_mass: metrics.fam,
+                    score_adjustment: self.own_score_adjustment,
+                    score_index: metrics.logical_segments + usize::from(self.own_score_adjustment),
+                }
+            });
+        let status = if !self.score_enabled {
+            ScoreStatus::Disabled
+        } else if let Some(tables) = &self.score_tables {
+            match own {
+                None => ScoreStatus::NoOwn,
+                Some(own) => match tables.score(own.score_index, own.fractional_mass) {
+                    Ok(value) => ScoreStatus::Ready(value),
+                    Err(error) => ScoreStatus::Unsupported(error),
+                },
+            }
+        } else {
+            ScoreStatus::NoTables
+        };
+        ClientScoreView {
+            enabled: self.score_enabled,
+            table_max: self.score_tables.as_ref().map(|tables| tables.table_max()),
+            own,
+            status,
+        }
     }
 
     /// Restore only the lag multiplier, preserving world, timestamp and both phases.
@@ -1110,9 +1235,12 @@ impl AnimatedClient {
         H: FnMut(&mut AnimatedClient, &Setup) -> Result<(), E>,
     {
         let mut received = self.received.clone();
-        let applied = received
-            .apply_frame_with_events(bytes, header)
-            .map_err(ClientPresentationError::from)?;
+        let applied = if self.score_enabled {
+            received.apply_frame_with_score_events(bytes, header)
+        } else {
+            received.apply_frame_with_events(bytes, header)
+        }
+        .map_err(ClientPresentationError::from)?;
         if enable_face_presentation
             && !self.face_presentation_enabled
             && self.received.frames_applied != 0
@@ -1148,6 +1276,15 @@ impl AnimatedClient {
                     if value.game_mode == Some(2) {
                         return Err(ClientPresentationError::UnsupportedMode(2).into());
                     }
+                    if next.score_enabled
+                        && next.score_tables.as_ref().map(|tables| tables.table_max())
+                            != Some(value.max_segments)
+                    {
+                        next.score_tables = Some(Arc::new(
+                            ScoreTables::new(value.max_segments)
+                                .map_err(ClientPresentationError::from)?,
+                        ));
+                    }
                     if let Some(boundary) = &mut next.boundary {
                         boundary
                             .apply_setup(value.radius)
@@ -1170,6 +1307,12 @@ impl AnimatedClient {
                         .map_err(ClientPresentationError::from)?;
                     next.connected = true;
                     on_setup(&mut next, setup.insert(value))?;
+                }
+                PresentationEvent::OwnScoreAdjustment(adjustment) => {
+                    if next.own_snake().is_none() {
+                        return Err(ClientPresentationError::ScoreOwnRequired.into());
+                    }
+                    next.own_score_adjustment = adjustment;
                 }
                 PresentationEvent::SnakeAppearance(appearance) => {
                     if next.face_presentation_enabled && !enable_face_presentation {
@@ -1201,6 +1344,7 @@ impl AnimatedClient {
                         .map_err(ClientPresentationError::from)?;
                     let own = next.own_snake().is_none();
                     if own {
+                        next.own_score_adjustment = 0;
                         let position = snake
                             .body()
                             .points()
@@ -2109,6 +2253,24 @@ mod resolved_draw_tests {
     use super::*;
     use crate::presentation::{BodyAsset, BodyAssetStatus, FoodSource, food_palette};
     use std::{cell::RefCell, rc::Rc};
+
+    #[test]
+    fn score_cache_shares_equal_setup_and_reset_but_replaces_changed_parameter() {
+        let mut client = AnimatedClient::new(0.).unwrap();
+        client.enable_score_tracking().unwrap();
+        apply(&mut client, &setup());
+        let first = client.score_tables.clone().unwrap();
+        apply(&mut client, &setup());
+        assert!(Arc::ptr_eq(client.score_tables.as_ref().unwrap(), &first));
+        client.reset();
+        assert!(Arc::ptr_eq(client.score_tables.as_ref().unwrap(), &first));
+        let mut changed = setup();
+        changed[4..6].copy_from_slice(&17_u16.to_be_bytes());
+        apply(&mut client, &changed);
+        assert!(!Arc::ptr_eq(client.score_tables.as_ref().unwrap(), &first));
+        assert_eq!(first.table_max(), 430);
+        assert_eq!(client.score_view().table_max, Some(17));
+    }
 
     #[test]
     fn single_eye_legacy_gate_precedes_every_style_and_random_callback() {

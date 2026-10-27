@@ -250,6 +250,8 @@ pub struct PreyMotionInput {
 pub enum PresentationEvent {
     /// Apply configuration while preserving entities, own identity, caches and camera state.
     Setup(Setup),
+    /// Replace retained original-own R; emitted only by opted-in score ingestion.
+    OwnScoreAdjustment(u8),
     /// Create or replace a snake with complete initial presentation inputs.
     SnakeAppearance(Appearance),
     /// Apply only the motion fields present in this command.
@@ -428,7 +430,7 @@ impl ClientState {
         bytes: &[u8],
         header: ElapsedHeader,
     ) -> Result<FrameReport, StateError> {
-        self.apply_transaction(bytes, header, None)
+        self.apply_transaction(bytes, header, None, false)
     }
 
     /// Atomically apply a frame and return every supported presentation change.
@@ -449,7 +451,18 @@ impl ClientState {
         header: ElapsedHeader,
     ) -> Result<AppliedFrame, StateError> {
         let mut events = Vec::new();
-        let report = self.apply_transaction(bytes, header, Some(&mut events))?;
+        let report = self.apply_transaction(bytes, header, Some(&mut events), false)?;
+        Ok(AppliedFrame { report, events })
+    }
+
+    /// Canonical score admission is private to the explicitly enabled native client.
+    pub(crate) fn apply_frame_with_score_events(
+        &mut self,
+        bytes: &[u8],
+        header: ElapsedHeader,
+    ) -> Result<AppliedFrame, StateError> {
+        let mut events = Vec::new();
+        let report = self.apply_transaction(bytes, header, Some(&mut events), true)?;
         Ok(AppliedFrame { report, events })
     }
 
@@ -458,12 +471,13 @@ impl ClientState {
         bytes: &[u8],
         header: ElapsedHeader,
         mut events: Option<&mut Vec<PresentationEvent>>,
+        score_enabled: bool,
     ) -> Result<FrameReport, StateError> {
         let decoded = protocol::decode_frame(bytes, header)?;
         let mut staged = self.clone();
         let mut ignored = 0;
         for command in &decoded.commands {
-            if !staged.apply_command(command, events.as_deref_mut())? {
+            if !staged.apply_command(command, events.as_deref_mut(), score_enabled)? {
                 ignored += 1;
             }
         }
@@ -485,8 +499,16 @@ impl ClientState {
         &mut self,
         p: &[u8],
         events: Option<&mut Vec<PresentationEvent>>,
+        score_enabled: bool,
     ) -> Result<bool, StateError> {
         let code = p[0];
+        if score_enabled && code == b'R' {
+            require(p, p.len() == 2)?;
+            if let Some(events) = events {
+                events.push(PresentationEvent::OwnScoreAdjustment(p[1]));
+            }
+            return Ok(true);
+        }
         if code == b'a' {
             let setup = parse_setup(p)?;
             if let Some(previous) = &self.setup
