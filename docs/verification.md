@@ -38,6 +38,42 @@ pull requests, and manual dispatch. Normal tests and CI require no external
 reference and do not connect to game servers. Dependency and toolchain setup may
 access package sources. Release-plz remains dormant.
 
+## Lease-bound nickname input policy
+
+The opt-in policy integration passes 836 Node tests, including 117 focused
+gate/bootstrap/profile/input cases. Its 26 new policy cases execute the actual
+gate IIFE with authored native receiver/value operations. They cover legacy
+shape compatibility, missing getter/setter groups, closed grammar, captured
+intrinsics, every admitted unit at lengths 0..24, controls/surrogates/cutoff,
+conditional writes and primitive-string rejection without coercion.
+
+Delivery tests cover one exact active routed event, stale/duplicate/deferred
+calls, nested fence and handler reentry, pre/post native-operation ownership,
+structural checks invalidating the URL before a setter, all falsy primaries and
+secondary fence failures. Composing/noncancelable/already-mutated input follows
+the selected rule even when native defaults are temporarily ineligible. Raw
+keys and other notifications perform zero value work.
+
+A test-only single-claim facade composes actual bootstrap/gameplay/input modules
+with the handler before the existing notification filter. It verifies no extra
+control/source/clock/send/socket effects and preserves input errors through gate
+finalization. The Wasm boundary there is a synthetic double; production startup
+still registers no field and installs no such handler hook.
+
+A fresh web build and the unchanged full real-Wasm suite pass. Generated
+JS/Wasm/validator fingerprints remain exact; both packages contain 44 files with
+the same module graph, manifests and permissions. Native sources remain
+unchanged; native tests/Clippy are inherited from the DEL integration.
+
+The worker retained a genuine absent-policy baseline and three supported local
+defect groups: a nested fence claiming the outer event, inherited private-state
+or result-method accessors, and URL invalidation during a structural check just
+before a setter. Failing source copies and transcripts remain preserved beside
+the passing corrections. These are authored source/delivery checks, not native
+descriptor/default/caret/undo/IME/clipboard/selection, installed-browser/login or
+server acceptance. Completed native value effects cannot be rolled back; production
+attachment remains separate. See [the policy API](extension.md#lease-bound-input-correction).
+
 ## Private nickname-edit default gate
 
 The integrated gate/bootstrap slice passes 810 Node tests, including 91 focused
