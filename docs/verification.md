@@ -71,7 +71,7 @@ or result-method accessors, and URL invalidation during a structural check just
 before a setter. Failing source copies and transcripts remain preserved beside
 the passing corrections. These are authored source/delivery checks, not native
 descriptor/default/caret/undo/IME/clipboard/selection, installed-browser/login or
-server acceptance. Completed native value effects are not rollback; production
+server acceptance. Completed native value effects cannot be rolled back; production
 attachment remains separate. See [the policy API](extension.md#lease-bound-input-correction).
 
 ## Private nickname-edit default gate
