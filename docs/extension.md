@@ -167,6 +167,51 @@ precedence. These paths add no field registration or native editing behavior.
 
 ## Session and input boundary
 
+### Local nickname-field owner
+
+A successfully initialized private runtime exposes an opt-in owner capability:
+
+```js
+const runtime = await gamePageRuntime;
+const binding = runtime.bindNicknameField({ schema: 1, element: ownedInput, parent: directParent });
+binding.unbind();
+```
+
+The closed request accepts exactly those own data fields with an ordinary
+current-realm or null prototype. The runtime fixes the gate policy to
+`nickname-ascii-24`, holds its single lease privately, and returns a frozen
+`{unbind()}` ticket. It performs no initial value read, correction or focus.
+Startup discovers, creates and registers no field. Early dispose-only startup
+results do not expose this method; no capability is installed on the window or
+message bridge.
+
+The existing router calls the private input handler synchronously before its
+editing-notification filter. It adds no router, listener, control/source read,
+clock, packet or Play operation. Raw keyboard/mouse gameplay delivery and reload
+priority remain unchanged. The importing caller must bind or unbind at a
+completed idle owner boundary. Local operation/router and held-capture guards
+reject known active paths; they do not certify universal native idleness.
+
+Only one owner slot may be occupied. Binding prepares its ticket before gate
+registration and rejects caught reentry before publication. Unbind clears the
+slot and method references before attempting unregister; old tickets are inert
+and cannot revoke a later binding. Gate-only revocation is opaque, so an occupied
+stale slot still requires explicit unbind. Registration success is not an ongoing
+readiness or native-editing guarantee.
+
+An input-handler failure detaches the field, attempts unregister and rethrows
+the exact original value, including falsy values. It does not free game owners
+while the gate delivery is active. Earlier pre-router gate failures remain
+unobservable here. Permanent idle disposal detaches the field first, then uses
+the existing complete-cleanup/first-error behavior. A throwing unregister cannot
+certify native permission removal; dropping references is not a successful
+revocation claim. Completed native value writes cannot be rolled back.
+
+This API does not create a login UI, choose labels/layout, export a nickname,
+read a field for Play, or attach a production field automatically. Its actual
+bootstrap VM tests use synthetic native-receiver doubles; browser composition,
+caret/IME/clipboard/undo and installed-host/UI acceptance remain separate.
+
 ### Private nickname-edit defaults
 
 The single claimed native record additionally exposes
@@ -175,7 +220,8 @@ The single claimed native record additionally exposes
 with the current realm's ordinary or null prototype. Registration requires an
 installed input router and one exact connected native HTML `INPUT` of normalized
 type `text`, its exact direct HTML parent, and the captured light-DOM Document.
-The bootstrap selects or registers no field; a login binder remains separate.
+Bootstrap startup selects or registers no field; the explicit local owner API
+above can bind a caller-supplied field.
 
 Without registration, fenced events retain cancellation. A registered field
 can receive the following native-default permissions; original propagation is
