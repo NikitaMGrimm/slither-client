@@ -195,6 +195,8 @@ export function stockRenderSmoke(wasm, { control = true } = {}) {
     }
     host.jsebi = source('jsebi', 64, 64);
     host.jsepi = source('jsepi', 48, 48);
+    host.ecmc = source('ecmc', 48, 48);
+    host.jmou = source('jmou', 79, 130);
     for (let color = 0; color <= 9; color++) {
       const entry = host.per_color_imgs[color]; entry.ic = 2;
       for (const [family, width, height, halfWidth, halfHeight, count] of [
@@ -396,11 +398,36 @@ export function stockRenderSmoke(wasm, { control = true } = {}) {
     {
       const f = fixture();
       try {
+        eq(checkOperation(f, () => f.client.packet(bundle(setup(), snake(0, 40), setup()))), 2);
+        const recipe = f.recipes.at(-1).result.recipe;
+        eq(recipe.eyes.kind, 'mouth-face'); eq(recipe.eyes.geometry.pupilTravel, 2.3);
+        eq(recipe.eyes.eyeMarks.asset.source, f.host.ecmc);
+        eq(recipe.eyes.mouth.asset.source, f.host.jmou);
+        const faceImages = () => f.images().filter(call => call.source === f.host.ecmc || call.source === f.host.jmou);
+        const checkFace = () => {
+          eq(faceImages().map(call => call.source), [f.host.ecmc, f.host.ecmc, f.host.jmou]);
+          for (const call of faceImages()) {
+            eq(call.args.length, 4, 'whole-source overload from actual stock adapter');
+            eq([call.alpha, call.blend], [1, 'source-over']);
+            eq(call.transforms.map(transform => transform[0]), ['identity', 'translate', 'rotate']);
+          }
+          eq(f.client.diagnostics().stopped, false); eq(f.held, null);
+        };
+        checkFace();
+        f.target.context.trace = [];
+        checkOperation(f, () => f.client.frame(44)); checkFace();
+        cases.push('complete-stock-mouth-held-sources-and-frame');
+      } finally { f.close(); }
+    }
+    {
+      const f = fixture();
+      try {
+        f.readiness.find(entry => entry.source === f.host.jmou).state = 'pending';
         const before = f.state();
-        rejects(() => f.client.packet(bundle(setup(), snake(0, 40), setup())), /Unsupported stock appearance/);
+        rejects(() => f.client.packet(bundle(setup(), snake(0, 40), setup())), /pending or unsupported/);
         eq(f.state(), before); eq(f.resets(), 0); eq(f.steps.length, 0); eq(f.units, 0);
         eq(f.captures, 1); eq(f.ends, 1); eq(f.held, null); eq(f.client.diagnostics().stopped, true);
-        cases.push('skin40-before-clear');
+        cases.push('unpainted-stock-mouth-before-clear');
       } finally { f.close(); }
     }
     {

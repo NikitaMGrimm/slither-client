@@ -407,7 +407,7 @@
     const contextCanvas = Object.getOwnPropertyDescriptor(Context.prototype, 'canvas')?.get;
     if (!contextCanvas) throw new Error('Native context canvas getter unavailable');
     const downloaded = ['kwkbulb', 'pwdbulb', 'playbulb', 'leafbulb', 'swissbulb',
-      'moldovabulb', 'vietnambulb', 'argentinabulb', 'movbulb', 'bonkbulb', 'sest'];
+      'moldovabulb', 'vietnambulb', 'argentinabulb', 'movbulb', 'bonkbulb', 'sest', 'jmou'];
     for (const name of ['drawImage', 'putImageData', 'fill', 'stroke', 'fillRect', 'strokeRect', 'clearRect', 'reset']) {
       const method = Context.prototype[name];
       if (typeof method !== 'function') {

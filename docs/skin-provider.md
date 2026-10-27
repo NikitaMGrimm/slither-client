@@ -21,7 +21,23 @@ type CatalogEntry = {
   source: HTMLCanvasElement | HTMLImageElement | null;
   state: Status;
 };
-type AssetUse = { asset: number; sourceRect?: [number, number, number, number] };
+type AssetUse = {
+  asset: number; sourceRect?: [number, number, number, number];
+  sourceMode?: 'whole' | 'crop';
+};
+
+type SingleImageEyes = {
+  kind: 'single-image';
+  geometry: { baseSize: number; pupilSize: number; pupilTravel: number };
+  baseImage: AssetUse; pupilImage: AssetUse;
+};
+
+type MouthFace = {
+  kind: 'mouth-face';
+  geometry: { pupilTravel: number }; // finite 0..4096, signed zero retained
+  eyeMarks: { asset: number; sourceMode: 'whole' };
+  mouth: { asset: number; sourceMode: 'whole' };
+};
 type PairedSideGeometry = {
   forward: number; lateral: number; lateralBias: number; // finite 0..4096
   rotationOffset: number; // finite 0..pi
@@ -53,7 +69,7 @@ type HostRecipe = { status: 'pending' | 'unsupported' } | {
   palettes: { variants: AssetUse[]; boostGlow?: AssetUse }[];
   variantMode: 'first' | 'cycle' | 'ping-pong';
   variantPeriod: number;       // family period supplied from resolved base palette
-  eyes: StandardEyes | { kind: 'none' };
+  eyes: StandardEyes | SingleImageEyes | MouthFace | { kind: 'none' };
   effects: (AssetUse & { kind: EffectKind; opacity: number })[];
   bodyStyle?: BodyStyle | null;
   faceDecoration?: {
@@ -119,7 +135,7 @@ frozen, and each asset use becomes:
     revision?: string | number; // explicit source content revision, when supplied
   };
   sourceRect: readonly [number, number, number, number] | null;
-  sourceMode?: 'whole' | 'crop'; // bodyStyle uses, and every face-decoration image
+  sourceMode?: 'whole' | 'crop'; // bodyStyle uses and explicit face-image uses
 }
 ```
 

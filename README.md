@@ -77,7 +77,7 @@ controls visual gaze,
 including in the synthetic preview. The synthetic fixture uses original
 stand-ins with ordered body effects, retained food/prey animation and adaptive quality.
 Local simulator mode keeps its basic snake stand-ins and uses the same retained
-food path. Full skins, special faces and static accessories remain pending.
+food path. Full skins, other special faces and static accessories remain pending.
 The received-anchor preview at `/` remains available for comparison.
 
 Both animated renderers draw the nearby arena edge as a late red band and open
@@ -115,6 +115,12 @@ An additive [paired-face API](docs/standard-body-renderer.md#complete-ordinary-p
 also retains optional geometric side images and composes the complete represented
 face through both renderers with trusted ready borrowed sources. Host skin mapping,
 startup loading equivalence, other special faces and extension packaging remain pending.
+
+The generalized [mouth-face family](docs/mouth-face.md) retains appearance-owned
+gaze and submits two eye marks followed by a mouth through both render paths.
+It requires two ready whole-source images and preserves alpha one during spawn
+and death. Artwork, startup-loading equivalence and installed gameplay remain
+separate.
 
 The additive [ordinary antenna API](docs/antenna-presentation.md) retains each
 appearance's Float32 chain and bulb rotation. Both renderers step it on eligible

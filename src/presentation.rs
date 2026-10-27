@@ -26,6 +26,7 @@ mod food;
 mod food_painter;
 mod hud;
 mod length;
+mod mouth_face;
 mod prey;
 mod prey_painter;
 mod quality;
@@ -76,6 +77,7 @@ pub use hud::{
     HudIngressReport,
 };
 pub use length::LengthPresentation;
+pub use mouth_face::{MouthFaceGeometry, MouthFaceLayout, MouthImageLayout};
 pub use prey::{
     MAX_PREY_FAMILY_SOURCES, MAX_RETAINED_PREYS, PreyCorrections, PreyEaterPose, PreyError,
     PreyFactory, PreyFactoryInput, PreyInstance, PreyPalette, PreyPresentation, PreySnapshot,

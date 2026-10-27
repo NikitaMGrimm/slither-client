@@ -124,7 +124,9 @@ failed writes and dimension assignment invalidate readiness. No pixels are read
 and no original image handler/generator is invoked.
 
 `createStockHostSnapshot` captures own-data metadata, exact sources and explicit
-commitments, including the single-image eye sources. It requires the supported
+commitments, including single-image eyes and the complete mouth-face sources.
+Mouth marks require generated completion; the mouth canvas requires its final
+whole-source painting commitment. It requires the supported
 desktop standard mode, normal custom policy, no team/chooser/builder/testing mode,
 no original session and no selected static accessory. Missing metadata/sources
 are pending or unsupported. Full selectable entity families and independent

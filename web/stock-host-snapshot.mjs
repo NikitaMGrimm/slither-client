@@ -1,8 +1,9 @@
 const freeze = Object.freeze;
 const typedLength = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype), 'length').get;
 const downloaded = ['kwkbulb', 'pwdbulb', 'playbulb', 'leafbulb', 'swissbulb',
-  'moldovabulb', 'vietnambulb', 'argentinabulb', 'movbulb', 'bonkbulb', 'sest'];
-const slots = ['komc', 'ksmc', 'kdmc', 'acbulb', 'cdbulb', 'jsebi', 'jsepi', ...downloaded];
+  'moldovabulb', 'vietnambulb', 'argentinabulb', 'movbulb', 'bonkbulb', 'sest', 'jmou'];
+const slots = ['komc', 'ksmc', 'kdmc', 'acbulb', 'cdbulb', 'jsebi', 'jsepi', 'ecmc', ...downloaded];
+const mouthShapes = { ecmc: [48, 48], jmou: [79, 130] };
 const families = [
   ['imgs', 'fws', 'fhs', 'fw2s', 'fh2s'], ['oimgs', 'ofws', 'ofhs', 'ofw2s', 'ofh2s'],
   ['gimgs', 'gfws', 'gfhs', 'gfw2s', 'gfh2s'], ['pr_imgs', 'pr_fws', 'pr_fhs', 'pr_fw2s', 'pr_fh2s'],
@@ -64,7 +65,7 @@ export function createStockHostSnapshot({ realm, observer, readAccessory }) {
       host.alcsc = new Uint8Array(mask);
       const readiness = [], signature = [host.nsr, Array.from(host.alcsc)];
       const states = new Map();
-      function source(value, download = false, imageOnly = false) {
+      function source(value, download = false, imageOnly = false, shape = null) {
         if (value === undefined || value === null) fail('Host source not created', 'pending');
         const canvas = value instanceof Canvas;
         if ((!canvas && !(value instanceof Image)) || (imageOnly && canvas)) fail('Host source realm/type mismatch');
@@ -74,6 +75,7 @@ export function createStockHostSnapshot({ realm, observer, readAccessory }) {
         const complete = canvas ? true : scalar(value, Image, 'complete');
         if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 0 || height < 0
           || width > 65535 || height > 65535 || typeof complete !== 'boolean') fail('Host intrinsic dimensions invalid');
+        if (shape && (!canvas || width !== shape[0] || height !== shape[1])) fail('Incompatible mouth canvas');
         const ready = width > 0 && height > 0 && complete
           && (!canvas || (download ? observer.painted(value) : observer.generated(value)));
         const state = ready ? 'ready' : 'pending';
@@ -115,7 +117,7 @@ export function createStockHostSnapshot({ realm, observer, readAccessory }) {
         }
         return freeze(entry);
       }));
-      for (const name of slots) host[name] = source(field(realm, name), downloaded.includes(name));
+      for (const name of slots) host[name] = source(field(realm, name), downloaded.includes(name), false, mouthShapes[name]);
       const background = source(field(realm, 'bg_hex'), false, true);
       const encoded = JSON.stringify(signature);
       if (encoded !== previous) { previous = encoded; revision++; }

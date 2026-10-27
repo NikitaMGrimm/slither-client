@@ -28,8 +28,9 @@ function fixture() {
       kmcs: Array.from({ length: i === 36 ? 60 : 7 }, source), klp: i !== 36, kfmc: source() })) };
   for (const slot of ['komc', 'ksmc', 'kdmc', 'acbulb', 'cdbulb', 'kwkbulb', 'pwdbulb', 'playbulb',
     'leafbulb', 'swissbulb', 'moldovabulb', 'vietnambulb', 'argentinabulb', 'movbulb', 'bonkbulb', 'sest',
-    'jsebi', 'jsepi']) host[slot] = source();
+    'jsebi', 'jsepi', 'ecmc', 'jmou']) host[slot] = source();
   host.jsebi.width = host.jsebi.height = 64;
+  host.jmou.width = 79; host.jmou.height = 130;
   let snapshot = { revision: 'authored-1', normalGameplay: true, ownAccessory: -1, host, readiness };
   let reads = 0, randomCalls = 0;
   let random = () => (randomCalls++ % 64) / 64;
@@ -44,6 +45,84 @@ function fixture() {
 const custom = (...pairs) => Uint8Array.of(3, 8, 1, 42, 9, 0, 201, 7, ...pairs.flat());
 const expand = rule => rule.runs.flatMap(({ palette, count }) => Array(count).fill(palette));
 
+test('stock mouth face borrows two whole canvas roles and installs numeric geometry without readiness', () => {
+  const f = fixture(); const mouth = f.readiness.find(entry => entry.source === f.host.jmou);
+  mouth.state = 'pending'; f.adapter.beginOperation();
+  const appearance = f.adapter.resolveAppearance({ skin: 40 });
+  assert.deepEqual(appearance, { face: { kind: 'mouth-face', geometry: { pupilTravel: 2.3 } }, antenna: null });
+  assert(Object.isFrozen(appearance.face)); assert(Object.isFrozen(appearance.face.geometry));
+  assert.equal(f.adapter.resolveRecipe({ skin: 40 }).status, 'pending');
+  mouth.state = 'ready'; mouth.revision = 'painted'; f.snapshot.revision = 'paint-complete';
+  assert.equal(f.adapter.resolveRecipe({ skin: 40 }).status, 'pending', 'held commitment remains pending');
+  assert.equal(f.adapter.resolveRecipe({ skin: 0 }).status, 'ready');
+  f.adapter.endOperation();
+  const { recipe, status } = f.resolve({ skin: 40 }); assert.equal(status, 'ready');
+  assert.equal(recipe.eyes.kind, 'mouth-face'); assert.deepEqual(recipe.eyes.geometry, appearance.face.geometry);
+  for (const [key, slot] of [['eyeMarks', 'ecmc'], ['mouth', 'jmou']]) {
+    const use = recipe.eyes[key]; assert.equal(use.asset.source, f.host[slot]); assert.equal(use.sourceMode, 'whole');
+    assert.deepEqual(use.sourceRect, [0, 0, f.host[slot].width, f.host[slot].height]);
+    assert.equal(use.asset.revision, f.readiness.find(entry => entry.source === f.host[slot]).revision);
+  }
+  assert.equal(recipe.palettes[0].variants[0].asset.source, f.host.per_color_imgs[26].kmcs[0]);
+  assert.equal(recipe.antenna, undefined); assert.equal(recipe.faceDecoration, undefined);
+  assert.deepEqual(recipe.supportedFeatures, ['body-palettes', 'mouth-face', 'outline', 'shadow', 'death-highlight', 'standard-body-style']);
+  assert.equal(f.randomCalls, 0);
+});
+
+test('stock mouth sources require independent ready commitments, preserve unsupported precedence and custom suppression', () => {
+  for (const slot of ['ecmc', 'jmou']) {
+    const f = fixture(); const entry = f.readiness.find(entry => entry.source === f.host[slot]);
+    entry.state = 'pending'; assert.equal(f.resolve({ skin: 40 }).status, 'pending');
+    for (const customBytes of [new Uint8Array(), custom([0, 26]), custom([2, 40])]) {
+      assert.equal(f.resolve({ skin: 40, customBytes }).status, 'pending');
+    }
+    const accepted = f.resolve({ skin: 40, customBytes: custom([1, 26]) });
+    assert.equal(accepted.status, 'ready'); assert.equal(accepted.recipe.eyes.kind, 'standard');
+    entry.state = 'unsupported'; f.snapshot.revision = 'unsupported';
+    assert.equal(f.resolve({ skin: 40 }).status, 'unsupported');
+    f.host[slot] = null; f.snapshot.revision = 'missing';
+    assert.equal(f.resolve({ skin: 40 }).status, 'pending');
+    assert.equal(f.resolve({ skin: 40, attachmentId: 1 }).status, 'unsupported');
+  }
+  const f = fixture(); f.readiness.splice(f.readiness.findIndex(entry => entry.source === f.host.jmou), 1);
+  assert.equal(f.resolve({ skin: 40 }).status, 'pending');
+  const g = fixture(); g.readiness.find(entry => entry.source === g.host.ecmc).state = 'pending';
+  g.readiness.find(entry => entry.source === g.host.jmou).state = 'unsupported';
+  assert.equal(g.resolve({ skin: 40 }).status, 'unsupported');
+});
+
+test('mouth slots share the held catalog, content tokens, replacement and shape drift checks with old source paths', () => {
+  const f = fixture(); f.host.ecmc = f.host.per_color_imgs[26].kmcs[0];
+  f.host.jmou = f.host.komc; f.host.jmou.width = 79; f.host.jmou.height = 130;
+  const commitment = f.readiness.find(entry => entry.source === f.host.jmou); commitment.revision = -0;
+  f.adapter.beginOperation();
+  const before = f.adapter.resolveRecipe({ skin: 40 });
+  assert.equal(before.recipe.eyes.eyeMarks.asset, before.recipe.palettes[0].variants[0].asset);
+  assert.equal(before.recipe.eyes.mouth.asset, before.recipe.effects[0].asset);
+  assert(Object.is(before.recipe.eyes.mouth.asset.revision, -0));
+  const replacement = new f.realm.HTMLCanvasElement(); replacement.width = 79; replacement.height = 130;
+  f.host.jmou = replacement; f.snapshot.revision = 'replaced';
+  f.readiness.push({ source: replacement, state: 'ready', revision: 'new-mouth' });
+  assert.equal(f.adapter.resolveRecipe({ skin: 40 }).recipe.eyes.mouth.asset.source, before.recipe.eyes.mouth.asset.source);
+  f.adapter.endOperation();
+  assert.equal(f.resolve({ skin: 40 }).recipe.eyes.mouth.asset.source, replacement);
+  const entry = f.readiness.at(-1); entry.revision = 'same-size-paint';
+  assert.throws(() => f.adapter.beginOperation(), /without a new revision/);
+  f.snapshot.revision = 'paint-revised';
+  assert.equal(f.resolve({ skin: 40 }).recipe.eyes.mouth.asset.revision, 'same-size-paint');
+  f.adapter.beginOperation(); replacement.width = 80;
+  assert.throws(() => f.adapter.resolveRecipe({ skin: 40 }), /during operation/); f.adapter.endOperation();
+  f.snapshot.revision = 'shape-changed'; assert.throws(() => f.adapter.beginOperation(), /mouth canvas/);
+  for (const slot of ['ecmc', 'jmou']) {
+    const g = fixture(); const image = new g.realm.HTMLImageElement();
+    image.naturalWidth = g.host[slot].width; image.naturalHeight = g.host[slot].height;
+    g.host[slot] = image; assert.throws(() => g.adapter.beginOperation(), /mouth canvas/);
+    const h = fixture(); let reads = 0;
+    Object.defineProperty(h.host, slot, { get() { reads++; return null; } });
+    assert.throws(() => h.adapter.beginOperation(), /Accessor/); assert.equal(reads, 0);
+  }
+});
+
 test('ordinary coverage spans every requested byte and custom suppression precedes exclusions', () => {
   const f = fixture();
   f.adapter.beginOperation();
@@ -51,26 +130,21 @@ test('ordinary coverage spans every requested byte and custom suppression preced
     const rule = resolveStockSkin({ skin, cosmetic: skin });
     assert.equal(rule.runs[0].palette, rule.basePalette);
     const result = f.adapter.resolveRecipe({ skin, cosmetic: skin });
-    if (skin === 40) {
-      assert.equal(result.status, 'unsupported');
-      assert.throws(() => f.adapter.resolveAppearance({ skin }), /Unsupported stock appearance/);
+    assert.equal(result.status, 'ready', `skin ${skin}`);
+    const appearance = f.adapter.resolveAppearance({ skin });
+    if (skin === 27 || skin === 40) {
+      assert.equal(appearance.face.kind, skin === 27 ? 'single-image' : 'mouth-face');
+      assert.deepEqual(appearance.face.geometry, result.recipe.eyes.geometry);
+      assert.equal(appearance.face.eyes, undefined);
+      assert.equal(appearance.face.decoration, undefined);
     } else {
-      assert.equal(result.status, 'ready', `skin ${skin}`);
-      const appearance = f.adapter.resolveAppearance({ skin });
-      if (skin === 27) {
-        assert.equal(appearance.face.kind, 'single-image');
-        assert.deepEqual(appearance.face.geometry, result.recipe.eyes.geometry);
-        assert.equal(appearance.face.eyes, undefined);
-        assert.equal(appearance.face.decoration, undefined);
-      } else {
-        assert.equal(appearance.face.kind, 'paired');
-        assert.deepEqual(appearance.face.eyes, result.recipe.eyes);
-        assert.deepEqual(appearance.face.decoration, result.recipe.faceDecoration
-          ? { kind: 'paired-side-images', geometry: result.recipe.faceDecoration.geometry } : { kind: 'none' });
-      }
-      assert.deepEqual(appearance.antenna, result.recipe.antenna?.geometry ?? null);
-      if (skin < 9 || skin > 65) assert.deepEqual(expand(rule), [skin % 9]);
+      assert.equal(appearance.face.kind, 'paired');
+      assert.deepEqual(appearance.face.eyes, result.recipe.eyes);
+      assert.deepEqual(appearance.face.decoration, result.recipe.faceDecoration
+        ? { kind: 'paired-side-images', geometry: result.recipe.faceDecoration.geometry } : { kind: 'none' });
     }
+    assert.deepEqual(appearance.antenna, result.recipe.antenna?.geometry ?? null);
+    if (skin < 9 || skin > 65) assert.deepEqual(expand(rule), [skin % 9]);
     const accepted = f.adapter.resolveRecipe({ skin, customBytes: custom([2, 0], [1, 27]), cosmetic: skin });
     assert.equal(accepted.status, 'ready');
     assert.equal(accepted.recipe.custom, true);
@@ -143,7 +217,6 @@ test('42 host palette families validate and all normally selectable palettes bor
   const seen = new Set();
   f.adapter.beginOperation();
   for (let skin = 0; skin <= 65; skin++) {
-    if (skin === 40) continue;
     const rule = resolveStockSkin({ skin });
     const { recipe } = f.adapter.resolveRecipe({ skin });
     rule.runs.forEach((run, i) => {

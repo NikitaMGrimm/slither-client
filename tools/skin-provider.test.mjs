@@ -94,6 +94,120 @@ function addSingleEye(f) {
     baseImage: { asset: 0 }, pupilImage: { asset: 1 } };
 }
 
+function addMouthFace(f) {
+  f.metadata.eyes = { kind: 'mouth-face', geometry: { pupilTravel: 1.625 },
+    eyeMarks: { asset: 0, sourceMode: 'whole' }, mouth: { asset: 1, sourceMode: 'whole' } };
+}
+
+test('mouth face copies the complete exclusive family, exact sources, signed zero and explicit whole modes', () => {
+  for (const make of [fixture, bodyFixture]) {
+    const f = make(); const old = f.resolve(); const original = f.metadata.eyes;
+    addMouthFace(f); const input = f.metadata.eyes; input.geometry.pupilTravel = -0;
+    const { recipe, status } = f.resolve(); const eyes = recipe.eyes;
+    assert.equal(status, 'ready');
+    assert.deepEqual(Object.keys(eyes), ['kind', 'geometry', 'eyeMarks', 'mouth']);
+    assert(Object.is(eyes.geometry.pupilTravel, -0)); assert.notEqual(eyes.geometry, input.geometry);
+    assert(Object.isFrozen(eyes)); assert(Object.isFrozen(eyes.geometry));
+    for (const [key, index] of [['eyeMarks', 0], ['mouth', 1]]) {
+      const use = eyes[key]; assert.notEqual(use, input[key]);
+      assert.equal(use.sourceMode, 'whole'); assert.equal(use.asset, recipe.palettes[index].variants[0].asset);
+      assert.equal(use.asset.source, f.catalog[index].source);
+      for (const value of [use, use.asset, use.sourceRect]) assert(Object.isFrozen(value));
+      assert(!Object.isFrozen(use.asset.source));
+    }
+    assert(recipe.supportedFeatures.includes('mouth-face'));
+    assert(!recipe.supportedFeatures.includes('standard-eyes'));
+    assert(!recipe.supportedFeatures.includes('single-image-eye'));
+    input.geometry.pupilTravel = 7; input.eyeMarks.asset = 1;
+    assert(Object.is(eyes.geometry.pupilTravel, -0)); assert.equal(eyes.eyeMarks.asset.source, f.canvas);
+    const alias = f.resolve().recipe.eyes; assert.equal(alias.eyeMarks.asset, alias.mouth.asset);
+    f.metadata.eyes = original; assert.deepEqual(f.resolve(), old);
+  }
+});
+
+test('mouth face requires finite own geometry and both explicit whole source uses without any supplied crop', () => {
+  const f = fixture(); addMouthFace(f);
+  for (const pupilTravel of [0, -0, Number.MIN_VALUE, 4096]) {
+    f.metadata.eyes.geometry.pupilTravel = pupilTravel;
+    assert(Object.is(f.resolve().recipe.eyes.geometry.pupilTravel, pupilTravel));
+  }
+  for (const pupilTravel of [undefined, null, true, '1', {}, NaN, Infinity, -Infinity, -Number.MIN_VALUE, 4096.001]) {
+    f.metadata.eyes.geometry.pupilTravel = pupilTravel; assert.throws(() => f.resolve());
+  }
+  f.metadata.eyes.geometry.pupilTravel = 2;
+  for (const key of ['eyeMarks', 'mouth']) {
+    const use = f.metadata.eyes[key];
+    for (const value of [undefined, null, {}, Promise.resolve()]) {
+      f.metadata.eyes[key] = value; assert.throws(() => f.resolve());
+    }
+    f.metadata.eyes[key] = use;
+    for (const sourceMode of [undefined, null, 'crop', 'WHOLE', {}, true]) {
+      use.sourceMode = sourceMode; assert.throws(() => f.resolve());
+    }
+    use.sourceMode = 'whole';
+    for (const sourceRect of [undefined, null, [0, 0, 20, 30], [0, 0, 40, 50], [1, 2, 3, 4]]) {
+      use.sourceRect = sourceRect; assert.throws(() => f.resolve());
+    }
+    delete use.sourceRect;
+  }
+  for (const decoration of [{ kind: 'none' }, { kind: 'paired-side-images' }, {}, false, Promise.resolve()]) {
+    f.metadata.faceDecoration = decoration; assert.throws(() => f.resolve());
+  }
+  for (const faceDecoration of [undefined, null]) {
+    f.metadata.faceDecoration = faceDecoration;
+    assert.equal(f.resolve().recipe.faceDecoration, undefined);
+  }
+});
+
+test('mouth metadata never invokes accessors and rejects inherited requirements and decorated promises', () => {
+  const paths = [f => [f.metadata, 'eyes'],
+    ...['kind', 'geometry', 'eyeMarks', 'mouth'].map(k => f => [f.metadata.eyes, k]),
+    f => [f.metadata.eyes.geometry, 'pupilTravel'],
+    ...['eyeMarks', 'mouth'].flatMap(k => ['asset', 'sourceMode', 'sourceRect'].map(p => f => [f.metadata.eyes[k], p]))];
+  for (const locate of paths) {
+    const f = fixture(); addMouthFace(f); const [record, key] = locate(f);
+    const original = Object.getOwnPropertyDescriptor(record, key); let reads = 0;
+    Object.defineProperty(record, key, { configurable: true, get() { reads++; return original?.value; } });
+    assert.throws(() => f.resolve(), /Accessor/); assert.equal(reads, 0);
+    delete record[key];
+    if (key !== 'sourceRect') {
+      Object.setPrototypeOf(record, { [key]: original.value }); assert.throws(() => f.resolve());
+    }
+  }
+  for (const key of ['eyes', 'geometry', 'eyeMarks', 'mouth']) {
+    const f = fixture(); addMouthFace(f); const record = key === 'eyes' ? f.metadata : f.metadata.eyes;
+    record[key] = Object.assign(Promise.resolve(), record[key]); assert.throws(() => f.resolve(), /synchronous/);
+  }
+});
+
+test('mouth sources share catalog status precedence and immutable revision snapshots with all existing uses', () => {
+  for (const key of ['eyeMarks', 'mouth']) {
+    const f = bodyFixture(); addMouthFace(f); addAntenna(f);
+    f.catalog.push({ source: null, state: 'ready', revision: -0 }); f.metadata.eyes[key].asset = 4;
+    const pending = f.resolve(); assert.equal(pending.status, 'pending');
+    assert.equal(pending.recipe.eyes[key].asset.status, 'pending');
+    assert.equal(pending.recipe.eyes[key].sourceMode, 'whole'); assert.equal(pending.recipe.eyes[key].sourceRect, null);
+    f.metadata.unsupportedFeatures = ['required-synthetic-feature']; assert.equal(f.resolve().status, 'unsupported');
+    f.metadata.unsupportedFeatures = []; f.catalog[0].state = 'unsupported'; assert.equal(f.resolve().status, 'unsupported');
+    f.catalog[0].state = 'ready';
+    const source = new f.realm.HTMLCanvasElement(); f.catalog[4] = { source, state: 'pending', revision: -0 };
+    assert.equal(f.resolve().status, 'pending');
+    f.catalog[4].state = 'ready'; f.snapshot.revision = 2;
+    const ready = f.resolve(); assert.equal(ready.status, 'ready');
+    assert(Object.is(ready.recipe.eyes[key].asset.revision, -0));
+    f.catalog[4].revision = +0; source.width = 7; f.snapshot.revision = 3;
+    const after = f.resolve(); assert.equal(after.recipe.eyes[key].asset.source, source);
+    assert(Object.is(after.recipe.eyes[key].asset.revision, +0));
+    assert.equal(ready.recipe.eyes[key].asset.width, 20); assert.equal(after.recipe.eyes[key].asset.width, 7);
+    assert.equal(pending.recipe.eyes[key].asset.source, null);
+    source.width = 0; assert.equal(f.resolve().status, 'pending');
+    f.catalog[4].state = 'unsupported'; assert.equal(f.resolve().status, 'unsupported');
+  }
+  const f = fixture(); f.metadata.status = 'ready'; addMouthFace(f);
+  f.metadata.status = 'pending'; assert.equal(f.resolve().recipe, null);
+  f.metadata.status = 'unsupported'; assert.equal(f.resolve().status, 'unsupported');
+});
+
 test('single image eyes copy and freeze geometry and both uses while borrowing exact shared sources', () => {
   for (const make of [fixture, bodyFixture]) {
     const f = make(); addSingleEye(f);

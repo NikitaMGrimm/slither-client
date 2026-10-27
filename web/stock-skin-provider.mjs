@@ -8,6 +8,7 @@ const bulbSlots = freeze(['acbulb', 'cdbulb', 'kwkbulb', 'pwdbulb', 'playbulb', 
   'swissbulb', 'moldovabulb', 'vietnambulb', 'argentinabulb', 'movbulb', 'bonkbulb', 'sest']);
 const effectSlots = freeze(['komc', 'ksmc', 'kdmc']);
 const eyeSlots = freeze(['jsebi', 'jsepi']);
+const mouthShapes = freeze({ ecmc: freeze([48, 48]), jmou: freeze([79, 130]) });
 
 function list(value, length, label) {
   if (!Array.isArray(value) || value.length !== length) throw new TypeError(`Incompatible ${label}`);
@@ -96,7 +97,15 @@ function capture(raw, realm) {
       glow: borrow(ownData(entry, 'kfmc')) });
   });
   const slots = {};
-  for (const name of [...effectSlots, ...bulbSlots, ...eyeSlots]) slots[name] = borrow(ownData(host, name));
+  for (const name of [...effectSlots, ...bulbSlots, ...eyeSlots, ...Object.keys(mouthShapes)]) {
+    const source = ownData(host, name);
+    slots[name] = borrow(source);
+    const shape = mouthShapes[name];
+    if (shape && source != null && (!(source instanceof realm.HTMLCanvasElement)
+      || !shape.every((value, i) => value === shapes[slots[name]][i]))) {
+      throw new TypeError(`Incompatible mouth canvas: ${name}`);
+    }
+  }
   return freeze({ revision: version, nsr, palettes: freeze(palettes), slots: freeze(slots),
     assetCatalog: freeze(catalog), shapes: freeze(shapes) });
 }
@@ -127,7 +136,11 @@ function hostRecipe(rule, snapshot) {
   const chain = rule.antenna;
   const antenna = chain ? { kind: 'ordinary-chain', geometry: chain.geometry,
     image: { ...use(snapshot.slots[chain.source]), sourceMode: 'whole' } } : null;
-  const eyes = rule.eyes.kind === 'single-image'
+  const eyes = rule.eyes.kind === 'mouth-face'
+    ? { kind: 'mouth-face', geometry: rule.eyes.geometry,
+      eyeMarks: { ...use(snapshot.slots[rule.eyes.eyeMarks.source]), sourceMode: 'whole' },
+      mouth: { ...use(snapshot.slots[rule.eyes.mouth.source]), sourceMode: 'whole' } }
+    : rule.eyes.kind === 'single-image'
     ? { kind: 'single-image', geometry: rule.eyes.geometry,
       baseImage: { ...use(snapshot.slots[rule.eyes.baseImage.source]), sourceRect: rule.eyes.baseImage.sourceRect },
       pupilImage: { ...use(snapshot.slots[rule.eyes.pupilImage.source]), sourceRect: rule.eyes.pupilImage.sourceRect } }
@@ -205,8 +218,8 @@ export function createStockSkinAdapter({ realm, readSnapshot, random }) {
         }
         const rule = resolveStockSkin(request, snapshot.nsr);
         if (rule.unsupportedFeatures.length) throw new TypeError(`Unsupported stock appearance: ${rule.unsupportedFeatures.join(', ')}`);
-        const face = rule.eyes.kind === 'single-image'
-          ? freeze({ kind: 'single-image', geometry: rule.eyes.geometry })
+        const face = ['single-image', 'mouth-face'].includes(rule.eyes.kind)
+          ? freeze({ kind: rule.eyes.kind, geometry: rule.eyes.geometry })
           : freeze({ kind: 'paired', eyes: rule.eyes, decoration: rule.faceDecoration
             ? freeze({ kind: rule.faceDecoration.kind, geometry: rule.faceDecoration.geometry }) : freeze({ kind: 'none' }) });
         return freeze({ face,

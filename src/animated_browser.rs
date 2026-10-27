@@ -21,9 +21,9 @@ use crate::{
         ClientControlView, ClientScoreView, CurveInput, CurveOutput, EyeLayoutInput, FaceGeometry,
         FacePresentation, FoodImageCommand, FoodPaintInput, FoodPaintPlan, HudCommandGuard,
         HudIngressEventKind, HudIngressPlan, HudIngressReport, MAX_BODY_PAINT_COMMANDS,
-        MAX_DRAW_SAMPLES, MAX_RETAINED_SNAKES, OrdinaryAntennaGeometry, PairedSideLayout,
-        PreparedAntenna, PreparedSnake, PreyEaterPose, PreyImageCommand, PreyPaintInput,
-        PreyPaintPlan, QualitySnapshot, ScoreError, ScoreStatus, SingleEyeLayout,
+        MAX_DRAW_SAMPLES, MAX_RETAINED_SNAKES, MouthFaceLayout, OrdinaryAntennaGeometry,
+        PairedSideLayout, PreparedAntenna, PreparedSnake, PreyEaterPose, PreyImageCommand,
+        PreyPaintInput, PreyPaintPlan, QualitySnapshot, ScoreError, ScoreStatus, SingleEyeLayout,
         SnakePresentation, StandardEyeLayout, Turn, plan_arena_edge, plan_food, plan_prey,
         plan_standard_body, plan_standard_body_with_antenna, sample_curve_with_heading,
     },
@@ -1854,6 +1854,13 @@ impl AnimatedScene {
                         ])?,
                     ),
                 ])?,
+                FaceGeometry::Mouth(geometry) => record([
+                    ("kind", "mouth-face".into()),
+                    (
+                        "geometry",
+                        record([("pupilTravel", geometry.pupil_travel.into())])?,
+                    ),
+                ])?,
             };
             let eyes = snake.eyes();
             snakes.push(&record([
@@ -3193,6 +3200,7 @@ enum FaceLayout {
         decoration: Option<[PairedSideLayout; 2]>,
     },
     SingleImage(SingleEyeLayout),
+    Mouth(MouthFaceLayout),
 }
 
 enum PlannedSnakePaint {
@@ -3474,6 +3482,7 @@ fn drawn_antenna_geometry(
 
 fn face_image_count(face: Option<&FaceSources>) -> usize {
     match face {
+        Some(FaceSources::Mouth(_)) => 3,
         Some(FaceSources::SingleImage(_))
         | Some(FaceSources::Paired {
             decoration: Some(_),
@@ -3489,6 +3498,14 @@ fn plan_face(
     view: EyeLayoutInput,
 ) -> Result<FaceLayout, JsValue> {
     match face {
+        Some(FaceSources::Mouth(_)) => Ok(FaceLayout::Mouth(
+            snake
+                .face_geometry
+                .mouth()
+                .ok_or_else(|| error("mouth face geometry required"))?
+                .layout(snake.face_heading, snake.pupil, view)
+                .map_err(error)?,
+        )),
         Some(FaceSources::SingleImage(_)) => Ok(FaceLayout::SingleImage(
             snake
                 .face_geometry
@@ -3525,6 +3542,13 @@ fn submit_selected_face(
     basic: bool,
 ) -> Result<(), JsValue> {
     match layout {
+        FaceLayout::Mouth(layout) => {
+            let Some(FaceSources::Mouth(face)) = face else {
+                return Err(error("planned mouth face sources missing"));
+            };
+            sources.submit_mouth_face(context, face, &layout)?;
+            context.set_global_alpha(1.);
+        }
         FaceLayout::SingleImage(layout) => {
             let Some(FaceSources::SingleImage(face)) = face else {
                 return Err(error("planned single image sources missing"));
@@ -3621,7 +3645,7 @@ fn build_standard(
                         decoration.as_ref()
                     }
                     None => None,
-                    Some(FaceSources::SingleImage(_)) => {
+                    Some(FaceSources::SingleImage(_) | FaceSources::Mouth(_)) => {
                         return Err(error("legacy renderer requires paired face").into());
                     }
                 };

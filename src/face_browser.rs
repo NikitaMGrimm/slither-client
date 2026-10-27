@@ -5,13 +5,19 @@ use wasm_bindgen::prelude::*;
 use crate::antenna_browser::{AntennaDecoration, geometry};
 use crate::body_browser::{FaceDecoration, error, field, num, side_geometry, standard_eyes, text};
 use crate::presentation::{
-    BodyAsset, BodyRect, FaceGeometry, FacePresentation, PairedFaceGeometry, SingleEyeGeometry,
-    StandardEyeGeometry,
+    BodyAsset, BodyRect, FaceGeometry, FacePresentation, MouthFaceGeometry, PairedFaceGeometry,
+    SingleEyeGeometry, StandardEyeGeometry,
 };
 
 pub(crate) struct SingleEyeSources {
     pub(crate) geometry: SingleEyeGeometry,
     pub(crate) images: [(BodyAsset, BodyRect); 2],
+}
+
+pub(crate) struct MouthFaceSources {
+    pub(crate) geometry: MouthFaceGeometry,
+    pub(crate) eye_marks: BodyAsset,
+    pub(crate) mouth: BodyAsset,
 }
 
 pub(crate) enum FaceSources {
@@ -20,6 +26,7 @@ pub(crate) enum FaceSources {
         decoration: Option<FaceDecoration>,
     },
     SingleImage(SingleEyeSources),
+    Mouth(MouthFaceSources),
 }
 
 pub(crate) struct FacePresentationSources {
@@ -31,6 +38,14 @@ pub(crate) fn single_eye_geometry(value: &JsValue) -> Result<SingleEyeGeometry, 
     let geometry = SingleEyeGeometry {
         base_size: num(field(value, "baseSize")?, f64::from_bits(1), 4096.)?,
         pupil_size: num(field(value, "pupilSize")?, f64::from_bits(1), 4096.)?,
+        pupil_travel: num(field(value, "pupilTravel")?, 0., 4096.)?,
+    };
+    geometry.validate().map_err(error)?;
+    Ok(geometry)
+}
+
+pub(crate) fn mouth_geometry(value: &JsValue) -> Result<MouthFaceGeometry, JsValue> {
+    let geometry = MouthFaceGeometry {
         pupil_travel: num(field(value, "pupilTravel")?, 0., 4096.)?,
     };
     geometry.validate().map_err(error)?;
@@ -63,6 +78,13 @@ pub(crate) fn appearance(value: &JsValue) -> Result<FacePresentation, JsValue> {
                 return Err(error("single image eyes cannot have paired decoration"));
             }
             FaceGeometry::SingleImage(single_eye_geometry(&field(&face, "geometry")?)?)
+        }
+        "mouth-face" => {
+            let decoration = field(&face, "decoration")?;
+            if !decoration.is_null() && !decoration.is_undefined() {
+                return Err(error("mouth faces cannot have paired decoration"));
+            }
+            FaceGeometry::Mouth(mouth_geometry(&field(&face, "geometry")?)?)
         }
         _ => return Err(error("unsupported face family")),
     };
