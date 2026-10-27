@@ -8,6 +8,8 @@ import { createStockClient } from '../web/stock-client.mjs';
 import { createStockEntityAssets } from '../web/stock-food-provider.mjs';
 import { createStockGameplay } from '../web/stock-gameplay.mjs';
 import { createStockSession } from '../web/stock-session.mjs';
+import { projectHudView } from '../web/stock-hud-view.mjs';
+import { bindStockHudDom } from '../web/stock-hud-dom.mjs';
 import { syntheticChallenge } from './reference-parity.mjs';
 
 // Original authored synthetic packets, live-source doubles and Canvas command
@@ -41,6 +43,68 @@ export function stockRenderSmoke(wasm, { control = true } = {}) {
   const eq = (actual, expected, message) => { assertions++; assert.deepEqual(actual, expected, message); };
   const ok = (value, message) => { assertions++; assert.ok(value, message); };
   const rejects = (callback, match, message) => { assertions++; assert.throws(callback, match, message); };
+
+  // Original fixed-tree capability doubles; no real Document or browser is used.
+  function hudTree(beforeWrite) {
+    const metadata = new WeakMap(), styleData = new WeakMap(), writes = [];
+    const data = node => {
+      if (!metadata.has(node)) throw new TypeError('Authored HUD Node receiver');
+      return metadata.get(node);
+    };
+    const make = (type, name, document, value = '') => {
+      const node = Object.create(null), style = Object.create(null);
+      metadata.set(node, { type, name, document, value, parent: null, children: [], style });
+      styleData.set(style, new Map());
+      return node;
+    };
+    const document = make(9, null, null);
+    const element = name => make(1, name, document);
+    const children = (parent, nodes) => {
+      data(parent).children = nodes;
+      for (const node of nodes) data(node).parent = parent;
+    };
+    const atom = (name, label) => {
+      const result = { element: element(name), text: make(3, null, document, label) };
+      children(result.element, [result.text]); return result;
+    };
+    const mount = element('section'); children(document, [mount]);
+    const readout = { root: element('div'), lengthLine: element('div'), rankLine: element('div'),
+      lengthLabel: atom('span', 'authored length'), lengthValue: atom('b', 'unwritten'),
+      rankLabel: atom('span', 'authored rank'), rankValue: atom('span', 'unwritten'),
+      separator: atom('span', 'authored separator'), populationValue: atom('span', 'unwritten') };
+    const final = { root: element('div'), label: atom('span', 'authored final'), value: atom('b', 'unwritten') };
+    children(readout.root, [readout.lengthLine, readout.rankLine]);
+    children(readout.lengthLine, [readout.lengthLabel.element, readout.lengthValue.element]);
+    children(readout.rankLine, [readout.rankLabel.element, readout.rankValue.element,
+      readout.separator.element, readout.populationValue.element]);
+    children(final.root, [final.label.element, final.value.element]);
+    children(mount, [readout.root, final.root]);
+    const dom = {
+      nodeType: node => data(node).type, ownerDocument: node => data(node).document,
+      parentNode: node => data(node).parent, firstChild: node => data(node).children[0] ?? null,
+      nextSibling(node) {
+        const parent = data(node).parent;
+        if (parent === null) return null;
+        const siblings = data(parent).children;
+        return siblings[siblings.indexOf(node) + 1] ?? null;
+      },
+      isConnected(node) { data(node); return true; },
+      localName: node => data(node).name,
+      namespaceURI(node) { data(node); return 'http://www.w3.org/1999/xhtml'; },
+      style: node => data(node).style,
+      setText(node, value) {
+        beforeWrite(); eq(data(node).type, 3); data(node).value = value;
+        writes.push(['text', node, value]);
+      },
+      setStyle(style, property, value) {
+        beforeWrite(); ok(styleData.has(style)); styleData.get(style).set(property, value);
+        writes.push(['style', style, property, value]);
+      },
+    };
+    return { dom, nodes: { schema: 1, document, mount, textPolicy: 'authored', readout, final },
+      readout, final, writes, text: node => data(node).value,
+      style: (node, property) => styleData.get(data(node).style).get(property) };
+  }
 
   class CanvasRenderingContext2D {
     trace = []; stack = []; alpha = 1; blend = 'source-over'; transforms = []; path = [];
@@ -417,7 +481,7 @@ export function stockRenderSmoke(wasm, { control = true } = {}) {
       }
       for (const [withHud, withReadout] of [[false, false], [true, false], [true, true]]) {
         const f = fixture();
-        let gameplay;
+        let gameplay, hudBinding;
         try {
           if (withHud) f.scene.enable_score_tracking();
           let now = 0, nextTimer = 0;
@@ -462,6 +526,37 @@ export function stockRenderSmoke(wasm, { control = true } = {}) {
               sockets.push(socket); return socket;
             },
           });
+          const hud = withReadout ? hudTree(() => eq(f.held, null, 'HUD setters follow source release')) : null;
+          hudBinding = withReadout ? bindStockHudDom({ documentIdentity: Symbol('authored Document'),
+            sceneIdentity: gameplay.hudSnapshot().sceneIdentity, scope: 'readout-and-final',
+            dom: hud.dom, nodes: hud.nodes, isCurrentDocument: () => true }) : null;
+          const projectCommitted = () => {
+            eq(f.held, null, 'Projection follows the completed source operation');
+            const before = [scoreReads, f.captures, f.ends, f.steps.length, f.client.diagnostics().draws];
+            const view = projectHudView(gameplay.hudSnapshot(), hudBinding.readiness());
+            const writes = hud.writes.length, receipt = hudBinding.render(view);
+            eq(receipt.readoutWritten, view.current.readiness === 'ready');
+            eq(receipt.finalWritten, view.final.readiness === 'ready');
+            if (receipt.readoutWritten) {
+              eq(hud.text(hud.readout.lengthValue.text), view.current.value.scoreText);
+              eq(hud.text(hud.readout.rankValue.text), view.current.value.rankText);
+              eq(hud.text(hud.readout.populationValue.text), view.current.value.populationText);
+              eq(hud.style(hud.readout.root, 'opacity'), String(view.requestedOpacity.readout));
+            }
+            if (receipt.finalWritten) eq(hud.text(hud.final.value.text), view.final.value.scoreText + view.final.value.suffix);
+            if (!receipt.readoutWritten && !receipt.finalWritten) eq(hud.writes.length, writes);
+            eq(hud.text(hud.readout.lengthLabel.text), 'authored length');
+            eq(hud.text(hud.final.label.text), 'authored final');
+            eq(hud.style(hud.final.root, 'opacity'), undefined, 'Final host visibility stays owner policy');
+            eq([scoreReads, f.captures, f.ends, f.steps.length, f.client.diagnostics().draws], before,
+              'Projection and passive rendering perform no native score, source, step or draw operation');
+            return view;
+          };
+          if (withReadout) {
+            const view = projectCommitted();
+            eq(view.readiness, 'pending'); eq(view.reason, 'no-displayed-current');
+            eq(view.current.value, null); eq(view.final.value, null);
+          }
           gameplay.play({ endpoint: 'ws://192.0.2.9:1234/slither',
             profile: { clientVersion: 7, password: Uint8Array.from({ length: 20 }, (_, i) => i + 1), protocolVersion: 19 },
             nickname: 'Synthetic', skin: 27, customSkin: new Uint8Array() });
@@ -497,6 +592,11 @@ export function stockRenderSmoke(wasm, { control = true } = {}) {
               eq(scoreReads, 1); eq(gameplay.hudSnapshot().dirty, false);
               eq(gameplay.hudSnapshot().current, { score: nativeScore().score, rank: 17, population: 33,
                 ownToken: nativeScore().own.token });
+              const projected = projectCommitted();
+              eq(projected.current.readiness, 'ready'); eq(projected.final.readiness, 'pending');
+              eq(projected.readiness, 'pending'); eq(projected.current.value.rankText, '17');
+              eq(projected.current.value.populationText, '33');
+              eq(projected.current.value.scoreText, String(gameplay.hudSnapshot().current.score));
               gameplay.resize(960, 540);
               eq(scoreReads, 1, 'A clean resized readout does not poll scores');
               eq(f.steps.length, steps); eq(f.quality.snapshot(), quality);
@@ -529,6 +629,11 @@ export function stockRenderSmoke(wasm, { control = true } = {}) {
               eq(view.dirty, false); eq(view.fade, -1);
               eq(view.requestedOpacity, { readout: 0, header: 0, rows: 0, announcement: 0 });
               ok(Object.isFrozen(view.current)); ok(Object.isFrozen(view.final));
+              const projected = projectCommitted();
+              eq(projected.readiness, 'ready'); eq(projected.final.value.score, before.score);
+              eq(projected.final.value.ownToken, before.own.token);
+              eq(projected.current.value.score, report.events[4].view.score);
+              eq(projected.requestedOpacity, view.requestedOpacity);
             }
           }
           now = 48;
@@ -562,13 +667,21 @@ export function stockRenderSmoke(wasm, { control = true } = {}) {
             eq(view.ownToken, null); eq(view.rank, 0); eq(view.population, 0);
             eq(view.fade, -1); eq(view.requestedOpacity, { readout: -1, header: -0.85, rows: -1, announcement: -1 });
             ok(view.current !== null); ok(view.final !== null);
+            const projected = projectCommitted();
+            eq(projected.readiness, 'ready');
+            eq(projected.current.value.ownToken, view.current.ownToken);
+            eq(projected.final.value.ownToken, view.final.ownToken);
+            eq(projected.requestedOpacity, { readout: -1, header: -0.85, rows: -1, announcement: -1 });
             gameplay.dispose(); eq(gameplay.hudSnapshot(), null);
+            const stopped = projectCommitted();
+            eq(stopped.readiness, 'unavailable'); eq(stopped.reason, 'hud-disabled-or-disposed');
+            eq(stopped.current.value, null); eq(stopped.final.value, null);
           }
-          cases.push(withReadout ? 'real-staged-readout-intermediate-Setup-score-and-completion-history'
+          cases.push(withReadout ? 'real-staged-readout-to-passive-HUD-through-completion-history'
             : withHud ? 'real-hud-session-controller-render-and-life-end-composition'
             : 'real-gameplay-session-input-render-and-life-end-composition');
         } finally {
-          try { gameplay?.dispose(); } finally { f.close(); }
+          try { hudBinding?.dispose(); } finally { try { gameplay?.dispose(); } finally { f.close(); } }
         }
       }
       for (const failedDefer of [false, true]) {

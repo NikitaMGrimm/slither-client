@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add copied semantic HUD views with per-role readiness and a passive fixed-node
+  renderer using supplied native DOM capabilities. Preserve displayed/final
+  history and raw opacity requests; attachment and activation remain separate.
+
 - Add explicit semantic HUD reduction and gameplay staging for packet headers,
   dirty readouts, command-time finals and same-step fade requests. Read required
   scores after source release; preserve legacy activation and visible UI scope.

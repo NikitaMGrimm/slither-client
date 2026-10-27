@@ -107,3 +107,6 @@ available to finish cleanup. Already committed native draws are not undone.
 
 DOM binding, rows, announcements, login UI and installed-browser/server acceptance
 remain separate. See [verification](verification.md) for the exact evidence.
+
+The separate [view and passive renderer](hud-view.md) consume committed history
+with explicit binding readiness. They add no bootstrap activation or score read.
