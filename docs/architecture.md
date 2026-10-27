@@ -21,6 +21,13 @@ wasm-bindgen 0.2.129 and web-sys 0.3.106.
 
 ## Received scene state
 
+`protocol::hud` separately supplies explicit borrowed leaderboard and public
+announcement projections. It validates complete bounded commands before
+exposing their fields and iterates rows without allocation. Raw text bytes,
+score calculations and lifecycle policy remain separate. Generic framing and
+state admission do not invoke these decoders automatically; see
+[HUD packet projections](hud-packets.md).
+
 `ClientState::apply_frame` validates framing, applies supported commands to a
 staged clone, and commits only on success. Malformed supported commands preserve
 the entire previous state, including compact caches and counters. BTreeMaps keep

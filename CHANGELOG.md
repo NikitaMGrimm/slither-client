@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add explicit bounded borrowed decoders for leaderboard and public-announcement
+  packets, with complete-tail validation and preserved raw bytes. HUD routing
+  and presentation remain separate.
+
 - Add explicit opt-in retained-own score tracking with ordered Setup table caches,
   canonical replacement `R`, transactional rollback and copied native/Wasm score
   observations. Legacy ingestion remains unchanged; HUD wiring remains separate.

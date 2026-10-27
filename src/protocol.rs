@@ -2,6 +2,8 @@
 
 use std::fmt;
 
+pub mod hud;
+
 /// Maximum frame bytes, including any elapsed header.
 pub const MAX_FRAME_BYTES: usize = 1 << 20;
 /// Maximum commands in one frame.
