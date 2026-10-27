@@ -153,6 +153,97 @@ effects.
 
 ## Session and input boundary
 
+### Private nickname-edit defaults
+
+The single claimed native record additionally exposes
+`registerNicknameEditField({schema:1,element,parent})`, returning a frozen
+`{unregister()}` lease. The argument is a closed three-field own-data record
+with the current realm's ordinary or null prototype. Registration requires an
+installed input router and one exact connected native HTML `INPUT` of normalized
+type `text`, its exact direct HTML parent, and the captured light-DOM Document.
+The bootstrap selects or registers no field; a login binder remains separate.
+
+Without registration, fenced events retain cancellation. A registered field
+can receive the following native-default permissions; original propagation is
+stopped before the private router runs in every supported path:
+
+| Category | Admitted domain |
+| --- | --- |
+| Text and caret keys | One Unicode scalar text key, Space, arrows, Home/End, Backspace/Delete; optional Shift. |
+| Ctrl or Meta | Exactly one modifier: A/C/X/V/Z/Y, ShiftZ/ShiftV, and caret/deletion keys with optional Shift. Other shifted letters and ordinary Alt chords are excluded. |
+| Composition | Dead/Process initiation; bounded text/editing keys and composing Unidentified; explicit AltGraph text/Dead/Process handling. |
+| Editing events | Closed `beforeinput` types below; composition and copy/cut/paste on the exact focused eligible field. |
+| Mouse selection | Primary desktop mouse focus/caret initiation on the field, exact-field caret/word selection, and one bounded originating-field selection gesture. |
+
+Enter/NumpadEnter, Tab, Escape, context menus, drag/drop, touch/pen editing and
+unknown keys/chords/input types receive no permission. Modifier-only
+Shift/Control/Meta/AltGraph notifications are admitted on the eligible field;
+standalone Alt is excluded. Native permission never synthesizes a character,
+performs clipboard access, submits Play or changes the nickname wire domain.
+
+The exact `beforeinput` allowlist is:
+
+```text
+insertText insertReplacementText insertFromPaste insertFromPasteAsQuotation
+insertCompositionText insertFromComposition deleteCompositionText
+deleteContentBackward deleteContentForward deleteWordBackward deleteWordForward
+deleteSoftLineBackward deleteSoftLineForward deleteHardLineBackward deleteHardLineForward
+deleteByCut historyUndo historyRedo
+```
+
+Keyboard, composition, clipboard and editing admission requires the exact field
+target and focus. Native disabled-fieldset, readonly, inert and visibility
+checks may temporarily deny permission without discarding the structural lease.
+The gate rechecks eligibility and the same router/lease after delivery. A router
+must return `undefined` synchronously for an editing candidate; another return
+or any thrown value cancels and revokes. Legacy callbacks without an editing
+candidate retain their ignored-return behavior. A previously ineligible event
+cannot be promoted by its callback.
+
+The gate additionally fences keypress, beforeinput/input, composition,
+clipboard, selection, double-click/contextmenu, focus, hover, cancellation and
+drag events. Window capture handles target-path events; the captured Document
+alone handles selectionchange. New notifications reach the owned router only
+when attributable to the exact field, or to Document selectionchange with that
+field active. The bootstrap filters that exact new inventory before gameplay,
+so it adds no control/source/clock/send observations. Every original event
+family, including raw keydown/keyup outside the field or after eligibility
+changes, keeps its existing gameplay delivery. No keyCode/which normalization
+or artificial release is added.
+
+One lease-bound primary mouse selection can continue with same-document outside
+move/up/selectstart while the exact field remains focused and eligible. Pointer
+continuations match the captured primary mouse pointer identity. This grants no
+outside click/down permission, pointer capture, timer or synthetic mouseup.
+Matching up, incompatible initiation, cancellation or lease revocation clears
+the private gesture.
+
+Unregister is idempotent; an old lease cannot revoke a newer one. Every successful
+`setInput`, including the same handler or `undefined`, revokes registration;
+invalid handler arguments preserve the existing route. Observed structural,
+type, Document/Location/URL, top-level or gate/router identity changes revoke
+permanently. Pagehide and ordinary reload also revoke. No observer detects
+detach/reattach entirely between checks. Cleanup drops retained field references
+without changing value, selection, focus, styles or gameplay held state.
+
+Event fencing and the optional editing group use fixed captured native
+operations with exact receivers. Window document/top/location and Location href
+use their selected own descriptors; there is no prototype search or mutable
+instance fallback. Visibility requires captured `checkVisibility` with
+`opacityProperty`, `visibilityProperty` and `contentVisibilityAuto` all true.
+Missing editing capabilities make registration unavailable while preserving
+legacy holds; missing critical Event fencing uses `gate-unavailable`. A native
+failure cancels/revokes, and the exact first thrown value survives secondary
+fence failures. A failed fence call proves only an attempt at isolation.
+
+These bounds are verified with authored Node doubles. Actual descriptors,
+visibility semantics, native propagation/defaults, IME, clipboard, selection,
+installed-host/CSP and server behavior remain unverified. Input notifications
+can be noncancelable or follow a mutation; fencing does not roll back a value.
+This slice implements no field binder, sanitizer, layout, focus or login UI.
+
+### Session composition
+
 Default state is `ready-not-connected`. The exported MAIN runtime exposes local
 `play(request)`, `playWithLiveProfile(request)`, `diagnostics()` and `dispose()`
 capabilities. External-profile Play requires
