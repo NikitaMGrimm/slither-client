@@ -40,11 +40,12 @@ access package sources. Release-plz remains dormant.
 
 ## Explicit game-page composition
 
-The composed extension sources pass 356 Node tests. A fresh Wasm build passes
+The composed extension sources pass 449 Node tests. A fresh Wasm build passes
 the full ABI smoke: 7,624 body assertions, 38 control cases, 252 stock/gameplay
-assertions across ten cases, and eight session scenarios. The native sources
+assertions across ten cases, eight session scenarios and 643 profile assertions
+across ten cases. The native sources
 are unchanged from the 434-test integration below. Both extension packages
-build with 37 files each and retain the exact generated module fingerprints.
+build with 38 files each and retain the exact generated module fingerprints.
 
 The real-Wasm gameplay fixture composes the actual session, input, controller,
 skin/entity adapters and renderer with authored sources and an in-memory socket.

@@ -168,7 +168,9 @@ Current document, intent and ready source commitments are rechecked during
 acquisition. Staged launch cannot advance or commit while acquisition is pending;
 rejection after staging cancels it before any socket can open. On success, the
 normal native reset and complete controller operation must still succeed before
-socket construction. Matching fetched bytes does not prove executed-page identity,
+socket construction. Acquisition-specific freshness checks end after that socket
+commit; ordinary controller source validation and pagehide cleanup continue.
+Matching fetched bytes does not prove executed-page identity,
 current asset compatibility or server acceptance.
 
 The gate retains its native Socket constructor in a once-claimed factory for the

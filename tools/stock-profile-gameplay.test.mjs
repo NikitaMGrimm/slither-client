@@ -171,6 +171,27 @@ test('actual acquirer success keeps stage locked through full resolution, then o
   assert.equal(h.counts.fetched, 1); h.gameplay.dispose(); assert.equal(h.sockets[0].closes, 1);
 });
 
+test('socket commit ends acquisition checks while connected frames and disposal retain session ownership', async () => {
+  let current = true;
+  const h = harness({ check: () => current });
+  await h.gameplay.playWithLiveProfile(request());
+  h.tick(8);
+  const checks = h.counts.checks;
+  const socket = h.sockets[0];
+  socket.open(); socket.message([54, 1]); socket.message([97]); h.flush(); h.setOwn(own());
+  assert.equal(h.gameplay.diagnostics().session.connected, true);
+  current = false;
+  h.tick(16); h.tick(24); h.flush();
+  assert.equal(h.gameplay.diagnostics().profilePhase, 'committed');
+  assert.equal(h.counts.checks, checks, 'established sessions do not revisit acquisition readiness');
+  assert.equal(h.gameplay.diagnostics().session.connected, true);
+  assert.equal(h.sockets.length, 1); assert.equal(socket.closes, 0);
+  await assert.rejects(h.gameplay.playWithLiveProfile(request()), e => e.code === 'already-attempted');
+  assert.equal(h.counts.fetched, 1);
+  h.gameplay.dispose(); h.gameplay.dispose();
+  assert.equal(socket.closes, 1); h.assertWiped();
+});
+
 test('pending frames have no side effects; duplicate/live/external calls cannot allocate another acquirer', async () => {
   const pending = defer(); const h = harness({ fetch: () => pending.promise });
   const operation = h.gameplay.playWithLiveProfile(request()); await h.reached.fetch.promise;

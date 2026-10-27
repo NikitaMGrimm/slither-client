@@ -242,7 +242,11 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
         }
         // Render, quality, step free AND held source release must all succeed first.
         session.commitControl();
-        nativeConnected = session.snapshot().connected;
+        const state = session.snapshot();
+        if (profilePhase === 'ready' && state.constructorAttempts > 0) {
+          profilePhase = 'committed'; profileIntent = undefined;
+        }
+        nativeConnected = state.connected;
         return result;
       });
     },
