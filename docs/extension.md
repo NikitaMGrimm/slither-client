@@ -244,6 +244,53 @@ installed-host/CSP and server behavior remain unverified. Input notifications
 can be noncancelable or follow a mutation; fencing does not roll back a value.
 This slice implements no field binder, sanitizer, layout, focus or login UI.
 
+#### Lease-bound input correction
+
+The existing three-field registration keeps its unregister-only result. An
+explicit four-field variant adds only a lease-bound input handler:
+
+```js
+native.registerNicknameEditField({schema: 1, element, parent,
+  inputPolicy: 'nickname-ascii-24'}); // frozen {unregister(), handleInput(event)}
+```
+
+Only that exact policy string is admitted; an omitted policy preserves the
+legacy shape, and an explicit unknown/undefined/null policy is rejected. This
+variant also requires separately captured own native `HTMLInputElement.prototype`
+value getter/setter operations. Their absence makes only the policy variant
+unavailable. No mutable instance accessor, alternate owner or coercion fallback
+is used, and registration never reads or edits an existing value.
+
+A trusted future owner must call `lease.handleInput(event)` synchronously inside
+the same gate-selected router, before the bootstrap's notification filter. No
+production registration or router hook is installed here. Stale leases are inert
+before argument inspection; a live handler requires that exact active delivery.
+Noninput deliveries perform no value work. Input is handled at most once per
+delivery; outside/deferred/wrong-event calls, duplicates and reentry fail and
+revoke. An event object may be used by a later separate delivery; no event history
+or nickname store is retained.
+
+For exact-field input, read the primitive native value once. Inspect at most its
+first 24 UTF-16 code units: preserve units `0x20..=0x7f`, replace each other unit
+with an ordinary space, and discard the tail. Preserve literal DEL, empty names,
+spaces, punctuation and digits. An astral pair becomes two spaces if both units
+are retained. Write through the captured native setter only when the result
+differs, at most once. Native getter materialization may still depend on the
+original string length; the 24-unit limit bounds local processing and output.
+
+Shared structural/document/router ownership is checked before the getter,
+before any setter and after it. Temporary default ineligibility does not add a
+focus/visibility/readonly guard to correction of an already-performed input.
+Composing input uses the same immediate rule. There is no selection save/restore,
+IME deferral, synthetic event, initialization/Play-time correction, name-admission
+policy, value export, extra scene/source/clock/send or gameplay key filtering.
+
+Failures preserve the exact first thrown value and clear the active delivery
+and operation references. Native effects already completed cannot be rolled
+back. Actual native descriptor, caret, undo, IME and selection consequences
+remain unverified; later production binding requires its own selected ownership
+and native-browser acceptance.
+
 ### Session composition
 
 Default state is `ready-not-connected`. The exported MAIN runtime exposes local

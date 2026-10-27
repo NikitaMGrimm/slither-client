@@ -31,7 +31,7 @@
   let revision = 0;
   let input;
   let routerGeneration = {}, lease, gesture, registering = false, routing = 0, deciding = false;
-  let ended = false, gateRecord;
+  let ended = false, gateRecord, delivery, sinking = 0;
   const apply = Reflect.apply, descriptor = Object.getOwnPropertyDescriptor;
   const ownKeys = Reflect.ownKeys, prototype = Object.getPrototypeOf, recordPrototype = Object.prototype;
   const freeze = Object.freeze;
@@ -73,6 +73,18 @@
     } catch { return; }
   }
   const editing = captureEditing();
+  function captureNicknameValue() {
+    try {
+      const value = descriptor(realm.HTMLInputElement.prototype, 'value');
+      const code = descriptor(String.prototype, 'charCodeAt')?.value;
+      const character = descriptor(String.prototype, 'charAt')?.value;
+      if (typeof value?.get !== 'function' || typeof value.set !== 'function'
+        || typeof code !== 'function' || typeof character !== 'function') return;
+      return freeze({ get: value.get, set: value.set, code, character });
+    } catch { return; }
+  }
+  // Value support is optional independently of the reviewed native-default group.
+  const nicknameValue = captureNicknameValue();
   function current(generation) {
     return !ended && claimed && input !== undefined && generation === routerGeneration
       && realm[slot] === gateRecord && editing.top(realm) === realm
@@ -100,6 +112,55 @@
       && editing.visible(value.element, { opacityProperty: true, visibilityProperty: true, contentVisibilityAuto: true }) === true
       && (!focused || editing.active(editing.initialDocument) === value.element);
   }
+  function handleNicknameInput(value, event) {
+    if (lease !== value) return;
+    const previous = value.operation;
+    if (previous) {
+      // A caught reentry must remain primary until the outer native operation unwinds.
+      if (!previous.failed) { previous.failed = true; previous.primary = new Error('Nickname input reentry'); }
+      revoke();
+      throw previous.primary;
+    }
+    const operation = { failed: false, primary: undefined };
+    value.operation = operation;
+    let active, original, corrected;
+    const check = () => {
+      if (operation.failed) throw operation.primary;
+      if (sinking !== 1 || delivery !== active || lease !== value || active.lease !== value || active.event !== event
+        || active.target !== value.element || !valid(value) || !current(value.generation) || lease !== value) {
+        throw new Error('Current nickname input delivery required');
+      }
+      if (operation.failed) throw operation.primary;
+    };
+    try {
+      active = delivery;
+      if (sinking !== 1 || !active || active.lease !== value || active.event !== event || value.generation !== routerGeneration) {
+        throw new Error('Current nickname input delivery required');
+      }
+      if (active.type !== 'input') return;
+      if (active.handled) throw new Error('Nickname input already handled');
+      active.handled = true;
+      check();
+      original = apply(nicknameValue.get, value.element, []);
+      if (typeof original !== 'string') throw new TypeError('Native nickname string required');
+      corrected = '';
+      for (let index = 0; index < original.length && index < 24; index++) {
+        const unit = apply(nicknameValue.code, original, [index]);
+        corrected += unit >= 32 && unit <= 127 ? apply(nicknameValue.character, original, [index]) : ' ';
+      }
+      check();
+      if (corrected !== original) apply(nicknameValue.set, value.element, [corrected]);
+      check();
+    } catch (error) {
+      if (!operation.failed) { operation.failed = true; operation.primary = error; }
+      if (lease === value) revoke();
+      throw operation.primary;
+    } finally {
+      value.operation = undefined;
+      active = original = corrected = event = undefined;
+      operation.primary = undefined;
+    }
+  }
   function registerNicknameEditField(record) {
     if (registering || routing) throw new Error('Nickname edit registration reentry');
     if (!editing) throw new Error('Native nickname editing unavailable');
@@ -111,7 +172,8 @@
       if (record === null || typeof record !== 'object'
         || ![recordPrototype, null].includes(prototype(record))) throw new TypeError('Closed nickname edit record required');
       const keys = ownKeys(record);
-      if (keys.length !== 3 || !['schema', 'element', 'parent'].every(name => keys.includes(name))) {
+      const policy = keys.length === 4 && keys.includes('inputPolicy');
+      if (keys.length !== (policy ? 4 : 3) || !['schema', 'element', 'parent'].every(name => keys.includes(name))) {
         throw new TypeError('Closed nickname edit record required');
       }
       const values = {};
@@ -121,9 +183,12 @@
         values[name] = field.value;
       }
       if (values.schema !== 1) throw new TypeError('Nickname edit schema required');
-      const next = { element: values.element, parent: values.parent, generation };
+      if (policy && values.inputPolicy !== 'nickname-ascii-24') throw new TypeError('Nickname input policy required');
+      if (policy && !nicknameValue) throw new Error('Native nickname input policy unavailable');
+      const next = { element: values.element, parent: values.parent, generation, operation: undefined };
       if (!structural(next) || !current(generation)) throw new Error('Current native text field required');
-      const result = freeze({ unregister() { if (lease === next) revoke(); } });
+      const result = freeze({ unregister() { if (lease === next) revoke(); },
+        ...(policy ? { handleInput(event) { return handleNicknameInput(next, event); } } : {}) });
       lease = next;
       return result;
     } finally { registering = false; }
@@ -378,6 +443,8 @@
       let allow = false, stopped = false, failed = false, primary;
       const failure = error => { if (!failed) { failed = true; primary = error; } revoke(); allow = false; };
       let entered = false, wasDeciding;
+      // Native fence operations can reenter before the nested dispatch is refused.
+      sinking++;
       try {
         const type = eventType(event), target = eventTarget(event);
         prevented(event); // Validate the captured native Event receiver, without clearing earlier cancellation.
@@ -399,7 +466,11 @@
         let result;
         // Editing capability failure must not swallow an original raw keyup/mouse record.
         if (originalTypes.includes(type) || !failed && attributed) {
-          try { result = router(event); } catch (error) { failure(error); }
+          try {
+            delivery = { event, lease: value, type, target, handled: false };
+            result = router(event);
+          } catch (error) { failure(error); }
+          finally { delivery = undefined; }
         }
         if (failed) return;
         if (candidate && result !== undefined) throw new TypeError('Nickname edit router must return undefined synchronously');
@@ -411,6 +482,7 @@
         if (entered) { routing--; deciding = wasDeciding; }
         if (!allow || failed) { try { prevent(event); } catch (error) { failure(error); } }
         if (!stopped) { try { stop(event); } catch (error) { failure(error); } }
+        sinking--;
         if (failed) throw primary;
       }
     };
