@@ -37,9 +37,16 @@ export async function activateGamePage(api, { now = Date.now, random = bytes => 
       js: ['game/link.js'], css: ['game/host.css'], runAt: 'document_start', world: 'ISOLATED', allFrames: false, persistAcrossSessions: false },
   ];
   const existing = await api.scripting.getRegisteredContentScripts({ ids: registration.map(entry => entry.id) });
+  // Returned registrations may omit defaults; persistence defaults to true, not our false.
+  const defaults = { allFrames: false, world: 'ISOLATED', runAt: 'document_idle', persistAcrossSessions: true };
   for (const entry of existing) {
     const expected = registration.find(value => value.id === entry.id);
-    if (!expected || Object.entries(expected).some(([key, value]) => JSON.stringify(entry[key]) !== JSON.stringify(value))) {
+    if (!expected || Object.entries(expected).some(([key, value]) => {
+      const actual = entry[key] === undefined ? defaults[key] : entry[key];
+      return key === 'matches'
+        ? JSON.stringify([...actual].sort()) !== JSON.stringify([...value].sort())
+        : JSON.stringify(actual) !== JSON.stringify(value);
+    })) {
       throw new Error('Existing game registration differs; reload the extension');
     }
   }
