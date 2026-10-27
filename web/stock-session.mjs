@@ -231,12 +231,14 @@ export function createStockSession({ wasm, createSocket, now, maxBufferedBytes =
       integer(profile.clientVersion, 65535, 'client version');
       if (profile.protocolVersion !== 19) throw new RangeError('Protocol 19 required');
       const password = copiedBytes(profile.password, 20, 'external profile');
-      const custom = copiedBytes(request.customSkin, undefined, 'custom skin');
-      if (custom.length > 255 || typeof request.nickname !== 'string' || !/^[ -~]{0,24}$/.test(request.nickname)) throw new TypeError('Invalid login fields');
-      integer(request.skin, 255, 'skin');
-      const endpoint = stockEndpoint(request.endpoint);
-      let login;
-      try { login = copiedBytes(wasm.encode_login(profile.clientVersion, password, request.nickname, request.skin, custom), undefined, 'encoded login'); }
+      let endpoint, login;
+      try {
+        const custom = copiedBytes(request.customSkin, undefined, 'custom skin');
+        if (custom.length > 255 || typeof request.nickname !== 'string' || !/^[ -~]{0,24}$/.test(request.nickname)) throw new TypeError('Invalid login fields');
+        integer(request.skin, 255, 'skin');
+        endpoint = stockEndpoint(request.endpoint);
+        login = copiedBytes(wasm.encode_login(profile.clientVersion, password, request.nickname, request.skin, custom), undefined, 'encoded login');
+      }
       finally { password.fill(0); }
       return guarded(() => {
         launch = { endpoint, login }; phase = 'opening';

@@ -134,6 +134,60 @@ test('profile and login validate before mutation, reject getters/truncation, cop
   assert.equal(JSON.stringify(h.session.snapshot()).includes('password'), false);
 });
 
+for (const [name, modify] of [
+  ['DEL nickname', r => { r.nickname = '\u007f'; }],
+  ['long nickname', r => { r.nickname = 'x'.repeat(25); }],
+  ['negative skin', r => { r.skin = -1; }],
+  ['large skin', r => { r.skin = 256; }],
+  ['wrong custom byte type', r => { r.customSkin = new Uint16Array(1); }],
+  ['long custom skin', r => { r.customSkin = new Uint8Array(256); }],
+  ['invalid endpoint', r => { r.endpoint = 'ws://example.invalid:1234/slither'; }],
+]) {
+  test(`session clears its owned password when rejecting ${name}`, () => {
+    const h = harness(), r = request(); modify(r);
+    const Native = globalThis.Uint8Array;
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'Uint8Array');
+    const copies = [];
+    // Authored observation only: preserve intrinsic brand/prototype while tracking
+    // the private session copy, which acquisition-capability tests cannot observe.
+    globalThis.Uint8Array = new Proxy(Native, { construct(target, args, newTarget) {
+      const value = Reflect.construct(target, args, newTarget);
+      if (value.length === 20) copies.push(value);
+      return value;
+    } });
+    try {
+      assert.throws(() => h.session.play(r));
+      assert.equal(copies.length, 1);
+      assert(copies.every(value => value.every(byte => byte === 0)), 'Every session password copy clears on rejection');
+      assert.deepEqual([...r.profile.password], Array.from({ length: 20 }, (_, i) => i + 1));
+      assert.equal(h.session.snapshot().phase, 'ready');
+      assert.deepEqual(h.session.pendingActions().actions, {});
+      assert.equal(h.sockets.length, 0);
+    } finally { Object.defineProperty(globalThis, 'Uint8Array', descriptor); h.session.close(); }
+  });
+}
+
+for (const failure of [new Error('Authored encoder failure'), undefined, null]) {
+  test(`session clears its password and preserves encoder failure ${String(failure)}`, () => {
+    const h = harness({ wasmChanges: { encode_login() { throw failure; } } }), r = request();
+    const Native = globalThis.Uint8Array;
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'Uint8Array');
+    const copies = [];
+    globalThis.Uint8Array = new Proxy(Native, { construct(target, args, newTarget) {
+      const value = Reflect.construct(target, args, newTarget);
+      if (value.length === 20) copies.push(value);
+      return value;
+    } });
+    try {
+      let threw = false, received;
+      try { h.session.play(r); } catch (error) { threw = true; received = error; }
+      assert.equal(threw, true); assert.equal(received, failure);
+      assert.equal(copies.length, 1); assert(copies[0].every(byte => byte === 0));
+      assert.equal(h.session.snapshot().phase, 'ready'); assert.equal(h.sockets.length, 0);
+    } finally { Object.defineProperty(globalThis, 'Uint8Array', descriptor); h.session.close(); }
+  });
+}
+
 test('exact untimed prefixes, closed challenge reply, then login in separate sends', () => {
   const h = harness(); h.start();
   assert.deepEqual(h.sockets[0].sent, [[1], [99, 0]]);
