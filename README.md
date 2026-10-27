@@ -126,6 +126,11 @@ CI checks native Rust on Linux and Windows and runs a real Wasm ABI smoke test
 on Linux. Release-plz remains dormant; ordinary pushes do not publish artifacts.
 See [releases](docs/releases.md) and the [roadmap](docs/roadmap.md).
 
+Build the [Chrome/Firefox extension packages](docs/extension.md) with
+`npm run build:web` followed by `npm run build:extension`. These package the
+current authored client and Wasm for local installation. Game-page replacement,
+complete host assets and end-to-end gameplay remain work in progress.
+
 ## Source and license
 
 Keep official client source, assets, credentials, and raw captures outside Git

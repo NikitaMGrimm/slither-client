@@ -81,3 +81,4 @@ jobs:
           echo "WASM_BINDGEN=$RUNNER_TEMP/wasm-bindgen/wasm-bindgen-0.2.129-x86_64-unknown-linux-musl/wasm-bindgen" >> "$GITHUB_ENV"
       - run: npm run build:web
       - run: node tools/wasm-smoke.mjs
+      - run: npm run build:extension

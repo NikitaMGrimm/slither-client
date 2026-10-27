@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add reproducible Chrome and Firefox extension packages containing the authored
+  client and Rust/Wasm bundle, with a packaged launcher and local installation
+  instructions. Game-page replacement and full host integration remain pending.
+
 - Add appearance-owned ordinary antenna chains with explicit draw-time random
   inputs, both bulb rotation modes, shared borrowed sources and both animated
   render paths. Preserve antenna cursor/alpha effects before standard death

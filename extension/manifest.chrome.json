@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "SlitherClient authored preview",
+  "version": "0.1.0",
+  "version_name": "0.1.0-alpha.0",
+  "description": "Offline authored Rust/Wasm client preview. Game-page replacement and gameplay integration remain pending.",
+  "action": {
+    "default_title": "Open SlitherClient authored preview",
+    "default_popup": "launcher.html"
+  },
+  "content_security_policy": {
+    "extension_pages": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"
+  }
+}
