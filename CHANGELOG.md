@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add optional bounded profile acquisition for an explicit trusted Play request
+  on canonical HTTPS, with captured native capabilities, full pinned-byte
+  verification, closed parsing and staged-launch cancellation. Keep external
+  profiles and offline tests independent; actual acquisition and gameplay remain
+  unverified.
+
 - Add explicit armed-reload game-page activation, MAIN-world source borrowing
   and authored session/input composition to both extension packages. Require
   successful paint commitments for generated sources and sample post-lifecycle

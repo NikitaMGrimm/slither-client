@@ -10,7 +10,8 @@ import { createStockGameplay } from './stock-gameplay.mjs';
 export async function startGamePage({ realm = globalThis, initialize = init, wasmApi = wasm } = {}) {
   const gate = realm[Symbol.for('slither.client.gate.v1')];
   if (!gate || gate.metadata().code !== 'held') throw new Error('Armed document-start gate required');
-  const native = gate.claim(gate.metadata().id);
+  const armed = gate.metadata(), document = realm.document, pageUrl = realm.location.href;
+  const native = gate.claim(armed.id);
   let scene, quality, controller, gameplay, held, frame, waiting, wakeWaiting, reload;
   let disposed = false;
   const listeners = [];
@@ -109,10 +110,20 @@ export async function startGamePage({ realm = globalThis, initialize = init, was
       palettes: initial.palettes, background: initial.background, ...backing });
     initial = undefined;
     // The captured context objects cannot silently switch while the scene retains their uses.
+    const isCurrentDocument = () => {
+      try {
+        const current = gate.metadata();
+        if (disposed || realm !== realm.top || realm.document !== document || realm.location.href !== pageUrl
+          || realm[Symbol.for('slither.client.gate.v1')] !== gate || current.schema !== armed.schema || current.id !== armed.id) return false;
+        captureReady();
+        return true;
+      } catch { return false; }
+    };
     gameplay = createStockGameplay({ scene, quality, controller, wasm: wasmApi,
       createSocket: native.createSocket, now: native.now, defer: native.queueMicrotask,
       setInterval: native.setInterval, clearInterval: native.clearInterval,
-      onStatus: report, onFatal: fail });
+      onStatus: report, onFatal: fail,
+      ...(native.liveProfile === undefined ? {} : { liveProfile: { capabilities: native.liveProfile, isCurrentDocument } }) });
     const tick = now => {
       frame = undefined;
       if (disposed) return;
@@ -130,6 +141,7 @@ export async function startGamePage({ realm = globalThis, initialize = init, was
         captureReady();
         return gameplay.play(request);
       },
+      playWithLiveProfile(request) { return gameplay.playWithLiveProfile(request); },
       dispose,
     });
   } catch (error) {

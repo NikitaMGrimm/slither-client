@@ -131,9 +131,11 @@ Build the [Chrome/Firefox extension packages](docs/extension.md) with
 `npm run build:web` followed by `npm run build:extension`. These package the
 current authored client and Wasm for local installation. Explicit activation
 holds the original scheduling/socket paths and binds authored presentation to
-existing ready source objects. The local session API requires an external
-profile and a selected endpoint; no Play UI or automatic connection is provided.
-Live host/CSP compatibility and end-to-end gameplay remain unverified.
+existing ready source objects. A trusted local caller can explicitly supply a
+profile or request bounded pinned profile acquisition on canonical HTTPS before
+Play, with a selected endpoint. Activation starts neither acquisition nor a game
+connection; a Play UI remains pending. Live host/CSP compatibility, actual profile
+acquisition and end-to-end gameplay remain unverified.
 
 ## Source and license
 

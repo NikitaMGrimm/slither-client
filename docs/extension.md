@@ -9,10 +9,11 @@ and prey adapters to the stock packet/update/draw controller, reporting
 `ready-not-connected` when its borrowed sources are ready.
 
 The local trusted runtime also composes the authored session and desktop input
-through the native pre-motion control seam. An explicit external profile and
-selected endpoint are required for Play; activation supplies neither. This is
-not playable-game acceptance. Profile acquisition, Play UI, HUD/minimap,
-unsupported appearances/modes, live host/CSP and server acceptance remain separate.
+through the native pre-motion control seam. Play requires a selected endpoint
+and either an explicit external profile or an explicit request for bounded
+pinned profile acquisition on canonical HTTPS. Activation supplies neither and
+starts no acquisition. A Play UI, HUD/minimap, unsupported appearances/modes,
+live acquisition/host/CSP and server acceptance remain separate.
 
 ## Build
 
@@ -37,8 +38,8 @@ The default produces both ignored directories:
 - `dist/extension/chrome`
 - `dist/extension/firefox`
 
-Each contains exactly 37 files: the original 17-file preview package plus the
-fixed game activation/gate/link/bootstrap/CSS, thirteen authored game modules and a
+Each contains exactly 38 files: the original 17-file preview package plus the
+fixed game activation/gate/link/bootstrap/CSS, fourteen authored game modules and a
 game-local generated JS/Wasm pair. Preview HTML/modules are copied unchanged
 under `scene/`; null simulator configuration disables its local connection.
 The game entry imports no synthetic resolver or fixture.
@@ -140,16 +141,35 @@ effects.
 ## Session and input boundary
 
 Default state is `ready-not-connected`. The exported MAIN runtime exposes local
-`play(request)`, `diagnostics()` and `dispose()` capabilities. Play requires
+`play(request)`, `playWithLiveProfile(request)`, `diagnostics()` and `dispose()`
+capabilities. External-profile Play requires
 `{endpoint,profile:{clientVersion,password,protocolVersion:19},nickname,skin,customSkin}`;
 the password is a caller-supplied 20-byte Uint8Array. Endpoint is one selected
 literal IP with explicit port and `/slither`, using ws/wss. No discovery, DNS
-selection, stored profile, defaults, source fetch, automatic Play or retry exists.
+selection, stored profile, defaults, automatic Play or retry exists.
 No credential, packet or socket command is accepted through the status bridge.
-The installed entry offers no Play UI or profile acquisition yet; this local API
-is for explicit trusted composition. An importing MAIN module can await exported
+The installed entry offers no Play UI yet; this local API is for explicit trusted
+composition. An importing MAIN module can await exported
 `gamePageRuntime`, the single auto-entry promise, to obtain this runtime without
 claiming the gate again; nothing is installed on `window` for this purpose.
+
+The separate asynchronous `playWithLiveProfile` path requests the exact pinned
+same-origin script only after explicit invocation in canonical, top-level, secure
+`https://slither.io`. Optional captured native capabilities are absent on HTTP,
+www or unsupported environments; the external-profile path remains available.
+The acquirer observes complete EOF and verifies exact length/SHA-256 before
+closed numeric parsing. Owned source/digest bytes clear before the synchronous
+private consumer stages Play, and its borrowed password clears afterward.
+No source or profile is returned, cached, logged or sent through the bridge.
+See [the runtime policy](provenance.md#explicit-play-profile-acquisition).
+
+There is at most one acquisition attempt per document, with no fallback or retry.
+Current document, intent and ready source commitments are rechecked during
+acquisition. Staged launch cannot advance or commit while acquisition is pending;
+rejection after staging cancels it before any socket can open. On success, the
+normal native reset and complete controller operation must still succeed before
+socket construction. Matching fetched bytes does not prove executed-page identity,
+current asset compatibility or server acceptance.
 
 The gate retains its native Socket constructor in a once-claimed factory for the
 authored session. Play validates/copies/encodes first and stages a reset without
@@ -221,6 +241,7 @@ Firefox [temporary loading](https://extensionworkshop.com/documentation/develop/
 is separate from [signed distribution](https://extensionworkshop.com/documentation/publish/signing-and-distribution-overview/).
 The numeric version stays `0.1.0` with Chrome's alpha display name. Firefox declares
 its Gecko ID and `authenticationInfo` transmission because explicit Play can send
-caller-supplied login data. There is no analytics or automatic credential acquisition.
+explicit login data, including an explicitly acquired profile. There is no analytics
+or startup credential acquisition.
 See [Mozilla's data-type declaration](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json/browser_specific_settings).
 Publication/release enablement remain separate actions.

@@ -50,6 +50,99 @@
     revision++;
     writes.set(canvas, { revision, ready, generated });
   }
+  function captureLiveProfile() {
+    // Optional preparation only. Missing profile APIs must not disable the
+    // reviewed external-profile path or any of its document ownership holds.
+    try {
+      if (url.origin !== 'https://slither.io' || realm.isSecureContext !== true) return;
+      const apply = Reflect.apply, freeze = Object.freeze;
+      const descriptor = Object.getOwnPropertyDescriptor, prototype = Object.getPrototypeOf;
+      const integer = Number.isSafeInteger, Invalid = TypeError;
+      const method = (object, name) => {
+        const value = object?.[name];
+        if (typeof value !== 'function') throw new Invalid('Optional native method unavailable');
+        return value;
+      };
+      const getter = (object, name) => {
+        const value = descriptor(object, name)?.get;
+        if (typeof value !== 'function') throw new Invalid('Optional native getter unavailable');
+        return value;
+      };
+      const fetch = method(realm, 'fetch');
+      const subtle = realm.crypto?.subtle, digest = method(subtle, 'digest');
+      const Bytes = realm.Uint8Array, Buffer = realm.ArrayBuffer, Abort = realm.AbortController;
+      if (typeof Bytes !== 'function' || typeof Buffer !== 'function' || typeof Abort !== 'function') return;
+      const typed = prototype(Bytes.prototype);
+      const brand = getter(typed, Symbol.toStringTag), length = getter(typed, 'length');
+      const buffer = getter(typed, 'buffer'), offset = getter(typed, 'byteOffset');
+      const bufferLength = getter(Buffer.prototype, 'byteLength'), isView = method(Buffer, 'isView');
+      const set = method(typed, 'set'), fill = method(typed, 'fill');
+      const then = method(realm.Promise?.prototype, 'then');
+      const signal = getter(Abort.prototype, 'signal'), abort = method(Abort.prototype, 'abort');
+      const response = realm.Response?.prototype;
+      const status = getter(response, 'status'), type = getter(response, 'type');
+      const responseUrl = getter(response, 'url'), redirected = getter(response, 'redirected'), body = getter(response, 'body');
+      const getReader = method(realm.ReadableStream?.prototype, 'getReader');
+      const reader = realm.ReadableStreamDefaultReader?.prototype;
+      const read = method(reader, 'read'), cancel = method(reader, 'cancel'), release = method(reader, 'releaseLock');
+      const environment = freeze({ origin: url.origin, topLevel: true, secureContext: true });
+      function byteLength(value) {
+        if (!apply(isView, Buffer, [value]) || apply(brand, value, []) !== 'Uint8Array') {
+          throw new Invalid('Ordinary Uint8Array required');
+        }
+        const backing = apply(buffer, value, []);
+        const capacity = apply(bufferLength, backing, []); // Reject SharedArrayBuffer/proxies.
+        const size = apply(length, value, []), start = apply(offset, value, []);
+        if (start > capacity || size > capacity - start) throw new Invalid('Invalid byte view');
+        return size;
+      }
+      const bytes = freeze({
+        allocate(size) {
+          if (!integer(size) || size < 0) throw new Invalid('Invalid byte allocation');
+          return new Bytes(size);
+        },
+        length: byteLength,
+        copy(target, source, start = 0) {
+          const targetSize = byteLength(target), sourceSize = byteLength(source);
+          if (!integer(start) || start < 0 || start > targetSize || sourceSize > targetSize - start) {
+            throw new Invalid('Invalid byte copy range');
+          }
+          apply(set, target, [source, start]);
+        },
+        clear(value) { byteLength(value); apply(fill, value, [0]); },
+      });
+      return freeze({
+        fetch(input, init) {
+          if (input !== 'https://slither.io/s/game1107249518.js') throw new Invalid('Unsupported profile route');
+          return apply(fetch, realm, [input, init]);
+        },
+        digest(algorithm, value) {
+          byteLength(value);
+          return apply(then, apply(digest, subtle, [algorithm, value]), [result => {
+            if (apply(bufferLength, result, []) !== 32) throw new Invalid('Invalid native digest size');
+            const owned = new Bytes(result);
+            if (byteLength(owned) !== 32) throw new Invalid('Invalid native digest view');
+            return owned;
+          }]);
+        },
+        createAbort() {
+          const controller = new Abort();
+          return freeze({ signal: apply(signal, controller, []), abort: () => apply(abort, controller, []) });
+        },
+        setTimeout: native.setTimeout, clearTimeout: native.clearTimeout, now: native.now,
+        environment: () => environment,
+        responseInfo(value) {
+          return freeze({ status: apply(status, value, []), type: apply(type, value, []),
+            url: apply(responseUrl, value, []), redirected: apply(redirected, value, []), body: apply(body, value, []) });
+        },
+        getReader: value => apply(getReader, value, []),
+        read: value => apply(read, value, []),
+        cancelReader: value => apply(cancel, value, []),
+        releaseReader: value => apply(release, value, []),
+        bytes,
+      });
+    } catch { return; }
+  }
   try {
     if (realm.document.readyState !== 'loading' || ownValue(realm, 'oef') !== undefined || ownValue(realm, 'ws')) {
       throw new Error('Document-start ownership missed');
@@ -57,6 +150,8 @@
     for (const name of ['requestAnimationFrame', 'cancelAnimationFrame', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'queueMicrotask']) native[name] = bind(name);
     native.now = realm.performance.now.bind(realm.performance);
     native.random = realm.Math.random.bind(realm.Math);
+    const liveProfile = captureLiveProfile();
+    if (liveProfile !== undefined) native.liveProfile = liveProfile;
     const storage = realm.localStorage;
     const getItem = realm.Storage?.prototype.getItem;
     if (!storage || typeof getItem !== 'function') throw new Error('Native storage reader unavailable');
