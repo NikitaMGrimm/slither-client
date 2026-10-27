@@ -16,10 +16,12 @@ use crate::{
         AnimatedClient, BodyPaintError, BodyPaintInput, BodyPaintPlan, BodyPaintQuality,
         BodyPaintView, BodyPaintVisual, CurveInput, CurveOutput, EyeLayoutInput, FoodImageCommand,
         FoodPaintInput, FoodPaintPlan, MAX_BODY_PAINT_COMMANDS, MAX_DRAW_SAMPLES,
-        MAX_RETAINED_SNAKES, PairedSideLayout, PreparedSnake, QualitySnapshot, SnakePresentation,
-        StandardEyeLayout, Turn, plan_food, plan_standard_body, sample_curve_with_heading,
+        MAX_RETAINED_SNAKES, PairedSideLayout, PreparedSnake, PreyEaterPose, PreyImageCommand,
+        PreyPaintInput, PreyPaintPlan, QualitySnapshot, SnakePresentation, StandardEyeLayout, Turn,
+        plan_food, plan_prey, plan_standard_body, sample_curve_with_heading,
     },
     presentation_browser::AnimationStep,
+    prey_browser::PreySources,
     protocol::ElapsedHeader,
     quality_browser::DesktopQuality,
     state::{Food, Point, Setup},
@@ -41,6 +43,51 @@ fn record<const N: usize>(fields: [(&str, JsValue); N]) -> Result<JsValue, JsVal
 
 fn serial(value: u64) -> JsValue {
     js_sys::BigInt::from(value).into()
+}
+
+fn elapsed_header_kind(present: bool) -> ElapsedHeader {
+    if present {
+        ElapsedHeader::TwoBytes
+    } else {
+        ElapsedHeader::Absent
+    }
+}
+
+fn registry_allowance(entries: usize, snapshots: usize) -> Result<(usize, usize), JsValue> {
+    let entries = 262_144_usize
+        .checked_sub(entries)
+        .ok_or_else(|| error("combined food/prey catalog budget exceeded"))?;
+    let snapshots = 524_288_usize
+        .checked_sub(snapshots)
+        .ok_or_else(|| error("combined food/prey source budget exceeded"))?;
+    Ok((entries, snapshots))
+}
+
+fn validate_registries(foods: &FoodSources, preys: &PreySources) -> Result<(), JsValue> {
+    let (entries, snapshots) = registry_allowance(preys.entry_count(), preys.len())?;
+    if foods.entry_count() > entries || foods.len() > snapshots {
+        return Err(error("combined food/prey registry budget exceeded"));
+    }
+    foods.validate_ready()?;
+    preys.validate_ready()?;
+    for (asset, object, revision) in preys.object_snapshots() {
+        foods.validate_shared(object, revision, asset.width, asset.height)?;
+    }
+    Ok(())
+}
+
+fn validate_scene_sources(
+    sources: &BorrowedSources,
+    foods: &FoodSources,
+    preys: &PreySources,
+    target: &HtmlCanvasElement,
+) -> Result<(), JsValue> {
+    validate_registries(foods, preys)?;
+    sources.validate(target)?;
+    foods.validate(target)?;
+    preys.validate(target)?;
+    sources.validate_food(foods)?;
+    sources.validate_prey(preys)
 }
 
 fn food_source_snapshot(source: crate::presentation::FoodSource) -> Result<JsValue, JsValue> {
@@ -193,6 +240,7 @@ fn draw_eyes(context: &CanvasRenderingContext2d, layout: StandardEyeLayout) -> R
 pub struct AnimatedScene {
     client: AnimatedClient,
     food_sources: FoodSources,
+    prey_sources: PreySources,
 }
 
 #[wasm_bindgen]
@@ -203,6 +251,7 @@ impl AnimatedScene {
         Ok(Self {
             client: AnimatedClient::new(start_ms).map_err(error)?,
             food_sources: FoodSources::default(),
+            prey_sources: PreySources::default(),
         })
     }
 
@@ -211,6 +260,7 @@ impl AnimatedScene {
     pub fn reset(&mut self) {
         self.client.reset();
         self.food_sources.clear();
+        self.prey_sources.clear();
     }
 
     /// Gate boundary updates only; setup activates this gate and reset clears it.
@@ -316,11 +366,70 @@ impl AnimatedScene {
                     Ok(paired_face(&metadata)?)
                 },
                 |spawn, zoom| -> Result<_, ResolveError> {
-                    Ok(sources.resolve(resolve_food, spawn, zoom)?)
+                    if self.prey_sources.len() == 0 {
+                        return Ok(sources.resolve(resolve_food, spawn, zoom)?);
+                    }
+                    let (catalog, snapshots) = registry_allowance(0, self.prey_sources.len())?;
+                    Ok(sources.resolve_limited(resolve_food, spawn, zoom, catalog, snapshots)?)
                 },
             )
             .map_err(|e| e.0)?;
         self.commit_client(prepared, sources)
+    }
+
+    /// Retain face, food and prey creation inputs in wire order. All packet
+    /// validation precedes callbacks; external callback effects cannot roll back.
+    pub fn apply_frame_with_all_factories(
+        &mut self,
+        bytes: &[u8],
+        elapsed_header: bool,
+        resolve_face: &js_sys::Function,
+        resolve_food: &js_sys::Function,
+        resolve_prey: &js_sys::Function,
+    ) -> Result<(), JsValue> {
+        let mut prepared = self.client.clone();
+        let foods = RefCell::new(self.food_sources.clone());
+        let preys = RefCell::new(self.prey_sources.clone());
+        prepared
+            .apply_frame_with_all_factories(
+                bytes,
+                elapsed_header_kind(elapsed_header),
+                |appearance| -> Result<_, ResolveError> {
+                    let metadata = resolve_face
+                        .call1(&JsValue::UNDEFINED, &appearance_request(appearance)?.into())?;
+                    Ok(paired_face(&metadata)?)
+                },
+                |spawn, zoom| -> Result<_, ResolveError> {
+                    let other = preys
+                        .try_borrow()
+                        .map_err(|_| error("prey registry already borrowed"))?;
+                    let (catalog, snapshots) =
+                        registry_allowance(other.entry_count(), other.len())?;
+                    Ok(foods
+                        .try_borrow_mut()
+                        .map_err(|_| error("food registry already borrowed"))?
+                        .resolve_limited(resolve_food, spawn, zoom, catalog, snapshots)?)
+                },
+                |spawn, zoom| -> Result<_, ResolveError> {
+                    let other = foods
+                        .try_borrow()
+                        .map_err(|_| error("food registry already borrowed"))?;
+                    if other.entry_count() == 0 && other.len() == 0 {
+                        return Ok(preys
+                            .try_borrow_mut()
+                            .map_err(|_| error("prey registry already borrowed"))?
+                            .resolve(resolve_prey, spawn, zoom)?);
+                    }
+                    let (catalog, snapshots) =
+                        registry_allowance(other.entry_count(), other.len())?;
+                    Ok(preys
+                        .try_borrow_mut()
+                        .map_err(|_| error("prey registry already borrowed"))?
+                        .resolve_limited(resolve_prey, spawn, zoom, catalog, snapshots)?)
+                },
+            )
+            .map_err(|e| e.0)?;
+        self.commit_all(prepared, foods.into_inner(), preys.into_inner())
     }
 
     /// Apply retained factories and submit each Setup draw in wire order.
@@ -348,6 +457,7 @@ impl AnimatedScene {
             elapsed_header,
             resolve_appearance,
             resolve_food,
+            None,
             target,
             [palette_0, palette_1, palette_2],
             background,
@@ -383,6 +493,80 @@ impl AnimatedScene {
             elapsed_header,
             resolve_appearance,
             resolve_food,
+            None,
+            target,
+            [palette_0, palette_1, palette_2],
+            background,
+            DrawSize::new(width, height)?,
+            DrawLane::Standard(resolve_recipe),
+            quality.applied(),
+        )
+    }
+
+    /// Apply all factories and draw every Setup using basic bodies and retained prey.
+    /// Plans share the ingress budgets; source and model commit follows submission.
+    #[allow(clippy::too_many_arguments)]
+    pub fn apply_frame_and_render_with_food_and_prey(
+        &mut self,
+        bytes: &[u8],
+        elapsed_header: bool,
+        resolve_appearance: &js_sys::Function,
+        resolve_food: &js_sys::Function,
+        resolve_prey: &js_sys::Function,
+        target: HtmlCanvasElement,
+        palette_0: HtmlCanvasElement,
+        palette_1: HtmlCanvasElement,
+        palette_2: HtmlCanvasElement,
+        background: HtmlImageElement,
+        width: f64,
+        height: f64,
+        detailed_style: bool,
+        resolve_draw_face: &js_sys::Function,
+        quality: &DesktopQuality,
+    ) -> Result<u32, JsValue> {
+        self.apply_and_render(
+            bytes,
+            elapsed_header,
+            resolve_appearance,
+            resolve_food,
+            Some(resolve_prey),
+            target,
+            [palette_0, palette_1, palette_2],
+            background,
+            DrawSize::new(width, height)?,
+            DrawLane::Basic {
+                detailed: detailed_style,
+                face: resolve_draw_face,
+            },
+            quality.applied(),
+        )
+    }
+
+    /// Standard-body counterpart including retained prey in every ordered Setup draw.
+    #[allow(clippy::too_many_arguments)]
+    pub fn apply_frame_and_render_standard_with_prey(
+        &mut self,
+        bytes: &[u8],
+        elapsed_header: bool,
+        resolve_appearance: &js_sys::Function,
+        resolve_food: &js_sys::Function,
+        resolve_prey: &js_sys::Function,
+        target: HtmlCanvasElement,
+        palette_0: HtmlCanvasElement,
+        palette_1: HtmlCanvasElement,
+        palette_2: HtmlCanvasElement,
+        background: HtmlImageElement,
+        width: f64,
+        height: f64,
+        resolve_recipe: &js_sys::Function,
+        quality: &DesktopQuality,
+    ) -> Result<u32, JsValue> {
+        self.apply_and_render(
+            bytes,
+            elapsed_header,
+            resolve_appearance,
+            resolve_food,
+            Some(resolve_prey),
             target,
             [palette_0, palette_1, palette_2],
             background,
@@ -448,6 +632,7 @@ impl AnimatedScene {
     pub fn advance(&mut self, now_ms: f64, lagging: bool) -> Result<AnimationStep, JsValue> {
         let inner = self.client.advance(now_ms, lagging).map_err(error)?;
         self.food_sources.retain(self.client.foods().foods());
+        self.prey_sources.retain(self.client.preys().preys());
         Ok(AnimationStep { inner })
     }
 
@@ -619,6 +804,83 @@ impl AnimatedScene {
             ("sourceCount", (self.food_sources.len() as f64).into()),
             ("bounds", bounds),
             ("foods", rows.into()),
+        ])
+    }
+
+    /// Copy prey scalars, retained identities and both Float32 correction rings.
+    /// Diagnostics borrow no source objects and advance no update or draw state.
+    pub fn prey_state(&self) -> Result<JsValue, JsValue> {
+        let rows = js_sys::Array::new();
+        for p in self.client.preys().snapshots() {
+            let sources = js_sys::Array::new();
+            sources.push(&food_source_snapshot(p.sources.body)?);
+            sources.push(&food_source_snapshot(p.sources.glow)?);
+            let indices = p
+                .sources
+                .indices
+                .into_iter()
+                .map(|v| JsValue::from_f64(v as f64))
+                .collect::<js_sys::Array>();
+            let counts = p
+                .sources
+                .family_counts
+                .into_iter()
+                .map(|v| JsValue::from_f64(v as f64))
+                .collect::<js_sys::Array>();
+            let samples = js_sys::Array::new();
+            for channel in p.corrections.samples() {
+                samples.push(&js_sys::Float32Array::from(channel.as_slice()));
+            }
+            let [offset_x, offset_y] = p.corrections.offset();
+            let direction = match p.direction {
+                crate::state::Direction::None => 0_u8,
+                crate::state::Direction::Decreasing => 1,
+                crate::state::Direction::Increasing => 2,
+            };
+            rows.push(&record([
+                ("instance", serial(p.instance.serial())),
+                ("id", p.id.into()),
+                ("x", p.position.x.into()),
+                ("y", p.position.y.into()),
+                ("sizeByte", p.size_byte.into()),
+                ("size", p.base_size.into()),
+                ("rawColor", p.raw_color.into()),
+                ("palette", p.palette.into()),
+                ("direction", direction.into()),
+                ("heading", p.heading.into()),
+                ("wantedHeading", p.wanted_heading.into()),
+                ("speedPer32ms", p.speed_per_32ms.into()),
+                ("scale", p.scale.into()),
+                ("fade", p.fade.into()),
+                ("glowPhase", p.glow_phase.into()),
+                ("glowRate", p.glow_rate.into()),
+                ("randomPhaseUnit", p.random_phase_unit.into()),
+                ("randomRateUnit", p.random_rate_unit.into()),
+                ("creationZoom", p.creation_zoom.into()),
+                ("eaten", p.eaten.into()),
+                ("progress", p.consumption_progress.into()),
+                (
+                    "eater",
+                    p.eater.map_or(JsValue::NULL, |t| serial(t.serial())),
+                ),
+                ("indices", indices.into()),
+                ("familyCounts", counts.into()),
+                ("sources", sources.into()),
+                ("offsetX", offset_x.into()),
+                ("offsetY", offset_y.into()),
+                ("index", (p.corrections.index() as f64).into()),
+                ("pending", p.corrections.pending().into()),
+                ("samples", samples.into()),
+                (
+                    "weights",
+                    js_sys::Float32Array::from(p.corrections.weights().as_slice()).into(),
+                ),
+            ])?);
+        }
+        record([
+            ("enabled", self.client.prey_enabled().into()),
+            ("sourceCount", (self.prey_sources.len() as f64).into()),
+            ("preys", rows.into()),
         ])
     }
 
@@ -956,6 +1218,7 @@ impl AnimatedScene {
         let plan = PlannedScene::build(
             &mut prepared,
             &self.food_sources,
+            &self.prey_sources,
             &mut sources,
             &target,
             context,
@@ -963,8 +1226,7 @@ impl AnimatedScene {
             quality.applied(),
             &mut budget,
         )?;
-        sources.validate(&target)?;
-        sources.validate_food(&self.food_sources)?;
+        validate_scene_sources(&sources, &self.food_sources, &self.prey_sources, &target)?;
         entry.validate_entry(&target)?;
         let frame = CanvasFrame::new(
             &target,
@@ -974,7 +1236,13 @@ impl AnimatedScene {
             plan.camera.y - context.center,
             plan.zoom,
         )?;
-        plan.submit(frame, &sprites, &sources, &self.food_sources)?;
+        plan.submit(
+            frame,
+            &sprites,
+            &sources,
+            &self.food_sources,
+            &self.prey_sources,
+        )?;
         self.client = prepared;
         Ok(())
     }
@@ -988,6 +1256,7 @@ impl AnimatedScene {
         elapsed_header: bool,
         resolve_appearance: &js_sys::Function,
         resolve_food: &js_sys::Function,
+        resolve_prey: Option<&js_sys::Function>,
         target: HtmlCanvasElement,
         sprites: [HtmlCanvasElement; 3],
         background: HtmlImageElement,
@@ -998,63 +1267,101 @@ impl AnimatedScene {
         let entry = DrawSize::entry(&target);
         let mut prepared = self.client.clone();
         let food_sources = RefCell::new(self.food_sources.clone());
+        let prey_sources = RefCell::new(self.prey_sources.clone());
         let mut sources = BorrowedSources::default();
         let mut plans = Vec::new();
         let mut budget = DrawBudget::default();
         let mut setup_budget = SetupDrawBudget::default();
-        prepared
-            .apply_frame_with_factories_and_setup(
+        let mut appearance = |appearance: &crate::state::Appearance| -> Result<_, ResolveError> {
+            let raw = resolve_appearance
+                .call1(&JsValue::UNDEFINED, &appearance_request(appearance)?.into())?;
+            Ok(paired_face(&raw)?)
+        };
+        let mut food_factory =
+            |spawn: &crate::state::FoodSpawnInput, zoom| -> Result<_, ResolveError> {
+                let other = prey_sources
+                    .try_borrow()
+                    .map_err(|_| error("prey registry already borrowed"))?;
+                let (catalog, snapshots) = registry_allowance(other.entry_count(), other.len())?;
+                Ok(food_sources
+                    .try_borrow_mut()
+                    .map_err(|_| error("food registry already borrowed"))?
+                    .resolve_limited(resolve_food, spawn, zoom, catalog, snapshots)?)
+            };
+        let mut prey_factory = |spawn: &crate::state::PreySpawnInput,
+                                zoom|
+         -> Result<_, ResolveError> {
+            let callback = resolve_prey.ok_or_else(|| error("prey factory resolver required"))?;
+            let other = food_sources
+                .try_borrow()
+                .map_err(|_| error("food registry already borrowed"))?;
+            let (catalog, snapshots) = registry_allowance(other.entry_count(), other.len())?;
+            Ok(prey_sources
+                .try_borrow_mut()
+                .map_err(|_| error("prey registry already borrowed"))?
+                .resolve_limited(callback, spawn, zoom, catalog, snapshots)?)
+        };
+        let mut on_setup =
+            |client: &mut AnimatedClient, setup: &Setup| -> Result<(), ResolveError> {
+                setup_budget.charge(size)?;
+                let context = SceneDrawContext::at_setup(client, size, Some(setup));
+                // Finish host callbacks before borrowing the food registry.
+                let paint = build_paint(
+                    client,
+                    &mut sources,
+                    &target,
+                    size,
+                    lane,
+                    applied,
+                    &mut budget,
+                )?;
+                let mut foods = food_sources
+                    .try_borrow_mut()
+                    .map_err(|_| error("food registry already borrowed"))?;
+                let mut preys = prey_sources
+                    .try_borrow_mut()
+                    .map_err(|_| error("prey registry already borrowed"))?;
+                let plan = PlannedScene::finish(
+                    client,
+                    &foods,
+                    &preys,
+                    &target,
+                    context,
+                    paint,
+                    applied,
+                    &mut budget,
+                )?;
+                if let Some(food) = &plan.food {
+                    foods.observe_draw_sources(food)?;
+                }
+                if let Some(prey) = &plan.prey {
+                    preys.observe_draw_sources(prey)?;
+                }
+                push(&mut plans, plan)?;
+                Ok(())
+            };
+        let header = elapsed_header_kind(elapsed_header);
+        if resolve_prey.is_some() {
+            prepared.apply_frame_with_all_factories_and_setup(
                 bytes,
-                if elapsed_header {
-                    ElapsedHeader::TwoBytes
-                } else {
-                    ElapsedHeader::Absent
-                },
-                |appearance| -> Result<_, ResolveError> {
-                    let raw = resolve_appearance
-                        .call1(&JsValue::UNDEFINED, &appearance_request(appearance)?.into())?;
-                    Ok(paired_face(&raw)?)
-                },
-                |spawn, zoom| -> Result<_, ResolveError> {
-                    Ok(food_sources
-                        .try_borrow_mut()
-                        .map_err(|_| error("food registry already borrowed"))?
-                        .resolve(resolve_food, spawn, zoom)?)
-                },
-                |client, setup| -> Result<(), ResolveError> {
-                    setup_budget.charge(size)?;
-                    let context = SceneDrawContext::at_setup(client, size, Some(setup));
-                    // Finish host callbacks before borrowing the food registry.
-                    let paint = build_paint(
-                        client,
-                        &mut sources,
-                        &target,
-                        size,
-                        lane,
-                        applied,
-                        &mut budget,
-                    )?;
-                    let mut foods = food_sources
-                        .try_borrow_mut()
-                        .map_err(|_| error("food registry already borrowed"))?;
-                    let plan = PlannedScene::finish(
-                        client,
-                        &foods,
-                        &target,
-                        context,
-                        paint,
-                        applied,
-                        &mut budget,
-                    )?;
-                    if let Some(food) = &plan.food {
-                        foods.observe_draw_sources(food)?;
-                    }
-                    push(&mut plans, plan)?;
-                    Ok(())
-                },
+                header,
+                &mut appearance,
+                &mut food_factory,
+                &mut prey_factory,
+                &mut on_setup,
             )
-            .map_err(|e| e.0)?;
+        } else {
+            prepared.apply_frame_with_factories_and_setup(
+                bytes,
+                header,
+                &mut appearance,
+                &mut food_factory,
+                &mut on_setup,
+            )
+        }
+        .map_err(|e| e.0)?;
         let foods = food_sources.into_inner();
+        let preys = prey_sources.into_inner();
         let count = plans.len() as u32;
         submit_plans(
             plans,
@@ -1064,8 +1371,9 @@ impl AnimatedScene {
             entry,
             &sources,
             &foods,
+            &preys,
         )?;
-        self.commit_client(prepared, foods)?;
+        self.commit_all(prepared, foods, preys)?;
         Ok(count)
     }
 
@@ -1092,6 +1400,7 @@ impl AnimatedScene {
         let plan = PlannedScene::build(
             &mut prepared,
             &self.food_sources,
+            &self.prey_sources,
             &mut sources,
             &target,
             context,
@@ -1109,6 +1418,7 @@ impl AnimatedScene {
             entry,
             &sources,
             &self.food_sources,
+            &self.prey_sources,
         )?;
         self.client = prepared;
         Ok(())
@@ -1117,12 +1427,23 @@ impl AnimatedScene {
     fn commit_client(
         &mut self,
         client: AnimatedClient,
-        mut sources: FoodSources,
+        sources: FoodSources,
     ) -> Result<(), JsValue> {
-        sources.validate_ready()?;
-        sources.retain(client.foods().foods());
+        self.commit_all(client, sources, self.prey_sources.clone())
+    }
+
+    fn commit_all(
+        &mut self,
+        client: AnimatedClient,
+        mut foods: FoodSources,
+        mut preys: PreySources,
+    ) -> Result<(), JsValue> {
+        validate_registries(&foods, &preys)?;
+        foods.retain(client.foods().foods());
+        preys.retain(client.preys().preys());
         self.client = client;
-        self.food_sources = sources;
+        self.food_sources = foods;
+        self.prey_sources = preys;
         Ok(())
     }
 
@@ -1138,7 +1459,7 @@ impl AnimatedScene {
         food_quality: Option<BodyPaintQuality>,
     ) -> Result<(), JsValue> {
         quality(quality_scale)?;
-        if self.client.food_enabled() && food_quality.is_none() {
+        if (self.client.food_enabled() || self.client.prey_enabled()) && food_quality.is_none() {
             return Err(error(
                 "retained food requires the basic renderer's applied-quality API",
             ));
@@ -1174,16 +1495,23 @@ impl AnimatedScene {
             .transpose()?
             .flatten();
         let fallback = fallback_food(&prepared, food.is_none())?;
+        let prey = prey_plan(
+            &self.prey_sources,
+            &prepared,
+            &target,
+            view(size, camera, zoom),
+            &mut budget,
+        )?;
         let plan = PlannedScene {
             context,
             camera,
             zoom,
             food,
+            prey,
             fallback,
             paint,
         };
-        sources.validate(&target)?;
-        sources.validate_food(&self.food_sources)?;
+        validate_scene_sources(&sources, &self.food_sources, &self.prey_sources, &target)?;
         size.validate_entry(&target)?;
         let frame = CanvasFrame::new(
             &target,
@@ -1193,7 +1521,13 @@ impl AnimatedScene {
             camera.y - context.center,
             zoom,
         )?;
-        plan.submit(frame, &sprites, &sources, &self.food_sources)?;
+        plan.submit(
+            frame,
+            &sprites,
+            &sources,
+            &self.food_sources,
+            &self.prey_sources,
+        )?;
         self.client = prepared;
         Ok(())
     }
@@ -1365,6 +1699,7 @@ struct PlannedScene {
     camera: Point,
     zoom: f64,
     food: Option<FoodPaintPlan>,
+    prey: Option<PreyPaintPlan>,
     fallback: Vec<Food>,
     paint: PlannedSnakePaint,
 }
@@ -1430,6 +1765,78 @@ fn submit_food(
     let result = commands
         .iter()
         .try_for_each(|command| sources.submit(context, command));
+    context.restore();
+    result
+}
+
+fn prey_plan(
+    sources: &PreySources,
+    prepared: &AnimatedClient,
+    target: &HtmlCanvasElement,
+    view: BodyPaintView,
+    budget: &mut DrawBudget,
+) -> Result<Option<PreyPaintPlan>, JsValue> {
+    if !prepared.prey_enabled() {
+        return Ok(None);
+    }
+    sources.validate(target)?;
+    let mut eaters = Vec::new();
+    for token in prepared.preys().referenced_eaters() {
+        if eaters.iter().any(|(prior, _)| *prior == token) {
+            continue;
+        }
+        let snake = prepared
+            .snake_object(token)
+            .ok_or_else(|| error("missing captured prey eater"))?;
+        let metrics = snake.metrics();
+        let offset = snake.head_corrections().offset();
+        push(
+            &mut eaters,
+            (
+                token,
+                PreyEaterPose {
+                    head: metrics.raw_head,
+                    head_offset: Point {
+                        x: offset[0],
+                        y: offset[1],
+                    },
+                    heading: metrics.heading,
+                    angle_offset: snake.angle_corrections().offset(),
+                },
+            ),
+        )?;
+    }
+    let plan = plan_prey(PreyPaintInput {
+        preys: prepared.preys().preys(),
+        eaters: &eaters,
+        view,
+        assets: &sources.assets()?,
+        target_handle: None,
+        early_entry_alpha: 1.,
+        late_entry_alpha: 1.,
+        command_limit: budget.images,
+    })
+    .map_err(error)?;
+    budget.images = budget
+        .images
+        .checked_sub(plan.counts.total())
+        .ok_or_else(|| error("scene image budget exceeded"))?;
+    Ok(Some(plan))
+}
+
+fn submit_prey(
+    sources: &PreySources,
+    context: &CanvasRenderingContext2d,
+    commands: &[PreyImageCommand],
+) -> Result<(), JsValue> {
+    context.save();
+    let result = (|| {
+        context.set_transform(1., 0., 0., 1., 0., 0.)?;
+        context.set_global_composite_operation("lighter")?;
+        commands
+            .iter()
+            .try_for_each(|command| sources.submit(context, command))
+    })();
     context.restore();
     result
 }
@@ -1763,10 +2170,9 @@ fn submit_plans(
     entry: DrawSize,
     sources: &BorrowedSources,
     foods: &FoodSources,
+    preys: &PreySources,
 ) -> Result<(), JsValue> {
-    sources.validate(target)?;
-    foods.validate(target)?;
-    sources.validate_food(foods)?;
+    validate_scene_sources(sources, foods, preys, target)?;
     entry.validate_entry(target)?;
     let mut frames = Vec::new();
     frames
@@ -1787,7 +2193,7 @@ fn submit_plans(
     }
     entry.validate_entry(target)?;
     for (plan, frame) in plans.into_iter().zip(frames) {
-        plan.submit(frame.begin(target)?, sprites, sources, foods)?;
+        plan.submit(frame.begin(target)?, sprites, sources, foods, preys)?;
     }
     Ok(())
 }
@@ -1797,6 +2203,7 @@ impl PlannedScene {
     fn build(
         prepared: &mut AnimatedClient,
         food_sources: &FoodSources,
+        prey_sources: &PreySources,
         sources: &mut BorrowedSources,
         target: &HtmlCanvasElement,
         context: SceneDrawContext,
@@ -1816,6 +2223,7 @@ impl PlannedScene {
         Self::finish(
             prepared,
             food_sources,
+            prey_sources,
             target,
             context,
             paint,
@@ -1824,9 +2232,11 @@ impl PlannedScene {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn finish(
         prepared: &AnimatedClient,
         food_sources: &FoodSources,
+        prey_sources: &PreySources,
         target: &HtmlCanvasElement,
         context: SceneDrawContext,
         paint: PlannedSnakePaint,
@@ -1847,11 +2257,19 @@ impl PlannedScene {
             budget,
         )?;
         let fallback = fallback_food(prepared, food.is_none())?;
+        let prey = prey_plan(
+            prey_sources,
+            prepared,
+            target,
+            view(context.size, camera, zoom),
+            budget,
+        )?;
         Ok(Self {
             context,
             camera,
             zoom,
             food,
+            prey,
             fallback,
             paint,
         })
@@ -1863,6 +2281,7 @@ impl PlannedScene {
         sprites: &[HtmlCanvasElement; 3],
         sources: &BorrowedSources,
         food_sources: &FoodSources,
+        prey_sources: &PreySources,
     ) -> Result<(), JsValue> {
         let context = frame.context();
         let camera = self.camera;
@@ -1890,6 +2309,9 @@ impl PlannedScene {
                     )?;
                 }
             }
+        }
+        if let Some(plan) = &self.prey {
+            submit_prey(prey_sources, context, &plan.early)?;
         }
         match self.paint {
             PlannedSnakePaint::Basic {
@@ -1978,6 +2400,9 @@ impl PlannedScene {
         }
         if let Some(plan) = &self.food {
             submit_food(food_sources, context, &plan.late)?;
+        }
+        if let Some(plan) = &self.prey {
+            submit_prey(prey_sources, context, &plan.late)?;
         }
         Ok(())
     }

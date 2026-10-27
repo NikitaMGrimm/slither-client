@@ -6,14 +6,14 @@ use super::{
     AnchorView, BodyPaintGeometry, BodyPaintSample, BodyPaintView, BoundaryRadius, CurveOutput,
     FollowCamera, FoodConsume, FoodCullBounds, FoodEaterPose, FoodError, FoodFactory, FoodSpawn,
     FoodWorld, FrameClock, FrameStep, MAX_CURVE_SAMPLES, PairedFaceGeometry, PairedSideGeometry,
-    PresentationError, SnakeMetrics, SnakeObjectToken, SnakePresentation, StandardEyeGeometry,
-    finite,
+    PresentationError, PreyError, PreyFactory, PreyWorld, SnakeMetrics, SnakeObjectToken,
+    SnakePresentation, StandardEyeGeometry, finite,
 };
 use crate::{
     protocol::ElapsedHeader,
     state::{
         Appearance, ClientState, FoodSpawnInput, FrameReport, MAX_SNAKES, MAX_TOTAL_BODY_POINTS,
-        Point, PresentationEvent, Setup, SnakeTarget, StateError,
+        Point, PresentationEvent, PreySpawnInput, Setup, SnakeTarget, StateError,
     },
 };
 
@@ -83,6 +83,12 @@ pub enum ClientPresentationError {
     FoodFactoryRequired,
     /// Food presentation must start before packets, or immediately after an explicit reset.
     FoodModeRequiresReset,
+    /// Prey creation, animation or captured eater invariants failed.
+    Prey(PreyError),
+    /// Enabled prey presentation requires metadata for every new appearance.
+    PreyFactoryRequired,
+    /// Prey factories must start before packets or immediately after reset.
+    PreyModeRequiresReset,
     /// The presentation world or prepared draw would exceed a retention/sample bound.
     Limit,
     /// Presentation requires an unimplemented mode-specific skin/color ordering.
@@ -95,9 +101,14 @@ impl fmt::Display for ClientPresentationError {
             Self::State(error) => error.fmt(f),
             Self::Presentation(error) => error.fmt(f),
             Self::Food(error) => error.fmt(f),
+            Self::Prey(error) => error.fmt(f),
             Self::FoodFactoryRequired => f.write_str("food creation requires a factory resolver"),
             Self::FoodModeRequiresReset => {
                 f.write_str("enable food presentation before packets or after reset")
+            }
+            Self::PreyFactoryRequired => f.write_str("prey creation requires a factory resolver"),
+            Self::PreyModeRequiresReset => {
+                f.write_str("enable prey presentation before packets or after reset")
             }
             Self::Limit => f.write_str("retained presentation capacity exceeded"),
             Self::UnsupportedMode(mode) => write!(f, "unsupported presentation mode {mode}"),
@@ -111,10 +122,13 @@ impl Error for ClientPresentationError {
             Self::State(error) => Some(error),
             Self::Presentation(error) => Some(error),
             Self::Food(error) => Some(error),
+            Self::Prey(error) => Some(error),
             Self::Limit
             | Self::UnsupportedMode(_)
             | Self::FoodFactoryRequired
-            | Self::FoodModeRequiresReset => None,
+            | Self::FoodModeRequiresReset
+            | Self::PreyFactoryRequired
+            | Self::PreyModeRequiresReset => None,
         }
     }
 }
@@ -137,6 +151,12 @@ impl From<FoodError> for ClientPresentationError {
     }
 }
 
+impl From<PreyError> for ClientPresentationError {
+    fn from(error: PreyError) -> Self {
+        Self::Prey(error)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct Entry {
     token: SnakeObjectToken,
@@ -147,6 +167,22 @@ struct Entry {
     own: bool,
     drawn: bool,
     snake: SnakePresentation,
+}
+
+impl Entry {
+    fn eater_pose(&self) -> FoodEaterPose {
+        let metrics = self.snake.metrics();
+        let offset = self.snake.head_corrections().offset();
+        FoodEaterPose {
+            head: metrics.raw_head,
+            head_offset: Point {
+                x: offset[0],
+                y: offset[1],
+            },
+            heading: metrics.heading,
+            angle_offset: self.snake.angle_corrections().offset(),
+        }
+    }
 }
 
 /// Bounded native animation world with transactional numeric draws. No sockets.
@@ -169,6 +205,8 @@ pub struct AnimatedClient {
     foods: FoodWorld,
     food_bounds: Option<FoodCullBounds>,
     food_enabled: bool,
+    preys: PreyWorld,
+    prey_enabled: bool,
     last_snake_serial: u64,
 }
 
@@ -198,6 +236,8 @@ impl AnimatedClient {
             foods: FoodWorld::new(),
             food_bounds: None,
             food_enabled: false,
+            preys: PreyWorld::new(),
+            prey_enabled: false,
             last_snake_serial: 0,
         })
     }
@@ -213,6 +253,7 @@ impl AnimatedClient {
         self.connected = false;
         self.entries.clear();
         self.foods.clear();
+        self.preys.clear();
     }
 
     fn reset_camera(&mut self) {
@@ -220,7 +261,11 @@ impl AnimatedClient {
     }
 
     fn retire_entries(&mut self) {
-        let referenced: BTreeSet<_> = self.foods.referenced_tokens().collect();
+        let referenced: BTreeSet<_> = self
+            .foods
+            .referenced_tokens()
+            .chain(self.preys.referenced_eaters())
+            .collect();
         self.entries
             .retain(|entry| entry.drawn || entry.own || referenced.contains(&entry.token));
     }
@@ -301,6 +346,8 @@ impl AnimatedClient {
             resolve,
             |_, _| Ok(None),
             false,
+            |_, _| Ok(None),
+            false,
             |_, _| Ok(()),
         )
     }
@@ -327,6 +374,8 @@ impl AnimatedClient {
             resolve_face,
             |spawn, zoom| resolve_food(spawn, zoom).map(Some),
             true,
+            |_, _| Ok(None),
+            false,
             |_, _| Ok(()),
         )
     }
@@ -354,23 +403,89 @@ impl AnimatedClient {
             resolve_face,
             |spawn, zoom| resolve_food(spawn, zoom).map(Some),
             true,
+            |_, _| Ok(None),
+            false,
             on_setup,
         )
     }
 
-    fn apply_frame_resolved<E, F, G, H>(
+    /// Retain food and prey factories in the same ordered packet transaction.
+    /// All wire validation precedes callbacks. Reset preserves mode enablement,
+    /// but clears instances and permits replacing caller-owned factory sources.
+    pub fn apply_frame_with_all_factories<E, F, G, P>(
+        &mut self,
+        bytes: &[u8],
+        header: ElapsedHeader,
+        resolve_face: F,
+        mut resolve_food: G,
+        mut resolve_prey: P,
+    ) -> Result<FrameReport, E>
+    where
+        E: From<ClientPresentationError>,
+        F: FnMut(&Appearance) -> Result<PairedFaceGeometry, E>,
+        G: FnMut(&FoodSpawnInput, f64) -> Result<FoodFactory, E>,
+        P: FnMut(&PreySpawnInput, f64) -> Result<PreyFactory, E>,
+    {
+        self.apply_frame_resolved(
+            bytes,
+            header,
+            resolve_face,
+            |spawn, zoom| resolve_food(spawn, zoom).map(Some),
+            true,
+            |spawn, zoom| resolve_prey(spawn, zoom).map(Some),
+            true,
+            |_, _| Ok(()),
+        )
+    }
+
+    /// Include every prey transition in event-time Setup draw planning.
+    #[cfg(any(target_arch = "wasm32", test))]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn apply_frame_with_all_factories_and_setup<E, F, G, P, H>(
+        &mut self,
+        bytes: &[u8],
+        header: ElapsedHeader,
+        resolve_face: F,
+        mut resolve_food: G,
+        mut resolve_prey: P,
+        on_setup: H,
+    ) -> Result<FrameReport, E>
+    where
+        E: From<ClientPresentationError>,
+        F: FnMut(&Appearance) -> Result<PairedFaceGeometry, E>,
+        G: FnMut(&FoodSpawnInput, f64) -> Result<FoodFactory, E>,
+        P: FnMut(&PreySpawnInput, f64) -> Result<PreyFactory, E>,
+        H: FnMut(&mut AnimatedClient, &Setup) -> Result<(), E>,
+    {
+        self.apply_frame_resolved(
+            bytes,
+            header,
+            resolve_face,
+            |spawn, zoom| resolve_food(spawn, zoom).map(Some),
+            true,
+            |spawn, zoom| resolve_prey(spawn, zoom).map(Some),
+            true,
+            on_setup,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn apply_frame_resolved<E, F, G, P, H>(
         &mut self,
         bytes: &[u8],
         header: ElapsedHeader,
         mut resolve: F,
         mut resolve_food: G,
         enable_food: bool,
+        mut resolve_prey: P,
+        enable_prey: bool,
         mut on_setup: H,
     ) -> Result<FrameReport, E>
     where
         E: From<ClientPresentationError>,
         F: FnMut(&Appearance) -> Result<PairedFaceGeometry, E>,
         G: FnMut(&FoodSpawnInput, f64) -> Result<Option<FoodFactory>, E>,
+        P: FnMut(&PreySpawnInput, f64) -> Result<Option<PreyFactory>, E>,
         H: FnMut(&mut AnimatedClient, &Setup) -> Result<(), E>,
     {
         let mut received = self.received.clone();
@@ -380,13 +495,18 @@ impl AnimatedClient {
         if enable_food && !self.food_enabled && self.received.frames_applied != 0 {
             return Err(ClientPresentationError::FoodModeRequiresReset.into());
         }
+        if enable_prey && !self.prey_enabled && self.received.frames_applied != 0 {
+            return Err(ClientPresentationError::PreyModeRequiresReset.into());
+        }
         if applied.events.is_empty() {
             self.received = received;
             self.food_enabled |= enable_food;
+            self.prey_enabled |= enable_prey;
             return Ok(applied.report);
         }
         let mut next = self.clone();
         next.food_enabled |= enable_food;
+        next.prey_enabled |= enable_prey;
         let mut setup = self.received.setup.clone();
         for event in applied.events {
             match event {
@@ -595,6 +715,33 @@ impl AnimatedClient {
                     next.foods.clear_sector(sector);
                     next.retire_entries();
                 }
+                PresentationEvent::PreySpawn(spawn) => {
+                    if let Some(factory) = resolve_prey(&spawn, next.camera.zoom())? {
+                        next.preys
+                            .spawn(spawn, factory.input(next.camera.zoom()))
+                            .map_err(ClientPresentationError::from)?;
+                    } else if next.prey_enabled {
+                        return Err(ClientPresentationError::PreyFactoryRequired.into());
+                    }
+                }
+                PresentationEvent::PreyMotion(motion) => {
+                    if next.prey_enabled {
+                        next.preys
+                            .motion(motion, next.clock.lag_multiplier)
+                            .map_err(ClientPresentationError::from)?;
+                    }
+                }
+                PresentationEvent::PreyRemoved { id } => {
+                    next.preys.remove(id);
+                    next.retire_entries();
+                }
+                PresentationEvent::PreyEaten { id, eater_id } => {
+                    if next.prey_enabled {
+                        let eater = next.lookup_index(eater_id).map(|i| next.entries[i].token);
+                        next.preys.consume(id, eater);
+                        next.retire_entries();
+                    }
+                }
             }
         }
         next.received = received;
@@ -620,23 +767,20 @@ impl AnimatedClient {
             }
         }
         let entries = &next.entries;
-        next.foods.advance(step, |token| {
-            let snake = &entries
+        let prey_turn_rate = next.received.setup.as_ref().map_or(0., |s| s.mamu2);
+        next.preys.advance(step, prey_turn_rate, |token| {
+            entries
                 .iter()
                 .find(|entry| entry.token == token)
-                .ok_or(FoodError::MissingEater(token))?
-                .snake;
-            let m = snake.metrics();
-            let offset = snake.head_corrections().offset();
-            Ok(FoodEaterPose {
-                head: m.raw_head,
-                head_offset: Point {
-                    x: offset[0],
-                    y: offset[1],
-                },
-                heading: m.heading,
-                angle_offset: snake.angle_corrections().offset(),
-            })
+                .map(Entry::eater_pose)
+                .ok_or(PreyError::MissingEater(token))
+        })?;
+        next.foods.advance(step, |token| {
+            entries
+                .iter()
+                .find(|entry| entry.token == token)
+                .map(Entry::eater_pose)
+                .ok_or(FoodError::MissingEater(token))
         })?;
         next.retire_entries();
         *self = next;
@@ -889,6 +1033,16 @@ impl AnimatedClient {
         self.food_enabled
     }
 
+    /// Insertion-ordered prey appearances, including active capture flights.
+    pub fn preys(&self) -> &PreyWorld {
+        &self.preys
+    }
+
+    /// Whether every prey appearance requires a retained creation factory.
+    pub fn prey_enabled(&self) -> bool {
+        self.prey_enabled
+    }
+
     /// Stable identity of the retained original own object.
     pub fn own_token(&self) -> Option<SnakeObjectToken> {
         self.entries
@@ -965,6 +1119,47 @@ mod resolved_draw_tests {
     use super::*;
     use crate::presentation::{BodyAsset, BodyAssetStatus, FoodSource, food_palette};
     use std::{cell::RefCell, rc::Rc};
+
+    #[test]
+    fn all_factories_setup_hook_is_ordered_and_rolls_back_enablement() {
+        let mut client = AnimatedClient::new(0.).unwrap();
+        let before = client.clone();
+        let bytes = bundle(&[setup(), setup()]);
+        let mut calls = 0;
+        let result = client
+            .apply_frame_with_all_factories_and_setup::<ClientPresentationError, _, _, _, _>(
+                &bytes,
+                ElapsedHeader::Absent,
+                |_| Ok(PairedFaceGeometry::default()),
+                |_, _| Err(ClientPresentationError::FoodFactoryRequired),
+                |_, _| Err(ClientPresentationError::PreyFactoryRequired),
+                |stage, _| {
+                    calls += 1;
+                    assert!(stage.prey_enabled());
+                    assert!(stage.food_enabled());
+                    if calls == 2 {
+                        Err(ClientPresentationError::Limit)
+                    } else {
+                        Ok(())
+                    }
+                },
+            );
+        assert_eq!(result, Err(ClientPresentationError::Limit));
+        assert_eq!(calls, 2);
+        assert_eq!(client, before);
+        client
+            .apply_frame_with_all_factories_and_setup::<ClientPresentationError, _, _, _, _>(
+                &bytes,
+                ElapsedHeader::Absent,
+                |_| Ok(PairedFaceGeometry::default()),
+                |_, _| Err(ClientPresentationError::FoodFactoryRequired),
+                |_, _| Err(ClientPresentationError::PreyFactoryRequired),
+                |_, _| Ok(()),
+            )
+            .unwrap();
+        assert!(client.prey_enabled());
+        assert_eq!(client.received.frames_applied, 1);
+    }
 
     // Original synthetic protocol-19 inputs; no external source or fixture.
     fn u24(v: u32) -> [u8; 3] {

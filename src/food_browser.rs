@@ -8,8 +8,8 @@ use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, HtmlImageElement};
 
 use crate::{
     presentation::{
-        BodyAsset, BodyAssetStatus, BodyBlend, FoodFactory, FoodImageCommand, FoodImageDraw,
-        FoodPresentation, FoodSource, MAX_RETAINED_FOODS, food_palette,
+        BodyAlpha, BodyAsset, BodyAssetStatus, BodyBlend, FoodFactory, FoodImageCommand,
+        FoodImageDraw, FoodPresentation, FoodSource, MAX_RETAINED_FOODS, food_palette,
     },
     state::FoodSpawnInput,
 };
@@ -20,11 +20,11 @@ const MAX_FAMILY: usize = 4096;
 const MAX_TRANSACTION_ENTRIES: usize = 262_144;
 const MAX_SNAPSHOTS: usize = 4 * MAX_RETAINED_FOODS + MAX_TRANSACTION_ENTRIES;
 
-fn error(message: impl std::fmt::Display) -> JsValue {
+pub(crate) fn error(message: impl std::fmt::Display) -> JsValue {
     JsValue::from_str(&message.to_string())
 }
 
-fn field(value: &JsValue, key: &str) -> Result<JsValue, JsValue> {
+pub(crate) fn field(value: &JsValue, key: &str) -> Result<JsValue, JsValue> {
     if !value.is_object() || value.is_null() {
         return Err(error("food metadata record required"));
     }
@@ -45,14 +45,14 @@ fn field(value: &JsValue, key: &str) -> Result<JsValue, JsValue> {
     Reflect::get(&descriptor, &JsValue::from_str("value"))
 }
 
-fn number(value: JsValue, min: f64, max: f64) -> Result<f64, JsValue> {
+pub(crate) fn number(value: JsValue, min: f64, max: f64) -> Result<f64, JsValue> {
     value
         .as_f64()
         .filter(|n| n.is_finite() && *n >= min && *n <= max)
         .ok_or_else(|| error("invalid food metadata number"))
 }
 
-fn integer(value: JsValue, min: usize, max: usize) -> Result<usize, JsValue> {
+pub(crate) fn integer(value: JsValue, min: usize, max: usize) -> Result<usize, JsValue> {
     let n = number(value, min as f64, max as f64)?;
     if n.fract() != 0. {
         return Err(error("food metadata integer required"));
@@ -66,7 +66,7 @@ fn text(value: JsValue) -> Result<String, JsValue> {
         .ok_or_else(|| error("food metadata string required"))
 }
 
-fn record(value: &JsValue) -> Result<(), JsValue> {
+pub(crate) fn record(value: &JsValue) -> Result<(), JsValue> {
     if !value.is_object() || value.is_null() || Array::is_array(value) {
         return Err(error("plain food metadata record required"));
     }
@@ -96,7 +96,7 @@ fn revision(value: JsValue) -> Result<JsValue, JsValue> {
 }
 
 // Define own data properties so inherited setters cannot consume request fields.
-fn set(object: &Object, key: &str, value: JsValue) -> Result<(), JsValue> {
+pub(crate) fn set(object: &Object, key: &str, value: JsValue) -> Result<(), JsValue> {
     let descriptor = Object::create(&JsValue::NULL.unchecked_into::<Object>());
     Reflect::set(&descriptor, &JsValue::from_str("value"), &value)?;
     Reflect::set(
@@ -257,6 +257,10 @@ impl FoodSources {
         self.sources.len()
     }
 
+    pub(crate) fn entry_count(&self) -> usize {
+        self.entries
+    }
+
     pub(crate) fn assets(&self) -> Result<Vec<BodyAsset>, JsValue> {
         let mut assets = Vec::new();
         assets
@@ -272,23 +276,38 @@ impl FoodSources {
         &mut self,
         plan: &crate::presentation::FoodPaintPlan,
     ) -> Result<(), JsValue> {
-        for command in plan.early.iter().chain(&plan.late) {
-            let source = self.lookup(command.source.asset())?;
-            let handle = command.source.asset().handle;
-            if self.observed.contains(&handle) {
+        self.observe_assets(
+            plan.early
+                .iter()
+                .chain(&plan.late)
+                .map(|c| c.source.asset()),
+        )
+    }
+
+    pub(crate) fn observe_assets(
+        &mut self,
+        assets: impl IntoIterator<Item = BodyAsset>,
+    ) -> Result<(), JsValue> {
+        let mut observed = self.observed.clone();
+        for asset in assets {
+            // Even a repeated handle must match its complete frozen descriptor.
+            let source = self.lookup(asset)?;
+            let handle = asset.handle;
+            if observed.contains(&handle) {
                 continue;
             }
             for prior in self
                 .sources
                 .iter()
-                .filter(|s| self.observed.contains(&s.asset.handle))
+                .filter(|s| observed.contains(&s.asset.handle))
             {
                 if Object::is(&source.object, &prior.object) && !source.coherent(prior) {
                     return Err(error("incoherent food source across planned draws"));
                 }
             }
-            self.observed.insert(handle);
+            observed.insert(handle);
         }
+        self.observed = observed;
         Ok(())
     }
 
@@ -316,6 +335,24 @@ impl FoodSources {
         event: &FoodSpawnInput,
         zoom: f64,
     ) -> Result<FoodFactory, JsValue> {
+        self.resolve_limited(
+            callback,
+            event,
+            zoom,
+            MAX_TRANSACTION_ENTRIES,
+            MAX_SNAPSHOTS,
+        )
+    }
+
+    /// Limits are permitted totals for this registry, after charging other pools.
+    pub(crate) fn resolve_limited(
+        &mut self,
+        callback: &Function,
+        event: &FoodSpawnInput,
+        zoom: f64,
+        catalog_limit: usize,
+        snapshot_limit: usize,
+    ) -> Result<FoodFactory, JsValue> {
         let raw = callback.call1(&JsValue::UNDEFINED, &request(event, zoom)?.into())?;
         record(&raw)?;
         let random_phase_unit = number(field(&raw, "randomPhaseUnit")?, 0., 1.)?;
@@ -330,27 +367,55 @@ impl FoodSources {
             return Err(error("food palette does not match raw color"));
         }
         let count = integer(field(&palette, "count")?, 1, MAX_FAMILY)?;
-        let entries = self
-            .entries
-            .checked_add(3 * count)
-            .filter(|n| *n <= MAX_TRANSACTION_ENTRIES)
+        let [bodies, outlines, glows] = self.register_families(
+            [
+                (field(&palette, "bodies")?, count),
+                (field(&palette, "outlines")?, count),
+                (field(&palette, "glows")?, count),
+            ],
+            catalog_limit.min(MAX_TRANSACTION_ENTRIES),
+            snapshot_limit.min(MAX_SNAPSHOTS),
+            false,
+        )?;
+        Ok(FoodFactory {
+            random_phase_unit,
+            random_wobble_unit,
+            palette: color,
+            image_count: count,
+            bodies,
+            outlines,
+            glows,
+        })
+    }
+
+    /// Share only raster entry registration; each caller owns its factory schema.
+    pub(crate) fn register_families<const N: usize>(
+        &mut self,
+        families: [(JsValue, usize); N],
+        catalog_limit: usize,
+        snapshot_limit: usize,
+        exact_lengths: bool,
+    ) -> Result<[Vec<FoodSource>; N], JsValue> {
+        let entries = families
+            .iter()
+            .try_fold(self.entries, |total, (_, count)| total.checked_add(*count))
+            .filter(|n| *n <= catalog_limit)
             .ok_or_else(|| error("food transaction catalog budget exceeded"))?;
+        if self.sources.len() > snapshot_limit {
+            return Err(error("food source snapshot budget exceeded"));
+        }
         let mut stage = Registration {
             registry: self,
             added: Vec::new(),
             observed: BTreeSet::new(),
             last_handle: self.last_handle,
             last_revision: self.last_revision,
+            snapshot_limit,
         };
-        let factory = FoodFactory {
-            random_phase_unit,
-            random_wobble_unit,
-            palette: color,
-            image_count: count,
-            bodies: stage.family(field(&palette, "bodies")?, count)?,
-            outlines: stage.family(field(&palette, "outlines")?, count)?,
-            glows: stage.family(field(&palette, "glows")?, count)?,
-        };
+        let mut result = std::array::from_fn(|_| Vec::new());
+        for ((value, count), family) in families.into_iter().zip(&mut result) {
+            *family = stage.family(value, count, exact_lengths)?;
+        }
         // A later callback or metadata proxy can mutate an earlier source.
         self.validate_ready()?;
         for source in &stage.added {
@@ -371,7 +436,7 @@ impl FoodSources {
         self.entries = entries;
         self.last_handle = last_handle;
         self.last_revision = last_revision;
-        Ok(factory)
+        Ok(result)
     }
 
     /// GC only after the complete disposable model succeeds and all staged refs
@@ -384,6 +449,10 @@ impl FoodSources {
                 [s.body, s.outline, s.inner, s.outer].map(|s| s.asset().handle)
             })
             .collect();
+        self.retain_handles(&selected);
+    }
+
+    pub(crate) fn retain_handles(&mut self, selected: &BTreeSet<u64>) {
         self.sources.retain(|s| selected.contains(&s.asset.handle));
         self.observed.clear();
         self.entries = 0;
@@ -394,19 +463,36 @@ impl FoodSources {
         context: &CanvasRenderingContext2d,
         command: &FoodImageCommand,
     ) -> Result<(), JsValue> {
-        let source = self.lookup(command.source.asset())?;
+        self.submit_image(
+            context,
+            command.source.asset(),
+            command.draw,
+            command.alpha,
+            command.blend,
+        )
+    }
+
+    pub(crate) fn submit_image(
+        &self,
+        context: &CanvasRenderingContext2d,
+        asset: BodyAsset,
+        draw: FoodImageDraw,
+        alpha: BodyAlpha,
+        blend: BodyBlend,
+    ) -> Result<(), JsValue> {
+        let source = self.lookup(asset)?;
         let target = context
             .canvas()
             .ok_or_else(|| error("food context has no target canvas"))?;
         source.validate(Some(&target))?;
         context.set_transform(1., 0., 0., 1., 0., 0.)?;
-        context.set_global_alpha(command.alpha.effective);
-        context.set_global_alpha(command.alpha.requested);
-        context.set_global_composite_operation(match command.blend {
+        context.set_global_alpha(alpha.effective);
+        context.set_global_alpha(alpha.requested);
+        context.set_global_composite_operation(match blend {
             BodyBlend::SourceOver => "source-over",
             BodyBlend::Lighter => "lighter",
         })?;
-        match (&source.raster, command.draw) {
+        match (&source.raster, draw) {
             (Raster::Canvas(c), FoodImageDraw::Whole { x, y }) => {
                 context.draw_image_with_html_canvas_element(c, x, y)
             }
@@ -443,15 +529,25 @@ struct Registration<'a> {
     observed: BTreeSet<u64>,
     last_handle: u64,
     last_revision: u64,
+    snapshot_limit: usize,
 }
 
 impl Registration<'_> {
-    fn family(&mut self, value: JsValue, count: usize) -> Result<Vec<FoodSource>, JsValue> {
+    fn family(
+        &mut self,
+        value: JsValue,
+        count: usize,
+        exact: bool,
+    ) -> Result<Vec<FoodSource>, JsValue> {
         if !Array::is_array(&value) {
             return Err(error("food source array required"));
         }
         // Extra tail entries are outside the selectable prefix and are not read.
-        integer(field(&value, "length")?, count, u32::MAX as usize)?;
+        integer(
+            field(&value, "length")?,
+            count,
+            if exact { count } else { u32::MAX as usize },
+        )?;
         let mut result = Vec::new();
         result
             .try_reserve_exact(count)
@@ -519,7 +615,14 @@ impl Registration<'_> {
             }
         }
         if snapshot.asset.handle == 0 {
-            if self.registry.sources.len() + self.added.len() >= MAX_SNAPSHOTS {
+            if self
+                .registry
+                .sources
+                .len()
+                .checked_add(self.added.len())
+                .and_then(|n| n.checked_add(1))
+                .is_none_or(|n| n > self.snapshot_limit)
+            {
                 return Err(error("food source snapshot budget exceeded"));
             }
             let handle = self

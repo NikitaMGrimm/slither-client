@@ -3,14 +3,19 @@
 //! This original presentation model reads transmitted anchors, not authoritative
 //! physics. Bodies are head-to-tail; coordinates are centered on setup's grid
 //! center. It does not extrapolate motion or reproduce body contraction. Unknown
-//! packet families (including prey, HUD, minimap and game-over) are counted and
-//! ignored without claiming to decode them.
+//! packet families (including HUD, minimap and game-over) are counted and
+//! ignored without claiming to decode them. Canonical prey packets emit ordered
+//! presentation inputs without retaining a received prey map.
 
 use crate::{
     math,
     protocol::{self, ElapsedHeader, ProtocolError},
 };
-use std::{collections::BTreeMap, f64::consts::TAU, fmt};
+use std::{
+    collections::BTreeMap,
+    f64::consts::{PI, TAU},
+    fmt,
+};
 
 /// Maximum simultaneously retained snakes.
 pub const MAX_SNAKES: usize = 256;
@@ -200,6 +205,46 @@ pub struct FoodSpawnInput {
     pub rapid: bool,
 }
 
+/// One prey appearance, before instance ownership or source selection.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PreySpawnInput {
+    /// Wire identifier, including zero and duplicates.
+    pub id: u16,
+    /// Absolute wire position, independent of centered received state.
+    pub absolute_position: Point,
+    /// Original size byte, including zero.
+    pub size_byte: u8,
+    /// Original size byte divided by five.
+    pub base_size: f64,
+    /// Raw palette byte, before modulo-nine selection.
+    pub raw_color: u8,
+    /// Active initial turn, unlike snake appearance direction metadata.
+    pub direction: Direction,
+    /// Transmitted heading, including its possible full-turn endpoint.
+    pub heading: f64,
+    /// Transmitted target heading.
+    pub wanted_heading: f64,
+    /// Exact wire speed scalar in its 32 ms unit.
+    pub speed_per_32ms: f64,
+}
+
+/// A prey reanchor with independently present motion fields.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PreyMotionInput {
+    /// Wire identifier of the newest matching retained appearance.
+    pub id: u16,
+    /// Absolute packet position before presentation correction.
+    pub absolute_position: Point,
+    /// Omission preserves the active turn.
+    pub direction: Option<Direction>,
+    /// Omission preserves the heading.
+    pub heading: Option<f64>,
+    /// Omission preserves the target heading.
+    pub wanted_heading: Option<f64>,
+    /// A present zero speed is distinct from omission.
+    pub speed_per_32ms: Option<f64>,
+}
+
 /// A validated presentation change in wire order, without advancing any clock.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PresentationEvent {
@@ -270,6 +315,22 @@ pub enum PresentationEvent {
     FoodSectorClear {
         /// Original sector coordinates.
         sector: (u8, u8),
+    },
+    /// Append a prey appearance without collapsing duplicate wire identifiers.
+    PreySpawn(PreySpawnInput),
+    /// Reanchor the newest retained matching prey.
+    PreyMotion(PreyMotionInput),
+    /// Remove the newest matching prey immediately.
+    PreyRemoved {
+        /// Wire identifier, even if absent from the presentation world.
+        id: u16,
+    },
+    /// Capture the newest matching prey using event-time eater lookup.
+    PreyEaten {
+        /// Prey wire identifier.
+        id: u16,
+        /// Explicit eater wire identifier, including zero.
+        eater_id: u16,
     },
 }
 
@@ -357,9 +418,11 @@ impl ClientState {
     /// Validate framing, then stage all supported decoding and changes atomically.
     ///
     /// Accepted world families: `s`, `g/n/G/N/=/+`, `e/E/3/4/5/d/7`,
-    /// `h/r`, `F/f/b/c/C/<`, `w`, and radius `z`; setup is `a`.
+    /// `h/r`, `F/f/b/c/C/<`, `w`, prey `j/y`, and radius `z`; setup is `a`.
     /// Unknown snake updates are validated then ignored. Unsupported families
     /// are opaque and counted even before setup. No clocks or simulation advance.
+    /// Prey accepts only canonical lengths and ASCII directions after setup;
+    /// these packets are supported even without a received prey map.
     pub fn apply_frame(
         &mut self,
         bytes: &[u8],
@@ -374,7 +437,8 @@ impl ClientState {
     /// Removal requests always emit, including unknown or already removed IDs,
     /// so retained presentation duplicates remain reachable. Every food creation,
     /// consume and sector clear emits directly in command/record order, including
-    /// unknown keys; other unknown explicit-ID updates emit no events. Compact own
+    /// unknown keys. Every canonical prey command emits, including unknown IDs and
+    /// duplicates; other unknown explicit-ID updates emit no events. Compact own
     /// commands retain `Own` targeting after received-state removal and setup. Elapsed
     /// headers never advance presentation here.
     /// Appearance direction metadata must be ASCII `0`, `1` or `2`; received-only
@@ -475,6 +539,8 @@ impl ClientState {
                 | b'C'
                 | b'<'
                 | b'w'
+                | b'j'
+                | b'y'
                 | b'z'
         ) {
             return Ok(false);
@@ -484,6 +550,16 @@ impl ClientState {
             b's' => self.appearance(p, &setup, events)?,
             b'g' | b'n' | b'G' | b'N' | b'=' | b'+' => self.anchor(p, &setup, events)?,
             b'e' | b'E' | b'3' | b'4' | b'5' | b'd' | b'7' => self.motion(p, events)?,
+            b'j' | b'y' => {
+                let event = if code == b'j' {
+                    PresentationEvent::PreyMotion(parse_prey_motion(p)?)
+                } else {
+                    parse_prey_lifecycle(p)?
+                };
+                if let Some(events) = events {
+                    events.push(event);
+                }
+            }
             b'h' | b'r' => {
                 require(
                     p,
@@ -982,6 +1058,74 @@ impl ClientState {
             Ok(())
         }
     }
+}
+
+fn parse_prey_lifecycle(p: &[u8]) -> Result<PresentationEvent, StateError> {
+    require(p, matches!(p.len(), 3 | 5 | 20))?;
+    let id = word(p, 1)?;
+    Ok(match p.len() {
+        3 => PresentationEvent::PreyRemoved { id },
+        5 => PresentationEvent::PreyEaten {
+            id,
+            eater_id: word(p, 3)?,
+        },
+        20 => PresentationEvent::PreySpawn(PreySpawnInput {
+            id,
+            absolute_position: Point {
+                x: f64::from(triple(p, 4)?) / 5.,
+                y: f64::from(triple(p, 7)?) / 5.,
+            },
+            size_byte: p[10],
+            base_size: f64::from(p[10]) / 5.,
+            raw_color: p[3],
+            direction: prey_direction(p, 11)?,
+            heading: prey_angle(p, 15)?,
+            wanted_heading: prey_angle(p, 12)?,
+            speed_per_32ms: f64::from(word(p, 18)?) / 1000.,
+        }),
+        _ => unreachable!(),
+    })
+}
+
+fn parse_prey_motion(p: &[u8]) -> Result<PreyMotionInput, StateError> {
+    let (direction_at, heading_at, wanted_at, speed_at) = match p.len() {
+        7 => (None, None, None, None),
+        9 => (None, None, None, Some(7)),
+        10 => (None, Some(7), None, None),
+        11 => (Some(7), None, Some(8), None),
+        12 => (None, Some(7), None, Some(10)),
+        13 => (Some(7), None, Some(8), Some(11)),
+        14 => (Some(7), Some(8), Some(11), None),
+        16 => (Some(7), Some(8), Some(11), Some(14)),
+        _ => return Err(StateError::InvalidPacket(p[0])),
+    };
+    Ok(PreyMotionInput {
+        id: word(p, 1)?,
+        absolute_position: Point {
+            x: 1. + f64::from(word(p, 3)?) * 3.,
+            y: 1. + f64::from(word(p, 5)?) * 3.,
+        },
+        direction: direction_at.map(|at| prey_direction(p, at)).transpose()?,
+        heading: heading_at.map(|at| prey_angle(p, at)).transpose()?,
+        wanted_heading: wanted_at.map(|at| prey_angle(p, at)).transpose()?,
+        speed_per_32ms: speed_at
+            .map(|at| word(p, at).map(|speed| f64::from(speed) / 1000.))
+            .transpose()?,
+    })
+}
+
+fn prey_direction(p: &[u8], at: usize) -> Result<Direction, StateError> {
+    match p[at] {
+        b'0' => Ok(Direction::None),
+        b'1' => Ok(Direction::Decreasing),
+        b'2' => Ok(Direction::Increasing),
+        _ => Err(StateError::InvalidPacket(p[0])),
+    }
+}
+
+fn prey_angle(p: &[u8], at: usize) -> Result<f64, StateError> {
+    // Keep the wire operation order and the inclusive full-turn endpoint.
+    Ok(f64::from(triple(p, at)?) * 2. * PI / 16_777_215.)
 }
 
 fn parse_setup(p: &[u8]) -> Result<Setup, StateError> {

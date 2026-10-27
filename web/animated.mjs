@@ -3,6 +3,7 @@ import { syntheticScene, syntheticStep } from './synthetic-scene.mjs';
 import { connectLoopback, loopbackEndpoint, sceneHeading } from './loopback-session.mjs';
 import { createSyntheticBodyResolver } from './synthetic-body.mjs';
 import { createSyntheticFoodResolver } from './synthetic-food.mjs';
+import { createSyntheticPreyResolver, syntheticPreyCommands } from './synthetic-prey.mjs';
 import { desktopBackingSize } from './desktop-layout.mjs';
 
 const control = id => document.querySelector(`#${id}`);
@@ -26,6 +27,7 @@ let lastReadout = -Infinity;
 let renderedCamera;
 let applyFrame;
 let foodRandomState;
+let preyRandomState;
 
 function setStatus(text) { control('status').textContent = text; }
 function updateControls() {
@@ -69,12 +71,13 @@ function reset() {
   animated.reset();
   quality.begin_skin_preview();
   foodRandomState = 0x5eed1;
+  preyRandomState = 0x7a3e1;
   animated.set_follows(control('follow').checked);
   animated.set_zoom(Number(control('zoom').value));
   anchorStep = 0;
   lastReadout = -Infinity;
   renderedCamera = undefined;
-  applyFrame(syntheticScene(Number(control('skin').value)), false);
+  applyFrame(syntheticScene(Number(control('skin').value), syntheticPreyCommands()), false);
   updateControls();
   setStatus('Synthetic geometry preview');
 }
@@ -118,6 +121,10 @@ async function start() {
     foodRandomState = (Math.imul(foodRandomState, 1664525) + 1013904223) >>> 0;
     return foodRandomState / 4294967296;
   });
+  const resolvePrey = createSyntheticPreyResolver(globalThis, () => {
+    preyRandomState = (Math.imul(preyRandomState, 1664525) + 1013904223) >>> 0;
+    return preyRandomState / 4294967296;
+  });
   const desiredSize = () => desktopBackingSize(window.innerWidth, window.innerHeight);
   function recordDraws(count) {
     renders += count;
@@ -138,9 +145,9 @@ async function start() {
   applyFrame = (bytes, header) => {
     const { width, height } = desiredSize();
     const count = mode === 'synthetic'
-      ? animated.apply_frame_and_render_standard(bytes, header, () => face, resolveFood,
+      ? animated.apply_frame_and_render_standard_with_prey(bytes, header, () => face, resolveFood, resolvePrey,
         target, ...palettes, background, width, height, resolveSynthetic, quality)
-      : animated.apply_frame_and_render_with_food(bytes, header, () => face, resolveFood,
+      : animated.apply_frame_and_render_with_food_and_prey(bytes, header, () => face, resolveFood, resolvePrey,
         target, ...palettes, background, width, height, false, resolveFace, quality);
     if (count !== 0) {
       recordDraws(count);
@@ -166,9 +173,11 @@ async function start() {
         lastReadout = nowMs;
         const count = (value, width) => String(value).padStart(width);
         const food = animated.food_state();
-        control('counts').textContent = `Snakes ${count(view.snakes, 3)}   Retained ${count(view.retainedSnakes, 3)}   Drawn ${count(view.drawnSnakes, 3)}\nFood ${count(food.foods.length, 5)}   Frames ${count(view.frames, 8)}   Ignored ${count(view.ignored, 8)}\nQuality ${qualityView.highQuality ? 'HQ' : 'LQ'}   Blend ${qualityView.qualityBlend.toFixed(4)}   Spacing ${qualityView.qualityScale.toFixed(5)}`;
+        const prey = animated.prey_state();
+        control('counts').textContent = `Snakes ${count(view.snakes, 3)}   Retained ${count(view.retainedSnakes, 3)}   Drawn ${count(view.drawnSnakes, 3)}\nFood ${count(food.foods.length, 5)}   Prey ${count(prey.preys.length, 4)}   Frames ${count(view.frames, 8)}   Ignored ${count(view.ignored, 8)}\nQuality ${qualityView.highQuality ? 'HQ' : 'LQ'}   Blend ${qualityView.qualityBlend.toFixed(4)}   Spacing ${qualityView.qualityScale.toFixed(5)}`;
         window.slitherAnimatedSceneReport = { ...view, retainedFoods: food.foods.length,
-          foodSources: food.sourceCount, quality: qualityView, wasmExecuted: true, renders, mode, connected: Boolean(connection) };
+          foodSources: food.sourceCount, retainedPreys: prey.preys.length, preySources: prey.sourceCount,
+          quality: qualityView, wasmExecuted: true, renders, mode, connected: Boolean(connection) };
       }
       pendingFrame = requestAnimationFrame(frame);
     } catch (error) { fail(error); }
@@ -203,6 +212,7 @@ async function start() {
         reset: () => {
           animated.reset();
           foodRandomState = 0x5eed1;
+          preyRandomState = 0x7a3e1;
           quality.begin_connection();
           animated.set_follows(control('follow').checked);
           animated.set_zoom(Number(control('zoom').value));

@@ -297,6 +297,21 @@ pub(crate) struct BorrowedSources {
 }
 
 impl BorrowedSources {
+    pub(crate) fn validate_prey(
+        &self,
+        preys: &crate::prey_browser::PreySources,
+    ) -> Result<(), JsValue> {
+        for source in &self.sources {
+            preys.validate_shared(
+                &source.object,
+                &source.revision,
+                source.width,
+                source.height,
+            )?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn validate_food(
         &self,
         foods: &crate::food_browser::FoodSources,

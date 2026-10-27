@@ -74,7 +74,7 @@ Open `http://127.0.0.1:18884/animated` for continuous prediction, corrected
 body sampling, standard paired eyes and arena-radius easing. Pointer motion
 controls visual gaze,
 including in the synthetic preview. The synthetic fixture uses original
-stand-ins with ordered body effects, retained food animation and adaptive quality.
+stand-ins with ordered body effects, retained food/prey animation and adaptive quality.
 Local simulator mode keeps its basic snake stand-ins and uses the same retained
 food path. Full skins, special faces and attachments remain pending.
 The received-anchor preview at `/` remains available for comparison.
@@ -98,6 +98,12 @@ preserves the existing world; explicit reset clears it on the retained timeline.
 Additive target-aware APIs also stage a draw at each ordered Setup. The animated
 page uses these calls and synchronous resize draws with desktop backing sizes;
 its contained demo layout does not implement the original login/HUD layout.
+
+The additive [prey factory API](docs/prey-presentation.md) retains independent
+appearances, position corrections, movement and captured eater objects. Both
+animated render paths place prey bodies and glows around snake drawing. The
+page uses three authored prey and original flat stand-ins; source artwork,
+loading equivalence and complete host adaptation remain separate.
 
 An additive [paired-face API](docs/standard-body-renderer.md#complete-ordinary-paired-faces)
 also retains optional geometric side images and composes the complete represented
