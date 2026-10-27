@@ -12,8 +12,9 @@ The local trusted runtime also composes the authored session and desktop input
 through the native pre-motion control seam. Play requires a selected endpoint
 and either an explicit external profile or an explicit request for bounded
 pinned profile acquisition on canonical HTTPS. Activation supplies neither and
-starts no acquisition. A Play UI, minimap, unsupported appearances/modes,
-live acquisition/host/CSP and server acceptance remain separate.
+starts no acquisition. The optional `owned-play` package adds explicit local
+controls described below. Minimap, unsupported appearances/modes, native Play
+interaction, live acquisition/host/CSP and server acceptance remain separate.
 
 ## Build
 
@@ -42,8 +43,8 @@ The default produces both ignored directories:
 - `dist/extension/chrome`
 - `dist/extension/firefox`
 
-Each contains exactly 46 files: the original preview package, fixed game
-activation/gate/link/bootstrap/runtime/owned-HUD-UI/CSS, eighteen authored game modules and a generated
+Each contains exactly 47 files: the original preview package, fixed game
+activation/gate/link/bootstrap/runtime/owned-HUD-UI/owned-Play-UI/CSS, eighteen authored game modules and a generated
 JS/Wasm/validator module graph for each renderer. Preview HTML/modules are copied unchanged
 under `scene/`; null simulator configuration disables its local connection.
 
@@ -56,8 +57,8 @@ node tools/build-extension.mjs --game-entry owned-hud --output-dir dist/extensio
 ```
 
 This entry starts one runtime with both `hudReadout` and `ownedHudUi` true.
-The default selection is `--game-entry default`; neither selection adds a
-runtime switch or second entry alias. Use a fresh output directory when
+The default selection is `--game-entry default`. The third selection below uses
+the same fixed entry path; none adds a runtime switch or second entry alias. Use a fresh output directory when
 changing selection.
 The game entry imports no synthetic resolver or fixture.
 
@@ -83,10 +84,48 @@ node tools/build-extension.mjs --output-dir dist/extension/candidate-2
 `--web-dir <trusted directory>` explicitly selects a different build pair; no
 search or fallback occurs. API:
 `buildExtension({ projectRoot?, webDir?, outputDir?, gameEntry? })` accepts exactly
-`default` or `owned-hud` for `gameEntry` and returns
+`default`, `owned-hud` or `owned-play` for `gameEntry` and returns
 `{ outputDir, files: [{ path, bytes, sha256 }] }` with sorted relative paths.
 Output stays under ignored `dist/extension`, separate from input. Input/output
 symlinks are rejected. See [provenance](provenance.md) and [releases](releases.md).
+
+## Explicit owned Play controls
+
+Select a fresh package directory:
+
+```sh
+node tools/build-extension.mjs --game-entry owned-play --output-dir dist/extension/owned-play
+```
+
+This entry enables the semantic HUD, owned HUD and owned Play panel in one
+claimed runtime. The address and nickname start empty. Enter a supported
+literal-IP `ws://` or `wss://` endpoint with an explicit port and `/slither`
+path, then click **Play**. There is no server discovery or preselected endpoint.
+Nickname input uses the existing 24-byte ASCII policy; the final proposal allows
+bytes `0x20..=0x7f`, including DEL, without trimming.
+
+The separate captured control lease permits native editing only for the exact
+owned address field. The nickname keeps its existing correction lease. Play
+requires the exact current enabled button, an uncancelled primary trusted click
+and the selected native trusted-event descriptor form. Unsupported descriptors
+refuse the action. The existing gate completes its delivery and fencing before
+it queues a private callback; the callback checks the same lease, document and
+idle owners again. No second event listener or public Play binding is added.
+
+Invalid local strings show fixed status text and leave correction available.
+An accepted proposal locks Play before invoking the existing bounded
+`playWithLiveProfile` path. Acquisition is supported only on canonical HTTPS
+with the complete captured profile capabilities; otherwise the panel is locked
+and reports unavailable. Activation alone starts no acquisition or socket.
+The accepted attempt has no automatic retry or unlock. Status contains fixed
+labels, never the address, nickname, profile values or error details.
+
+Disposal invalidates pending actions and late settlement, releases nickname and
+controls before removing their panel, and preserves the first failure even when
+cleanup also throws. Cleanup attempts do not certify successful native release.
+Synthetic full-module-graph tests cover these boundaries. Actual browser
+click/edit/default behavior, installed-host/CSP compatibility, profile HTTP and
+game/server acceptance remain unverified.
 
 ## Activation and ownership
 

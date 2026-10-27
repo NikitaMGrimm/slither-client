@@ -38,6 +38,7 @@ test('legacy native fixture retains eleven renderer operations without opting in
 
 test('CLI selects the explicit entry only by its exact closed package option', () => {
   assert.deepEqual(extensionArguments(['--game-entry', 'owned-hud']), { gameEntry: 'owned-hud' });
+  assert.deepEqual(extensionArguments(['--game-entry', 'owned-play']), { gameEntry: 'owned-play' });
 });
 
 test('factory graph evaluation is inert in armed and unarmed realms', async () => {
@@ -81,7 +82,7 @@ test('factory validates explicit dependencies and primitive options before any g
 test('unarmed actual entry graphs export undefined and keep initialization quiet', async () => {
   await runGameModuleTest(async ({ assert, createGraph }) => {
     const graph = createGraph({ armed: false });
-    for (const name of ['bootstrap.mjs', 'owned-entry.mjs']) {
+    for (const name of ['bootstrap.mjs', 'owned-entry.mjs', 'play-entry.mjs']) {
       const entry = await graph.load(name);
       assert.equal(entry.gamePageRuntime, undefined);
       assert.equal((await graph.load(name)).gamePageRuntime, undefined);
