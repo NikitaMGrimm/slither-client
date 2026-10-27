@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add an explicit lease-bound nickname input policy with captured native value
+  operations, exact UTF-16 replacement/prefix rules and conditional writes.
+  Production binding and native caret/undo/IME acceptance remain separate.
+
 - Add private opt-in native nickname-edit default permission for one exact text
   field while fencing original handlers and preserving raw gameplay input.
   Field binding and native-browser editing acceptance remain separate.

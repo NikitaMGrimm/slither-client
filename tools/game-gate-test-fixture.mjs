@@ -58,11 +58,31 @@ export function createGateTestDom() {
     }
     setAttribute() {}
   }
-  const inputs = new WeakSet();
+  const inputs = new WeakSet(), valueState = new WeakMap();
+  const inputValue = receiver => {
+    if (!inputs.has(receiver)) throw new TypeError('Synthetic Input value receiver');
+    return valueState.get(receiver);
+  };
   class Input extends Element {
-    constructor() { super('input'); inputs.add(this); }
+    constructor() {
+      super('input'); inputs.add(this);
+      valueState.set(this, { value: '', gets: 0, sets: 0, trace: [], getHook: undefined, setHook: undefined });
+    }
     get type() { if (!inputs.has(this)) throw new TypeError('Synthetic Input receiver'); return state(this).type; }
     get readOnly() { if (!inputs.has(this)) throw new TypeError('Synthetic Input receiver'); return state(this).readOnly; }
+    get value() {
+      const data = inputValue(this); data.gets++; data.trace.push(['get', this]);
+      data.getHook?.(this);
+      if (Object.hasOwn(data, 'getFailure')) throw data.getFailure;
+      return data.value;
+    }
+    set value(value) {
+      const data = inputValue(this); data.sets++; data.trace.push(['set', this, value]);
+      data.setHook?.(this, value);
+      if (Object.hasOwn(data, 'setFailure')) throw data.setFailure;
+      data.value = value;
+      data.afterSetHook?.(this, value);
+    }
   }
   const documents = new WeakSet();
   class Document extends Node {
@@ -132,7 +152,7 @@ export function createGateTestDom() {
   class Pointer extends Mouse { constructor(...args) { super(...args); eventBrands.get(Pointer).add(this); } }
   eventBrands.set(Pointer, new WeakSet());
   eventGetter(Pointer, 'pointerId', 1); eventGetter(Pointer, 'pointerType', 'mouse'); eventGetter(Pointer, 'isPrimary', true);
-  return { Node, Element, Input, Document, FenceEvent, Keyboard, InputEvent, Mouse, Pointer, state, eventData };
+  return { Node, Element, Input, Document, FenceEvent, Keyboard, InputEvent, Mouse, Pointer, state, eventData, inputValue };
 }
 
 export function attachGateTestRealm(dom, realm, document, actualRealm) {
