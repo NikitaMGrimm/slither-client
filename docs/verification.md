@@ -38,6 +38,24 @@ pull requests, and manual dispatch. Normal tests and CI require no external
 reference and do not connect to game servers. Dependency and toolchain setup may
 access package sources. Release-plz remains dormant.
 
+## Borrowed HUD packet decoders
+
+The decoder integration passes 469 native all-target tests, formatting,
+doctests, strict rustdoc and native/Wasm Clippy. Independent read-only review
+finds no supported actionable defect in its three-file behavioral slice. It
+passes 16 new HUD tests, seven existing protocol tests and three private probes,
+including deterministic arbitrary-byte and generated-row samples.
+
+A fresh web build passes the existing full ABI suite, including the 297
+score-state assertions, and both extension packages contain 38 files. This
+checks existing ABI behavior with the new native module present; the packet
+decoders have no Wasm export or HUD routing. All 85 JavaScript source paths
+match the earlier 449-test candidate; those Node results remain unchanged.
+
+These are authored native and Node/Wasm checks. They do not establish browser,
+text/HTML, pixel, server or complete HUD acceptance. See
+[the packet API](hud-packets.md).
+
 ## Opt-in retained-own score state
 
 The integrated opt-in slice passes 453 native all-target tests and 449 Node
