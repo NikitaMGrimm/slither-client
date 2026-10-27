@@ -106,7 +106,10 @@ fn spawn_uses_effective_heading_and_independently_wanted_gaze() {
         assert_eq!(snake.eyes().gaze_heading(), 4_000_000. * TAU / 16_777_215.);
         assert_eq!(snake.eyes().pupil(), Point::default());
         assert_eq!(snake.eyes().turn(), Turn::None);
-        assert_eq!(*snake.eye_geometry(), StandardEyeGeometry::default());
+        assert_eq!(
+            *snake.eye_geometry().unwrap(),
+            StandardEyeGeometry::default()
+        );
         if points >= 2 {
             assert_ne!(snake.eyes().heading(), c.received().snakes[&7].heading);
         }
@@ -459,7 +462,7 @@ fn prepared_outputs_keep_draw_order_duplicate_ids_and_culled_ordinal_gaps() {
         let snake = drawn[prepared.draw_ordinal];
         assert_eq!(prepared.metrics, snake.metrics());
         assert_eq!(prepared.pupil, snake.eyes().pupil());
-        assert_eq!(prepared.eye_geometry, *snake.eye_geometry());
+        assert_eq!(prepared.eye_geometry, snake.eye_geometry().copied());
         if let Some(curve) = prepared.curve {
             let m = prepared.metrics;
             let expected = sample_curve(CurveInput {

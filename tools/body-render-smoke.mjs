@@ -8,6 +8,7 @@ import { foodRenderSmoke } from './food-render-smoke.mjs';
 import { preyRenderSmoke } from './prey-render-smoke.mjs';
 import { arenaEdgeRenderSmoke, assertArenaEdge } from './arena-edge-render-smoke.mjs';
 import { antennaRenderSmoke } from './antenna-render-smoke.mjs';
+import { singleEyeRenderSmoke } from './single-eye-render-smoke.mjs';
 
 // Original synthetic sources and Canvas recorder. This executes the real Wasm
 // ABI, but models Canvas state; it is neither a browser nor a raster oracle.
@@ -155,6 +156,7 @@ export function bodyRenderSmoke(wasm) {
     preyRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok, rejects });
     arenaEdgeRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok, rejects });
     antennaRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok, rejects });
+    singleEyeRenderSmoke(wasm, { fixture, appearance, eq, ok, rejects });
     const style = { ...vanillaEyes(), distance: 9.25, separation: 4.75, radius: 4.25,
       pupilRadius: 1.5, pupilTravel: 0.02, outlineWidth: 2.5,
       eyeColor: 0x123456, pupilColor: 0xabcdef, eyeOpacity: 0.6, pupilOpacity: 0.8 };

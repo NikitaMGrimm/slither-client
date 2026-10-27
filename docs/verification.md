@@ -38,6 +38,25 @@ pull requests, and manual dispatch. Normal tests and CI require no external
 reference and do not connect to game servers. Dependency and toolchain setup may
 access package sources. Release-plz remains dormant.
 
+## Single image eye integration
+
+The additive face-family path passes 426 native all-target tests and 169 Node
+tests in a frozen feature snapshot, plus formatting, doctests, strict rustdoc
+and native/Wasm Clippy. A fresh Wasm build passes full ABI smoke with 7,542
+recorder assertions. The extended focused recorder passes 7,602 assertions,
+including exact signed-zero configuration rejection in both lanes.
+
+Checks cover unfactored two-image geometry, shared gaze updates, death-only alpha,
+both rendering lanes and size forms, legacy rejection before reset, explicit
+crops, source readiness, late-image rollback and ordered Setup source retention.
+Independent read-only review found no actionable defect in the frozen feature;
+its focused Wasm probes additionally cover mixed face families, source aliases,
+revision conflicts, callback mutations and Promise/accessor rejection.
+
+These are synthetic native/Wasm observations. Stock-browser pixels, original
+artwork/loading equivalence, original-runtime comparisons and complete host skin
+mapping remain separate. See [single image eyes](single-image-eye.md).
+
 ## Draw-driven ordinary antennas
 
 The opt-in ordinary-antenna implementation passes 407 native all-target tests,

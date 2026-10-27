@@ -227,6 +227,7 @@ fn face_ownership_survives_duplicate_death_reuse_and_short_preparation() {
         c.own_snake()
             .unwrap()
             .face_geometry()
+            .unwrap()
             .decoration
             .unwrap()
             .pivot_x
@@ -262,6 +263,7 @@ fn face_ownership_survives_duplicate_death_reuse_and_short_preparation() {
         c.own_snake()
             .unwrap()
             .face_geometry()
+            .unwrap()
             .decoration
             .unwrap()
             .same_bits(&signed)

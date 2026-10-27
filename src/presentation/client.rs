@@ -5,8 +5,8 @@ use std::{collections::BTreeSet, error::Error, fmt};
 use super::{
     AnchorView, AntennaCullBounds, AntennaDrawInput, AntennaError, AntennaSnapshot, AntennaState,
     ArenaEdgeView, BodyPaintGeometry, BodyPaintSample, BodyPaintView, BoundaryRadius, CurveOutput,
-    FollowCamera, FoodConsume, FoodCullBounds, FoodEaterPose, FoodError, FoodFactory, FoodSpawn,
-    FoodWorld, FrameClock, FrameStep, MAX_CURVE_SAMPLES, OrdinaryAntennaGeometry,
+    FaceGeometry, FollowCamera, FoodConsume, FoodCullBounds, FoodEaterPose, FoodError, FoodFactory,
+    FoodSpawn, FoodWorld, FrameClock, FrameStep, MAX_CURVE_SAMPLES, OrdinaryAntennaGeometry,
     PairedFaceGeometry, PairedSideGeometry, PreparedAntenna, PresentationError, PreyError,
     PreyFactory, PreyWorld, SnakeMetrics, SnakeObjectToken, SnakePresentation, StandardEyeGeometry,
     finite,
@@ -33,6 +33,24 @@ pub struct AppearancePresentation {
     pub face: PairedFaceGeometry,
     /// Explicit ordinary antenna configuration, independent of wire skin identifiers.
     pub antenna: Option<OrdinaryAntennaGeometry>,
+}
+
+/// Complete numeric face family and antenna, owned by one retained appearance.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FacePresentation {
+    /// Authoritative face family; image sources are borrowed only during a draw.
+    pub face: FaceGeometry,
+    /// Ordinary antenna geometry on the same stable appearance object.
+    pub antenna: Option<OrdinaryAntennaGeometry>,
+}
+
+impl From<AppearancePresentation> for FacePresentation {
+    fn from(value: AppearancePresentation) -> Self {
+        Self {
+            face: FaceGeometry::Paired(value.face),
+            antenna: value.antenna,
+        }
+    }
 }
 
 /// Identity and consumption of one eligible appearance's draw-time random request.
@@ -163,8 +181,10 @@ pub struct PreparedSnake {
     pub face_heading: f64,
     /// World-axis pupil displacement, before entity scale and zoom.
     pub pupil: Point,
-    /// Caller-ready standard paired-eye geometry and style.
-    pub eye_geometry: StandardEyeGeometry,
+    /// Authoritative family captured with this draw's heading and pupil state.
+    pub face_geometry: FaceGeometry,
+    /// Paired-only metadata; absent for image eyes rather than a substitute style.
+    pub eye_geometry: Option<StandardEyeGeometry>,
     /// Appearance-owned side-image geometry; assets are borrowed only during submission.
     pub face_decoration: Option<PairedSideGeometry>,
     /// Exact appearance configuration, retained even when its inner gate rejects.
@@ -184,6 +204,12 @@ pub enum ClientPresentationError {
     AppearanceResolverRequired,
     /// A configured drawn antenna requires an explicit draw-time random capability.
     AntennaRandomRequired,
+    /// Generalized face ownership must start before packets or after reset.
+    FacePresentationModeRequiresReset,
+    /// Generalized ownership requires its full resolver for new appearances.
+    FacePresentationResolverRequired,
+    /// A visible single-image face requires an explicit capable draw path.
+    FacePresentationRequired,
     /// Packet framing, validation, received-state policy, or received-state capacity failed.
     State(StateError),
     /// A presentation input or arithmetic result is invalid.
@@ -219,6 +245,15 @@ impl fmt::Display for ClientPresentationError {
             Self::AntennaRandomRequired => {
                 f.write_str("antenna drawing requires an explicit random capability")
             }
+            Self::FacePresentationModeRequiresReset => {
+                f.write_str("enable face presentation before packets or after reset")
+            }
+            Self::FacePresentationResolverRequired => {
+                f.write_str("appearance creation requires a face presentation resolver")
+            }
+            Self::FacePresentationRequired => {
+                f.write_str("single-image face requires an explicit face draw capability")
+            }
             Self::State(error) => error.fmt(f),
             Self::Presentation(error) => error.fmt(f),
             Self::Food(error) => error.fmt(f),
@@ -249,6 +284,9 @@ impl Error for ClientPresentationError {
             | Self::AppearanceModeRequiresReset
             | Self::AppearanceResolverRequired
             | Self::AntennaRandomRequired
+            | Self::FacePresentationModeRequiresReset
+            | Self::FacePresentationResolverRequired
+            | Self::FacePresentationRequired
             | Self::UnsupportedMode(_)
             | Self::FoodFactoryRequired
             | Self::FoodModeRequiresReset
@@ -342,6 +380,7 @@ pub struct AnimatedClient {
     prey_enabled: bool,
     last_snake_serial: u64,
     appearance_enabled: bool,
+    face_presentation_enabled: bool,
     antenna_bounds: Option<AntennaCullBounds>,
     draw_serial: u64,
 }
@@ -377,6 +416,7 @@ impl AnimatedClient {
             prey_enabled: false,
             last_snake_serial: 0,
             appearance_enabled: false,
+            face_presentation_enabled: false,
             antenna_bounds: None,
             draw_serial: 0,
         })
@@ -750,6 +790,150 @@ impl AnimatedClient {
         )
     }
 
+    /// Resolve complete appearance metadata once in wire order, before its first update.
+    /// Start before packets or after reset; enabled sessions require this resolver
+    /// for later appearances. Callback effects remain external to model rollback.
+    pub fn apply_frame_with_face_presentation<E, F>(
+        &mut self,
+        bytes: &[u8],
+        header: ElapsedHeader,
+        resolve: F,
+    ) -> Result<FrameReport, E>
+    where
+        E: From<ClientPresentationError>,
+        F: FnMut(&Appearance) -> Result<FacePresentation, E>,
+    {
+        self.apply_frame_face_resolved(
+            bytes,
+            header,
+            resolve,
+            true,
+            true,
+            |_, _| Ok(None),
+            false,
+            |_, _| Ok(None),
+            false,
+            |_, _| Ok(()),
+        )
+    }
+
+    /// Install full appearances and food factories in the same atomic event transaction.
+    pub fn apply_frame_with_face_presentation_and_factories<E, F, G>(
+        &mut self,
+        bytes: &[u8],
+        header: ElapsedHeader,
+        resolve: F,
+        mut resolve_food: G,
+    ) -> Result<FrameReport, E>
+    where
+        E: From<ClientPresentationError>,
+        F: FnMut(&Appearance) -> Result<FacePresentation, E>,
+        G: FnMut(&FoodSpawnInput, f64) -> Result<FoodFactory, E>,
+    {
+        self.apply_frame_face_resolved(
+            bytes,
+            header,
+            resolve,
+            true,
+            true,
+            |spawn, zoom| resolve_food(spawn, zoom).map(Some),
+            true,
+            |_, _| Ok(None),
+            false,
+            |_, _| Ok(()),
+        )
+    }
+
+    /// Install full appearances and both creation factories in wire order.
+    pub fn apply_frame_with_face_presentation_and_all_factories<E, F, G, P>(
+        &mut self,
+        bytes: &[u8],
+        header: ElapsedHeader,
+        resolve: F,
+        mut resolve_food: G,
+        mut resolve_prey: P,
+    ) -> Result<FrameReport, E>
+    where
+        E: From<ClientPresentationError>,
+        F: FnMut(&Appearance) -> Result<FacePresentation, E>,
+        G: FnMut(&FoodSpawnInput, f64) -> Result<FoodFactory, E>,
+        P: FnMut(&PreySpawnInput, f64) -> Result<PreyFactory, E>,
+    {
+        self.apply_frame_face_resolved(
+            bytes,
+            header,
+            resolve,
+            true,
+            true,
+            |spawn, zoom| resolve_food(spawn, zoom).map(Some),
+            true,
+            |spawn, zoom| resolve_prey(spawn, zoom).map(Some),
+            true,
+            |_, _| Ok(()),
+        )
+    }
+
+    /// Plan event-time Setup draws with full appearances and food factories.
+    pub fn apply_frame_with_face_presentation_and_factories_and_setup<E, F, G, H>(
+        &mut self,
+        bytes: &[u8],
+        header: ElapsedHeader,
+        resolve: F,
+        mut resolve_food: G,
+        on_setup: H,
+    ) -> Result<FrameReport, E>
+    where
+        E: From<ClientPresentationError>,
+        F: FnMut(&Appearance) -> Result<FacePresentation, E>,
+        G: FnMut(&FoodSpawnInput, f64) -> Result<FoodFactory, E>,
+        H: FnMut(&mut AnimatedClient, &Setup) -> Result<(), E>,
+    {
+        self.apply_frame_face_resolved(
+            bytes,
+            header,
+            resolve,
+            true,
+            true,
+            |spawn, zoom| resolve_food(spawn, zoom).map(Some),
+            true,
+            |_, _| Ok(None),
+            false,
+            on_setup,
+        )
+    }
+
+    /// Plan every ordered Setup with the complete appearance, food and prey transaction.
+    #[allow(clippy::too_many_arguments)]
+    pub fn apply_frame_with_face_presentation_and_all_factories_and_setup<E, F, G, P, H>(
+        &mut self,
+        bytes: &[u8],
+        header: ElapsedHeader,
+        resolve: F,
+        mut resolve_food: G,
+        mut resolve_prey: P,
+        on_setup: H,
+    ) -> Result<FrameReport, E>
+    where
+        E: From<ClientPresentationError>,
+        F: FnMut(&Appearance) -> Result<FacePresentation, E>,
+        G: FnMut(&FoodSpawnInput, f64) -> Result<FoodFactory, E>,
+        P: FnMut(&PreySpawnInput, f64) -> Result<PreyFactory, E>,
+        H: FnMut(&mut AnimatedClient, &Setup) -> Result<(), E>,
+    {
+        self.apply_frame_face_resolved(
+            bytes,
+            header,
+            resolve,
+            true,
+            true,
+            |spawn, zoom| resolve_food(spawn, zoom).map(Some),
+            true,
+            |spawn, zoom| resolve_prey(spawn, zoom).map(Some),
+            true,
+            on_setup,
+        )
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn apply_frame_resolved<E, F, G, P, H>(
         &mut self,
@@ -794,11 +978,11 @@ impl AnimatedClient {
         header: ElapsedHeader,
         mut resolve: F,
         enable_appearance: bool,
-        mut resolve_food: G,
+        resolve_food: G,
         enable_food: bool,
-        mut resolve_prey: P,
+        resolve_prey: P,
         enable_prey: bool,
-        mut on_setup: H,
+        on_setup: H,
     ) -> Result<FrameReport, E>
     where
         E: From<ClientPresentationError>,
@@ -807,10 +991,51 @@ impl AnimatedClient {
         P: FnMut(&PreySpawnInput, f64) -> Result<Option<PreyFactory>, E>,
         H: FnMut(&mut AnimatedClient, &Setup) -> Result<(), E>,
     {
+        self.apply_frame_face_resolved(
+            bytes,
+            header,
+            |appearance| resolve(appearance).map(Into::into),
+            enable_appearance,
+            false,
+            resolve_food,
+            enable_food,
+            resolve_prey,
+            enable_prey,
+            on_setup,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn apply_frame_face_resolved<E, F, G, P, H>(
+        &mut self,
+        bytes: &[u8],
+        header: ElapsedHeader,
+        mut resolve: F,
+        enable_appearance: bool,
+        enable_face_presentation: bool,
+        mut resolve_food: G,
+        enable_food: bool,
+        mut resolve_prey: P,
+        enable_prey: bool,
+        mut on_setup: H,
+    ) -> Result<FrameReport, E>
+    where
+        E: From<ClientPresentationError>,
+        F: FnMut(&Appearance) -> Result<FacePresentation, E>,
+        G: FnMut(&FoodSpawnInput, f64) -> Result<Option<FoodFactory>, E>,
+        P: FnMut(&PreySpawnInput, f64) -> Result<Option<PreyFactory>, E>,
+        H: FnMut(&mut AnimatedClient, &Setup) -> Result<(), E>,
+    {
         let mut received = self.received.clone();
         let applied = received
             .apply_frame_with_events(bytes, header)
             .map_err(ClientPresentationError::from)?;
+        if enable_face_presentation
+            && !self.face_presentation_enabled
+            && self.received.frames_applied != 0
+        {
+            return Err(ClientPresentationError::FacePresentationModeRequiresReset.into());
+        }
         if enable_appearance && !self.appearance_enabled && self.received.frames_applied != 0 {
             return Err(ClientPresentationError::AppearanceModeRequiresReset.into());
         }
@@ -825,12 +1050,14 @@ impl AnimatedClient {
             self.food_enabled |= enable_food;
             self.prey_enabled |= enable_prey;
             self.appearance_enabled |= enable_appearance;
+            self.face_presentation_enabled |= enable_face_presentation;
             return Ok(applied.report);
         }
         let mut next = self.clone();
         next.food_enabled |= enable_food;
         next.prey_enabled |= enable_prey;
         next.appearance_enabled |= enable_appearance;
+        next.face_presentation_enabled |= enable_face_presentation;
         let mut setup = self.received.setup.clone();
         for event in applied.events {
             match event {
@@ -862,6 +1089,11 @@ impl AnimatedClient {
                     on_setup(&mut next, setup.insert(value))?;
                 }
                 PresentationEvent::SnakeAppearance(appearance) => {
+                    if next.face_presentation_enabled && !enable_face_presentation {
+                        return Err(
+                            ClientPresentationError::FacePresentationResolverRequired.into()
+                        );
+                    }
                     if next.appearance_enabled && !enable_appearance {
                         return Err(ClientPresentationError::AppearanceResolverRequired.into());
                     }
@@ -870,7 +1102,7 @@ impl AnimatedClient {
                         .ok_or(StateError::MissingSetup)
                         .map_err(ClientPresentationError::from)?;
                     let geometry = resolve(&appearance)?;
-                    let snake = SnakePresentation::from_appearance_with_face_geometry(
+                    let snake = SnakePresentation::from_appearance_with_active_face_geometry(
                         &appearance,
                         setup,
                         next.camera.zoom(),
@@ -1203,6 +1435,35 @@ impl AnimatedClient {
         Ok(prepared)
     }
 
+    /// Prepare one numeric draw with explicit tagged faces and ordered antenna randomness.
+    /// This consumes the same camera, spacing and eye transition as rendering;
+    /// do not prepare again for the same draw. Callback effects cannot roll back.
+    pub fn prepare_draw_with_face_presentation<E, R>(
+        &mut self,
+        width: u32,
+        height: u32,
+        quality_scale: f64,
+        detailed_style: bool,
+        resolve_random: R,
+    ) -> Result<Vec<PreparedSnake>, E>
+    where
+        E: From<ClientPresentationError>,
+        R: FnMut(AntennaRandomRequest) -> Result<Vec<[f64; 2]>, E>,
+    {
+        let mut next = self.clone();
+        let prepared = next.prepare_draw_resolved_with_face_presentation_limited_staged(
+            width,
+            height,
+            quality_scale,
+            MAX_DRAW_SAMPLES,
+            &mut AntennaDrawBudget::default(),
+            |_, _, _| Ok(detailed_style),
+            resolve_random,
+        )?;
+        *self = next;
+        Ok(prepared)
+    }
+
     /// Prepare an already staged client without copying the world again.
     /// The caller must discard this client on any later preparation or drawing
     /// error: this method can leave partial camera, eye, spacing and flag changes.
@@ -1262,6 +1523,7 @@ impl AnimatedClient {
             &mut AntennaDrawBudget::default(),
             resolve_style,
             None::<fn(AntennaRandomRequest) -> Result<Vec<[f64; 2]>, E>>,
+            false,
         )
     }
 
@@ -1292,6 +1554,38 @@ impl AnimatedClient {
             antenna_budget,
             resolve_style,
             Some(resolve_random),
+            false,
+        )
+    }
+
+    /// Prepare once on a disposable stage with aggregate sample and antenna limits.
+    /// The caller must discard both client and budget after any later failure.
+    /// Share this budget across all ordered Setup plans in the same ingress.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn prepare_draw_resolved_with_face_presentation_limited_staged<E, F, R>(
+        &mut self,
+        width: u32,
+        height: u32,
+        quality_scale: f64,
+        sample_limit: usize,
+        antenna_budget: &mut AntennaDrawBudget,
+        resolve_style: F,
+        resolve_random: R,
+    ) -> Result<Vec<PreparedSnake>, E>
+    where
+        E: From<ClientPresentationError>,
+        F: FnMut(usize, bool, &SnakePresentation) -> Result<bool, E>,
+        R: FnMut(AntennaRandomRequest) -> Result<Vec<[f64; 2]>, E>,
+    {
+        self.prepare_draw_antenna_resolved_staged(
+            width,
+            height,
+            quality_scale,
+            sample_limit,
+            antenna_budget,
+            resolve_style,
+            Some(resolve_random),
+            true,
         )
     }
 
@@ -1305,6 +1599,7 @@ impl AnimatedClient {
         antenna_budget: &mut AntennaDrawBudget,
         mut resolve_style: F,
         mut resolve_random: Option<R>,
+        allow_face_presentation: bool,
     ) -> Result<Vec<PreparedSnake>, E>
     where
         E: From<ClientPresentationError>,
@@ -1376,6 +1671,17 @@ impl AnimatedClient {
                 x >= left && y >= top && x <= right && y <= bottom
             });
             entry.snake.set_visible(visible);
+        }
+        if !allow_face_presentation
+            && next.entries.iter().any(|entry| {
+                let metrics = entry.snake.metrics();
+                entry.drawn
+                    && metrics.visible
+                    && !metrics.expired
+                    && entry.snake.active_face_geometry().paired().is_none()
+            })
+        {
+            return Err(ClientPresentationError::FacePresentationRequired.into());
         }
         let mut prepared = Vec::new();
         let mut samples = 0_usize;
@@ -1486,8 +1792,9 @@ impl AnimatedClient {
                 body_geometry,
                 face_heading,
                 pupil: entry.snake.eyes().pupil(),
-                eye_geometry: *entry.snake.eye_geometry(),
-                face_decoration: entry.snake.face_geometry().decoration,
+                face_geometry: *entry.snake.active_face_geometry(),
+                eye_geometry: entry.snake.eye_geometry().copied(),
+                face_decoration: entry.snake.face_geometry().and_then(|face| face.decoration),
                 antenna_geometry,
                 antenna,
             });
@@ -1556,6 +1863,11 @@ impl AnimatedClient {
     /// Whether new appearances require the complete numeric presentation resolver.
     pub fn appearance_enabled(&self) -> bool {
         self.appearance_enabled
+    }
+
+    /// Whether later appearances require the complete tagged face resolver.
+    pub fn face_presentation_enabled(&self) -> bool {
+        self.face_presentation_enabled
     }
 
     /// Retained 210-unit root-culling bounds, refreshed only by retained-own draws.
@@ -1672,6 +1984,131 @@ mod resolved_draw_tests {
     use super::*;
     use crate::presentation::{BodyAsset, BodyAssetStatus, FoodSource, food_palette};
     use std::{cell::RefCell, rc::Rc};
+
+    #[test]
+    fn single_eye_legacy_gate_precedes_every_style_and_random_callback() {
+        let mut client = AnimatedClient::new(0.).unwrap();
+        client
+            .apply_frame_with_face_presentation::<ClientPresentationError, _>(
+                &bundle(&[setup(), spawn(3, 11), spawn(8, 19)]),
+                ElapsedHeader::Absent,
+                |a| {
+                    Ok(FacePresentation {
+                        face: if a.custom_skin == [3] {
+                            FaceGeometry::default()
+                        } else {
+                            FaceGeometry::SingleImage(super::super::SingleEyeGeometry {
+                                base_size: 20.,
+                                pupil_size: 8.,
+                                pupil_travel: 3.,
+                            })
+                        },
+                        antenna: None,
+                    })
+                },
+            )
+            .unwrap();
+        let saved = client.clone();
+        let mut stage = client.clone();
+        assert_eq!(
+            stage
+                .prepare_draw_resolved_with_antenna_limited_staged::<ClientPresentationError, _, _>(
+                    960,
+                    540,
+                    1.,
+                    MAX_DRAW_SAMPLES,
+                    &mut AntennaDrawBudget::default(),
+                    |_, _, _| panic!("all visible face capabilities must be checked first"),
+                    |_| panic!("legacy rejection must precede randomness"),
+                ),
+            Err(ClientPresentationError::FacePresentationRequired)
+        );
+        assert_eq!(client, saved);
+        let mut stage = saved.clone();
+        assert_eq!(
+            stage.prepare_draw_resolved_limited_staged::<ClientPresentationError, _>(
+                960,
+                540,
+                1.,
+                MAX_DRAW_SAMPLES,
+                |_, _, _| panic!("non-antenna legacy gate must also precede callbacks"),
+            ),
+            Err(ClientPresentationError::FacePresentationRequired)
+        );
+    }
+
+    #[test]
+    fn single_eye_generalized_helper_shares_sample_and_antenna_budgets_across_setup_plans() {
+        let mut client = AnimatedClient::new(0.).unwrap();
+        let mut styles = Vec::new();
+        let mut budget = AntennaDrawBudget::default();
+        let initial_budget = budget;
+        client
+            .apply_frame_with_face_presentation_and_factories_and_setup::<ClientPresentationError, _, _, _>(
+                &bundle(&[setup(), spawn(3, 11), setup()]),
+                ElapsedHeader::Absent,
+                |_| Ok(FacePresentation {
+                    face: FaceGeometry::SingleImage(super::super::SingleEyeGeometry {
+                        base_size: 20., pupil_size: 8., pupil_travel: 3.,
+                    }),
+                    antenna: None,
+                }),
+                factory,
+                |stage, _| {
+                    let draw = stage.prepare_draw_resolved_with_face_presentation_limited_staged(
+                        960, 540, 1., MAX_DRAW_SAMPLES, &mut budget,
+                        |_, _, snake| { styles.push(*snake.active_face_geometry()); Ok(false) },
+                        |_| -> Result<_, ClientPresentationError> { panic!("image eyes have no RNG visit") },
+                    )?;
+                    assert_eq!(draw.len(), styles.len());
+                    Ok(())
+                },
+            )
+            .unwrap();
+        assert_eq!(client.draw_serial(), 2);
+        assert_eq!(styles.len(), 1);
+        assert_eq!(budget, initial_budget);
+        let saved = client.clone();
+        let mut stage = client.clone();
+        assert_eq!(
+            stage.prepare_draw_resolved_with_face_presentation_limited_staged::<ClientPresentationError, _, _>(
+                960, 540, 1., 0, &mut budget,
+                |_, _, _| Ok(false),
+                |_| panic!("sample rejection precedes RNG"),
+            ),
+            Err(ClientPresentationError::Limit)
+        );
+        assert_eq!(client, saved);
+        let mut retained_budget = AntennaDrawBudget::default();
+        let mut legacy = antenna_client();
+        let mut tagged = legacy.clone();
+        let old = legacy
+            .prepare_draw_resolved_with_antenna_limited_staged(
+                960,
+                540,
+                1.,
+                MAX_DRAW_SAMPLES,
+                &mut retained_budget,
+                |_, _, _| Ok(false),
+                |r| Ok::<_, ClientPresentationError>(vec![[0.2, 0.8]; r.random_pair_count]),
+            )
+            .unwrap();
+        let mut tagged_budget = AntennaDrawBudget::default();
+        let new = tagged
+            .prepare_draw_resolved_with_face_presentation_limited_staged(
+                960,
+                540,
+                1.,
+                MAX_DRAW_SAMPLES,
+                &mut tagged_budget,
+                |_, _, _| Ok(false),
+                |r| Ok::<_, ClientPresentationError>(vec![[0.2, 0.8]; r.random_pair_count]),
+            )
+            .unwrap();
+        assert_eq!(old, new);
+        assert_eq!(legacy, tagged);
+        assert_eq!(retained_budget, tagged_budget);
+    }
 
     fn antenna_style() -> AppearancePresentation {
         AppearancePresentation {

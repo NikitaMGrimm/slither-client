@@ -58,6 +58,219 @@ function addAntenna(f) {
     image: { asset: 0, sourceMode: 'whole' } };
 }
 
+function addSingleEye(f) {
+  f.metadata.eyes = { kind: 'single-image', geometry: { baseSize: 20, pupilSize: 8, pupilTravel: 3 },
+    baseImage: { asset: 0 }, pupilImage: { asset: 1 } };
+}
+
+test('single image eyes copy and freeze geometry and both uses while borrowing exact shared sources', () => {
+  for (const make of [fixture, bodyFixture]) {
+    const f = make(); addSingleEye(f);
+    const input = f.metadata.eyes;
+    input.geometry.pupilTravel = -0;
+    input.pupilImage.sourceRect = [1, 2, 7, 9];
+    const { recipe, status } = f.resolve(); const eyes = recipe.eyes;
+    assert.equal(status, 'ready');
+    assert.deepEqual(Object.keys(eyes), ['kind', 'geometry', 'baseImage', 'pupilImage']);
+    assert.equal(eyes.kind, 'single-image');
+    assert.deepEqual(eyes.geometry, input.geometry);
+    assert(Object.is(eyes.geometry.pupilTravel, -0));
+    assert.notEqual(eyes.geometry, input.geometry);
+    for (const key of ['baseImage', 'pupilImage']) {
+      assert.deepEqual(Object.keys(eyes[key]), ['asset', 'sourceRect', 'sourceMode']);
+      assert.notEqual(eyes[key], input[key]);
+      for (const value of [eyes[key], eyes[key].asset, eyes[key].sourceRect]) assert(Object.isFrozen(value));
+    }
+    assert(Object.isFrozen(eyes)); assert(Object.isFrozen(eyes.geometry));
+    assert.equal(eyes.baseImage.asset, recipe.palettes[0].variants[0].asset);
+    assert.equal(eyes.pupilImage.asset, recipe.palettes[1].variants[0].asset);
+    assert.equal(eyes.baseImage.asset.source, f.canvas);
+    assert.equal(eyes.pupilImage.asset.source, f.image);
+    assert.equal(eyes.baseImage.sourceMode, 'whole');
+    assert.deepEqual(eyes.baseImage.sourceRect, [0, 0, 20, 30]);
+    assert.equal(eyes.pupilImage.sourceMode, 'crop');
+    assert.deepEqual(eyes.pupilImage.sourceRect, [1, 2, 7, 9]);
+    assert(recipe.supportedFeatures.includes('single-image-eye'));
+    assert(!recipe.supportedFeatures.includes('standard-eyes'));
+    input.geometry.baseSize = 91; input.baseImage.asset = 1; input.pupilImage.sourceRect[0] = 3;
+    assert.equal(eyes.geometry.baseSize, 20);
+    assert.equal(eyes.baseImage.asset.source, f.canvas);
+    assert.equal(eyes.pupilImage.sourceRect[0], 1);
+    assert(!Object.isFrozen(f.canvas)); assert(!Object.isFrozen(f.image));
+    f.metadata.eyes.baseImage.asset = 1;
+    const alias = f.resolve().recipe.eyes;
+    assert.equal(alias.baseImage.asset, alias.pupilImage.asset);
+    assert.equal(alias.baseImage.asset.source, f.image);
+    f.catalog.push({ source: f.image, state: 'pending' });
+    f.metadata.eyes.baseImage.asset = f.catalog.length - 1;
+    const duplicate = f.resolve().recipe.eyes;
+    assert.equal(duplicate.baseImage.asset.source, duplicate.pupilImage.asset.source);
+    assert.notEqual(duplicate.baseImage.asset, duplicate.pupilImage.asset);
+  }
+});
+
+test('single image geometry requires finite bounded own numbers and preserves admitted signed zero', () => {
+  const f = fixture(); addSingleEye(f);
+  for (const key of ['baseSize', 'pupilSize', 'pupilTravel']) {
+    const geometry = f.metadata.eyes.geometry; const original = geometry[key];
+    const positive = key !== 'pupilTravel';
+    for (const value of [NaN, Infinity, -Infinity, -Number.MIN_VALUE, 4096.000000000001,
+      null, undefined, '1', true, {}, ...(positive ? [0, -0] : [])]) {
+      geometry[key] = value; assert.throws(() => f.resolve(), undefined, key);
+    }
+    for (const value of [Number.MIN_VALUE, 0.125, 4096, ...(positive ? [] : [0, -0])]) {
+      geometry[key] = value; assert(Object.is(f.resolve().recipe.eyes.geometry[key], value));
+    }
+    delete geometry[key]; Object.setPrototypeOf(geometry, { [key]: original });
+    assert.throws(() => f.resolve(), undefined, key);
+    Object.setPrototypeOf(geometry, Object.prototype); geometry[key] = original;
+  }
+});
+
+test('single image uses distinguish omitted rectangles from full and partial crops without body style', () => {
+  const f = fixture(); addSingleEye(f);
+  for (const [key, full] of [['baseImage', [0, 0, 20, 30]], ['pupilImage', [0, 0, 40, 50]]]) {
+    const input = f.metadata.eyes[key];
+    const whole = f.resolve().recipe.eyes[key];
+    input.sourceRect = [...full];
+    const crop = f.resolve().recipe.eyes[key];
+    assert.equal(whole.sourceMode, 'whole'); assert.equal(crop.sourceMode, 'crop');
+    assert.deepEqual(whole.sourceRect, crop.sourceRect);
+    input.sourceRect = [-0, -0, 1.5, 2.5];
+    const partial = f.resolve().recipe.eyes[key];
+    assert.deepEqual(partial.sourceRect, input.sourceRect);
+    assert(Object.is(partial.sourceRect[0], -0)); assert(Object.is(partial.sourceRect[1], -0));
+    for (const rect of [null, [], [0, 0, 1], [0, 0, 1, 1, 1], [-1, 0, 1, 1], [0, 0, 0, 1],
+      [0, 0, 1, -0], [0, 0, Infinity, 1], [NaN, 0, 1, 1], [0, 0, '1', 1],
+      [0, 0, full[2] + 1, 1], [0, full[3], 1, 1]]) {
+      input.sourceRect = rect; assert.throws(() => f.resolve());
+    }
+    delete input.sourceRect;
+    for (const asset of [-1, 2, 0.5, '0', null, undefined]) {
+      const original = input.asset; input.asset = asset; assert.throws(() => f.resolve()); input.asset = original;
+    }
+  }
+  assert.equal(Object.hasOwn(f.resolve().recipe.palettes[0].variants[0], 'sourceMode'), false);
+});
+
+test('each single image use contributes native readiness and unsupported status independently', () => {
+  for (const key of ['baseImage', 'pupilImage']) {
+    const f = fixture(); addSingleEye(f);
+    f.catalog.push({ source: null, state: 'ready' }); f.metadata.eyes[key].asset = 2;
+    let value = f.resolve(); assert.equal(value.status, 'pending');
+    assert.equal(value.recipe.eyes[key].asset.status, 'pending');
+    assert.equal(value.recipe.eyes[key].sourceRect, null);
+    assert.equal(value.recipe.eyes[key].sourceMode, 'whole');
+    f.metadata.eyes[key].sourceRect = [1, 2, 3, 4];
+    value = f.resolve(); assert.equal(value.recipe.eyes[key].sourceRect, null);
+    assert.equal(value.recipe.eyes[key].sourceMode, 'crop');
+    const source = new f.realm.HTMLCanvasElement();
+    f.catalog[2] = { source, state: 'pending' };
+    assert.equal(f.resolve().status, 'pending');
+    f.catalog[2].state = 'ready'; assert.equal(f.resolve().status, 'ready');
+    source.width = 0; assert.equal(f.resolve().status, 'pending');
+    assert.equal(f.resolve().recipe.eyes[key].sourceRect, null);
+    source.width = 20; source.height = 0; assert.equal(f.resolve().status, 'pending');
+    source.height = 30; f.catalog[2].state = 'unsupported'; assert.equal(f.resolve().status, 'unsupported');
+    f.catalog[2] = { source: null, state: 'unsupported' }; assert.equal(f.resolve().status, 'unsupported');
+    const image = new f.realm.HTMLImageElement(); image.complete = false;
+    f.catalog[2] = { source: image, state: 'ready' }; assert.equal(f.resolve().status, 'pending');
+    image.complete = true; f.catalog[2].state = 'pending'; assert.equal(f.resolve().status, 'ready');
+    image.naturalWidth = 0; assert.equal(f.resolve().status, 'pending');
+    image.naturalWidth = 40; image.naturalHeight = 0; assert.equal(f.resolve().status, 'pending');
+    image.naturalHeight = 50;
+    f.metadata.unsupportedFeatures = ['synthetic-required-mouth']; assert.equal(f.resolve().status, 'unsupported');
+    f.metadata.unsupportedFeatures = []; f.catalog[0].state = 'pending'; assert.equal(f.resolve().status, 'pending');
+    f.catalog[2].state = 'unsupported'; assert.equal(f.resolve().status, 'unsupported');
+    for (const source of [{}, { width: 20, height: 30 }, new Uint8Array(4)]) {
+      f.catalog[2] = { source, state: 'ready' }; assert.throws(() => f.resolve(), /trusted realm/);
+    }
+  }
+});
+
+test('single image sources refresh by revision without mutating previously resolved snapshots', () => {
+  const f = fixture(); addSingleEye(f);
+  for (const revision of [-0, 0, 'synthetic-single-eye']) {
+    f.snapshot.revision = revision; assert(Object.is(f.resolve().revision, revision));
+  }
+  const before = f.resolve();
+  f.canvas.width = 29; f.image.naturalHeight = 61; f.snapshot.revision = 2;
+  const after = f.resolve();
+  for (const [key, size, oldSize, newSize] of [['baseImage', 'width', 20, 29], ['pupilImage', 'height', 50, 61]]) {
+    assert.equal(after.recipe.eyes[key].asset.source, before.recipe.eyes[key].asset.source);
+    assert.notEqual(after.recipe.eyes[key].asset, before.recipe.eyes[key].asset);
+    assert.equal(before.recipe.eyes[key].asset[size], oldSize);
+    assert.equal(after.recipe.eyes[key].asset[size], newSize);
+  }
+  assert.deepEqual(after.recipe.eyes.baseImage.sourceRect, [0, 0, 29, 30]);
+  assert.deepEqual(after.recipe.eyes.pupilImage.sourceRect, [0, 0, 40, 61]);
+  f.catalog[0].source = new f.realm.HTMLCanvasElement();
+  assert.notEqual(f.resolve().recipe.eyes.baseImage.asset.source, before.recipe.eyes.baseImage.asset.source);
+  f.metadata.eyes.pupilImage.sourceRect = [0, 0, 40, 61];
+  f.image.naturalHeight = 50; assert.throws(() => f.resolve(), /sourceRect exceeds/);
+});
+
+test('single image metadata rejects own accessors, inherited required fields and decorated Promises', () => {
+  const paths = [f => [f.metadata, 'eyes'],
+    ...['kind', 'geometry', 'baseImage', 'pupilImage'].map(key => f => [f.metadata.eyes, key]),
+    ...['baseSize', 'pupilSize', 'pupilTravel'].map(key => f => [f.metadata.eyes.geometry, key]),
+    ...['baseImage', 'pupilImage'].flatMap(image => ['asset', 'sourceRect'].map(key => f => [f.metadata.eyes[image], key])),
+    ...['baseImage', 'pupilImage'].map(image => f => [f.metadata.eyes[image].sourceRect, '0'])];
+  for (const locate of paths) {
+    const f = fixture(); addSingleEye(f);
+    for (const key of ['baseImage', 'pupilImage']) f.metadata.eyes[key].sourceRect = [0, 0, 2, 3];
+    const [record, key] = locate(f); const original = Object.getOwnPropertyDescriptor(record, key);
+    let calls = 0;
+    Object.defineProperty(record, key, { configurable: true, get() { calls++; return original.value; } });
+    assert.throws(() => f.resolve(), /Accessor/); assert.equal(calls, 0);
+    Object.defineProperty(record, key, original);
+    if (key !== 'sourceRect') {
+      delete record[key]; Object.setPrototypeOf(record, { [key]: original.value });
+      assert.throws(() => f.resolve());
+    }
+  }
+  for (const key of ['eyes', 'geometry', 'baseImage', 'pupilImage']) {
+    const f = fixture(); addSingleEye(f);
+    const record = key === 'eyes' ? f.metadata : f.metadata.eyes;
+    record[key] = Object.assign(Promise.resolve(), record[key]);
+    assert.throws(() => f.resolve(), /synchronous/);
+  }
+});
+
+test('single image eyes reject paired decoration while preserving antenna, body and effect metadata', () => {
+  const f = bodyFixture(); addSingleEye(f); addAntenna(f);
+  const before = f.resolve();
+  assert.deepEqual(before.recipe.supportedFeatures, ['body-palettes', 'single-image-eye',
+    'outline', 'shadow', 'death-highlight', 'standard-body-style', 'ordinary-antenna']);
+  assert.deepEqual(before.recipe.bodyStyle, f.metadata.bodyStyle);
+  assert.equal(before.recipe.antenna.image.asset, before.recipe.eyes.baseImage.asset);
+  assert.equal(before.recipe.effects[0].asset, before.recipe.eyes.baseImage.asset);
+  for (const value of [null, undefined]) {
+    f.metadata.faceDecoration = value; assert.deepEqual(f.resolve(), before);
+    assert.equal(Object.hasOwn(f.resolve().recipe, 'faceDecoration'), false);
+  }
+  addDecoration(f); assert.throws(() => f.resolve(), /require standard eyes/);
+  for (const kind of ['none', 'mouth-overlay', 'accessory']) {
+    f.metadata.faceDecoration.kind = kind; assert.throws(() => f.resolve());
+  }
+});
+
+test('standard and none eye output shapes and tags remain exact after selecting single image eyes', () => {
+  const f = fixture(); const legacy = f.resolve(); const standard = f.metadata.eyes;
+  addSingleEye(f); assert.equal(f.resolve().recipe.eyes.kind, 'single-image');
+  f.metadata.eyes = standard; assert.deepEqual(f.resolve(), legacy);
+  assert.deepEqual(legacy.recipe.eyes, standard);
+  assert.deepEqual(legacy.recipe.supportedFeatures, ['body-palettes', 'standard-eyes']);
+  f.metadata.eyes = { kind: 'none' };
+  const none = f.resolve();
+  assert.deepEqual(none.recipe.eyes, { kind: 'none' });
+  assert.deepEqual(none.recipe.supportedFeatures, ['body-palettes']);
+  assert.deepEqual(Object.keys(none.recipe), Object.keys(legacy.recipe));
+  for (const value of [legacy, none]) {
+    assert.equal(Object.hasOwn(value.recipe.palettes[0].variants[0], 'sourceMode'), false);
+  }
+});
+
 test('optional ordinary antenna preserves exact absent/null legacy shapes and borrowed identity', () => {
   for (const make of [fixture, bodyFixture]) {
     const f = make(); const legacy = f.resolve();

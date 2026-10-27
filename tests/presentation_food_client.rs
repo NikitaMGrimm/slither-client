@@ -331,7 +331,7 @@ fn full_factories_retain_face_geometry_alongside_food_and_rollback_together() {
     )
     .unwrap();
     c.advance(4., false).unwrap();
-    assert_eq!(c.own_snake().unwrap().face_geometry(), &face);
+    assert_eq!(c.own_snake().unwrap().face_geometry().unwrap(), &face);
     assert_eq!(c.own_snake().unwrap().eyes().pupil().x, 0.02);
     assert_eq!(food(&c).len(), 1);
     let before = c.clone();

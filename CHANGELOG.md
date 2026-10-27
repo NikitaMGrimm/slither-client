@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add appearance-owned single image eyes, shared gaze updates and two ordered
+  borrowed image draws through both animated renderer lanes and ordered Setup.
+
 - Add reproducible Chrome and Firefox extension packages containing the authored
   client and Rust/Wasm bundle, with a packaged launcher and local installation
   instructions. Game-page replacement and full host integration remain pending.
