@@ -40,8 +40,8 @@ access package sources. Release-plz remains dormant.
 
 ## Private nickname-edit default gate
 
-The integrated gate/bootstrap slice passes 809 Node tests, including 90 focused
-gate/bootstrap/profile/input cases and the existing 47 package tests. Seventeen
+The integrated gate/bootstrap slice passes 810 Node tests, including 91 focused
+gate/bootstrap/profile/input cases and the existing 47 package tests. Eighteen
 new gate cases use deliberate native receiver brands, fixed descriptor owners
 and Window/Document/target propagation doubles. They cover the closed field
 lease, optional versus critical capture failure, bounded keyboard/input-type
@@ -67,6 +67,15 @@ attempts came from test setup/expectations: a deliberately throwing router reuse
 by a follow-up probe, an incorrect Ctrl+Space permission expectation, and a
 missing-capability fixture invoking a native-brand getter on its prototype.
 Corrected fixtures pass; those failures did not require product changes.
+
+Independent review then exposed a selectionchange fencing gap: Document-only
+capture let a later Window capture host listener run first. A retained parent
+regression observes one such host call before correction. The gate now captures
+that event once at Window, and the propagation fixture includes Window before
+Document even for non-bubbling selectionchange. The regression verifies zero
+host calls, one attributed owned notification, and continued fencing with no
+lease or field focus. This is event-path algorithm evidence, not browser execution;
+see [DOM event dispatch](https://dom.spec.whatwg.org/#concept-event-dispatch).
 
 These are authored Node/default-decision and separate real-Wasm/package checks.
 Actual descriptor support, visibility options, native propagation/defaults,

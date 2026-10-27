@@ -414,9 +414,9 @@
         if (failed) throw primary;
       }
     };
+    // Document selectionchange still traverses Window capture before its target.
     for (const type of [...originalTypes, ...notificationTypes]) {
-      (type === 'selectionchange' ? editing?.initialDocument ?? realm.document : realm)
-        .addEventListener(type, sink, { capture: true, passive: false });
+      realm.addEventListener(type, sink, { capture: true, passive: false });
     }
     realm.addEventListener('pagehide', () => { ended = true; revoke(); }, { capture: true });
     realm.document.addEventListener('DOMContentLoaded', () => { completed = true; completedAt = revision; }, { once: true });

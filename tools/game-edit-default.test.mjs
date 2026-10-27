@@ -258,15 +258,15 @@ const added = ['keypress', 'beforeinput', 'input', 'compositionstart', 'composit
 const original = ['pointerdown', 'pointerup', 'pointermove', 'mousedown', 'mouseup', 'mousemove',
   'touchstart', 'touchend', 'touchmove', 'keydown', 'keyup', 'click', 'wheel', 'resize'];
 
-test('exact fence inventory, Document-only selectionchange topology and attribution', () => {
+test('exact fence inventory, Window selectionchange capture and attribution', () => {
   const h = harness(); h.register();
   const fences = h.f.edit.listeners.filter(entry => entry.options?.passive === false);
-  assert.deepEqual(fences.map(entry => entry.type).sort(), [...original, ...added.filter(type => type !== 'selectionchange')].sort());
+  assert.deepEqual(fences.map(entry => entry.type).sort(), [...original, ...added].sort());
   const selection = h.f.edit.documentListeners.filter(entry => entry.type === 'selectionchange');
-  assert.equal(selection.length, 1);
+  assert.equal(selection.length, 0);
   for (const entry of [...fences, ...selection]) { assert.equal(entry.options.capture, true); assert.equal(entry.options.passive, false); }
   const event = h.f.edit.dispatch('selectionchange', { target: h.f.document });
-  assert.deepEqual(h.f.edit.eventData.get(event).trace, ['document-capture', 'stop', 'prevent']);
+  assert.deepEqual(h.f.edit.eventData.get(event).trace, ['window-capture', 'stop', 'prevent']);
   assert.equal(h.received.length, 1);
   h.f.edit.state(h.f.document).active = h.parent;
   h.f.edit.dispatch('selectionchange', { target: h.f.document }); assert.equal(h.received.length, 1);
@@ -274,6 +274,25 @@ test('exact fence inventory, Document-only selectionchange topology and attribut
   assert.equal(h.received.length, 1);
   for (const type of original) h.f.edit.dispatch(type, { target: h.parent });
   assert.equal(h.received.length, 1 + original.length);
+});
+
+test('Document selectionchange stops later Window and Document host capture before one owned notification', () => {
+  const h = harness(), lease = h.register();
+  let windowHost = 0, documentHost = 0, downstreamHost = 0;
+  h.f.realm.addEventListener('selectionchange', () => { windowHost++; }, { capture: true });
+  h.f.document.addEventListener('selectionchange', () => { documentHost++; }, { capture: true });
+  h.f.edit.originals.push(() => { downstreamHost++; });
+  const dispatch = () => h.f.edit.dispatch('selectionchange', { target: h.f.document, cancelable: false });
+  const event = dispatch();
+  assert.deepEqual({ windowHost, documentHost, downstreamHost }, { windowHost: 0, documentHost: 0, downstreamHost: 0 });
+  assert.deepEqual(h.f.edit.eventData.get(event).trace, ['window-capture', 'stop', 'prevent']);
+  assert.equal(event.defaultPrevented, false, 'noncancelable notification remains a notification');
+  assert.equal(h.received.length, 1);
+  h.f.edit.state(h.f.document).active = h.parent; dispatch();
+  assert.equal(h.received.length, 1, 'unattributed Document selection does not reach the owner');
+  lease.unregister(); dispatch();
+  assert.equal(h.received.length, 1, 'no lease still fences the Document event');
+  assert.deepEqual({ windowHost, documentHost, downstreamHost }, { windowHost: 0, documentHost: 0, downstreamHost: 0 });
 });
 
 test('post-router changes, undefined completion and nested dispatch cannot grant stale defaults', () => {

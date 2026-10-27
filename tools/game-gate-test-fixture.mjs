@@ -162,11 +162,16 @@ export function attachGateTestRealm(dom, realm, document, actualRealm) {
   }
   function deliver(event) {
     const data = dom.eventData.get(event), type = data.type;
-    // Deliberate topology: Document selectionchange has no Window path here.
-    const path = type === 'selectionchange' ? documentListeners : listeners;
-    data.trace.push(type === 'selectionchange' ? 'document-capture' : 'window-capture');
-    for (const entry of path.filter(entry => entry.type === type)) {
-      entry.handler(event); if (data.stopped) break;
+    // A non-bubbling Document selectionchange still has a Window capture ancestor.
+    const phases = type === 'selectionchange'
+      ? [['window-capture', listeners], ['document-capture', documentListeners]]
+      : [['window-capture', listeners]];
+    for (const [phase, path] of phases) {
+      data.trace.push(phase);
+      for (const entry of path.filter(entry => entry.type === type)) {
+        entry.handler(event); if (data.stopped) break;
+      }
+      if (data.stopped) break;
     }
     if (!data.stopped) for (const phase of ['document-capture-original', 'target-inline', 'target-listener', 'bubble']) {
       data.trace.push(phase);

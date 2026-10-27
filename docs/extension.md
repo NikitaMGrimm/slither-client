@@ -202,8 +202,10 @@ cannot be promoted by its callback.
 
 The gate additionally fences keypress, beforeinput/input, composition,
 clipboard, selection, double-click/contextmenu, focus, hover, cancellation and
-drag events. Window capture handles target-path events; the captured Document
-alone handles selectionchange. New notifications reach the owned router only
+drag events. Window capture handles target-path events, including the earlier
+capture phase of non-bubbling Document selectionchange. One fence handles each
+event; no second Document selectionchange listener is installed. New
+notifications reach the owned router only
 when attributable to the exact field, or to Document selectionchange with that
 field active. The bootstrap filters that exact new inventory before gameplay,
 so it adds no control/source/clock/send observations. Every original event
