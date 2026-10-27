@@ -5,8 +5,8 @@ use wasm_bindgen::prelude::*;
 use crate::antenna_browser::{AntennaDecoration, geometry};
 use crate::body_browser::{FaceDecoration, error, field, num, side_geometry, standard_eyes, text};
 use crate::presentation::{
-    BodyAsset, BodyRect, FaceGeometry, FacePresentation, MouthFaceGeometry, PairedFaceGeometry,
-    SingleEyeGeometry, StandardEyeGeometry,
+    AccessoryPresentation, BodyAsset, BodyRect, FaceGeometry, FacePresentation, MouthFaceGeometry,
+    PairedFaceGeometry, SingleEyeGeometry, StandardEyeGeometry, StaticHeadAccessoryGeometry,
 };
 
 pub(crate) struct SingleEyeSources {
@@ -32,6 +32,44 @@ pub(crate) enum FaceSources {
 pub(crate) struct FacePresentationSources {
     pub(crate) face: FaceSources,
     pub(crate) antenna: Option<AntennaDecoration>,
+}
+
+pub(crate) struct AccessorySources {
+    pub(crate) geometry: StaticHeadAccessoryGeometry,
+    pub(crate) asset: BodyAsset,
+    pub(crate) source_rect: BodyRect,
+}
+
+pub(crate) fn accessory_geometry(
+    value: &JsValue,
+    scale_key: &str,
+) -> Result<StaticHeadAccessoryGeometry, JsValue> {
+    let geometry = StaticHeadAccessoryGeometry {
+        forward: num(field(value, "forward")?, 0., 4096.)?,
+        image_scale: num(field(value, scale_key)?, f64::from_bits(1), 256.)?,
+        pivot_x: num(field(value, "pivotX")?, -65_535., 65_535.)?,
+        pivot_y: num(field(value, "pivotY")?, -65_535., 65_535.)?,
+    };
+    geometry.validate().map_err(error)?;
+    Ok(geometry)
+}
+
+/// The additive callback requires an explicit selection; legacy shapes stay unchanged.
+pub(crate) fn accessory_appearance(value: &JsValue) -> Result<AccessoryPresentation, JsValue> {
+    let presentation = appearance(value)?;
+    let raw = field(value, "accessory")?;
+    let accessory = if raw.is_null() {
+        None
+    } else {
+        if matches!(presentation.face, FaceGeometry::SingleImage(_)) {
+            return Err(error("single image eyes cannot have a static accessory"));
+        }
+        Some(accessory_geometry(&raw, "imageScale")?)
+    };
+    Ok(AccessoryPresentation {
+        presentation,
+        accessory,
+    })
 }
 
 pub(crate) fn single_eye_geometry(value: &JsValue) -> Result<SingleEyeGeometry, JsValue> {

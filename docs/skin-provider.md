@@ -26,6 +26,13 @@ type AssetUse = {
   sourceMode?: 'whole' | 'crop';
 };
 
+type StaticHeadAttachment = {
+  kind: 'static-head-image'; asset: number;
+  sourceMode: 'crop'; sourceRect: [0, 0, number, number];
+  anchor: 'head'; forward: number; scale: number;
+  pivotX: number; pivotY: number; opacity: 1;
+};
+
 type SingleImageEyes = {
   kind: 'single-image';
   geometry: { baseSize: number; pupilSize: number; pupilTravel: number };
@@ -75,9 +82,9 @@ type HostRecipe = { status: 'pending' | 'unsupported' } | {
   faceDecoration?: {
     kind: 'paired-side-images'; geometry: PairedSideGeometry; image: AssetUse;
   } | null;
-  attachment?: AssetUse & {
+  attachment?: (AssetUse & {
     anchor: 'head'; scale: number; pivotX: number; pivotY: number; opacity: number;
-  } | null;
+  }) | StaticHeadAttachment | null;
   unsupportedFeatures: string[];
 };
 
@@ -168,6 +175,16 @@ are optional via an empty list; at most one of each standard kind is allowed,
 with opacity 0..1. Head attachment scale is positive and at most 256, pivots are
 within -65535..65535, and opacity is 0..1. Placement coordinates are in the
 adapter's declared head-local units; this module performs no placement or drawing.
+
+An explicit `static-head-image` attachment instead requires exactly the ten own
+data fields in `StaticHeadAttachment`. Its forward distance is finite in
+0..4096, opacity is exactly 1, and it requires standard paired or Mouth faces.
+The crop origin must be positive zero and explicit crop mode remains present
+without a body style. Full-size crops stay crops. Signed-zero forward/pivots
+are retained for appearance/draw coherence. See the
+[additive accessory renderer](static-accessory.md); provider readiness alone
+does not enable a legacy draw path. Untagged attachments keep the normalization
+described above.
 
 Schema version 1 also accepts optional per-palette `boostGlow` uses and explicit
 `bodyStyle` metadata. A supplied glow follows the same asset borrowing, native

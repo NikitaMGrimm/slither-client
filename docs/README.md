@@ -16,6 +16,7 @@ Canvas2D rendering and an optional local simulator connection.
 - [Retained prey](prey-presentation.md): independent appearances, motion, capture and borrowed sources.
 - [Ordinary antennas](antenna-presentation.md): appearance state, draw cadence, supplied randomness and borrowed bulbs.
 - [Single image eyes](single-image-eye.md): selected face geometry, shared gaze and ordered borrowed images.
+- [Static head accessories](static-accessory.md): retained geometry, ready borrowed crops and face ordering.
 - [Browser extension](extension.md): package layout, local installation and integration limits.
 - [Verification](verification.md): builds, tests, optional comparisons, and results.
 - [Provenance](provenance.md): source/asset policy and external reference identity.
