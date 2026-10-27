@@ -466,8 +466,9 @@ the password is a caller-supplied 20-byte Uint8Array. Endpoint is one selected
 literal IP with explicit port and `/slither`, using ws/wss. No discovery, DNS
 selection, stored profile, defaults, automatic Play or retry exists.
 No credential, packet or socket command is accepted through the status bridge.
-The installed entry offers no Play UI yet; this local API is for explicit trusted
-composition. An importing MAIN module can await exported
+The default and owned-HUD entries offer no Play UI. The explicit `owned-play`
+entry adds [owned Play controls](#explicit-owned-play-controls). This local API is
+for explicit trusted composition. An importing MAIN module can await exported
 `gamePageRuntime`, the single auto-entry promise, to obtain this runtime without
 claiming the gate again; nothing is installed on `window` for this purpose.
 
