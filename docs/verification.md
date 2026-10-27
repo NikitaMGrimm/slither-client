@@ -38,6 +38,30 @@ pull requests, and manual dispatch. Normal tests and CI require no external
 reference and do not connect to game servers. Dependency and toolchain setup may
 access package sources. Release-plz remains dormant.
 
+## Same-step HUD lifecycle observation
+
+The additive session facade passes 659 Node tests, including 48 new lifecycle
+cases. Paired fixtures compare legacy subscription/legacy facade, HUD
+subscription/legacy facade and HUD subscription/new facade: actions, snapshots,
+revisions, socket traces and clock/decode counts agree. They cover strict return
+timing, incoming-fade delay, zero delta, completion, victory connection retention,
+close-only controls, pending-death Setup and terminal/cleanup failures.
+
+The full real-Wasm suite passes with the unchanged generated module graph. Its
+stock helper now has 1052 assertions across thirteen cases. Two additional
+actual session/controller/native-render cases check the native step delta,
+the strict 1600-ms boundary, the completing and following steps, release before
+socket commit, ordinary reset/disconnect and connected victory return. Both
+41-file packages build. Native sources and generated JS/Wasm/validator are
+unchanged from the journal integration.
+
+The retained baseline run fails at the absent facade before implementation.
+The worker also retained an initial fixture error where its paired verifier
+replaced an action-offer identity before acknowledgment; corrected fixtures
+pass without a product change for that failure. These checks establish the
+copied observation seam, not fade/readout reduction, UI, pixels or server
+acceptance. See the [lifecycle API](hud-ingress.md#same-step-lifecycle-observation).
+
 ## Integrated command-indexed HUD journal
 
 The integrated journal passes 611 Node tests, including 47 package checks, and

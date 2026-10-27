@@ -46,6 +46,9 @@ the owning operation unwinds. `commitControl` follows only successful operations
 The caller also owns the separate captured 25-ms login-fade timer while
 `uiTimerNeeded` is true and reconciles the returned `uiTick` snapshot. Normal
 life return uses the same lagged animation delta before input and motion.
+The opt-in `afterStepWithHud` facade returns copied branch-local return edges
+beside the same actions; see [same-step observations](hud-ingress.md#same-step-lifecycle-observation).
+It neither advances another clock nor changes the existing commit latch.
 Victory message submission and the complete stock UI remain unsupported.
 
 Tests use authored profiles, challenges and socket doubles. Real-Wasm checks
