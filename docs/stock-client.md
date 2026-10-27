@@ -89,8 +89,11 @@ Reports retain BigInt object tokens and command-time score samples. The session
 matches report events to its existing decoded commands; native code remains
 responsible for score arithmetic and retained-own target resolution.
 
-This session seam is covered by authored doubles. Native HUD report production,
-controller/gameplay wiring, lifecycle fade and visible HUD remain separate.
+`packetWithHud` and the optional gameplay `onHudPacket` callback connect this
+session seam to the native command-time journal and real Setup renderer.
+Score tracking requires explicit caller enablement before ingress. Default
+gameplay uses the legacy subscription. See the [journal API](hud-ingress.md).
+Lifecycle fade and visible HUD remain separate.
 An error after a future native commit or observer effect cannot roll those
 effects back; the session terminates and never replays the packet.
 

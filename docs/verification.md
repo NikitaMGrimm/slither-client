@@ -38,6 +38,33 @@ pull requests, and manual dispatch. Normal tests and CI require no external
 reference and do not connect to game servers. Dependency and toolchain setup may
 access package sources. Release-plz remains dormant.
 
+## Integrated command-indexed HUD journal
+
+The integrated journal passes 611 Node tests, including 47 package checks, and
+489 native all-target tests. Doctests, strict rustdoc, formatting and native/Wasm
+Clippy pass. Independent native review finds no supported actionable defect;
+the same reviewer separately checks the Wasm and controller/gameplay candidates
+with 346 real-Wasm assertions, 272 focused Node tests and 30 additional
+report-freeze failure assertions. Final parent integration review is separate.
+
+A fresh build passes the complete existing ABI suite plus the 346 journal
+assertions across nine cases. The stock adapter helper now passes 362 assertions
+across eleven cases, including actual session/controller/gameplay/native/render
+composition. It verifies release before publication, exact intermediate final
+score before later mass/R/Setup, command indices, one Setup count and no extra
+clock/quality step. Both packages build with 41 files each; the generated
+validator matches its authored source, and output manifests list its exact path.
+
+The first composed fixture repeated Setup four milliseconds later than the
+legacy case but retained its old fade-timer checkpoint. The retained failed run
+exposes that fixture mistake. Advancing the new case's checkpoint by the same
+four milliseconds passes without changing product lifecycle behavior.
+
+These are authored native/Node/real-Wasm Canvas-recorder checks. They do not
+establish raster pixels, installed-host compatibility, full fade/readout UI or
+server acceptance. Gameplay requires explicit callback and score-mode opt-in.
+See [journal API and failure boundaries](hud-ingress.md).
+
 ## Opt-in session HUD planning
 
 The session integration passes 522 Node tests, including 112 focused session

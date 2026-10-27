@@ -414,12 +414,13 @@ export function stockRenderSmoke(wasm, { control = true } = {}) {
           cases.push('real-post-lifecycle-playing-and-populated-registry-reset');
         } finally { f.close(); }
       }
-      {
+      for (const withHud of [false, true]) {
         const f = fixture();
         let gameplay;
         try {
+          if (withHud) f.scene.enable_score_tracking();
           let now = 0, nextTimer = 0;
-          const queue = [], timers = new Map(), sockets = [], fatal = [], flags = [];
+          const queue = [], timers = new Map(), sockets = [], fatal = [], flags = [], reports = [];
           const advance = f.quality.advance.bind(f.quality);
           const statistics = f.quality.update_statistics.bind(f.quality);
           f.quality.advance = (step, value) => { flags.push(['quality', value]); return advance(step, value); };
@@ -435,6 +436,14 @@ export function stockRenderSmoke(wasm, { control = true } = {}) {
             now: () => now, defer: callback => queue.push(callback),
             setInterval(callback, period) { eq(period, 25); const id = ++nextTimer; timers.set(id, callback); return id; },
             clearInterval: id => timers.delete(id), onStatus() {}, onFatal: error => fatal.push(error),
+            onHudPacket: withHud ? report => {
+              eq(f.held, null, 'HUD publication follows held-source release');
+              eq(f.captures, f.ends);
+              ok(Object.isFrozen(report)); ok(Object.isFrozen(report.events));
+              rejects(() => gameplay.frame(now), /reentrant/);
+              rejects(() => gameplay.dispose(), /reentry/);
+              reports.push(report);
+            } : undefined,
             createSocket(endpoint) {
               eq(endpoint, 'ws://192.0.2.9:1234/slither');
               eq(f.held, null, 'Socket construction follows held-source release');
@@ -459,12 +468,35 @@ export function stockRenderSmoke(wasm, { control = true } = {}) {
           socket.onmessage({ data: bundle(setup(), snake(0, 27), food(), prey(31), setup()).buffer }); drain();
           eq(gameplay.diagnostics().session.connected, true);
           ok(f.scene.food_state().sourceCount > 0); ok(f.scene.prey_state().sourceCount > 0);
+          if (withHud) {
+            eq(reports.length, 1); eq(reports[0].commandCount, 5); eq(reports[0].setupDraws, 2);
+            eq(reports[0].events.map(event => [event.commandIndex, event.kind]),
+              [[0, 'setup'], [0, 'setup-draw'], [1, 'own-length-scheduled'], [4, 'setup'], [4, 'setup-draw']]);
+            eq(reports[0].events[1].view.status, 'no-own');
+            eq(reports[0].events[4].view.status, 'ready');
+            const before = f.scene.score_view(), qualityBefore = f.quality.snapshot();
+            const stepsBefore = f.steps.length, drawsBefore = f.client.diagnostics().draws;
+            now = 44;
+            socket.onmessage({ data: bundle([112], [108, 0, 0, 17, 0, 33], [118, 1],
+              [104, 0, 0, ...u24(8388607)], [82, 9], setup()).buffer }); drain();
+            eq(reports.length, 2);
+            const report = reports[1];
+            eq(report.events.map(event => [event.commandIndex, event.kind]),
+              [[1, 'leaderboard'], [2, 'final-score'], [3, 'own-length-scheduled'], [5, 'setup'], [5, 'setup-draw']]);
+            eq(report.events[1].view, before, 'Final sample precedes later mass/R/Setup through every real layer');
+            eq(report.events[0].deathPending, false); eq(report.events[0].rank, 17); eq(report.events[0].population, 33);
+            eq(report.events[4].view.own.scoreAdjustment, 9);
+            eq(report.events[4].view, f.scene.score_view());
+            eq(f.steps.length, stepsBefore); eq(f.quality.snapshot(), qualityBefore);
+            eq(f.client.diagnostics().draws, drawsBefore + 1, 'One actual Setup draw is counted once');
+            ok(Object.isFrozen(report.events[1].view.own));
+          }
           now = 48;
           gameplay.event({ type: 'pointermove', clientX: 480, clientY: 100 }, { width: 960, height: 540 });
           gameplay.frame(now); drain();
           eq(f.scene.control_view().own.gazeHeading, -Math.PI / 2);
           ok(JSON.parse(f.scene.snapshot()).own.eyes.pupilY < 0);
-          now = 540;
+          now = withHud ? 544 : 540;
           for (const callback of [...timers.values()]) callback();
           drain(); eq(timers.size, 0);
           now = 600;
@@ -485,7 +517,8 @@ export function stockRenderSmoke(wasm, { control = true } = {}) {
           eq(f.scene.control_view().own, null);
           eq(f.scene.food_state().sourceCount, 0); eq(f.scene.prey_state().sourceCount, 0);
           eq(f.held, null); eq(f.captures, f.ends);
-          cases.push('real-gameplay-session-input-render-and-life-end-composition');
+          cases.push(withHud ? 'real-hud-session-controller-render-and-life-end-composition'
+            : 'real-gameplay-session-input-render-and-life-end-composition');
         } finally {
           try { gameplay?.dispose(); } finally { f.close(); }
         }

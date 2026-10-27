@@ -97,7 +97,11 @@ An explicit [score-tracking mode](score-state.md) in `AnimatedClient` caches
 those tables at ordered Setup events and retains the original own object's
 replacement R byte. Pure native/Wasm observations use latest logical count and
 mass, including after death or ID reuse. Default ingestion remains legacy;
-rank, readout scheduling, final capture and HUD wiring remain separate.
+rank/readout presentation remains separate. An optional
+[HUD journal](hud-ingress.md) shares the native transaction and supplies indexed
+Setup samples, retained-own scheduling, leaderboard headers and required
+command-time final captures through additive Wasm/controller/session APIs.
+It adds no clock or visible UI; gameplay must opt in explicitly.
 
 `presentation` provides explicit-time arithmetic separately from received state.
 `FrameClock` clamps elapsed milliseconds divided by eight to 0..=5, applies lag

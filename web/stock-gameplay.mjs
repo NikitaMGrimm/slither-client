@@ -24,15 +24,40 @@ function profileError(code) {
   return error;
 }
 
+const nonSynchronousPrototypes = [async function () {}, function* () {}, async function* () {}].map(Object.getPrototypeOf);
+function synchronousHudCallback(callback) {
+  if (typeof callback !== 'function') throw new TypeError('Synchronous onHudPacket callback required');
+  const seen = new Set();
+  let prototype = callback;
+  for (let calls = 0; calls < 64; calls++) {
+    prototype = Object.getPrototypeOf(prototype);
+    if (prototype === null) break;
+    // Bound even a Proxy returning a fresh prototype on every inspection.
+    if (seen.has(prototype) || nonSynchronousPrototypes.includes(prototype)) {
+      throw new TypeError('Synchronous onHudPacket callback required');
+    }
+    seen.add(prototype);
+  }
+  if (prototype !== null) throw new TypeError('Synchronous onHudPacket callback required');
+  const source = Function.prototype.toString.call(callback);
+  if (/^(?:\*|function\s*\*|async(?:\s+function\b|\s+[$\w]+|\s*\([^]*?\)\s*=>))/.test(source)) {
+    throw new TypeError('Synchronous onHudPacket callback required');
+  }
+}
+
 /** Trusted local composition; transports, native time and the scene remain caller-owned. */
 export function createStockGameplay({ scene, quality, controller, wasm, createSocket, now,
-  defer, setInterval, clearInterval, onStatus, onFatal, liveProfile }) {
+  defer, setInterval, clearInterval, onStatus, onFatal, liveProfile, onHudPacket }) {
   for (const [record, names] of [[scene, ['control_view', 'set_connected', 'reset_lag']],
     [quality, ['begin_connection']], [controller, ['packet', 'frame']]]) {
     for (const name of names) if (typeof record?.[name] !== 'function') throw new TypeError(`Gameplay capability required: ${name}`);
   }
   for (const callback of [defer, setInterval, clearInterval, onStatus, onFatal]) {
     if (typeof callback !== 'function') throw new TypeError('Gameplay scheduling/notification capability required');
+  }
+  if (onHudPacket !== undefined) {
+    synchronousHudCallback(onHudPacket);
+    if (typeof controller.packetWithHud !== 'function') throw new TypeError('Gameplay capability required: packetWithHud');
   }
   const profileOptions = liveProfile === undefined ? undefined
     : ownRecord(liveProfile, ['capabilities', 'isCurrentDocument']);
@@ -72,7 +97,7 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
     defer(() => { queued = false; if (!disposed) reconcile(); });
   };
   const latchError = error => { if (!hasFatal) { fatal = error; hasFatal = true; } dirty = true; schedule(); };
-  const unsubscribe = session.subscribe({
+  const observer = {
     packet(bytes, elapsedHeader) {
       if (disposed || active) throw new Error('Gameplay packet reentry');
       active = true;
@@ -84,7 +109,27 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
     // Only captured microtasks may reconcile/free after BOTH stacks have unwound.
     state() { dirty = true; schedule(); },
     error: latchError,
+  };
+  const unsubscribe = onHudPacket === undefined ? session.subscribe(observer) : session.subscribeWithHud({
+    ...observer,
+    packet(bytes, elapsedHeader, plan) {
+      return hudOperation(() => controller.packetWithHud(bytes, elapsedHeader, plan));
+    },
+    hud(report) {
+      return hudOperation(() => {
+        if (onHudPacket(report) !== undefined) throw new TypeError('Synchronous onHudPacket must return undefined');
+      });
+    },
   });
+  function hudOperation(callback) {
+    if (disposed || active) throw new Error('Gameplay HUD reentry');
+    active = true;
+    try { return callback(); }
+    catch (error) {
+      try { latchError(error); } catch { /* Scheduling cannot replace the primary failure. */ }
+      throw error;
+    } finally { active = false; }
+  }
   function clearUiTimer() {
     if (uiTimer !== undefined) { clearInterval(uiTimer); uiTimer = undefined; }
   }

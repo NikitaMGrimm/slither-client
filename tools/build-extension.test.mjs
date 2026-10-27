@@ -18,6 +18,7 @@ const gameWebNames = ['stock-client.mjs', 'stock-skin-provider.mjs', 'stock-skin
   'stock-session.mjs', 'stock-hud-contract.mjs', 'handshake-session.mjs', 'stock-live-profile.mjs'];
 const gameSources = [['game-activation.mjs', 'activation.mjs'], ['game-gate.js', 'gate.js'],
   ['game-link.js', 'link.js'], ['game-bootstrap.mjs', 'bootstrap.mjs'], ['game-host.css', 'host.css']];
+const snippetName = 'snippets/slither-client-0000000000000000/web/stock-hud-contract.mjs';
 
 // Original synthetic Wasm with empty constructor exports, never a playable fixture.
 function syntheticWasm(omit) {
@@ -27,6 +28,7 @@ function syntheticWasm(omit) {
   const entry = (name, kind, index) => [name.length, ...text(name), kind, index];
   const functions = ['animatedscene_new', 'desktopquality_new',
     'animatedscene_apply_frame_and_render_standard_with_face_presentation_and_prey',
+    'animatedscene_apply_frame_and_render_standard_with_face_presentation_and_prey_and_hud',
     'animatedscene_render_standard_with_face_presentation_at_size',
     'animatedscene_control_view', 'animatedscene_advance_with_control', 'animatedscene_reset_lag',
     'encode_login', 'solve_challenge', 'decode_frame', 'setup_protocol_version'].filter(name => name !== omit);
@@ -39,6 +41,7 @@ function syntheticWasm(omit) {
   ]);
 }
 const syntheticGlue = `// Original synthetic package-validation fixture; not generated production bindings.
+import { copyHudIngressPlan, copyHudIngressReport } from './${snippetName}';
 export class AnimatedScene {}
 export class DesktopQuality {}
 const url = new URL('slither_client_bg.wasm', import.meta.url);
@@ -63,6 +66,7 @@ function fixture(t) {
     write(`extension/${name}`, fs.readFileSync(path.join(projectRoot, 'extension', name)));
   }
   write('dist/web/slither_client.js', syntheticGlue);
+  write(`dist/web/${snippetName}`, fs.readFileSync(path.join(projectRoot, 'web/stock-hud-contract.mjs')));
   write('dist/web/slither_client_bg.wasm', syntheticWasm());
   const future = new Date('2030-01-01T00:00:00Z');
   for (const name of ['slither_client.js', 'slither_client_bg.wasm']) {
@@ -76,18 +80,18 @@ function fixture(t) {
   return { root, write, output: path.join(root, 'dist/extension'), build: options => buildExtension({ projectRoot: root, ...options }) };
 }
 
-test('default packages have a closed deterministic inventory and preserve authored inputs byte for byte', t => {
+test('default packages have a closed deterministic inventory and preserve module inputs byte for byte', t => {
   const f = fixture(t);
   f.write('web/unselected.mjs', 'throw new Error("must never be copied");');
   f.write('dist/web/unselected.wasm', Buffer.from('not a package input'));
   f.write('raw/synthetic-excluded.txt', 'Original synthetic excluded fixture.');
   const expectedPerBrowser = ['LICENSE', 'launcher.html', 'launcher.js', 'manifest.json', 'scene/config.json',
-    ...pageNames.map(name => `scene/${name}`), 'scene/pkg/slither_client.js', 'scene/pkg/slither_client_bg.wasm',
+    ...pageNames.map(name => `scene/${name}`), 'scene/pkg/slither_client.js', 'scene/pkg/slither_client_bg.wasm', `scene/pkg/${snippetName}`,
     ...gameWebNames.map(name => `game/${name}`), ...gameSources.map(value => `game/${value[1]}`),
-    'game/pkg/slither_client.js', 'game/pkg/slither_client_bg.wasm'].sort();
+    'game/pkg/slither_client.js', 'game/pkg/slither_client_bg.wasm', `game/pkg/${snippetName}`].sort();
   const result = f.build();
   assert.deepEqual(result.files.map(file => file.path), ['chrome', 'firefox'].flatMap(browser => expectedPerBrowser.map(name => `${browser}/${name}`)));
-  assert.equal(result.files.length, 78);
+  assert.equal(result.files.length, 82);
   assert(result.files.every(file => file.bytes > 0 && /^[a-f0-9]{64}$/.test(file.sha256)));
   assert.deepEqual(f.build(), result, 'an identical rerun neither accumulates nor changes files');
   for (const browser of ['chrome', 'firefox']) {
@@ -99,6 +103,47 @@ test('default packages have a closed deterministic inventory and preserve author
       assert.deepEqual(checkEntry(name, fs.readFileSync(path.join(f.output, browser, name))), []);
     }
   }
+});
+
+test('generated validator paths remain exact, byte-preserved and independent of the bindgen crate identifier', t => {
+  const f = fixture(t);
+  const alternate = snippetName.replace('0000000000000000', '1234567890abcdef');
+  const helper = fs.readFileSync(path.join(f.root, 'web/stock-hud-contract.mjs'));
+  const glue = syntheticGlue.replace(snippetName, alternate);
+  f.write(`dist/web/${alternate}`, helper);
+  f.write('dist/web/slither_client.js', glue);
+  const result = f.build();
+  for (const browser of ['chrome', 'firefox']) {
+    for (const lane of ['scene', 'game']) {
+      assert.deepEqual(fs.readFileSync(path.join(f.output, browser, lane, 'pkg', alternate)), helper);
+      assert.equal(fs.readFileSync(path.join(f.output, browser, lane, 'pkg/slither_client.js'), 'utf8'), glue);
+      assert.equal(fs.existsSync(path.join(f.output, browser, lane, 'pkg', snippetName)), false);
+    }
+    const output = JSON.parse(fs.readFileSync(path.join(f.output, browser, 'manifest.json')));
+    const source = JSON.parse(fs.readFileSync(path.join(f.root, 'extension', `manifest.${browser}.json`)));
+    assert.deepEqual(output.web_accessible_resources[0].resources,
+      [...source.web_accessible_resources[0].resources, `game/pkg/${alternate}`]);
+    assert(output.web_accessible_resources[0].resources.every(name => !name.includes('*')));
+    output.web_accessible_resources[0].resources.pop();
+    assert.deepEqual(output, source, 'all source manifest fields remain intact');
+  }
+  assert.equal(result.files.length, 82);
+});
+
+test('changing the authored HUD validator makes the generated pair stale', t => {
+  const f = fixture(t);
+  fs.utimesSync(path.join(f.root, 'web/stock-hud-contract.mjs'), new Date('2031-01-01'), new Date('2031-01-01'));
+  assert.throws(() => f.build(), /Stale .*npm run build:web/);
+  assert.equal(fs.existsSync(f.output), false);
+});
+
+test('a source manifest cannot preauthorize a generated wildcard or extra resource', t => {
+  const f = fixture(t);
+  const manifest = JSON.parse(fs.readFileSync(path.join(f.root, 'extension/manifest.chrome.json')));
+  manifest.web_accessible_resources[0].resources.push('game/pkg/snippets/*');
+  f.write('extension/manifest.chrome.json', JSON.stringify(manifest));
+  assert.throws(() => f.build(), /exact local module graph/);
+  assert.equal(fs.existsSync(f.output), false);
 });
 
 test('MV3 browser differences, explicit activation permissions, closed WAR and offline Wasm CSP', t => {
@@ -124,7 +169,7 @@ test('MV3 browser differences, explicit activation permissions, closed WAR and o
         'game/stock-skin-rules.mjs', 'game/skin-provider.mjs', 'game/stock-food-provider.mjs', 'game/stock-prey-provider.mjs',
         'game/stock-asset-sources.mjs', 'game/desktop-layout.mjs', 'game/client-input.mjs',
         'game/stock-gameplay.mjs', 'game/stock-session.mjs', 'game/stock-hud-contract.mjs', 'game/handshake-session.mjs', 'game/stock-live-profile.mjs',
-        'game/pkg/slither_client.js', 'game/pkg/slither_client_bg.wasm'],
+        'game/pkg/slither_client.js', 'game/pkg/slither_client_bg.wasm', `game/pkg/${snippetName}`],
     }]);
     for (const key of ['host_permissions', 'optional_host_permissions', 'content_scripts', 'background', 'externally_connectable']) {
       assert.equal(Object.hasOwn(manifest, key), false, key);
@@ -189,6 +234,11 @@ for (const [name, change, expected] of [
   ['multiline remote module', f => f.write('web/animated.mjs', "import {\n init\n} from 'https://example.invalid/client.js';"), /Nonlocal module import/],
   ['remote re-export', f => f.write('web/animated.mjs', "export { init } from 'https://example.invalid/client.js';"), /Nonlocal module import/],
   ['missing imported module', f => f.write('web/animated.mjs', "import init from './absent.mjs';"), /Missing packaged module/],
+  ['missing HUD validator', f => fs.unlinkSync(path.join(f.root, 'dist/web', snippetName)), /ENOENT/],
+  ['changed HUD validator', f => f.write(`dist/web/${snippetName}`, '// Original synthetic incompatible helper.\n'), /differs from its authored source/],
+  ['missing generated HUD import', f => f.write('dist/web/slither_client.js', syntheticGlue.replace(/^import .+\n/m, '')), /exactly one generated HUD validator/],
+  ['unsupported generated module', f => f.write('dist/web/slither_client.js', syntheticGlue.replace(snippetName, 'snippets/unreviewed.mjs')), /exactly one generated HUD validator/],
+  ['additional generated module', f => f.write('dist/web/slither_client.js', `${syntheticGlue}\nimport './snippets/unreviewed.mjs';`), /Missing packaged module/],
   ['dynamic module', f => f.write('web/animated.mjs', "import('./unreviewed.mjs');"), /Dynamic imports require package review/],
   ['source-map payload', f => f.write('web/animated.mjs', JSON.stringify({ ['sources' + 'Content']: ['synthetic excluded content'] })), /embedded source-map/],
   ['missing HTML asset', f => f.write('web/animated.html', '<script src="https://example.invalid/asset.js"></script>'), /Missing packaged page resource/],
@@ -205,6 +255,7 @@ for (const [name, change, expected] of [
 }
 
 for (const name of ['animatedscene_control_view', 'animatedscene_advance_with_control', 'animatedscene_reset_lag',
+  'animatedscene_apply_frame_and_render_standard_with_face_presentation_and_prey_and_hud',
   'encode_login', 'solve_challenge', 'decode_frame', 'setup_protocol_version']) {
   test(`missing production gameplay ABI ${name} fails before package output`, t => {
     const f = fixture(t);
@@ -254,7 +305,7 @@ test('CLI requires unambiguous paths and confines outputs to the ignored extensi
   }
   for (const outputDir of ['dist/elsewhere', '.', 'dist/extension/../../outside']) assert.throws(() => f.build({ outputDir }), /must stay inside/);
   assert.throws(() => f.build({ webDir: 'dist/extension' }), /must be separate/);
-  assert.equal(f.build({ outputDir: 'dist/extension/fresh' }).files.length, 78);
+  assert.equal(f.build({ outputDir: 'dist/extension/fresh' }).files.length, 82);
 });
 
 const launcher = new Script(fs.readFileSync(new URL('../extension/launcher.js', import.meta.url), 'utf8').replace(/^import .+;\r?$/gm, ''));

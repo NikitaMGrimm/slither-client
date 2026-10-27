@@ -52,4 +52,6 @@ announcement replacement policy, game-over capture or Wasm export. Names may
 contain arbitrary bytes; parser acceptance is not HTML or text-rendering
 acceptance. Native synthetic tests and independent review cover the declared
 parser boundary; browser, pixel, server and complete HUD behavior remain
-unverified. See [verification](verification.md).
+unverified. A separate opt-in [packet journal](hud-ingress.md) consumes the
+leaderboard parser through its native transaction; it does not change these
+borrowed decoder APIs. See [verification](verification.md).

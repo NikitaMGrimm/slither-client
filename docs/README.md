@@ -9,6 +9,7 @@ Canvas2D rendering and an optional local simulator connection.
 - [Caller-owned stock session](stock-session.md): explicit profiles, handshake, ping and lifecycle ownership.
 - [Opt-in score state](score-state.md): retained-own score inputs, table caching and copied observations.
 - [HUD packet projections](hud-packets.md): bounded borrowed leaderboard and announcement decoding.
+- [HUD packet journal](hud-ingress.md): explicit command-time scores, lifecycle guards and session/controller routing.
 - [Retained desktop food](food-presentation.md): factories, source ownership and ordered paint passes.
 - [Retained prey](prey-presentation.md): independent appearances, motion, capture and borrowed sources.
 - [Ordinary antennas](antenna-presentation.md): appearance state, draw cadence, supplied randomness and borrowed bulbs.

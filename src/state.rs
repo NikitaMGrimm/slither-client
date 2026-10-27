@@ -9,6 +9,7 @@
 
 use crate::{
     math,
+    presentation::{HudIngressError, HudIngressPlan},
     protocol::{self, ElapsedHeader, ProtocolError},
 };
 use std::{
@@ -345,9 +346,33 @@ pub struct AppliedFrame {
     pub events: Vec<PresentationEvent>,
 }
 
+/// Private ranges preserve wire positions even when commands emit no events.
+pub(crate) struct HudCommandBoundary {
+    pub event_end: usize,
+    pub marker: HudCommandMarker,
+}
+
+pub(crate) enum HudCommandMarker {
+    Other,
+    Leaderboard {
+        local_row: u8,
+        rank: u16,
+        population: u16,
+        death_pending: bool,
+    },
+    FinalCapture,
+}
+
+pub(crate) struct HudCommandCollector<'a> {
+    pub plan: HudIngressPlan<'a>,
+    pub boundaries: Vec<HudCommandBoundary>,
+}
+
 /// A malformed or out-of-policy frame never changes the scene or counters.
 #[derive(Clone, Debug, PartialEq)]
 pub enum StateError {
+    /// Explicit HUD ingress plan, canonical controls or complete leaderboard failed.
+    Hud(HudIngressError),
     /// Existing framing or setup-boundary validation failed.
     Protocol(ProtocolError),
     /// A supported command has an invalid length or scalar value.
@@ -369,6 +394,7 @@ pub enum StateError {
 impl fmt::Display for StateError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Hud(error) => error.fmt(f),
             Self::Protocol(error) => error.fmt(f),
             Self::InvalidPacket(code) => {
                 write!(f, "invalid supported '{}' packet", char::from(*code))
@@ -430,7 +456,7 @@ impl ClientState {
         bytes: &[u8],
         header: ElapsedHeader,
     ) -> Result<FrameReport, StateError> {
-        self.apply_transaction(bytes, header, None, false)
+        self.apply_transaction(bytes, header, None, false, None)
     }
 
     /// Atomically apply a frame and return every supported presentation change.
@@ -451,7 +477,7 @@ impl ClientState {
         header: ElapsedHeader,
     ) -> Result<AppliedFrame, StateError> {
         let mut events = Vec::new();
-        let report = self.apply_transaction(bytes, header, Some(&mut events), false)?;
+        let report = self.apply_transaction(bytes, header, Some(&mut events), false, None)?;
         Ok(AppliedFrame { report, events })
     }
 
@@ -462,7 +488,19 @@ impl ClientState {
         header: ElapsedHeader,
     ) -> Result<AppliedFrame, StateError> {
         let mut events = Vec::new();
-        let report = self.apply_transaction(bytes, header, Some(&mut events), true)?;
+        let report = self.apply_transaction(bytes, header, Some(&mut events), true, None)?;
+        Ok(AppliedFrame { report, events })
+    }
+
+    pub(crate) fn apply_frame_with_hud_events(
+        &mut self,
+        bytes: &[u8],
+        header: ElapsedHeader,
+        collector: &mut HudCommandCollector<'_>,
+    ) -> Result<AppliedFrame, StateError> {
+        let mut events = Vec::new();
+        let report =
+            self.apply_transaction(bytes, header, Some(&mut events), true, Some(collector))?;
         Ok(AppliedFrame { report, events })
     }
 
@@ -472,13 +510,50 @@ impl ClientState {
         header: ElapsedHeader,
         mut events: Option<&mut Vec<PresentationEvent>>,
         score_enabled: bool,
+        mut hud: Option<&mut HudCommandCollector<'_>>,
     ) -> Result<FrameReport, StateError> {
         let decoded = protocol::decode_frame(bytes, header)?;
+        if let Some(collector) = hud.as_ref() {
+            collector
+                .plan
+                .validate(&decoded.commands)
+                .map_err(StateError::Hud)?;
+        }
         let mut staged = self.clone();
         let mut ignored = 0;
-        for command in &decoded.commands {
-            if !staged.apply_command(command, events.as_deref_mut(), score_enabled)? {
+        let mut captures = 0;
+        for (index, command) in decoded.commands.iter().enumerate() {
+            let mut marker = HudCommandMarker::Other;
+            let hud_leaderboard = hud.is_some() && command[0] == b'l';
+            if let Some(collector) = hud.as_ref() {
+                if hud_leaderboard {
+                    // Opt-in admission deliberately validates ignored-playing tails too.
+                    let header = protocol::hud::parse_leaderboard(command)
+                        .map_err(|error| StateError::Hud(HudIngressError::Leaderboard(error)))?;
+                    let guard = collector.plan.guards[index];
+                    if guard.playing {
+                        marker = HudCommandMarker::Leaderboard {
+                            local_row: header.local_row(),
+                            rank: header.rank(),
+                            population: header.population(),
+                            death_pending: guard.death_pending,
+                        };
+                    }
+                } else if collector.plan.final_capture_indices.get(captures) == Some(&index) {
+                    marker = HudCommandMarker::FinalCapture;
+                    captures += 1;
+                }
+            }
+            if !hud_leaderboard
+                && !staged.apply_command(command, events.as_deref_mut(), score_enabled)?
+            {
                 ignored += 1;
+            }
+            if let Some(collector) = hud.as_deref_mut() {
+                collector.boundaries.push(HudCommandBoundary {
+                    event_end: events.as_ref().map_or(0, |events| events.len()),
+                    marker,
+                });
             }
         }
         staged.frames_applied = staged.frames_applied.saturating_add(1);

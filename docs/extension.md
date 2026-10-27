@@ -26,7 +26,11 @@ npm run build:extension
 ```
 
 Packaging uses an explicitly trusted existing `dist/web/slither_client.js` and
-`slither_client_bg.wasm`. It does not build Rust, install dependencies, execute
+`slither_client_bg.wasm` and the glue's generated shared-validator module. The
+selected `snippets/slither-client-<identifier>/web/stock-hud-contract.mjs` must
+match the authored validator byte-for-byte. Its identifier is discovered from
+the static glue import; no other generated module is admitted. Packaging
+does not build Rust, install dependencies, execute
 generated JavaScript or instantiate Wasm. It validates Wasm magic/structure,
 generated entrypoints and referenced exports, including generalized face
 packet/render APIs and the control/session exports. Missing, stale, malformed or mismatched files fail. Source
@@ -38,11 +42,17 @@ The default produces both ignored directories:
 - `dist/extension/chrome`
 - `dist/extension/firefox`
 
-Each contains exactly 38 files: the original 17-file preview package plus the
-fixed game activation/gate/link/bootstrap/CSS, fourteen authored game modules and a
-game-local generated JS/Wasm pair. Preview HTML/modules are copied unchanged
+Each contains exactly 41 files: the original preview package, fixed game
+activation/gate/link/bootstrap/CSS, fifteen authored game modules and a generated
+JS/Wasm/validator module graph for each renderer. Preview HTML/modules are copied unchanged
 under `scene/`; null simulator configuration disables its local connection.
 The game entry imports no synthetic resolver or fixture.
+
+Source manifests declare the fixed resource list. Packaging adds the verified
+generated validator's exact game-local path to each output manifest. Other
+manifest fields, origin matches, permissions and CSP are preserved; output
+resources contain no wildcard. Generated module bytes and glue are copied
+unchanged into both `scene/pkg` and `game/pkg`.
 
 Only explicit files are copied. There is no reference harness, official code or
 artwork, capture, dependency tree, server binary or Rust build intermediate.

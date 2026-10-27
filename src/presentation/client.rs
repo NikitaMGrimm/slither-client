@@ -6,16 +6,18 @@ use super::{
     AnchorView, AntennaCullBounds, AntennaDrawInput, AntennaError, AntennaSnapshot, AntennaState,
     ArenaEdgeView, BodyPaintGeometry, BodyPaintSample, BodyPaintView, BoundaryRadius, CurveOutput,
     FaceGeometry, FollowCamera, FoodConsume, FoodCullBounds, FoodEaterPose, FoodError, FoodFactory,
-    FoodSpawn, FoodWorld, FrameClock, FrameStep, MAX_CURVE_SAMPLES, OrdinaryAntennaGeometry,
-    PairedFaceGeometry, PairedSideGeometry, PreparedAntenna, PresentationError, PreyError,
-    PreyFactory, PreyWorld, ScoreError, ScoreTables, SnakeMetrics, SnakeObjectToken,
-    SnakePresentation, StandardEyeGeometry, finite,
+    FoodSpawn, FoodWorld, FrameClock, FrameStep, HudIngressEventKind, HudIngressPlan,
+    HudIngressReport, MAX_CURVE_SAMPLES, OrdinaryAntennaGeometry, PairedFaceGeometry,
+    PairedSideGeometry, PreparedAntenna, PresentationError, PreyError, PreyFactory, PreyWorld,
+    ScoreError, ScoreTables, SnakeMetrics, SnakeObjectToken, SnakePresentation,
+    StandardEyeGeometry, finite,
 };
 use crate::{
     protocol::ElapsedHeader,
     state::{
-        Appearance, ClientState, FoodSpawnInput, FrameReport, MAX_SNAKES, MAX_TOTAL_BODY_POINTS,
-        Point, PresentationEvent, PreySpawnInput, Setup, SnakeTarget, StateError,
+        Appearance, ClientState, FoodSpawnInput, FrameReport, HudCommandBoundary,
+        HudCommandCollector, HudCommandMarker, MAX_SNAKES, MAX_TOTAL_BODY_POINTS, Point,
+        PresentationEvent, PreySpawnInput, Setup, SnakeTarget, StateError,
     },
 };
 
@@ -292,6 +294,10 @@ pub struct PreparedSnake {
 /// A failed received, numeric, or retention transition; the entire client is preserved.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ClientPresentationError {
+    /// HUD journal ingress never enables score admission implicitly.
+    ScoreTrackingRequired,
+    /// An accepted final capture requires an actual ready retained-own score.
+    FinalScoreUnavailable(ScoreStatus),
     /// Score admission must start before packets or after reset.
     ScoreModeRequiresReset,
     /// Canonical R requires an original own object at its event position.
@@ -337,6 +343,12 @@ pub enum ClientPresentationError {
 impl fmt::Display for ClientPresentationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ScoreTrackingRequired => {
+                f.write_str("HUD ingress requires enabled score tracking")
+            }
+            Self::FinalScoreUnavailable(_) => {
+                f.write_str("HUD final capture requires a ready score")
+            }
             Self::ScoreModeRequiresReset => {
                 f.write_str("enable score tracking before packets or after reset")
             }
@@ -390,7 +402,9 @@ impl Error for ClientPresentationError {
             Self::Presentation(error) => Some(error),
             Self::Food(error) => Some(error),
             Self::Prey(error) => Some(error),
-            Self::Limit
+            Self::ScoreTrackingRequired
+            | Self::FinalScoreUnavailable(_)
+            | Self::Limit
             | Self::ScoreModeRequiresReset
             | Self::ScoreOwnRequired
             | Self::AppearanceModeRequiresReset
@@ -1142,6 +1156,48 @@ impl AnimatedClient {
         )
     }
 
+    /// Opt-in indexed HUD journal using the same typed transaction and event fold.
+    ///
+    /// Requires already enabled score tracking. Complete typed admission, including
+    /// every leaderboard tail even while not playing, precedes source callbacks.
+    /// Supplied booleans are private session decisions, not a native lifecycle.
+    /// Setup counts successful callbacks; callers map actual draw planning to these
+    /// callbacks. Observation adds no draw, update or decoder. All numeric changes
+    /// roll back on failure; external callback side effects cannot roll back.
+    #[allow(clippy::too_many_arguments)]
+    pub fn apply_frame_with_face_presentation_and_all_factories_and_setup_and_hud<E, F, G, P, H>(
+        &mut self,
+        bytes: &[u8],
+        header: ElapsedHeader,
+        resolve: F,
+        mut resolve_food: G,
+        mut resolve_prey: P,
+        on_setup: H,
+        plan: HudIngressPlan<'_>,
+    ) -> Result<HudIngressReport, E>
+    where
+        E: From<ClientPresentationError>,
+        F: FnMut(&Appearance) -> Result<FacePresentation, E>,
+        G: FnMut(&FoodSpawnInput, f64) -> Result<FoodFactory, E>,
+        P: FnMut(&PreySpawnInput, f64) -> Result<PreyFactory, E>,
+        H: FnMut(&mut AnimatedClient, &Setup) -> Result<(), E>,
+    {
+        let (_, journal) = self.apply_frame_face_transaction(
+            bytes,
+            header,
+            resolve,
+            true,
+            true,
+            |spawn, zoom| resolve_food(spawn, zoom).map(Some),
+            true,
+            |spawn, zoom| resolve_prey(spawn, zoom).map(Some),
+            true,
+            on_setup,
+            Some(plan),
+        )?;
+        Ok(journal.expect("HUD mode always constructs a journal"))
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn apply_frame_resolved<E, F, G, P, H>(
         &mut self,
@@ -1218,14 +1274,14 @@ impl AnimatedClient {
         &mut self,
         bytes: &[u8],
         header: ElapsedHeader,
-        mut resolve: F,
+        resolve: F,
         enable_appearance: bool,
         enable_face_presentation: bool,
-        mut resolve_food: G,
+        resolve_food: G,
         enable_food: bool,
-        mut resolve_prey: P,
+        resolve_prey: P,
         enable_prey: bool,
-        mut on_setup: H,
+        on_setup: H,
     ) -> Result<FrameReport, E>
     where
         E: From<ClientPresentationError>,
@@ -1234,8 +1290,55 @@ impl AnimatedClient {
         P: FnMut(&PreySpawnInput, f64) -> Result<Option<PreyFactory>, E>,
         H: FnMut(&mut AnimatedClient, &Setup) -> Result<(), E>,
     {
+        self.apply_frame_face_transaction(
+            bytes,
+            header,
+            resolve,
+            enable_appearance,
+            enable_face_presentation,
+            resolve_food,
+            enable_food,
+            resolve_prey,
+            enable_prey,
+            on_setup,
+            None,
+        )
+        .map(|(report, _)| report)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn apply_frame_face_transaction<E, F, G, P, H>(
+        &mut self,
+        bytes: &[u8],
+        header: ElapsedHeader,
+        mut resolve: F,
+        enable_appearance: bool,
+        enable_face_presentation: bool,
+        mut resolve_food: G,
+        enable_food: bool,
+        mut resolve_prey: P,
+        enable_prey: bool,
+        mut on_setup: H,
+        plan: Option<HudIngressPlan<'_>>,
+    ) -> Result<(FrameReport, Option<HudIngressReport>), E>
+    where
+        E: From<ClientPresentationError>,
+        F: FnMut(&Appearance) -> Result<FacePresentation, E>,
+        G: FnMut(&FoodSpawnInput, f64) -> Result<Option<FoodFactory>, E>,
+        P: FnMut(&PreySpawnInput, f64) -> Result<Option<PreyFactory>, E>,
+        H: FnMut(&mut AnimatedClient, &Setup) -> Result<(), E>,
+    {
+        if plan.is_some() && !self.score_enabled {
+            return Err(ClientPresentationError::ScoreTrackingRequired.into());
+        }
+        let mut collector = plan.map(|plan| HudCommandCollector {
+            plan,
+            boundaries: Vec::new(),
+        });
         let mut received = self.received.clone();
-        let applied = if self.score_enabled {
+        let applied = if let Some(collector) = &mut collector {
+            received.apply_frame_with_hud_events(bytes, header, collector)
+        } else if self.score_enabled {
             received.apply_frame_with_score_events(bytes, header)
         } else {
             received.apply_frame_with_events(bytes, header)
@@ -1256,13 +1359,13 @@ impl AnimatedClient {
         if enable_prey && !self.prey_enabled && self.received.frames_applied != 0 {
             return Err(ClientPresentationError::PreyModeRequiresReset.into());
         }
-        if applied.events.is_empty() {
+        if applied.events.is_empty() && collector.is_none() {
             self.received = received;
             self.food_enabled |= enable_food;
             self.prey_enabled |= enable_prey;
             self.appearance_enabled |= enable_appearance;
             self.face_presentation_enabled |= enable_face_presentation;
-            return Ok(applied.report);
+            return Ok((applied.report, None));
         }
         let mut next = self.clone();
         next.food_enabled |= enable_food;
@@ -1270,281 +1373,355 @@ impl AnimatedClient {
         next.appearance_enabled |= enable_appearance;
         next.face_presentation_enabled |= enable_face_presentation;
         let mut setup = self.received.setup.clone();
-        for event in applied.events {
-            match event {
-                PresentationEvent::Setup(value) => {
-                    if value.game_mode == Some(2) {
-                        return Err(ClientPresentationError::UnsupportedMode(2).into());
-                    }
-                    if next.score_enabled
-                        && next.score_tables.as_ref().map(|tables| tables.table_max())
-                            != Some(value.max_segments)
-                    {
-                        next.score_tables = Some(Arc::new(
-                            ScoreTables::new(value.max_segments)
-                                .map_err(ClientPresentationError::from)?,
-                        ));
-                    }
-                    if let Some(boundary) = &mut next.boundary {
-                        boundary
-                            .apply_setup(value.radius)
-                            .map_err(ClientPresentationError::from)?;
-                    } else {
-                        next.boundary = Some(
-                            BoundaryRadius::new(value.radius)
-                                .map_err(ClientPresentationError::from)?,
-                        );
-                    }
-                    for entry in &mut next.entries {
-                        entry
-                            .snake
-                            .apply_setup(&value)
-                            .map_err(ClientPresentationError::from)?;
-                    }
-                    // Received state commits after all callbacks; draws need this event's center.
-                    next.arena_edge_view
-                        .set_center(value.grid_center)
-                        .map_err(ClientPresentationError::from)?;
-                    next.connected = true;
-                    on_setup(&mut next, setup.insert(value))?;
-                }
-                PresentationEvent::OwnScoreAdjustment(adjustment) => {
-                    if next.own_snake().is_none() {
-                        return Err(ClientPresentationError::ScoreOwnRequired.into());
-                    }
-                    next.own_score_adjustment = adjustment;
-                }
-                PresentationEvent::SnakeAppearance(appearance) => {
-                    if next.face_presentation_enabled && !enable_face_presentation {
-                        return Err(
-                            ClientPresentationError::FacePresentationResolverRequired.into()
-                        );
-                    }
-                    if next.appearance_enabled && !enable_appearance {
-                        return Err(ClientPresentationError::AppearanceResolverRequired.into());
-                    }
-                    let setup = setup
-                        .as_ref()
-                        .ok_or(StateError::MissingSetup)
-                        .map_err(ClientPresentationError::from)?;
-                    let geometry = resolve(&appearance)?;
-                    let snake = SnakePresentation::from_appearance_with_active_face_geometry(
-                        &appearance,
-                        setup,
-                        next.camera.zoom(),
-                        geometry.face,
-                    )
-                    .map_err(ClientPresentationError::from)?;
-                    let antenna = geometry
-                        .antenna
-                        .map(|geometry| {
-                            AntennaState::from_appearance(geometry, appearance.absolute_head)
-                        })
-                        .transpose()
-                        .map_err(ClientPresentationError::from)?;
-                    let own = next.own_snake().is_none();
-                    if own {
-                        next.own_score_adjustment = 0;
-                        let position = snake
-                            .body()
-                            .points()
-                            .first()
-                            .map(|point| point.position())
-                            .unwrap_or(appearance.absolute_head);
-                        next.camera
-                            .set_position(position)
-                            .map_err(ClientPresentationError::from)?;
-                    }
-                    for entry in &mut next.entries {
-                        if entry.wire_id == Some(appearance.id) {
-                            entry.addressed = false;
+        let mut journal = plan.map(|_| HudIngressReport::new(applied.report));
+        let legacy_boundary = [HudCommandBoundary {
+            event_end: applied.events.len(),
+            marker: HudCommandMarker::Other,
+        }];
+        let boundaries = collector
+            .as_ref()
+            .map_or(legacy_boundary.as_slice(), |c| c.boundaries.as_slice());
+        let mut events = applied.events.into_iter();
+        let mut event_start = 0;
+        for (command_index, boundary) in boundaries.iter().enumerate() {
+            let mut own_length_scheduled = None;
+            for event in events.by_ref().take(boundary.event_end - event_start) {
+                match event {
+                    PresentationEvent::Setup(value) => {
+                        if value.game_mode == Some(2) {
+                            return Err(ClientPresentationError::UnsupportedMode(2).into());
                         }
-                    }
-                    next.last_snake_serial = next
-                        .last_snake_serial
-                        .checked_add(1)
-                        .ok_or(ClientPresentationError::Limit)?;
-                    next.entries.push(Entry {
-                        token: SnakeObjectToken::new(next.last_snake_serial)
-                            .map_err(ClientPresentationError::from)?,
-                        wire_id: Some(appearance.id),
-                        addressed: true,
-                        own,
-                        drawn: true,
-                        snake,
-                        antenna,
-                    });
-                    next.check_limits()?;
-                }
-                PresentationEvent::SnakeMotion {
-                    target,
-                    heading,
-                    wanted_heading,
-                    direction,
-                    speed_per_32ms,
-                } => {
-                    if let Some(index) = next.target_index(target) {
-                        let entry = &mut next.entries[index];
-                        entry
-                            .snake
-                            .set_motion(heading, wanted_heading, direction, speed_per_32ms)
-                            .map_err(ClientPresentationError::from)?;
-                        if !entry.own
-                            && let Some(wanted) = wanted_heading
+                        if next.score_enabled
+                            && next.score_tables.as_ref().map(|tables| tables.table_max())
+                                != Some(value.max_segments)
                         {
+                            next.score_tables = Some(Arc::new(
+                                ScoreTables::new(value.max_segments)
+                                    .map_err(ClientPresentationError::from)?,
+                            ));
+                        }
+                        if let Some(boundary) = &mut next.boundary {
+                            boundary
+                                .apply_setup(value.radius)
+                                .map_err(ClientPresentationError::from)?;
+                        } else {
+                            next.boundary = Some(
+                                BoundaryRadius::new(value.radius)
+                                    .map_err(ClientPresentationError::from)?,
+                            );
+                        }
+                        for entry in &mut next.entries {
                             entry
                                 .snake
-                                .set_gaze_heading(wanted)
+                                .apply_setup(&value)
                                 .map_err(ClientPresentationError::from)?;
                         }
-                    }
-                }
-                PresentationEvent::SnakeAnchor {
-                    target,
-                    absolute_position,
-                    direction,
-                    grew,
-                    fam,
-                } => {
-                    if let Some(index) = next.target_index(target) {
-                        let entry = &mut next.entries[index];
-                        let previous = entry.snake.metrics().corrected_head;
-                        entry
-                            .snake
-                            .apply_anchor(
-                                absolute_position,
-                                direction,
-                                if grew { fam } else { None },
-                                AnchorView {
-                                    zoom: next.camera.zoom(),
-                                    extrapolated_distance: 0.,
-                                },
-                            )
+                        // Received state commits after all callbacks; draws need this event's center.
+                        next.arena_edge_view
+                            .set_center(value.grid_center)
                             .map_err(ClientPresentationError::from)?;
-                        if entry.own {
+                        next.connected = true;
+                        if let Some(journal) = &mut journal {
+                            journal.push(
+                                command_index,
+                                HudIngressEventKind::Setup {
+                                    table_max: value.max_segments,
+                                },
+                            );
+                        }
+                        on_setup(&mut next, setup.insert(value))?;
+                        if let Some(journal) = &mut journal {
+                            journal.setup_draw(command_index, next.score_view());
+                        }
+                    }
+                    PresentationEvent::OwnScoreAdjustment(adjustment) => {
+                        if next.own_snake().is_none() {
+                            return Err(ClientPresentationError::ScoreOwnRequired.into());
+                        }
+                        next.own_score_adjustment = adjustment;
+                    }
+                    PresentationEvent::SnakeAppearance(appearance) => {
+                        if next.face_presentation_enabled && !enable_face_presentation {
+                            return Err(
+                                ClientPresentationError::FacePresentationResolverRequired.into()
+                            );
+                        }
+                        if next.appearance_enabled && !enable_appearance {
+                            return Err(ClientPresentationError::AppearanceResolverRequired.into());
+                        }
+                        let setup = setup
+                            .as_ref()
+                            .ok_or(StateError::MissingSetup)
+                            .map_err(ClientPresentationError::from)?;
+                        let geometry = resolve(&appearance)?;
+                        let snake = SnakePresentation::from_appearance_with_active_face_geometry(
+                            &appearance,
+                            setup,
+                            next.camera.zoom(),
+                            geometry.face,
+                        )
+                        .map_err(ClientPresentationError::from)?;
+                        let antenna = geometry
+                            .antenna
+                            .map(|geometry| {
+                                AntennaState::from_appearance(geometry, appearance.absolute_head)
+                            })
+                            .transpose()
+                            .map_err(ClientPresentationError::from)?;
+                        let own = next.own_snake().is_none();
+                        if own {
+                            next.own_score_adjustment = 0;
+                            let position = snake
+                                .body()
+                                .points()
+                                .first()
+                                .map(|point| point.position())
+                                .unwrap_or(appearance.absolute_head);
                             next.camera
-                                .reanchor(previous, entry.snake.metrics().corrected_head)
+                                .set_position(position)
                                 .map_err(ClientPresentationError::from)?;
                         }
+                        for entry in &mut next.entries {
+                            if entry.wire_id == Some(appearance.id) {
+                                entry.addressed = false;
+                            }
+                        }
+                        next.last_snake_serial = next
+                            .last_snake_serial
+                            .checked_add(1)
+                            .ok_or(ClientPresentationError::Limit)?;
+                        next.entries.push(Entry {
+                            token: SnakeObjectToken::new(next.last_snake_serial)
+                                .map_err(ClientPresentationError::from)?,
+                            wire_id: Some(appearance.id),
+                            addressed: true,
+                            own,
+                            drawn: true,
+                            snake,
+                            antenna,
+                        });
                         next.check_limits()?;
-                    }
-                }
-                PresentationEvent::SnakeMass { id, fam } => {
-                    if let Some(index) = next.lookup_index(id) {
-                        next.entries[index]
-                            .snake
-                            .set_mass(fam)
-                            .map_err(ClientPresentationError::from)?;
-                    }
-                }
-                PresentationEvent::SnakeTailRemoved { id, fam } => {
-                    if let Some(index) = next.lookup_index(id) {
-                        next.entries[index]
-                            .snake
-                            .remove_tail(fam, next.camera.zoom())
-                            .map_err(ClientPresentationError::from)?;
-                    }
-                }
-                PresentationEvent::SnakeRemoved { id, died } => {
-                    // Removal scans the draw collection in paint order, then
-                    // deletes the lookup even if it addressed a newer duplicate.
-                    let removed = next
-                        .entries
-                        .iter()
-                        .position(|entry| entry.drawn && entry.wire_id == Some(id));
-                    for entry in &mut next.entries {
-                        if entry.wire_id == Some(id) {
-                            entry.addressed = false;
+                        if own {
+                            own_length_scheduled = next.own_token();
                         }
                     }
-                    if let Some(index) = removed {
-                        let entry = &mut next.entries[index];
-                        entry.wire_id = None;
-                        if died {
-                            entry.snake.mark_dead();
-                        } else {
-                            entry.drawn = false;
+                    PresentationEvent::SnakeMotion {
+                        target,
+                        heading,
+                        wanted_heading,
+                        direction,
+                        speed_per_32ms,
+                    } => {
+                        if let Some(index) = next.target_index(target) {
+                            let entry = &mut next.entries[index];
+                            entry
+                                .snake
+                                .set_motion(heading, wanted_heading, direction, speed_per_32ms)
+                                .map_err(ClientPresentationError::from)?;
+                            if !entry.own
+                                && let Some(wanted) = wanted_heading
+                            {
+                                entry
+                                    .snake
+                                    .set_gaze_heading(wanted)
+                                    .map_err(ClientPresentationError::from)?;
+                            }
                         }
                     }
-                    next.retire_entries();
-                }
-                PresentationEvent::RadiusTarget(radius) => {
-                    if let Some(boundary) = &mut next.boundary {
-                        boundary
-                            .set_target(radius)
-                            .map_err(ClientPresentationError::from)?;
+                    PresentationEvent::SnakeAnchor {
+                        target,
+                        absolute_position,
+                        direction,
+                        grew,
+                        fam,
+                    } => {
+                        if let Some(index) = next.target_index(target) {
+                            let entry = &mut next.entries[index];
+                            let previous = entry.snake.metrics().corrected_head;
+                            entry
+                                .snake
+                                .apply_anchor(
+                                    absolute_position,
+                                    direction,
+                                    if grew { fam } else { None },
+                                    AnchorView {
+                                        zoom: next.camera.zoom(),
+                                        extrapolated_distance: 0.,
+                                    },
+                                )
+                                .map_err(ClientPresentationError::from)?;
+                            if entry.own {
+                                if grew {
+                                    own_length_scheduled = Some(entry.token);
+                                }
+                                next.camera
+                                    .reanchor(previous, entry.snake.metrics().corrected_head)
+                                    .map_err(ClientPresentationError::from)?;
+                            }
+                            next.check_limits()?;
+                        }
                     }
-                    if let Some(setup) = &mut setup {
-                        setup.radius = radius;
+                    PresentationEvent::SnakeMass { id, fam } => {
+                        if let Some(index) = next.lookup_index(id) {
+                            next.entries[index]
+                                .snake
+                                .set_mass(fam)
+                                .map_err(ClientPresentationError::from)?;
+                            if next.entries[index].own {
+                                own_length_scheduled = Some(next.entries[index].token);
+                            }
+                        }
                     }
-                }
-                PresentationEvent::FoodSpawn(spawn) => {
-                    if let Some(factory) = resolve_food(&spawn, next.camera.zoom())? {
-                        next.foods
-                            .spawn(
-                                FoodSpawn {
-                                    key: spawn.key,
-                                    sector: spawn.sector,
-                                    position: spawn.absolute_position,
-                                    base_size: spawn.base_size,
-                                    raw_color: spawn.raw_color,
-                                    rapid: spawn.rapid,
-                                },
-                                factory.input(next.camera.zoom()),
-                            )
-                            .map_err(ClientPresentationError::from)?;
-                    } else if next.food_enabled {
-                        return Err(ClientPresentationError::FoodFactoryRequired.into());
+                    PresentationEvent::SnakeTailRemoved { id, fam } => {
+                        if let Some(index) = next.lookup_index(id) {
+                            next.entries[index]
+                                .snake
+                                .remove_tail(fam, next.camera.zoom())
+                                .map_err(ClientPresentationError::from)?;
+                            if next.entries[index].own {
+                                own_length_scheduled = Some(next.entries[index].token);
+                            }
+                        }
                     }
-                }
-                PresentationEvent::FoodConsume { key, eater_id } => {
-                    if next.food_enabled {
-                        let consume = match eater_id {
-                            None => FoodConsume::Immediate,
-                            Some(id) => FoodConsume::Eaten(
-                                next.lookup_index(id).map(|i| next.entries[i].token),
-                            ),
-                        };
-                        next.foods.consume(key, consume);
+                    PresentationEvent::SnakeRemoved { id, died } => {
+                        // Removal scans the draw collection in paint order, then
+                        // deletes the lookup even if it addressed a newer duplicate.
+                        let removed = next
+                            .entries
+                            .iter()
+                            .position(|entry| entry.drawn && entry.wire_id == Some(id));
+                        for entry in &mut next.entries {
+                            if entry.wire_id == Some(id) {
+                                entry.addressed = false;
+                            }
+                        }
+                        if let Some(index) = removed {
+                            let entry = &mut next.entries[index];
+                            entry.wire_id = None;
+                            if died {
+                                entry.snake.mark_dead();
+                            } else {
+                                entry.drawn = false;
+                            }
+                        }
                         next.retire_entries();
                     }
-                }
-                PresentationEvent::FoodSectorClear { sector } => {
-                    next.foods.clear_sector(sector);
-                    next.retire_entries();
-                }
-                PresentationEvent::PreySpawn(spawn) => {
-                    if let Some(factory) = resolve_prey(&spawn, next.camera.zoom())? {
-                        next.preys
-                            .spawn(spawn, factory.input(next.camera.zoom()))
-                            .map_err(ClientPresentationError::from)?;
-                    } else if next.prey_enabled {
-                        return Err(ClientPresentationError::PreyFactoryRequired.into());
+                    PresentationEvent::RadiusTarget(radius) => {
+                        if let Some(boundary) = &mut next.boundary {
+                            boundary
+                                .set_target(radius)
+                                .map_err(ClientPresentationError::from)?;
+                        }
+                        if let Some(setup) = &mut setup {
+                            setup.radius = radius;
+                        }
                     }
-                }
-                PresentationEvent::PreyMotion(motion) => {
-                    if next.prey_enabled {
-                        next.preys
-                            .motion(motion, next.clock.lag_multiplier)
-                            .map_err(ClientPresentationError::from)?;
+                    PresentationEvent::FoodSpawn(spawn) => {
+                        if let Some(factory) = resolve_food(&spawn, next.camera.zoom())? {
+                            next.foods
+                                .spawn(
+                                    FoodSpawn {
+                                        key: spawn.key,
+                                        sector: spawn.sector,
+                                        position: spawn.absolute_position,
+                                        base_size: spawn.base_size,
+                                        raw_color: spawn.raw_color,
+                                        rapid: spawn.rapid,
+                                    },
+                                    factory.input(next.camera.zoom()),
+                                )
+                                .map_err(ClientPresentationError::from)?;
+                        } else if next.food_enabled {
+                            return Err(ClientPresentationError::FoodFactoryRequired.into());
+                        }
                     }
-                }
-                PresentationEvent::PreyRemoved { id } => {
-                    next.preys.remove(id);
-                    next.retire_entries();
-                }
-                PresentationEvent::PreyEaten { id, eater_id } => {
-                    if next.prey_enabled {
-                        let eater = next.lookup_index(eater_id).map(|i| next.entries[i].token);
-                        next.preys.consume(id, eater);
+                    PresentationEvent::FoodConsume { key, eater_id } => {
+                        if next.food_enabled {
+                            let consume = match eater_id {
+                                None => FoodConsume::Immediate,
+                                Some(id) => FoodConsume::Eaten(
+                                    next.lookup_index(id).map(|i| next.entries[i].token),
+                                ),
+                            };
+                            next.foods.consume(key, consume);
+                            next.retire_entries();
+                        }
+                    }
+                    PresentationEvent::FoodSectorClear { sector } => {
+                        next.foods.clear_sector(sector);
                         next.retire_entries();
+                    }
+                    PresentationEvent::PreySpawn(spawn) => {
+                        if let Some(factory) = resolve_prey(&spawn, next.camera.zoom())? {
+                            next.preys
+                                .spawn(spawn, factory.input(next.camera.zoom()))
+                                .map_err(ClientPresentationError::from)?;
+                        } else if next.prey_enabled {
+                            return Err(ClientPresentationError::PreyFactoryRequired.into());
+                        }
+                    }
+                    PresentationEvent::PreyMotion(motion) => {
+                        if next.prey_enabled {
+                            next.preys
+                                .motion(motion, next.clock.lag_multiplier)
+                                .map_err(ClientPresentationError::from)?;
+                        }
+                    }
+                    PresentationEvent::PreyRemoved { id } => {
+                        next.preys.remove(id);
+                        next.retire_entries();
+                    }
+                    PresentationEvent::PreyEaten { id, eater_id } => {
+                        if next.prey_enabled {
+                            let eater = next.lookup_index(eater_id).map(|i| next.entries[i].token);
+                            next.preys.consume(id, eater);
+                            next.retire_entries();
+                        }
                     }
                 }
             }
+            if let Some(journal) = &mut journal {
+                if let Some(token) = own_length_scheduled {
+                    journal.push(
+                        command_index,
+                        HudIngressEventKind::OwnLengthScheduled { token },
+                    );
+                }
+                match boundary.marker {
+                    HudCommandMarker::Other => {}
+                    HudCommandMarker::Leaderboard {
+                        local_row,
+                        rank,
+                        population,
+                        death_pending,
+                    } => {
+                        journal.push(
+                            command_index,
+                            HudIngressEventKind::Leaderboard {
+                                local_row,
+                                rank,
+                                population,
+                                death_pending,
+                            },
+                        );
+                    }
+                    HudCommandMarker::FinalCapture => {
+                        let view = next.score_view();
+                        if !matches!(view.status, ScoreStatus::Ready(_)) {
+                            return Err(ClientPresentationError::FinalScoreUnavailable(
+                                view.status,
+                            )
+                            .into());
+                        }
+                        journal.push(command_index, HudIngressEventKind::FinalScore { view });
+                    }
+                }
+            }
+            event_start = boundary.event_end;
         }
         next.received = received;
         *self = next;
-        Ok(applied.report)
+        Ok((applied.report, journal))
     }
 
     /// Advance the boundary and current draw collection, then retire completed deaths.
