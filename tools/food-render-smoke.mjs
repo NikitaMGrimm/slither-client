@@ -65,7 +65,7 @@ export function foodRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok
       const bodySources = path === 'standard' ? f.sources : f.foods;
       ok(trace.slice(indices[5] + 1, indices[6]).some(v => v.op === 'image' && bodySources.includes(v.source)),
         'all early food precedes snake bodies');
-      eq(trace.slice(indices[6]).filter(v => v.op === 'fill').length, 0, 'late food follows all eyes');
+      eq(trace.slice(indices[6]).filter(v => v.op === 'fill' && v.commands[0]?.op === 'arc').length, 0, 'late food follows all eyes');
       eq(f.target.context.stack.length, 0);
       f.scene.advance(now, false).free();
       eq(f.scene.food_state().foods.map(v => v.scale), [0, 0], 'zero-delta update applies the true initial scale');

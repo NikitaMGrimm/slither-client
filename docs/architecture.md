@@ -186,6 +186,24 @@ boundary until the next setup. Wasm exposes `set_connected`, copied
 `boundary_samples` and separate `snapshot.boundary` diagnostics; `snapshot.radius`
 continues to report the received target.
 
+`ArenaEdgeView` retains the effective Setup center and camera angle/distance.
+Setup changes the center before its ordered draw hook. Retained-own draw
+preparation refreshes angle and distance after the camera, including follow-off,
+offscreen and removed-own cases. No-own draws and reset preserve the cache;
+a new client starts with angle and distance at positive zero.
+
+`plan_arena_edge` freezes 83 fill points and 42 stroke points in screen space
+using the displayed radius and strict `abs(radius - distance) < 4000` gate.
+The fixed paths retain their duplicated initial endpoints and computed zero
+radius. Both animated lanes stage them before target reset and submit after
+late prey, under identity/source-over at alpha 0.8 with a `23 * zoom` stroke.
+The closed dark-red band fills before the open inner red stroke. This adds no
+animation step, quality gate, asset or image-budget charge. Ordered Setup draws
+freeze their own center, radius, camera and size. Wasm `arena_edge_view()` returns
+a copied Float64Array `[center, angle, distance]` without changing `snapshot`.
+The received-anchor preview retains its separate circle. The actual cosmetic
+chooser and full host layout remain unsupported.
+
 ## Retained food integration
 
 `AnimatedClient::apply_frame_with_factories` accepts explicit paired-face and food

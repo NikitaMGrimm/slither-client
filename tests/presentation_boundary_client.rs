@@ -1,6 +1,10 @@
 //! Original synthetic packet and explicit-clock fixtures; no reference or network.
 
-use slither_client::{presentation::AnimatedClient, protocol::ElapsedHeader};
+use slither_client::{
+    presentation::{AnimatedClient, ArenaEdgeInput, ArenaEdgeView, plan_arena_edge},
+    protocol::ElapsedHeader,
+    state::Point,
+};
 
 fn u24(value: u32) -> [u8; 3] {
     let bytes = value.to_be_bytes();
@@ -20,6 +24,12 @@ fn setup(radius: u32) -> Vec<u8> {
     p.extend([19, 42, 0, 1]);
     p.extend(u24(radius));
     p
+}
+
+fn setup_at(center: u32, radius: u32) -> Vec<u8> {
+    let mut packet = setup(radius);
+    packet[1..4].copy_from_slice(&u24(center));
+    packet
 }
 
 fn target(radius: u32) -> Vec<u8> {
@@ -350,4 +360,198 @@ fn draws_and_failures_preserve_boundary_and_atomic_connection_state() {
         control.advance(16., false).unwrap()
     );
     assert_eq!(c, control);
+}
+
+fn assert_polar_camera(client: &AnimatedClient, center: f64) {
+    let camera = client.camera().position();
+    let dx = camera.x - center;
+    let dy = camera.y - center;
+    let view = client.arena_edge_view();
+    assert_eq!(view.center(), center);
+    assert_eq!(view.angle().to_bits(), dy.atan2(dx).to_bits());
+    assert_eq!(
+        view.distance().to_bits(),
+        (dx * dx + dy * dy).sqrt().to_bits()
+    );
+}
+
+#[test]
+fn no_own_draws_keep_initial_positive_zero_polar_values_through_setups_and_reset() {
+    let mut c = AnimatedClient::new(0.).unwrap();
+    assert_eq!(c.arena_edge_view(), ArenaEdgeView::default());
+    for center in [1000, 5000] {
+        apply(&mut c, &[setup_at(center, 1000)]);
+        c.set_camera_position(Point {
+            x: 3210.,
+            y: -4321.,
+        })
+        .unwrap();
+        c.prepare_draw(801, 603).unwrap();
+        let view = c.arena_edge_view();
+        assert_eq!(view.center(), f64::from(center));
+        assert_eq!(view.angle().to_bits(), 0_f64.to_bits());
+        assert_eq!(view.distance().to_bits(), 0_f64.to_bits());
+    }
+    let view = c.arena_edge_view();
+    c.reset();
+    c.prepare_draw(801, 603).unwrap();
+    assert!(
+        c.received().setup.is_none(),
+        "the renderer hides the edge without Setup"
+    );
+    assert_eq!(c.arena_edge_view(), view);
+    apply(&mut c, &[setup_at(7000, 1000)]);
+    assert_eq!(c.arena_edge_view().center(), 7000.);
+    assert_eq!(c.arena_edge_view().angle().to_bits(), 0_f64.to_bits());
+    assert_eq!(c.arena_edge_view().distance().to_bits(), 0_f64.to_bits());
+}
+
+#[test]
+fn own_draw_refreshes_after_camera_preparation_without_advancing_update_clocks() {
+    let mut c = AnimatedClient::new(0.).unwrap();
+    apply(&mut c, &[setup(1000), appearance(), target(700)]);
+    c.advance(3., false).unwrap();
+    let ring = c.boundary().unwrap().clone();
+    let mut control = c.clone();
+    for (width, height) in [(801, 603), (801, 603), (333, 555)] {
+        c.prepare_draw(width, height).unwrap();
+        assert_polar_camera(&c, 1000.);
+        assert_eq!(c.boundary(), Some(&ring));
+    }
+    assert_eq!(
+        c.advance(8., false).unwrap(),
+        control.advance(8., false).unwrap()
+    );
+    c.set_follows(false);
+    c.set_camera_position(Point {
+        x: 1123.25,
+        y: 1456.75,
+    })
+    .unwrap();
+    c.prepare_draw(801, 603).unwrap();
+    assert_polar_camera(&c, 1000.);
+    assert_eq!(
+        c.camera().position(),
+        Point {
+            x: 1123.25,
+            y: 1456.75
+        }
+    );
+    c.set_connected(false);
+    c.set_camera_position(Point { x: 1000., y: 900. }).unwrap();
+    c.prepare_draw(801, 603).unwrap();
+    assert_polar_camera(&c, 1000.);
+    assert_eq!(c.arena_edge_view().angle(), -std::f64::consts::FRAC_PI_2);
+    assert_eq!(c.arena_edge_view().distance(), 100.);
+}
+
+#[test]
+fn reset_retains_nonzero_polar_selection_with_current_center_and_projection() {
+    let mut c = AnimatedClient::new(0.).unwrap();
+    apply(&mut c, &[setup(1000), appearance()]);
+    c.set_follows(false);
+    c.set_camera_position(Point { x: 4000., y: 5000. }).unwrap();
+    c.prepare_draw(801, 603).unwrap();
+    let before = c.arena_edge_view();
+    assert_eq!(before.distance(), 5000.);
+    c.reset();
+    c.set_camera_position(Point { x: -200., y: 700. }).unwrap();
+    apply(&mut c, &[setup_at(2000, 5000)]);
+    c.prepare_draw(801, 603).unwrap();
+    let view = c.arena_edge_view();
+    assert_eq!(view.center(), 2000.);
+    assert_eq!(view.angle().to_bits(), before.angle().to_bits());
+    assert_eq!(view.distance().to_bits(), before.distance().to_bits());
+    let input = ArenaEdgeInput {
+        view,
+        camera: c.camera().position(),
+        zoom: c.camera().zoom(),
+        width: 801,
+        height: 603,
+        radius: c.boundary().unwrap().displayed(),
+    };
+    let plan = plan_arena_edge(input).unwrap().unwrap();
+    let theta = before.angle() - 2000. / input.radius;
+    let expected_x = 400.5 + ((2000. + theta.cos() * 5000.) - (-200.)) * input.zoom;
+    assert_eq!(plan.fill[0].x.to_bits(), expected_x.to_bits());
+    let mut fresh = AnimatedClient::new(0.).unwrap();
+    apply(&mut fresh, &[setup_at(2000, 5000)]);
+    assert!(
+        plan_arena_edge(ArenaEdgeInput {
+            view: fresh.arena_edge_view(),
+            ..input
+        })
+        .unwrap()
+        .is_none()
+    );
+}
+
+#[test]
+fn offscreen_removed_and_expired_original_own_keep_refreshing_despite_wire_id_reuse() {
+    for removal in [0, 1] {
+        let mut c = AnimatedClient::new(0.).unwrap();
+        apply(&mut c, &[setup(1000), appearance()]);
+        c.set_follows(false);
+        c.set_camera_position(Point {
+            x: 9000.,
+            y: -9000.,
+        })
+        .unwrap();
+        assert!(
+            c.prepare_draw_with_style(100, 100, 1., false)
+                .unwrap()
+                .is_empty()
+        );
+        assert_polar_camera(&c, 1000.);
+        apply(&mut c, &[vec![b's', 0, 7, removal]]);
+        if removal == 1 {
+            for step in 1..=12 {
+                c.advance(f64::from(step) * 40., false).unwrap();
+            }
+            assert!(c.own_snake().unwrap().metrics().expired);
+        }
+        assert_eq!(c.drawn_snakes().count(), 0);
+        let mut replacement = appearance();
+        replacement[16..19].copy_from_slice(&u24(4000 * 5));
+        apply(&mut c, &[replacement]);
+        assert_eq!(c.own_snake().unwrap().metrics().raw_head.x, 2000.);
+        assert_eq!(c.snake(7).unwrap().metrics().raw_head.x, 4000.);
+        c.set_camera_position(Point { x: 1123., y: 1456. }).unwrap();
+        c.prepare_draw(100, 100).unwrap();
+        assert_polar_camera(&c, 1000.);
+        c.set_follows(true);
+        c.prepare_draw(801, 603).unwrap();
+        assert_polar_camera(&c, 1000.);
+        assert_eq!(
+            c.camera().position(),
+            c.own_snake().unwrap().metrics().corrected_head
+        );
+        assert_ne!(
+            c.camera().position(),
+            c.snake(7).unwrap().metrics().corrected_head
+        );
+    }
+}
+
+#[test]
+fn polar_overflow_and_late_bundle_failure_preserve_the_complete_client() {
+    let mut c = AnimatedClient::new(0.).unwrap();
+    apply(&mut c, &[setup(1000), appearance()]);
+    c.prepare_draw(801, 603).unwrap();
+    c.set_follows(false);
+    c.set_camera_position(Point { x: f64::MAX, y: 0. }).unwrap();
+    let before = c.clone();
+    assert!(c.prepare_draw(801, 603).is_err());
+    assert_eq!(c, before);
+    let mut bad_setup = setup_at(8000, 700);
+    bad_setup[10] = 0;
+    assert!(
+        c.apply_frame(
+            &frame(&[setup_at(9000, 800), bad_setup, appearance()]),
+            ElapsedHeader::Absent
+        )
+        .is_err()
+    );
+    assert_eq!(c, before);
+    assert_eq!(c.arena_edge_view().center(), 1000.);
 }

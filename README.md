@@ -71,13 +71,18 @@ synthetic scene. **Step** advances a received anchor; **Palette**, **Zoom**, and
 [the loopback procedure](docs/verification.md#offline-scene-and-local-simulator).
 
 Open `http://127.0.0.1:18884/animated` for continuous prediction, corrected
-body sampling, standard paired eyes and arena-radius easing. Pointer motion
+body sampling, standard paired eyes and an eased arena edge. Pointer motion
 controls visual gaze,
 including in the synthetic preview. The synthetic fixture uses original
 stand-ins with ordered body effects, retained food/prey animation and adaptive quality.
 Local simulator mode keeps its basic snake stand-ins and uses the same retained
 food path. Full skins, special faces and attachments remain pending.
 The received-anchor preview at `/` remains available for comparison.
+
+Both animated renderers draw the nearby arena edge as a late red band and open
+inner stroke. Its camera angle/distance update with retained-own draw preparation;
+the displayed radius follows the existing connected update clock. This gameplay
+adapter does not implement the original cosmetic chooser.
 
 The separate opt-in [`render_standard` API](docs/standard-body-renderer.md)
 submits standard body plans from trusted borrowed skin-provider snapshots and

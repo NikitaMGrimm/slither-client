@@ -6,6 +6,7 @@ import { denseScene } from '../web/dense-scene.mjs';
 import { faceRenderSmoke } from './face-render-smoke.mjs';
 import { foodRenderSmoke } from './food-render-smoke.mjs';
 import { preyRenderSmoke } from './prey-render-smoke.mjs';
+import { arenaEdgeRenderSmoke, assertArenaEdge } from './arena-edge-render-smoke.mjs';
 
 // Original synthetic sources and Canvas recorder. This executes the real Wasm
 // ABI, but models Canvas state; it is neither a browser nor a raster oracle.
@@ -17,7 +18,9 @@ export function bodyRenderSmoke(wasm) {
   class CanvasRenderingContext2D {
     trace = []; stack = []; alpha = 1; blend = 'source-over'; transforms = []; alphaWrites = [];
     failSource = null; failMethod = null; failSourceAt = 1; failSourceCount = 0; failMethodAfterEyes = null;
-    reset() { this.trace.push({ op: 'reset' }); this.stack = []; this.alpha = 1; this.blend = 'source-over'; this.transforms = []; this.alphaWrites = []; }
+    beforeCanvasCall = null; path = []; pathCommands = []; fillStyle = '#000000'; strokeStyle = '#000000'; lineWidth = 1;
+    reset() { this.trace.push({ op: 'reset' }); this.stack = []; this.alpha = 1; this.blend = 'source-over'; this.transforms = []; this.alphaWrites = [];
+      this.path = []; this.pathCommands = []; this.fillStyle = '#000000'; this.strokeStyle = '#000000'; this.lineWidth = 1; }
     get globalAlpha() { return this.alpha; }
     set globalAlpha(requested) {
       if (Number.isFinite(requested) && requested >= 0 && requested <= 1) this.alpha = requested;
@@ -25,25 +28,32 @@ export function bodyRenderSmoke(wasm) {
       this.alphaWrites = [...this.alphaWrites.slice(-1), { requested, effective: this.alpha }];
     }
     get globalCompositeOperation() { return this.blend; }
-    set globalCompositeOperation(value) { this.blend = value; this.trace.push({ op: 'blend', value }); }
-    save() { this.stack.push({ alpha: this.alpha, blend: this.blend, transforms: this.transforms.slice() }); this.trace.push({ op: 'save' }); }
-    restore() { Object.assign(this, this.stack.pop()); this.trace.push({ op: 'restore' }); }
+    set globalCompositeOperation(value) { this.throwIf('globalCompositeOperation'); this.blend = value; this.trace.push({ op: 'blend', value }); }
+    savedState() { return { alpha: this.alpha, blend: this.blend, transforms: this.transforms.slice(),
+      fillStyle: this.fillStyle, strokeStyle: this.strokeStyle, lineWidth: this.lineWidth }; }
+    save() { this.beforeCanvasCall?.('save', this); this.stack.push(this.savedState()); this.trace.push({ op: 'save', state: this.savedState() }); }
+    restore() { Object.assign(this, this.stack.pop()); this.trace.push({ op: 'restore', state: this.savedState() }); }
     setTransform(...args) { this.throwIf('setTransform'); this.transforms = [['setTransform', ...args]]; }
     translate(...args) { this.throwIf('translate'); this.transforms.push(['translate', ...args]); }
     scale(...args) { this.throwIf('scale'); this.transforms.push(['scale', ...args]); }
     rotate(...args) { this.throwIf('rotate'); this.transforms.push(['rotate', ...args]); }
     throwIf(method) {
-      if (this.failMethod === method || (this.failMethodAfterEyes === method && this.trace.filter(v => v.op === 'fill').length >= 4)) {
+      this.beforeCanvasCall?.(method, this);
+      if (this.failMethod === method || (this.failMethodAfterEyes === method && this.trace.filter(v => v.op === 'fill' && v.commands?.[0]?.op === 'arc').length >= 4)) {
         throw new Error(`synthetic Canvas ${method}`);
       }
     }
     createPattern(source, repetition) { this.throwIf('createPattern'); return { source, repetition }; }
-    beginPath() { this.path = []; }
-    arc(...args) { this.throwIf('arc'); this.path.push(args); }
-    closePath() {}
+    beginPath() { this.throwIf('beginPath'); this.path = []; this.pathCommands = []; this.trace.push({ op: 'beginPath' }); }
+    arc(...args) { this.throwIf('arc'); this.path.push(args); this.pathCommands.push({ op: 'arc', args }); this.trace.push({ op: 'arc', args }); }
+    moveTo(...args) { this.throwIf('moveTo'); this.path.push(args); this.pathCommands.push({ op: 'moveTo', args }); this.trace.push({ op: 'moveTo', args }); }
+    lineTo(...args) { this.throwIf('lineTo'); this.path.push(args); this.pathCommands.push({ op: 'lineTo', args }); this.trace.push({ op: 'lineTo', args }); }
+    closePath() { this.throwIf('closePath'); this.pathCommands.push({ op: 'closePath' }); this.trace.push({ op: 'closePath' }); }
     fillRect(...args) { this.trace.push({ op: 'fillRect', args }); }
-    stroke() { this.trace.push({ op: 'stroke', path: this.path, color: this.strokeStyle, width: this.lineWidth, alpha: this.alpha }); }
-    fill() { this.trace.push({ op: 'fill', path: this.path, color: this.fillStyle, alpha: this.alpha, blend: this.blend }); }
+    stroke() { this.throwIf('stroke'); this.trace.push({ op: 'stroke', path: this.path.slice(), commands: this.pathCommands.slice(), color: this.strokeStyle,
+      width: this.lineWidth, alpha: this.alpha, blend: this.blend, transforms: this.transforms.slice() }); }
+    fill(...args) { this.throwIf('fill'); this.trace.push({ op: 'fill', args, path: this.path.slice(), commands: this.pathCommands.slice(),
+      color: this.fillStyle, alpha: this.alpha, blend: this.blend, transforms: this.transforms.slice() }); }
     drawImage(source, ...args) {
       if (source === this.failSource && ++this.failSourceCount === this.failSourceAt) throw new Error('synthetic Canvas drawImage');
       this.trace.push({ op: 'image', source, args, alpha: this.alpha, blend: this.blend,
@@ -104,7 +114,7 @@ export function bodyRenderSmoke(wasm) {
     const render = (callback = resolve) => scene.render_standard(target, ...foods, background, callback, quality);
     const state = () => [scene.snapshot(), scene.drawn_snakes(), Array.from(scene.camera_samples()),
       Array.from(scene.own_body_samples()), Array.from(scene.own_body()), Array.from(scene.length_samples()),
-      Array.from(scene.boundary_samples())];
+      Array.from(scene.boundary_samples()), Array.from(scene.arena_edge_view())];
     const close = () => { scene.free(); quality.free(); };
     if (faceStyle) scene.apply_frame_with_face_geometry(syntheticScene(), false, () => faceStyle);
     else if (eyeStyle) scene.apply_frame_with_eye_geometry(syntheticScene(), false, () => eyeStyle);
@@ -137,6 +147,7 @@ export function bodyRenderSmoke(wasm) {
     faceRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok, rejects, checkAtomic, bodyImages });
     foodRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok, rejects });
     preyRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok, rejects });
+    arenaEdgeRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok, rejects });
     const style = { ...vanillaEyes(), distance: 9.25, separation: 4.75, radius: 4.25,
       pupilRadius: 1.5, pupilTravel: 0.02, outlineWidth: 2.5,
       eyeColor: 0x123456, pupilColor: 0xabcdef, eyeOpacity: 0.6, pupilOpacity: 0.8 };
@@ -156,7 +167,7 @@ export function bodyRenderSmoke(wasm) {
       styled.catalog[0].state = 'ready';
       styled.render();
       eq([...styled.requests[0].customBytes], [1, 4], 'appearance request bytes are independently owned');
-      const paint = () => target.context.trace.filter(v => v.op === 'fill');
+      const paint = () => target.context.trace.filter(v => v.op === 'fill' && v.commands[0]?.op === 'arc');
       const fills = paint(); const row = scene.drawn_eyes(960, 540);
       eq(fills.map(v => v.color), ['rgb(18,52,86)', 'rgb(171,205,239)', 'rgb(18,52,86)', 'rgb(171,205,239)']);
       eq(fills.map(v => v.alpha), [0.6, 0.8, 0.6, 0.8]);
@@ -169,7 +180,7 @@ export function bodyRenderSmoke(wasm) {
       eq(fills[0].path[0].slice(0, 3), [row[3], row[4], row[11]]);
       eq(fills[1].path[0].slice(0, 3), [row[5], row[6], row[12]]);
       eq(row[12], 1.5 * m.scale * z);
-      const outlines = target.context.trace.filter(v => v.op === 'stroke').slice(1);
+      const outlines = target.context.trace.filter(v => v.op === 'stroke' && v.commands[0]?.op === 'arc');
       eq(outlines.map(v => [v.color, v.width, v.alpha]), [['#000000', 2.5 * z, 0.6], ['#000000', 2.5 * z, 0.6]]);
       for (const key of ['distance', 'separation', 'radius', 'pupilRadius', 'pupilTravel', 'outlineWidth',
         'eyeColor', 'pupilColor', 'eyeOpacity', 'pupilOpacity']) {
@@ -247,27 +258,26 @@ export function bodyRenderSmoke(wasm) {
       const view = () => JSON.parse(scene.snapshot()).boundary;
       const renderers = [() => scene.render(target, ...foods, background, 1, false), boundary.render];
       const boundaryState = () => [view(), Array.from(scene.boundary_samples())];
-      const arc = render => {
+      const edge = render => {
         target.context.trace = [];
         const before = boundaryState(); render();
         eq(boundaryState(), before, 'both renderers leave the ring untouched');
-        const strokes = target.context.trace.filter(call => call.op === 'stroke');
-        eq(strokes.length, 1, 'one setup boundary per draw');
-        return strokes[0].path[0][2];
+        assertArenaEdge(boundary, { eq, ok });
+        return view().displayed;
       };
-      for (const render of renderers) eq(arc(render), 1000, 'unchanged fixture radius');
+      for (const render of renderers) eq(edge(render), 1000, 'unchanged fixture radius');
       scene.apply_frame(Uint8Array.of(122, 0, 1, 144), false); // Authored radius 400.
       const samples = scene.boundary_samples();
-      for (const render of renderers) eq(arc(render), 1000, 'target packets cannot jump the drawn boundary');
+      for (const render of renderers) eq(edge(render), 1000, 'target packets cannot jump the drawn boundary');
       scene.advance(44, false).free();
-      for (const render of renderers) eq(arc(render), 1000, 'fractional update cannot consume boundary');
+      for (const render of renderers) eq(edge(render), 1000, 'fractional update cannot consume boundary');
       scene.advance(48, false).free();
-      for (const render of renderers) eq(arc(render), 1000, 'first whole step displays the original radius');
+      for (const render of renderers) eq(edge(render), 1000, 'first whole step displays the original radius');
       scene.advance(88, false).free();
-      for (const render of renderers) eq(arc(render), samples[5], 'both paths draw the eased absolute radius');
+      for (const render of renderers) eq(edge(render), samples[5], 'both paths draw the eased absolute radius');
       scene.set_connected(false);
       scene.advance(128, false).free();
-      for (const render of renderers) eq(arc(render), samples[5], 'disconnected draws retain the paused display');
+      for (const render of renderers) eq(edge(render), samples[5], 'disconnected draws retain the paused display');
       for (const render of renderers) {
         const before = boundary.state(); const ring = scene.boundary_samples();
         target.context.failMethod = 'arc';
@@ -283,7 +293,7 @@ export function bodyRenderSmoke(wasm) {
         eq(scene.boundary_samples(), retained);
       }
       scene.apply_frame(syntheticSetup(), false);
-      for (const render of renderers) eq(arc(render), 1000, 'Setup replaces the retained display');
+      for (const render of renderers) eq(edge(render), 1000, 'Setup replaces the retained display');
     } finally { boundary.close(); }
     const inherited = fixture();
     const priorValue = Object.getOwnPropertyDescriptor(Object.prototype, 'value');
@@ -338,7 +348,7 @@ export function bodyRenderSmoke(wasm) {
       const firstEye = trace.findIndex(v => v.op === 'fill');
       eq(trace.slice(firstBody, firstEye).filter(v => v.op === 'image').length, ownCalls,
         'complete ordered body passes precede eyes');
-      eq(trace.slice(firstEye).filter(v => v.op === 'fill').length, 12);
+      eq(trace.slice(firstEye).filter(v => v.op === 'fill' && v.commands[0]?.op === 'arc').length, 12);
       const sequence = trace.slice(firstEye).filter(v => v.op === 'image' || v.op === 'fill');
       eq(sequence.slice(0, 4).map(v => v.op), ['fill', 'fill', 'fill', 'fill']);
       eq(sequence[4].op, 'image', 'both eye/pupil pairs finish before next snake');
@@ -424,7 +434,7 @@ export function bodyRenderSmoke(wasm) {
 
     for (const detailed of [false, true]) {
       const f = fixture({ eyes: false, detailed }); try {
-        f.render(); eq(f.target.context.trace.filter(v => v.op === 'fill').length, 0, 'explicit no-eyes lane');
+        f.render(); eq(f.target.context.trace.filter(v => v.op === 'fill' && v.commands[0]?.op === 'arc').length, 0, 'explicit no-eyes lane');
         ok(bodyImages(f).length > 0);
       } finally { f.close(); }
     }
@@ -452,7 +462,7 @@ export function bodyRenderSmoke(wasm) {
     const short = fixture();
     try {
       short.scene.reset(); short.scene.apply_frame(bundle(syntheticSetup(), appearance().slice(0, -22)), false);
-      short.render(); eq(bodyImages(short).length, 0); eq(short.target.context.trace.filter(v => v.op === 'fill').length, 4);
+      short.render(); eq(bodyImages(short).length, 0); eq(short.target.context.trace.filter(v => v.op === 'fill' && v.commands[0]?.op === 'arc').length, 4);
       short.scene.apply_frame(syntheticStep(1), false); short.render(); ok(bodyImages(short).length > 0);
     } finally { short.close(); }
     const incoherent = fixture();
@@ -465,7 +475,7 @@ export function bodyRenderSmoke(wasm) {
       culled.scene.set_camera_position(1000000, 1000000);
       culled.render(() => { throw new Error('culled recipe must not resolve'); });
       eq(bodyImages(culled).length, 0);
-      eq(culled.target.context.trace.filter(v => v.op === 'fill').length, 0);
+      eq(culled.target.context.trace.filter(v => v.op === 'fill' && v.commands[0]?.op === 'arc').length, 0);
       eq(culled.requests.length, 0);
     } finally { culled.close(); }
     for (const callback of [() => { throw new Error('synthetic trusted callback'); }, () => Promise.resolve({})]) {

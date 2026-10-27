@@ -52,6 +52,20 @@ review, stock-browser prey checks and source-runtime comparison remain pending;
 these synthetic results do not establish pixels, full host adaptation, original
 artwork/loading equivalence, gameplay or extension acceptance.
 
+## Animated arena-edge rendering
+
+The arena edge has a native fixed-path planner and retained camera polar cache,
+integrated into both animated lanes and ordered Setup draws. Focused native and
+real-Wasm recorder checks cover strict distance gating, projection/order, stale
+no-own state, reset, event-time Setup centers, scoped Canvas state and rollback.
+The integrated checks pass 371 native tests, 127 Node tests and the full real-Wasm
+smoke, including 3,674 body/face/food/Setup/prey/edge recorder assertions.
+The recorder distinguishes vector paths from arc-based eyes. These are synthetic
+model/command checks; native trig is not a browser bit oracle. A stock Windows
+Chrome capture of the preceding build preserves the thin gray-circle baseline.
+Original-runtime commands, original pixels and the actual cosmetic chooser are
+separate from this implementation's acceptance.
+
 ## Repository guards
 
 Before committing, review and stage only intended files, then run:
@@ -157,7 +171,7 @@ numeric Node/Wasm evidence without scene, pixel, browser or server acceptance.
 
 ## Coupled animation checks
 
-Eight native boundary-client tests cover ordered and repeated targets, setup and
+Thirteen native boundary-client tests cover ordered and repeated targets, setup and
 reset retention, connection gating without a catch-up backlog, continued entity
 animation, draw independence and complete packet/numeric failure rollback.
 The real Wasm smoke checks copied boundary samples and received/displayed radius
