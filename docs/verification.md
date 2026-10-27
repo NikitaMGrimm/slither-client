@@ -160,10 +160,24 @@ zero-alpha calls, whole/scaled overloads, ordering around food/snakes, LQ
 retention, copied Float32 diagnostics, captured-object lifetime, late-Canvas
 rollback, ordered Setup source retention and signed-zero revision conflicts.
 An isolated registry probe additionally passed 588 assertions; it is separate
-from the production renderer count. Page tests use authored doubles. Independent
-review, stock-browser prey checks and source-runtime comparison remain pending;
-these synthetic results do not establish pixels, full host adaptation, original
-artwork/loading equivalence, gameplay or extension acceptance.
+from the production renderer count. Page tests use authored doubles.
+
+A separate bounded offline external-runtime comparison of the historical prey
+candidate `993322acba23ee7b37639a661bd02a6a0e1ff798` completed all ten frozen
+operations and 44 retained returns. With constant entropy 0.25 and authored or
+mapped source objects, all 26,398 compared cells matched exactly: 20,938 across
+11 neutral-state reports and 2,730 each across ten basic-render and ten
+standard-render reports. Both production rendering lanes submitted their prey
+commands. No actual network attempt occurred; the run used fake transport
+constructors, sends and closes. Input pins and predecessor seals remained
+unchanged, owned workers terminated, and no retry or post-data fixture change
+was made. Earlier incomplete attempts remain preserved separately.
+
+That result covers the frozen minimal numeric and submitted-command projections
+of the named historical candidate. It does not establish current-client or
+full-state parity, stock-browser pixels, full host adaptation, original
+artwork/loading equivalence, gameplay or extension acceptance. Stock-browser
+prey verification remains separate.
 
 ## Animated arena-edge rendering
 
