@@ -87,11 +87,14 @@ export async function stockProfileSmoke(wasm) {
     save() { this.stack.push([this.alpha, this.blend]); }
     restore() { const value = this.stack.pop(); assert.ok(value); [this.alpha, this.blend] = value; }
     setTransform() {} translate() {} scale() {} rotate() {}
-    createPattern(source, repetition) { return { source, repetition }; }
+    createPattern(source, repetition) {
+      if (this.fault) throw new Error('Authored Canvas pattern preflight fault');
+      return { source, repetition };
+    }
     fillRect() { this.submit(); }
     beginPath() {} arc() {} moveTo() {} lineTo() {} closePath() {}
     fill() { this.submit(); } stroke() { this.submit(); }
-    submit() { if (this.fault) throw new Error('Authored Canvas submission fault'); this.draws++; }
+    submit() { this.draws++; }
     drawImage(source, ...args) {
       assert.ok(source instanceof HTMLCanvasElement || source instanceof HTMLImageElement);
       assert.ok([2, 4, 8].includes(args.length) && args.every(Number.isFinite));
@@ -231,7 +234,7 @@ export async function stockProfileSmoke(wasm) {
       releaseFetch() { fetchGate.resolve(response); },
       releaseDigest() { digestGate.resolve(digests.at(-1)); },
       invalidControl() { invalidControl = true; },
-      failCanvas() { target.context.fault = true; },
+      failCanvasPreflight() { target.context.fault = true; },
       staleAfterController() { staleAfterController = true; },
       assertCleared() {
         if (probeFailure) throw probeFailure;
@@ -425,7 +428,7 @@ export async function stockProfileSmoke(wasm) {
       h.assertCleared(); h.dispose();
       cases.push('pending-dispose-late-digest-is-cleanup-only');
     }
-    for (const fault of ['invalidControl', 'failCanvas', 'staleAfterController']) {
+    for (const fault of ['invalidControl', 'failCanvasPreflight', 'staleAfterController']) {
       const h = harness(); await accepted(h);
       const before = h.scene.snapshot(); h[fault]();
       throws(() => h.frame(8), /finite|invalid|Canvas|stale/i);
