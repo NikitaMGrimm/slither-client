@@ -304,6 +304,20 @@ nondecorated and eye-less completions. Standalone body entry-alpha semantics rem
 caller-owned. See the [complete face contract](standard-body-renderer.md#complete-ordinary-paired-faces)
 for source readiness, crop, trust and unsupported-family boundaries.
 
+`AppearancePresentation` extends that numeric ownership with an optional ordinary
+antenna on each stable client entry. The full appearance resolver is required for
+later appearances once enabled. The client retains separate 210-margin antenna
+bounds after own-camera preparation and steps each eligible chain once during the
+same curve/eye preparation. Its six Float32 channels, latch and double-precision
+bulb angle advance on draws with supplied random pairs, independently of update
+delta or direct quality gates. Setup preserves chains; reset clears them and
+retains bounds/mode/timeline. The additive body planner consumes the antenna's
+cursor and scoped-alpha effect before death highlighting. Both Wasm lanes share
+the metadata/source pool and bounded prepared paths; bulbs join the existing
+image budget, with separate aggregate path/stroke/vertex/random allowances.
+See [ordinary antennas](antenna-presentation.md) for API, transaction and readiness
+limits. The default no-antenna paths retain their existing signatures and output.
+
 `prepare_draw_with_style` samples each visible body once and returns ordered
 `PreparedSnake` values. It captures the current face heading before committing
 the new curve target for a later update. Spacing advances once; sampling uses that

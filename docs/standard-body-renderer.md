@@ -62,9 +62,11 @@ The existing `none` lane omits eyes for nondecorated faces without changing reta
 state. Optional `faceDecoration` must match the retained paired-side kind and all
 nine geometry fields bit for bit, including signed zero; omission cannot discard
 a required retained decoration. Its feature tag must agree with its metadata,
-and it requires standard paired eyes. Attachments,
-antennas, other special faces, singleton boost effects and unknown feature tags still
-fail explicitly. Full-skin support is outside this renderer.
+and it requires standard paired eyes. Static attachments, other special faces,
+singleton boost effects and unknown feature tags fail explicitly. The legacy
+`render_standard` call also rejects required antennas; the additive antenna calls
+below supply their appearance state and draw-time random capability. Full-skin
+support remains outside this renderer.
 
 ## Complete ordinary paired faces
 
@@ -214,8 +216,9 @@ before each complete plan allocation. No recipe, source, revision or command is
 cached in AnimatedScene after the call; live source references last only through
 submission. Hosts must keep sources ready and unchanged throughout that call.
 
-Background, arena and food precede snakes. Each snake completes body effects,
-death, both eye/pupil pairs and any paired side images before the next snake.
+Background and early food/prey precede snakes. Each snake completes body effects,
+any configured ordinary antenna, death, both eye/pupil pairs and paired side images
+before the next snake. Late food/prey and the arena edge follow all snakes.
 Body commands preserve separate center/local translations, stored tangent rotation, crop overload, destination
 arithmetic, and source-over/lighter composition. Flattened commands first install
 the planner's effective scoped alpha, then issue its original requested alpha;
@@ -231,6 +234,13 @@ eyes and later snakes still draw. No synthetic anchors are added. Invalid recipe
 or numeric inputs reject the complete draw before reset. Canvas exceptions may
 leave partial pixels but unwind the frame scope and preserve all model state;
 only successful complete submission commits camera, spacing, flags and targets.
+
+The additive [ordinary antenna calls](antenna-presentation.md) retain chain state
+and supplied draw-time random inputs. Their body planner inserts the antenna's
+cursor/alpha effect before computing death commands, then submission uses the
+existing barrier to place paths/bulb before that suffix. The legacy body planner
+keeps its signature and no-antenna behavior. The provider's static `attachment`
+remains separate; antenna bulbs require the explicit whole-source metadata.
 
 `node tools/body-render-smoke.mjs` runs the focused real-Wasm synthetic Canvas
 recorder checks after building; `tools/wasm-smoke.mjs` includes them. These check

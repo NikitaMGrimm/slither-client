@@ -4,6 +4,8 @@ use std::{error::Error, f64::consts::PI, fmt};
 
 use crate::{math, state::Point};
 
+use super::AntennaBarrierEffect;
+
 /// Maximum active head-to-tail samples accepted by the painter.
 pub const MAX_BODY_PAINT_SAMPLES: usize = super::MAX_CURVE_SAMPLES;
 /// Maximum image commands, including overlapping fades and all effect passes.
@@ -322,10 +324,10 @@ pub struct BodyImageCommand {
 pub struct BodyPaintPlan {
     /// Ordered image draws, including zero-alpha commands.
     pub commands: Vec<BodyImageCommand>,
-    /// Insertion index before death highlighting. Antenna work is unsupported;
-    /// an inserted lane must not change the cursor used by these planned draws.
+    /// Insertion index before death highlighting. Use the additive antenna planner
+    /// to apply its scratch effect before calculating the death suffix.
     pub antenna_barrier: usize,
-    /// Scratch cursor after all supported passes, without an antenna mutation.
+    /// Scratch cursor after all passes, including any supplied antenna effect.
     pub final_distance_cursor: Point,
 }
 
@@ -738,7 +740,31 @@ fn body_square(zoom: f64, size: f64) -> BodyRect {
 /// including zero-alpha calls, survive. Output assumes source-over at lane entry;
 /// effective per-image state accounts for the painter's local save/restore scopes.
 pub fn plan_standard_body(input: BodyPaintInput<'_>) -> Result<BodyPaintPlan, BodyPaintError> {
+    plan_standard_body_with_antenna(input, AntennaBarrierEffect::Disabled)
+}
+
+/// Plan a standard body with the antenna's draw-time scratch effect inserted
+/// before death commands. The caller submits the corresponding antenna commands
+/// at the returned image barrier; disabled retains the legacy plan exactly.
+pub fn plan_standard_body_with_antenna(
+    input: BodyPaintInput<'_>,
+    effect: AntennaBarrierEffect,
+) -> Result<BodyPaintPlan, BodyPaintError> {
     use BodyPaintPass::*;
+    match effect {
+        AntennaBarrierEffect::Disabled => {}
+        AntennaBarrierEffect::Rejected { cursor }
+        | AntennaBarrierEffect::Eligible { cursor, .. } => {
+            if !all_finite(&[cursor.x, cursor.y]) {
+                return Err(BodyPaintError::InvalidGeometry);
+            }
+        }
+    }
+    if let AntennaBarrierEffect::Eligible { scoped_alpha, .. } = effect
+        && !(0. ..=1.).contains(&scoped_alpha)
+    {
+        return Err(BodyPaintError::InvalidVisual);
+    }
     let style = validate(&input)?;
     let count = command_count(&input, style)?;
     let mut commands = Vec::new();
@@ -900,6 +926,20 @@ pub fn plan_standard_body(input: BodyPaintInput<'_>) -> Result<BodyPaintPlan, Bo
         }
     }
     let antenna_barrier = p.commands.len();
+    let death_scope_alpha = match effect {
+        AntennaBarrierEffect::Disabled => root_alpha.effective,
+        AntennaBarrierEffect::Rejected { cursor } => {
+            p.cursor = cursor;
+            root_alpha.effective
+        }
+        AntennaBarrierEffect::Eligible {
+            cursor,
+            scoped_alpha,
+        } => {
+            p.cursor = cursor;
+            scoped_alpha
+        }
+    };
     if v.dead {
         let envelope = (0.15 + 0.15 * math::sin(5. * PI * v.death).abs()) * math::sin(PI * v.death);
         let size = zoom * line;
@@ -910,7 +950,7 @@ pub fn plan_standard_body(input: BodyPaintInput<'_>) -> Result<BodyPaintPlan, Bo
             let d = p.visit(i)?;
             let alpha = BodyAlpha::assign(
                 d * envelope * (0.6 + 0.4 * math::cos(i as f64 / 4. - 15. * v.death)),
-                root_alpha.effective,
+                death_scope_alpha,
             );
             p.draw(
                 i,

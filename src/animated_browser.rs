@@ -6,6 +6,7 @@ use wasm_bindgen::prelude::*;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, HtmlImageElement};
 
 use crate::{
+    antenna_browser::{AntennaDecoration, appearance as parse_appearance},
     body_browser::{
         BorrowedSources, FaceDecoration, Recipe, ResolveError, appearance_request, paired_face,
         request, same_decoration, same_eyes, standard_eyes,
@@ -13,12 +14,14 @@ use crate::{
     canvas_browser::{CanvasFrame, CanvasPreflight, draw_sprite},
     food_browser::FoodSources,
     presentation::{
-        AnimatedClient, ArenaEdgeInput, ArenaEdgePlan, BodyPaintError, BodyPaintInput,
+        AnimatedClient, AntennaDrawBudget, AntennaPath, AntennaRandomRequest,
+        AppearancePresentation, ArenaEdgeInput, ArenaEdgePlan, BodyPaintError, BodyPaintInput,
         BodyPaintPlan, BodyPaintQuality, BodyPaintView, BodyPaintVisual, CurveInput, CurveOutput,
         EyeLayoutInput, FoodImageCommand, FoodPaintInput, FoodPaintPlan, MAX_BODY_PAINT_COMMANDS,
-        MAX_DRAW_SAMPLES, MAX_RETAINED_SNAKES, PairedSideLayout, PreparedSnake, PreyEaterPose,
-        PreyImageCommand, PreyPaintInput, PreyPaintPlan, QualitySnapshot, SnakePresentation,
-        StandardEyeLayout, Turn, plan_arena_edge, plan_food, plan_prey, plan_standard_body,
+        MAX_DRAW_SAMPLES, MAX_RETAINED_SNAKES, OrdinaryAntennaGeometry, PairedSideLayout,
+        PreparedAntenna, PreparedSnake, PreyEaterPose, PreyImageCommand, PreyPaintInput,
+        PreyPaintPlan, QualitySnapshot, SnakePresentation, StandardEyeLayout, Turn,
+        plan_arena_edge, plan_food, plan_prey, plan_standard_body, plan_standard_body_with_antenna,
         sample_curve_with_heading,
     },
     presentation_browser::AnimationStep,
@@ -44,6 +47,92 @@ fn record<const N: usize>(fields: [(&str, JsValue); N]) -> Result<JsValue, JsVal
 
 fn serial(value: u64) -> JsValue {
     js_sys::BigInt::from(value).into()
+}
+
+fn antenna_random_accessors() -> Result<[js_sys::Function; 2], JsValue> {
+    let array = js_sys::Float64Array::new_with_length(0);
+    let prototype = js_sys::Object::get_prototype_of(&js_sys::Object::get_prototype_of(&array));
+    let getter = |key: &JsValue| {
+        let descriptor = js_sys::Object::get_own_property_descriptor(&prototype, key);
+        js_sys::Reflect::get(&descriptor, &"get".into())?
+            .dyn_into::<js_sys::Function>()
+            .map_err(|_| error("typed-array intrinsic accessor unavailable"))
+    };
+    Ok([
+        getter(&js_sys::Symbol::to_string_tag().into())?,
+        getter(&"length".into())?,
+    ])
+}
+
+thread_local! {
+    static ANTENNA_RANDOM_ACCESSORS: Result<[js_sys::Function; 2], JsValue> = antenna_random_accessors();
+}
+
+fn antenna_random(
+    callback: &js_sys::Function,
+    input: AntennaRandomRequest,
+) -> Result<Vec<[f64; 2]>, ResolveError> {
+    // Capture the trusted realm's intrinsic accessors before invoking the host.
+    let [brand, length] = ANTENNA_RANDOM_ACCESSORS.with(Clone::clone)?;
+    let request = record([
+        ("token", serial(input.token.serial())),
+        ("id", input.id.into()),
+        ("own", input.own.into()),
+        ("drawOrdinal", (input.draw_ordinal as u32).into()),
+        ("nodeCount", (input.node_count as u32).into()),
+        ("randomPairCount", (input.random_pair_count as u32).into()),
+        ("drawSerial", serial(input.draw_serial)),
+    ])?;
+    let value = callback.call1(&JsValue::UNDEFINED, &request)?;
+    // Intrinsic getters inspect storage, ignoring own properties and mutated
+    // prototypes. A proxy must reject before any indexed or shadowed reads.
+    if !js_sys::ArrayBuffer::is_view(&value)
+        || brand.call0(&value)?.as_string().as_deref() != Some("Float64Array")
+    {
+        return Err(error("antenna random callback must return Float64Array").into());
+    }
+    let count = input
+        .random_pair_count
+        .checked_mul(2)
+        .ok_or_else(|| error("antenna random pair count overflow"))?;
+    if length.call0(&value)?.as_f64() != Some(count as f64) {
+        return Err(error("antenna random callback returned the wrong number of units").into());
+    }
+    let values: js_sys::Float64Array = value.unchecked_into();
+    let mut pairs = Vec::new();
+    pairs
+        .try_reserve(input.random_pair_count)
+        .map_err(|_| error("antenna random allocation failed"))?;
+    for index in 0..input.random_pair_count {
+        pairs.push([
+            values.get_index((2 * index) as u32),
+            values.get_index((2 * index + 1) as u32),
+        ]);
+    }
+    Ok(pairs)
+}
+
+fn antenna_geometry_snapshot(g: OrdinaryAntennaGeometry) -> Result<JsValue, JsValue> {
+    record([
+        ("kind", "ordinary-chain".into()),
+        ("nodes", (g.nodes as u32).into()),
+        ("outerColor", g.outer_color.into()),
+        ("innerColor", g.inner_color.into()),
+        ("innerOpacity", g.inner_opacity.into()),
+        ("repeatedInnerStrokes", g.repeated_inner_strokes.into()),
+        ("rotateBulb", g.rotate_bulb.into()),
+        (
+            "bulb",
+            record([
+                ("offsetX", g.bulb.offset_x.into()),
+                ("offsetY", g.bulb.offset_y.into()),
+                ("width", g.bulb.width.into()),
+                ("height", g.bulb.height.into()),
+                ("scale", g.bulb.scale.into()),
+                ("opacity", g.bulb.opacity.into()),
+            ])?,
+        ),
+    ])
 }
 
 fn elapsed_header_kind(present: bool) -> ElapsedHeader {
@@ -433,6 +522,51 @@ impl AnimatedScene {
         self.commit_all(prepared, foods.into_inner(), preys.into_inner())
     }
 
+    /// Retain explicit numeric face and antenna metadata before the first update.
+    pub fn apply_frame_with_appearance(
+        &mut self,
+        bytes: &[u8],
+        elapsed_header: bool,
+        resolve_appearance: &js_sys::Function,
+    ) -> Result<(), JsValue> {
+        self.apply_appearance_factories(bytes, elapsed_header, resolve_appearance, None, None)
+    }
+
+    /// Retain explicit appearance metadata and creation-selected food sources.
+    pub fn apply_frame_with_appearance_and_factories(
+        &mut self,
+        bytes: &[u8],
+        elapsed_header: bool,
+        resolve_appearance: &js_sys::Function,
+        resolve_food: &js_sys::Function,
+    ) -> Result<(), JsValue> {
+        self.apply_appearance_factories(
+            bytes,
+            elapsed_header,
+            resolve_appearance,
+            Some(resolve_food),
+            None,
+        )
+    }
+
+    /// Retain explicit appearance, food and prey inputs in wire order.
+    pub fn apply_frame_with_appearance_and_all_factories(
+        &mut self,
+        bytes: &[u8],
+        elapsed_header: bool,
+        resolve_appearance: &js_sys::Function,
+        resolve_food: &js_sys::Function,
+        resolve_prey: &js_sys::Function,
+    ) -> Result<(), JsValue> {
+        self.apply_appearance_factories(
+            bytes,
+            elapsed_header,
+            resolve_appearance,
+            Some(resolve_food),
+            Some(resolve_prey),
+        )
+    }
+
     /// Apply retained factories and submit each Setup draw in wire order.
     /// Callback/preflight failures preserve model and sources before any clear.
     #[allow(clippy::too_many_arguments)]
@@ -629,6 +763,270 @@ impl AnimatedScene {
         )
     }
 
+    /// Draw with retained appearance metadata and explicit ordered random units.
+    #[allow(clippy::too_many_arguments)]
+    pub fn apply_frame_and_render_with_appearance(
+        &mut self,
+        bytes: &[u8],
+        elapsed_header: bool,
+        resolve_appearance: &js_sys::Function,
+        resolve_food: &js_sys::Function,
+        target: HtmlCanvasElement,
+        palette_0: HtmlCanvasElement,
+        palette_1: HtmlCanvasElement,
+        palette_2: HtmlCanvasElement,
+        background: HtmlImageElement,
+        width: f64,
+        height: f64,
+        detailed_style: bool,
+        resolve_presentation: &js_sys::Function,
+        resolve_random: &js_sys::Function,
+        quality: &DesktopQuality,
+    ) -> Result<u32, JsValue> {
+        self.apply_and_render(
+            bytes,
+            elapsed_header,
+            resolve_appearance,
+            resolve_food,
+            None,
+            target,
+            [palette_0, palette_1, palette_2],
+            background,
+            DrawSize::new(width, height)?,
+            DrawLane::BasicAntenna {
+                detailed: detailed_style,
+                presentation: resolve_presentation,
+                random: resolve_random,
+            },
+            quality.applied(),
+        )
+    }
+
+    /// Draw with retained appearance metadata and explicit ordered random units.
+    #[allow(clippy::too_many_arguments)]
+    pub fn apply_frame_and_render_standard_with_appearance(
+        &mut self,
+        bytes: &[u8],
+        elapsed_header: bool,
+        resolve_appearance: &js_sys::Function,
+        resolve_food: &js_sys::Function,
+        target: HtmlCanvasElement,
+        palette_0: HtmlCanvasElement,
+        palette_1: HtmlCanvasElement,
+        palette_2: HtmlCanvasElement,
+        background: HtmlImageElement,
+        width: f64,
+        height: f64,
+        resolve_recipe: &js_sys::Function,
+        resolve_random: &js_sys::Function,
+        quality: &DesktopQuality,
+    ) -> Result<u32, JsValue> {
+        self.apply_and_render(
+            bytes,
+            elapsed_header,
+            resolve_appearance,
+            resolve_food,
+            None,
+            target,
+            [palette_0, palette_1, palette_2],
+            background,
+            DrawSize::new(width, height)?,
+            DrawLane::StandardAntenna {
+                recipe: resolve_recipe,
+                random: resolve_random,
+            },
+            quality.applied(),
+        )
+    }
+
+    /// Draw with retained appearance metadata and explicit ordered random units.
+    #[allow(clippy::too_many_arguments)]
+    pub fn apply_frame_and_render_with_appearance_and_prey(
+        &mut self,
+        bytes: &[u8],
+        elapsed_header: bool,
+        resolve_appearance: &js_sys::Function,
+        resolve_food: &js_sys::Function,
+        resolve_prey: &js_sys::Function,
+        target: HtmlCanvasElement,
+        palette_0: HtmlCanvasElement,
+        palette_1: HtmlCanvasElement,
+        palette_2: HtmlCanvasElement,
+        background: HtmlImageElement,
+        width: f64,
+        height: f64,
+        detailed_style: bool,
+        resolve_presentation: &js_sys::Function,
+        resolve_random: &js_sys::Function,
+        quality: &DesktopQuality,
+    ) -> Result<u32, JsValue> {
+        self.apply_and_render(
+            bytes,
+            elapsed_header,
+            resolve_appearance,
+            resolve_food,
+            Some(resolve_prey),
+            target,
+            [palette_0, palette_1, palette_2],
+            background,
+            DrawSize::new(width, height)?,
+            DrawLane::BasicAntenna {
+                detailed: detailed_style,
+                presentation: resolve_presentation,
+                random: resolve_random,
+            },
+            quality.applied(),
+        )
+    }
+
+    /// Draw with retained appearance metadata and explicit ordered random units.
+    #[allow(clippy::too_many_arguments)]
+    pub fn apply_frame_and_render_standard_with_appearance_and_prey(
+        &mut self,
+        bytes: &[u8],
+        elapsed_header: bool,
+        resolve_appearance: &js_sys::Function,
+        resolve_food: &js_sys::Function,
+        resolve_prey: &js_sys::Function,
+        target: HtmlCanvasElement,
+        palette_0: HtmlCanvasElement,
+        palette_1: HtmlCanvasElement,
+        palette_2: HtmlCanvasElement,
+        background: HtmlImageElement,
+        width: f64,
+        height: f64,
+        resolve_recipe: &js_sys::Function,
+        resolve_random: &js_sys::Function,
+        quality: &DesktopQuality,
+    ) -> Result<u32, JsValue> {
+        self.apply_and_render(
+            bytes,
+            elapsed_header,
+            resolve_appearance,
+            resolve_food,
+            Some(resolve_prey),
+            target,
+            [palette_0, palette_1, palette_2],
+            background,
+            DrawSize::new(width, height)?,
+            DrawLane::StandardAntenna {
+                recipe: resolve_recipe,
+                random: resolve_random,
+            },
+            quality.applied(),
+        )
+    }
+
+    /// Draw with retained appearance metadata and explicit ordered random units.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_with_antenna_at_size(
+        &mut self,
+        target: HtmlCanvasElement,
+        palette_0: HtmlCanvasElement,
+        palette_1: HtmlCanvasElement,
+        palette_2: HtmlCanvasElement,
+        background: HtmlImageElement,
+        width: f64,
+        height: f64,
+        detailed_style: bool,
+        resolve_presentation: &js_sys::Function,
+        resolve_random: &js_sys::Function,
+        quality: &DesktopQuality,
+    ) -> Result<(), JsValue> {
+        self.render_at_size(
+            target,
+            [palette_0, palette_1, palette_2],
+            background,
+            DrawSize::new(width, height)?,
+            DrawLane::BasicAntenna {
+                detailed: detailed_style,
+                presentation: resolve_presentation,
+                random: resolve_random,
+            },
+            quality.applied(),
+        )
+    }
+
+    /// Draw with retained appearance metadata and explicit ordered random units.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_standard_with_antenna_at_size(
+        &mut self,
+        target: HtmlCanvasElement,
+        palette_0: HtmlCanvasElement,
+        palette_1: HtmlCanvasElement,
+        palette_2: HtmlCanvasElement,
+        background: HtmlImageElement,
+        width: f64,
+        height: f64,
+        resolve_recipe: &js_sys::Function,
+        resolve_random: &js_sys::Function,
+        quality: &DesktopQuality,
+    ) -> Result<(), JsValue> {
+        self.render_at_size(
+            target,
+            [palette_0, palette_1, palette_2],
+            background,
+            DrawSize::new(width, height)?,
+            DrawLane::StandardAntenna {
+                recipe: resolve_recipe,
+                random: resolve_random,
+            },
+            quality.applied(),
+        )
+    }
+
+    /// Submit one draw with explicit retained antenna sources and random units.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_with_antenna(
+        &mut self,
+        target: HtmlCanvasElement,
+        palette_0: HtmlCanvasElement,
+        palette_1: HtmlCanvasElement,
+        palette_2: HtmlCanvasElement,
+        background: HtmlImageElement,
+        detailed_style: bool,
+        resolve_presentation: &js_sys::Function,
+        resolve_random: &js_sys::Function,
+        quality: &DesktopQuality,
+    ) -> Result<(), JsValue> {
+        self.render_committed(
+            target,
+            [palette_0, palette_1, palette_2],
+            background,
+            DrawLane::BasicAntenna {
+                detailed: detailed_style,
+                presentation: resolve_presentation,
+                random: resolve_random,
+            },
+            quality.applied(),
+        )
+    }
+
+    /// Submit one draw with explicit retained antenna sources and random units.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_standard_with_antenna(
+        &mut self,
+        target: HtmlCanvasElement,
+        palette_0: HtmlCanvasElement,
+        palette_1: HtmlCanvasElement,
+        palette_2: HtmlCanvasElement,
+        background: HtmlImageElement,
+        resolve_recipe: &js_sys::Function,
+        resolve_random: &js_sys::Function,
+        quality: &DesktopQuality,
+    ) -> Result<(), JsValue> {
+        self.render_committed(
+            target,
+            [palette_0, palette_1, palette_2],
+            background,
+            DrawLane::StandardAntenna {
+                recipe: resolve_recipe,
+                random: resolve_random,
+            },
+            quality.applied(),
+        )
+    }
+
     /// Advance the animation clock and drawn entities; free the returned step.
     pub fn advance(&mut self, now_ms: f64, lagging: bool) -> Result<AnimationStep, JsValue> {
         let inner = self.client.advance(now_ms, lagging).map_err(error)?;
@@ -668,6 +1066,93 @@ impl AnimatedScene {
     /// death fade. This neither sends steering nor advances an animation clock.
     pub fn set_gaze_heading(&mut self, heading: f64) -> Result<(), JsValue> {
         self.client.set_own_gaze_heading(heading).map_err(error)
+    }
+
+    /// Prepare one numeric draw with explicit antenna random units and no Canvas.
+    pub fn prepare_draw_with_antenna(
+        &mut self,
+        width: f64,
+        height: f64,
+        quality_scale: f64,
+        detailed_style: bool,
+        resolve_random: &js_sys::Function,
+    ) -> Result<(), JsValue> {
+        self.client
+            .prepare_draw_with_antenna(
+                dimensions(width)?,
+                dimensions(height)?,
+                quality_scale,
+                detailed_style,
+                |input| antenna_random(resolve_random, input),
+            )
+            .map_err(|e| e.0)?;
+        Ok(())
+    }
+
+    /// Fresh copies of retained appearance chains; observation advances no clock.
+    pub fn antenna_state(&self) -> Result<JsValue, JsValue> {
+        let bounds = self
+            .client
+            .antenna_bounds()
+            .map(|bounds| {
+                record([
+                    ("minX", bounds.min_x.into()),
+                    ("maxX", bounds.max_x.into()),
+                    ("minY", bounds.min_y.into()),
+                    ("maxY", bounds.max_y.into()),
+                ])
+            })
+            .transpose()?
+            .unwrap_or(JsValue::NULL);
+        let snakes = js_sys::Array::new();
+        for (token, own, drawn, snake) in self.client.snake_objects() {
+            let antenna = if let Some(snapshot) = self.client.antenna_snapshot(token) {
+                record([
+                    ("geometry", antenna_geometry_snapshot(snapshot.geometry)?),
+                    (
+                        "x",
+                        js_sys::Float32Array::from(snapshot.x.as_slice()).into(),
+                    ),
+                    (
+                        "y",
+                        js_sys::Float32Array::from(snapshot.y.as_slice()).into(),
+                    ),
+                    (
+                        "velocityX",
+                        js_sys::Float32Array::from(snapshot.velocity_x.as_slice()).into(),
+                    ),
+                    (
+                        "velocityY",
+                        js_sys::Float32Array::from(snapshot.velocity_y.as_slice()).into(),
+                    ),
+                    (
+                        "accelerationX",
+                        js_sys::Float32Array::from(snapshot.acceleration_x.as_slice()).into(),
+                    ),
+                    (
+                        "accelerationY",
+                        js_sys::Float32Array::from(snapshot.acceleration_y.as_slice()).into(),
+                    ),
+                    ("shown", snapshot.shown.into()),
+                    ("bulbRotation", snapshot.bulb_rotation.into()),
+                ])?
+            } else {
+                JsValue::NULL
+            };
+            snakes.push(&record([
+                ("token", serial(token.serial())),
+                ("id", snake.metrics().id.into()),
+                ("own", own.into()),
+                ("drawn", drawn.into()),
+                ("antenna", antenna),
+            ])?);
+        }
+        record([
+            ("appearanceEnabled", self.client.appearance_enabled().into()),
+            ("drawSerial", serial(self.client.draw_serial())),
+            ("bounds", bounds),
+            ("snakes", snakes.into()),
+        ])
     }
 
     /// Toggle following without advancing the camera's draw clock.
@@ -1215,9 +1700,92 @@ impl AnimatedScene {
         resolve_recipe: &js_sys::Function,
         quality: &DesktopQuality,
     ) -> Result<(), JsValue> {
+        self.render_committed(
+            target,
+            [food_0, food_1, food_2],
+            background,
+            DrawLane::Standard(resolve_recipe),
+            quality.applied(),
+        )
+    }
+}
+
+impl AnimatedScene {
+    fn apply_appearance_factories(
+        &mut self,
+        bytes: &[u8],
+        elapsed_header: bool,
+        resolve_appearance: &js_sys::Function,
+        resolve_food: Option<&js_sys::Function>,
+        resolve_prey: Option<&js_sys::Function>,
+    ) -> Result<(), JsValue> {
+        let mut prepared = self.client.clone();
+        let foods = RefCell::new(self.food_sources.clone());
+        let preys = RefCell::new(self.prey_sources.clone());
+        let mut appearance = |input: &crate::state::Appearance| -> Result<_, ResolveError> {
+            let raw = resolve_appearance
+                .call1(&JsValue::UNDEFINED, &appearance_request(input)?.into())?;
+            Ok(parse_appearance(&raw)?)
+        };
+        let mut food = |spawn: &crate::state::FoodSpawnInput, zoom| -> Result<_, ResolveError> {
+            let callback = resolve_food.ok_or_else(|| error("food factory resolver required"))?;
+            let other = preys
+                .try_borrow()
+                .map_err(|_| error("prey registry already borrowed"))?;
+            let (catalog, snapshots) = registry_allowance(other.entry_count(), other.len())?;
+            Ok(foods
+                .try_borrow_mut()
+                .map_err(|_| error("food registry already borrowed"))?
+                .resolve_limited(callback, spawn, zoom, catalog, snapshots)?)
+        };
+        let mut prey = |spawn: &crate::state::PreySpawnInput, zoom| -> Result<_, ResolveError> {
+            let callback = resolve_prey.ok_or_else(|| error("prey factory resolver required"))?;
+            let other = foods
+                .try_borrow()
+                .map_err(|_| error("food registry already borrowed"))?;
+            let (catalog, snapshots) = registry_allowance(other.entry_count(), other.len())?;
+            Ok(preys
+                .try_borrow_mut()
+                .map_err(|_| error("prey registry already borrowed"))?
+                .resolve_limited(callback, spawn, zoom, catalog, snapshots)?)
+        };
+        let header = elapsed_header_kind(elapsed_header);
+        if resolve_prey.is_some() {
+            prepared.apply_frame_with_appearance_and_all_factories(
+                bytes,
+                header,
+                &mut appearance,
+                &mut food,
+                &mut prey,
+            )
+        } else if resolve_food.is_some() {
+            prepared.apply_frame_with_appearance_and_factories(
+                bytes,
+                header,
+                &mut appearance,
+                &mut food,
+            )
+        } else {
+            prepared.apply_frame_with_appearance(bytes, header, &mut appearance)
+        }
+        .map_err(|e| e.0)?;
+        self.commit_all(prepared, foods.into_inner(), preys.into_inner())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_committed(
+        &mut self,
+        target: HtmlCanvasElement,
+        sprites: [HtmlCanvasElement; 3],
+        background: HtmlImageElement,
+        lane: DrawLane<'_>,
+        applied: QualitySnapshot,
+    ) -> Result<(), JsValue> {
         let size = DrawSize::new(f64::from(target.width()), f64::from(target.height()))?;
+        if lane.with_antenna() {
+            return self.render_at_size(target, sprites, background, size, lane, applied);
+        }
         let entry = size;
-        let sprites = [food_0, food_1, food_2];
         let mut prepared = self.client.clone();
         let context = SceneDrawContext::committed(&prepared, size);
         let mut sources = BorrowedSources::default();
@@ -1229,8 +1797,8 @@ impl AnimatedScene {
             &mut sources,
             &target,
             context,
-            DrawLane::Standard(resolve_recipe),
-            quality.applied(),
+            lane,
+            applied,
             &mut budget,
         )?;
         validate_scene_sources(&sources, &self.food_sources, &self.prey_sources, &target)?;
@@ -1253,9 +1821,7 @@ impl AnimatedScene {
         self.client = prepared;
         Ok(())
     }
-}
 
-impl AnimatedScene {
     #[allow(clippy::too_many_arguments)]
     fn apply_and_render(
         &mut self,
@@ -1282,7 +1848,14 @@ impl AnimatedScene {
         let mut appearance = |appearance: &crate::state::Appearance| -> Result<_, ResolveError> {
             let raw = resolve_appearance
                 .call1(&JsValue::UNDEFINED, &appearance_request(appearance)?.into())?;
-            Ok(paired_face(&raw)?)
+            if lane.with_antenna() {
+                Ok(parse_appearance(&raw)?)
+            } else {
+                Ok(AppearancePresentation {
+                    face: paired_face(&raw)?,
+                    antenna: None,
+                })
+            }
         };
         let mut food_factory =
             |spawn: &crate::state::FoodSpawnInput, zoom| -> Result<_, ResolveError> {
@@ -1348,11 +1921,28 @@ impl AnimatedScene {
                 Ok(())
             };
         let header = elapsed_header_kind(elapsed_header);
-        if resolve_prey.is_some() {
-            prepared.apply_frame_with_all_factories_and_setup(
+        if lane.with_antenna() && resolve_prey.is_some() {
+            prepared.apply_frame_with_appearance_and_all_factories_and_setup(
                 bytes,
                 header,
                 &mut appearance,
+                &mut food_factory,
+                &mut prey_factory,
+                &mut on_setup,
+            )
+        } else if lane.with_antenna() {
+            prepared.apply_frame_with_appearance_and_factories_and_setup(
+                bytes,
+                header,
+                &mut appearance,
+                &mut food_factory,
+                &mut on_setup,
+            )
+        } else if resolve_prey.is_some() {
+            prepared.apply_frame_with_all_factories_and_setup(
+                bytes,
+                header,
+                |input| Ok::<_, ResolveError>(appearance(input)?.face),
                 &mut food_factory,
                 &mut prey_factory,
                 &mut on_setup,
@@ -1361,7 +1951,7 @@ impl AnimatedScene {
             prepared.apply_frame_with_factories_and_setup(
                 bytes,
                 header,
-                &mut appearance,
+                |input| Ok::<_, ResolveError>(appearance(input)?.face),
                 &mut food_factory,
                 &mut on_setup,
             )
@@ -1394,7 +1984,7 @@ impl AnimatedScene {
         lane: DrawLane<'_>,
         applied: QualitySnapshot,
     ) -> Result<(), JsValue> {
-        if !self.client.food_enabled() {
+        if !self.client.food_enabled() && !lane.with_antenna() {
             return Err(error(
                 "retained food factories must be enabled before rendering food",
             ));
@@ -1484,6 +2074,7 @@ impl AnimatedScene {
             quality_scale,
             detailed_style,
             resolve_face,
+            None,
             &mut budget,
         )?;
         let camera = prepared.camera().position();
@@ -1633,6 +2224,7 @@ struct DrawBudget {
     samples: usize,
     images: usize,
     layouts: usize,
+    antenna: AntennaDrawBudget,
 }
 impl Default for DrawBudget {
     fn default() -> Self {
@@ -1640,6 +2232,7 @@ impl Default for DrawBudget {
             samples: MAX_DRAW_SAMPLES,
             images: MAX_BODY_PAINT_COMMANDS,
             layouts: MAX_DRAW_SAMPLES,
+            antenna: AntennaDrawBudget::default(),
         }
     }
 }
@@ -1682,6 +2275,24 @@ enum DrawLane<'a> {
         face: &'a js_sys::Function,
     },
     Standard(&'a js_sys::Function),
+    BasicAntenna {
+        detailed: bool,
+        presentation: &'a js_sys::Function,
+        random: &'a js_sys::Function,
+    },
+    StandardAntenna {
+        recipe: &'a js_sys::Function,
+        random: &'a js_sys::Function,
+    },
+}
+
+impl DrawLane<'_> {
+    fn with_antenna(self) -> bool {
+        matches!(
+            self,
+            Self::BasicAntenna { .. } | Self::StandardAntenna { .. }
+        )
+    }
 }
 
 enum PlannedSnakePaint {
@@ -1690,6 +2301,7 @@ enum PlannedSnakePaint {
         layouts: Vec<StandardEyeLayout>,
         decorations: Vec<Option<FaceDecoration>>,
         decoration_layouts: Vec<Option<[PairedSideLayout; 2]>>,
+        antennas: Vec<Option<AntennaDecoration>>,
     },
     Standard {
         draws: Vec<StandardDraw>,
@@ -1701,6 +2313,7 @@ struct StandardDraw {
     layout: Option<StandardEyeLayout>,
     root_alpha: f64,
     decoration_layout: Option<[PairedSideLayout; 2]>,
+    antenna: Option<PreparedAntenna>,
 }
 struct PlannedScene {
     context: SceneDrawContext,
@@ -1903,48 +2516,109 @@ fn submit_prey(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn prepare_snakes<F>(
+    prepared: &mut AnimatedClient,
+    size: DrawSize,
+    quality_scale: f64,
+    budget: &mut DrawBudget,
+    resolve_style: F,
+    random: Option<&js_sys::Function>,
+) -> Result<Vec<PreparedSnake>, JsValue>
+where
+    F: FnMut(usize, bool, &SnakePresentation) -> Result<bool, ResolveError>,
+{
+    let result = if let Some(random) = random {
+        prepared.prepare_draw_resolved_with_antenna_limited_staged(
+            size.width,
+            size.height,
+            quality_scale,
+            budget.samples,
+            &mut budget.antenna,
+            resolve_style,
+            |input| antenna_random(random, input),
+        )
+    } else {
+        prepared.prepare_draw_resolved_limited_staged(
+            size.width,
+            size.height,
+            quality_scale,
+            budget.samples,
+            resolve_style,
+        )
+    };
+    result.map_err(|e| e.0)
+}
+
+// Ordinals include culled draw entries; copy only configurations before the
+// client is mutably borrowed for its single draw-preparation pass.
+fn drawn_antenna_geometry(
+    prepared: &AnimatedClient,
+) -> Result<Vec<Option<OrdinaryAntennaGeometry>>, JsValue> {
+    collect_layouts(
+        prepared
+            .snake_objects()
+            .filter(|(_, _, drawn, _)| *drawn)
+            .map(|(token, _, _, _)| Ok(prepared.antenna_geometry(token))),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
 fn build_standard(
     prepared: &mut AnimatedClient,
     sources: &mut BorrowedSources,
     target: &HtmlCanvasElement,
     size: DrawSize,
     resolve_recipe: &js_sys::Function,
+    random: Option<&js_sys::Function>,
     applied: QualitySnapshot,
     budget: &mut DrawBudget,
 ) -> Result<PlannedSnakePaint, JsValue> {
     let DrawSize { width, height } = size;
     let mut recipes = Vec::new();
-    let snakes = prepared
-        .prepare_draw_resolved_limited_staged(
-            width,
-            height,
-            applied.quality_scale,
-            budget.samples,
-            |ordinal, own, snake| -> Result<bool, ResolveError> {
-                let recipe =
-                    sources.resolve(resolve_recipe, &request(ordinal, own, snake)?, target)?;
-                if let Some(eyes) = &recipe.eyes
-                    && !same_eyes(eyes, snake.eye_geometry())
-                {
-                    return Err(
-                        error("recipe eyes differ from retained appearance geometry").into(),
-                    );
-                }
-                if !same_decoration(
-                    recipe.decoration.as_ref(),
-                    snake.face_geometry().decoration.as_ref(),
-                ) {
-                    return Err(error(
-                        "recipe decoration differs from retained appearance geometry",
-                    )
-                    .into());
-                }
-                let detailed = recipe.style.detailed_segments;
-                push(&mut recipes, recipe)?;
-                Ok(detailed)
-            },
-        )
-        .map_err(|e| e.0)?;
+    let retained = if random.is_some() {
+        drawn_antenna_geometry(prepared)?
+    } else {
+        Vec::new()
+    };
+    let snakes = prepare_snakes(
+        prepared,
+        size,
+        applied.quality_scale,
+        budget,
+        |ordinal, own, snake| -> Result<bool, ResolveError> {
+            let request = request(ordinal, own, snake)?;
+            let recipe = if random.is_some() {
+                sources.resolve_with_antenna(
+                    resolve_recipe,
+                    &request,
+                    target,
+                    retained
+                        .get(ordinal)
+                        .ok_or_else(|| error("missing retained antenna configuration"))?
+                        .as_ref(),
+                )?
+            } else {
+                sources.resolve(resolve_recipe, &request, target)?
+            };
+            if let Some(eyes) = &recipe.eyes
+                && !same_eyes(eyes, snake.eye_geometry())
+            {
+                return Err(error("recipe eyes differ from retained appearance geometry").into());
+            }
+            if !same_decoration(
+                recipe.decoration.as_ref(),
+                snake.face_geometry().decoration.as_ref(),
+            ) {
+                return Err(
+                    error("recipe decoration differs from retained appearance geometry").into(),
+                );
+            }
+            let detailed = recipe.style.detailed_segments;
+            push(&mut recipes, recipe)?;
+            Ok(detailed)
+        },
+        random,
+    )?;
     if snakes.len() > MAX_RETAINED_SNAKES {
         return Err(error("face command budget exceeded"));
     }
@@ -1962,6 +2636,15 @@ fn build_standard(
     // still control their own entry alpha.
     let entry_alpha = 1.;
     for (snake, recipe) in snakes.iter().zip(&recipes) {
+        if snake
+            .antenna
+            .as_ref()
+            .is_some_and(|antenna| antenna.bulb.is_some())
+        {
+            remaining = remaining
+                .checked_sub(1)
+                .ok_or_else(|| error("scene image budget exceeded"))?;
+        }
         if recipe.decoration.is_some() {
             remaining = remaining
                 .checked_sub(2)
@@ -2021,7 +2704,12 @@ fn build_standard(
                 entry_alpha,
                 command_limit: remaining,
             };
-            match plan_standard_body(input) {
+            let body = if let Some(antenna) = &snake.antenna {
+                plan_standard_body_with_antenna(input, antenna.barrier_effect)
+            } else {
+                plan_standard_body(input)
+            };
+            match body {
                 Ok(plan) => {
                     remaining = remaining
                         .checked_sub(plan.commands.len())
@@ -2073,6 +2761,7 @@ fn build_standard(
                 layout,
                 root_alpha,
                 decoration_layout,
+                antenna: snake.antenna.clone(),
             },
         )?;
     }
@@ -2089,37 +2778,61 @@ fn build_basic(
     quality_scale: f64,
     detailed_style: bool,
     resolve_face: Option<&js_sys::Function>,
+    random: Option<&js_sys::Function>,
     budget: &mut DrawBudget,
 ) -> Result<PlannedSnakePaint, JsValue> {
     let DrawSize { width, height } = size;
     let mut decorations = Vec::new();
-    let snakes = prepared
-        .prepare_draw_resolved_limited_staged(
-            width,
-            height,
-            quality_scale,
-            budget.samples,
-            |ordinal, own, snake| -> Result<bool, ResolveError> {
-                let decoration = if let Some(resolve_face) = resolve_face {
+    let mut antennas = Vec::new();
+    let retained = if random.is_some() {
+        drawn_antenna_geometry(prepared)?
+    } else {
+        Vec::new()
+    };
+    let snakes = prepare_snakes(
+        prepared,
+        size,
+        quality_scale,
+        budget,
+        |ordinal, own, snake| -> Result<bool, ResolveError> {
+            let (decoration, antenna) = if random.is_some() {
+                let retained = AppearancePresentation {
+                    face: *snake.face_geometry(),
+                    antenna: *retained
+                        .get(ordinal)
+                        .ok_or_else(|| error("missing retained antenna configuration"))?,
+                };
+                let resolved = sources.resolve_presentation(
+                    resolve_face.ok_or_else(|| error("presentation resolver required"))?,
+                    &request(ordinal, own, snake)?,
+                    &retained,
+                    target,
+                )?;
+                (resolved.decoration, resolved.antenna)
+            } else if let Some(resolve_face) = resolve_face {
+                (
                     sources.resolve_face(
                         resolve_face,
                         &request(ordinal, own, snake)?,
                         snake.face_geometry(),
                         target,
-                    )?
-                } else {
-                    if snake.face_geometry().decoration.is_some() {
-                        return Err(
-                            error("decorated face requires render_with_face_decorations").into(),
-                        );
-                    }
-                    None
-                };
-                push(&mut decorations, decoration)?;
-                Ok(detailed_style)
-            },
-        )
-        .map_err(|e| e.0)?;
+                    )?,
+                    None,
+                )
+            } else {
+                if snake.face_geometry().decoration.is_some() {
+                    return Err(
+                        error("decorated face requires render_with_face_decorations").into(),
+                    );
+                }
+                (None, None)
+            };
+            push(&mut decorations, decoration)?;
+            push(&mut antennas, antenna)?;
+            Ok(detailed_style)
+        },
+        random,
+    )?;
     if snakes.len() > MAX_RETAINED_SNAKES {
         return Err(error("face command budget exceeded"));
     }
@@ -2172,7 +2885,16 @@ fn build_basic(
     let image_count = snakes
         .iter()
         .try_fold(0_usize, |count, snake| {
-            count.checked_add(snake.curve.as_ref().map_or(0, |curve| curve.samples.len()))
+            count
+                .checked_add(snake.curve.as_ref().map_or(0, |curve| curve.samples.len()))
+                .and_then(|count| {
+                    count.checked_add(usize::from(
+                        snake
+                            .antenna
+                            .as_ref()
+                            .is_some_and(|antenna| antenna.bulb.is_some()),
+                    ))
+                })
         })
         .and_then(|count| {
             decorations
@@ -2192,6 +2914,7 @@ fn build_basic(
         layouts,
         decorations,
         decoration_layouts,
+        antennas,
     })
 }
 
@@ -2214,11 +2937,37 @@ fn build_paint(
             applied.quality_scale,
             detailed,
             Some(face),
+            None,
             budget,
         ),
-        DrawLane::Standard(recipe) => {
-            build_standard(prepared, sources, target, size, recipe, applied, budget)
-        }
+        DrawLane::Standard(recipe) => build_standard(
+            prepared, sources, target, size, recipe, None, applied, budget,
+        ),
+        DrawLane::BasicAntenna {
+            detailed,
+            presentation,
+            random,
+        } => build_basic(
+            prepared,
+            sources,
+            target,
+            size,
+            applied.quality_scale,
+            detailed,
+            Some(presentation),
+            Some(random),
+            budget,
+        ),
+        DrawLane::StandardAntenna { recipe, random } => build_standard(
+            prepared,
+            sources,
+            target,
+            size,
+            recipe,
+            Some(random),
+            applied,
+            budget,
+        ),
     }
 }
 
@@ -2257,6 +3006,56 @@ fn submit_plans(
         plan.submit(frame.begin(target)?, sprites, sources, foods, preys)?;
     }
     Ok(())
+}
+
+fn submit_antenna(
+    sources: &BorrowedSources,
+    context: &CanvasRenderingContext2d,
+    decoration: Option<&AntennaDecoration>,
+    plan: &PreparedAntenna,
+) -> Result<(), JsValue> {
+    if plan.strokes.is_empty() {
+        return Ok(());
+    }
+    context.save();
+    let result = (|| {
+        context.set_transform(1., 0., 0., 1., 0., 0.)?;
+        context.translate(plan.center.x, plan.center.y)?;
+        context.set_global_composite_operation("source-over")?;
+        context.set_line_cap("round");
+        context.set_line_join("round");
+        let mut current_path = None;
+        for stroke in &plan.strokes {
+            if current_path != Some(stroke.path) {
+                let vertices = match stroke.path {
+                    AntennaPath::Outer => &plan.outer_path,
+                    AntennaPath::Inner => &plan.inner_path,
+                };
+                context.begin_path();
+                if let Some((first, rest)) = vertices.split_first() {
+                    context.move_to(first.x, first.y);
+                    for point in rest {
+                        context.line_to(point.x, point.y);
+                    }
+                }
+                current_path = Some(stroke.path);
+            }
+            context.set_global_alpha(stroke.alpha);
+            context.set_stroke_style_str(&format!("#{:06x}", stroke.color));
+            context.set_line_width(stroke.width);
+            context.stroke();
+        }
+        if let Some(bulb) = &plan.bulb {
+            sources.submit_antenna_bulb(
+                context,
+                decoration.ok_or_else(|| error("planned antenna bulb source missing"))?,
+                bulb,
+            )?;
+        }
+        Ok(())
+    })();
+    context.restore();
+    result
 }
 
 impl PlannedScene {
@@ -2374,14 +3173,16 @@ impl PlannedScene {
                 layouts,
                 decorations,
                 decoration_layouts,
+                antennas,
             } => {
                 // Preserve subtraction-before-scaling for body screen coordinates. The
                 // borrowed background/food preview above retains its existing transform.
-                for (((snake, layout), decoration), side_layouts) in snakes
+                for ((((snake, layout), decoration), side_layouts), antenna) in snakes
                     .into_iter()
                     .zip(layouts)
                     .zip(&decorations)
                     .zip(decoration_layouts)
+                    .zip(&antennas)
                 {
                     context.set_transform(1., 0., 0., 1., viewport_half.x, viewport_half.y)?;
                     let m = snake.metrics;
@@ -2409,6 +3210,9 @@ impl PlannedScene {
                             result?;
                         }
                     }
+                    if let Some(plan) = &snake.antenna {
+                        submit_antenna(sources, context, antenna.as_ref(), plan)?;
+                    }
                     draw_eyes(context, layout)?;
                     context.set_global_alpha(1.);
                     context.set_global_composite_operation("source-over")?;
@@ -2428,11 +3232,25 @@ impl PlannedScene {
                         layout,
                         root_alpha,
                         decoration_layout,
+                        antenna,
                     },
                     recipe,
                 ) in draws.into_iter().zip(&recipes)
                 {
-                    if let Some(plan) = plan {
+                    let barrier = plan.as_ref().map_or(0, |p| p.antenna_barrier);
+                    if let Some(antenna) = &antenna {
+                        if let Some(plan) = &plan {
+                            for command in &plan.commands[..barrier] {
+                                sources.submit(context, command)?;
+                            }
+                        }
+                        submit_antenna(sources, context, recipe.antenna.as_ref(), antenna)?;
+                        if let Some(plan) = &plan {
+                            for command in &plan.commands[barrier..] {
+                                sources.submit(context, command)?;
+                            }
+                        }
+                    } else if let Some(plan) = &plan {
                         for command in &plan.commands {
                             sources.submit(context, command)?;
                         }

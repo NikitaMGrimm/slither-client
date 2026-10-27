@@ -11,6 +11,7 @@ use std::{
 
 use crate::{math, state::Point};
 
+mod antenna;
 mod arena_edge;
 mod body;
 mod body_painter;
@@ -29,6 +30,11 @@ mod prey_painter;
 mod quality;
 mod snake;
 
+pub use antenna::{
+    AntennaBarrierEffect, AntennaBulbCommand, AntennaBulbGeometry, AntennaCullBounds,
+    AntennaDrawInput, AntennaDrawRequest, AntennaError, AntennaPath, AntennaSnapshot, AntennaState,
+    AntennaStroke, MAX_ANTENNA_NODES, OrdinaryAntennaGeometry, PreparedAntenna,
+};
 pub use arena_edge::{ArenaEdgeInput, ArenaEdgePlan, ArenaEdgeView, plan_arena_edge};
 pub use body::{BODY_SAMPLES, BodyGeometry, BodyPoint, MAX_RETAINED_BODY_POINTS};
 pub use body_painter::{
@@ -36,13 +42,14 @@ pub use body_painter::{
     BodyPaintError, BodyPaintGeometry, BodyPaintInput, BodyPaintPass, BodyPaintPlan,
     BodyPaintQuality, BodyPaintRecipe, BodyPaintSample, BodyPaintView, BodyPaintVisual,
     BodyPalette, BodyRect, BodyRun, BodyStyle, BodyVariantMode, MAX_BODY_PAINT_COMMANDS,
-    MAX_BODY_PAINT_SAMPLES, plan_standard_body,
+    MAX_BODY_PAINT_SAMPLES, plan_standard_body, plan_standard_body_with_antenna,
 };
 pub use boundary::{BOUNDARY_SAMPLES, BoundaryRadius};
 pub use camera::{CAMERA_SAMPLES, CameraCorrections};
 pub use client::{
-    AnimatedClient, ClientPresentationError, MAX_DRAW_SAMPLES, MAX_RETAINED_SNAKES,
-    MAX_RETAINED_TOTAL_BODY_POINTS, PreparedBodyGeometry, PreparedSnake,
+    AnimatedClient, AntennaDrawBudget, AntennaRandomRequest, AppearancePresentation,
+    ClientPresentationError, MAX_DRAW_SAMPLES, MAX_RETAINED_SNAKES, MAX_RETAINED_TOTAL_BODY_POINTS,
+    PreparedBodyGeometry, PreparedSnake,
 };
 pub use curve::{
     CurveInput, CurveOutput, CurveSample, CurveVertex, MAX_CURVE_SAMPLES, sample_curve,

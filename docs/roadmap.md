@@ -30,8 +30,11 @@ retains it per appearance and checks standard-recipe coherence before drawing.
 An additional paired-face API retains side geometry and ready borrowed
 images to compose the complete represented ordinary paired family in both renderers.
 Startup blank-source behavior, other special faces and general host mapping remain
-outside this completion. Full host skin adaptation and antennas remain future
-work. Radius easing now shares the connected update clock and retains cadence
+outside this completion. Full host skin adaptation remains future work.
+Ordinary antennas now have explicit appearance metadata, retained draw-driven
+chains and borrowed bulbs in both animated renderers, including their standard
+death-pass cursor effect. Chooser dynamics, pending-source timing and host mapping
+remain separate. Radius easing shares the connected update clock and retains cadence
 through reset. The opt-in
 standard-body renderer now connects ordered body effects and applied quality to
 production geometry; the synthetic page demonstrates three authored recipes.

@@ -4,11 +4,15 @@ use js_sys::{Array, Function, Object, Reflect, Uint8Array};
 use wasm_bindgen::{JsCast, prelude::*};
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, HtmlImageElement};
 
+use crate::antenna_browser::{
+    AntennaDecoration, PresentationSources, geometry, reject_post_bulb, same_antenna,
+};
 use crate::presentation::{
-    BodyAsset, BodyAssetStatus, BodyAssetUse, BodyBlend, BodyFade, BodyImageCommand,
-    BodyPaintRecipe, BodyPalette, BodyRect, BodyRun, BodyStyle, BodyVariantMode,
-    ClientPresentationError, PairedFaceGeometry, PairedSideGeometry, PairedSideLayout,
-    SnakePresentation, StandardEyeGeometry,
+    AntennaBulbCommand, AppearancePresentation, BodyAsset, BodyAssetStatus, BodyAssetUse,
+    BodyBlend, BodyFade, BodyImageCommand, BodyPaintRecipe, BodyPalette, BodyRect, BodyRun,
+    BodyStyle, BodyVariantMode, ClientPresentationError, OrdinaryAntennaGeometry,
+    PairedFaceGeometry, PairedSideGeometry, PairedSideLayout, SnakePresentation,
+    StandardEyeGeometry,
 };
 use crate::state::Appearance;
 
@@ -32,7 +36,7 @@ impl From<JsValue> for ResolveError {
 
 // Read own data fields, never inherited metadata or metadata accessors. The
 // callback, realm and live DOM sources remain trusted synchronous capabilities.
-fn field(value: &JsValue, key: &str) -> Result<JsValue, JsValue> {
+pub(crate) fn field(value: &JsValue, key: &str) -> Result<JsValue, JsValue> {
     if !value.is_object() || value.is_null() || value.is_instance_of::<js_sys::Promise>() {
         return Err(error(format!("expected record at {key}")));
     }
@@ -52,14 +56,14 @@ fn field(value: &JsValue, key: &str) -> Result<JsValue, JsValue> {
     Reflect::get(&descriptor, &JsValue::from_str("value"))
 }
 
-fn num(value: JsValue, min: f64, max: f64) -> Result<f64, JsValue> {
+pub(crate) fn num(value: JsValue, min: f64, max: f64) -> Result<f64, JsValue> {
     value
         .as_f64()
         .filter(|n| n.is_finite() && *n >= min && *n <= max)
         .ok_or_else(|| error("invalid bounded metadata number"))
 }
 
-fn integer(value: JsValue, min: usize, max: usize) -> Result<usize, JsValue> {
+pub(crate) fn integer(value: JsValue, min: usize, max: usize) -> Result<usize, JsValue> {
     let n = num(value, min as f64, max as f64)?;
     if n.fract() != 0. {
         return Err(error("metadata integer required"));
@@ -67,13 +71,13 @@ fn integer(value: JsValue, min: usize, max: usize) -> Result<usize, JsValue> {
     Ok(n as usize)
 }
 
-fn flag(value: JsValue) -> Result<bool, JsValue> {
+pub(crate) fn flag(value: JsValue) -> Result<bool, JsValue> {
     value
         .as_bool()
         .ok_or_else(|| error("metadata boolean required"))
 }
 
-fn text(value: JsValue) -> Result<String, JsValue> {
+pub(crate) fn text(value: JsValue) -> Result<String, JsValue> {
     value
         .as_string()
         .ok_or_else(|| error("metadata string required"))
@@ -367,6 +371,59 @@ impl BorrowedSources {
         Ok(decoration)
     }
 
+    /// Resolve the complete basic-lane presentation with the same pool and
+    /// metadata parsers as the standard lane, independent of body readiness.
+    pub(crate) fn resolve_presentation(
+        &mut self,
+        callback: &Function,
+        request: &Object,
+        retained: &AppearancePresentation,
+        target: &HtmlCanvasElement,
+    ) -> Result<PresentationSources, JsValue> {
+        let value = callback.call1(&JsValue::UNDEFINED, request)?;
+        let revision = revision(field(&value, "revision")?)?;
+        let face = field(&value, "face")?;
+        if !same_eyes(&standard_eyes(&field(&face, "eyes")?)?, &retained.face.eyes) {
+            return Err(error(
+                "recipe eyes differ from retained appearance geometry",
+            ));
+        }
+        let raw_decoration = field(&face, "decoration")?;
+        let raw_antenna = field(&value, "antenna")?;
+        if raw_decoration.is_undefined() || raw_antenna.is_undefined() {
+            return Err(error(
+                "explicit face decoration and antenna or null required",
+            ));
+        }
+        let mut assets = Vec::new();
+        let mut catalog_ids = Vec::new();
+        let decoration = self.decoration(
+            &raw_decoration,
+            &mut assets,
+            &mut catalog_ids,
+            &revision,
+            target,
+        )?;
+        let antenna = self.antenna(
+            &raw_antenna,
+            &mut assets,
+            &mut catalog_ids,
+            &revision,
+            target,
+        )?;
+        if !same_decoration(decoration.as_ref(), retained.face.decoration.as_ref())
+            || !same_antenna(antenna.as_ref(), retained.antenna.as_ref())
+        {
+            return Err(error(
+                "recipe presentation differs from retained appearance geometry",
+            ));
+        }
+        Ok(PresentationSources {
+            decoration,
+            antenna,
+        })
+    }
+
     fn decoration(
         &mut self,
         value: &JsValue,
@@ -402,6 +459,27 @@ impl BorrowedSources {
         request: &Object,
         target: &HtmlCanvasElement,
     ) -> Result<Recipe, JsValue> {
+        self.resolve_inner(callback, request, target, false, None)
+    }
+
+    pub(crate) fn resolve_with_antenna(
+        &mut self,
+        callback: &Function,
+        request: &Object,
+        target: &HtmlCanvasElement,
+        retained: Option<&OrdinaryAntennaGeometry>,
+    ) -> Result<Recipe, JsValue> {
+        self.resolve_inner(callback, request, target, true, retained)
+    }
+
+    fn resolve_inner(
+        &mut self,
+        callback: &Function,
+        request: &Object,
+        target: &HtmlCanvasElement,
+        allow_antenna: bool,
+        retained: Option<&OrdinaryAntennaGeometry>,
+    ) -> Result<Recipe, JsValue> {
         let snapshot = callback.call1(&JsValue::UNDEFINED, request)?;
         if snapshot.is_instance_of::<js_sys::Promise>() {
             return Err(error("recipe must be synchronous"));
@@ -412,6 +490,11 @@ impl BorrowedSources {
         }
         let revision = revision(field(&snapshot, "revision")?)?;
         let raw = field(&snapshot, "recipe")?;
+        let antenna = field(&raw, "antenna")?;
+        let has_antenna = !antenna.is_null() && !antenna.is_undefined();
+        if has_antenna && !allow_antenna {
+            return Err(error("antenna requires an explicit antenna renderer"));
+        }
         if !field(&raw, "attachment")?.is_null() {
             return Err(error("attachments are unsupported by standard renderer"));
         }
@@ -421,6 +504,9 @@ impl BorrowedSources {
         let mut features = Vec::new();
         for feature in list(field(&raw, "supportedFeatures")?, 1, 8)? {
             let feature = text(feature)?;
+            if feature == "ordinary-antenna" && !allow_antenna {
+                return Err(error("antenna requires an explicit antenna renderer"));
+            }
             if ![
                 "body-palettes",
                 "standard-eyes",
@@ -429,6 +515,7 @@ impl BorrowedSources {
                 "death-highlight",
                 "standard-body-style",
                 "paired-side-images",
+                "ordinary-antenna",
             ]
             .contains(&feature.as_str())
                 || features.contains(&feature)
@@ -445,9 +532,13 @@ impl BorrowedSources {
         };
         let decoration = field(&raw, "faceDecoration")?;
         let has_decoration = !decoration.is_null() && !decoration.is_undefined();
-        if features.len() != 5 + usize::from(eyes.is_some()) + usize::from(has_decoration)
+        if features.len()
+            != 5 + usize::from(eyes.is_some())
+                + usize::from(has_decoration)
+                + usize::from(has_antenna)
             || features.iter().any(|f| f == "standard-eyes") != eyes.is_some()
             || features.iter().any(|f| f == "paired-side-images") != has_decoration
+            || features.iter().any(|f| f == "ordinary-antenna") != has_antenna
             || (has_decoration && eyes.is_none())
         {
             return Err(error("inconsistent standard feature metadata"));
@@ -463,6 +554,7 @@ impl BorrowedSources {
             custom: flag(field(&raw, "custom")?)?,
             eyes,
             decoration: None,
+            antenna: None,
             style: BodyStyle {
                 detailed_segments: false,
                 swell: 0.,
@@ -472,6 +564,18 @@ impl BorrowedSources {
             },
             effects: [None; 3],
         };
+        recipe.antenna = self.antenna(
+            &antenna,
+            &mut recipe.assets,
+            &mut recipe.catalog_ids,
+            &revision,
+            target,
+        )?;
+        if allow_antenna && !same_antenna(recipe.antenna.as_ref(), retained) {
+            return Err(error(
+                "recipe antenna differs from retained appearance geometry",
+            ));
+        }
         recipe.decoration = self.decoration(
             &decoration,
             &mut recipe.assets,
@@ -569,6 +673,36 @@ impl BorrowedSources {
             )?);
         }
         Ok(recipe)
+    }
+
+    fn antenna(
+        &mut self,
+        value: &JsValue,
+        assets: &mut Vec<BodyAsset>,
+        catalog_ids: &mut Vec<usize>,
+        revision: &JsValue,
+        target: &HtmlCanvasElement,
+    ) -> Result<Option<AntennaDecoration>, JsValue> {
+        if value.is_null() || value.is_undefined() {
+            return Ok(None);
+        }
+        if text(field(value, "kind")?)? != "ordinary-chain" {
+            return Err(error("unsupported antenna topology"));
+        }
+        reject_post_bulb(value)?;
+        let geometry = geometry(&field(value, "geometry")?)?;
+        let image = field(value, "image")?;
+        if text(field(&image, "sourceMode")?)? != "whole" {
+            return Err(error("antenna bulb requires a whole source"));
+        }
+        let usage = self.usage(assets, catalog_ids, &image, revision, target)?;
+        if usage.source_rect.is_some() {
+            return Err(error("cropped antenna bulbs are unsupported"));
+        }
+        Ok(Some(AntennaDecoration {
+            geometry,
+            asset: assets[usage.asset],
+        }))
     }
 
     fn usage(
@@ -744,6 +878,30 @@ impl BorrowedSources {
         Ok(())
     }
 
+    /// The caller owns the outer center scope. Keep tip translation/rotation
+    /// separate and restore that nested scope even after a native Canvas throw.
+    pub(crate) fn submit_antenna_bulb(
+        &self,
+        context: &CanvasRenderingContext2d,
+        decoration: &AntennaDecoration,
+        command: &AntennaBulbCommand,
+    ) -> Result<(), JsValue> {
+        context.set_global_composite_operation("source-over")?;
+        context.set_global_alpha(command.alpha);
+        if let Some(angle) = command.rotation {
+            context.save();
+            let result = (|| {
+                context.translate(command.translation.x, command.translation.y)?;
+                context.rotate(angle)?;
+                self.image(context, decoration.asset, None, command.destination)
+            })();
+            context.restore();
+            result
+        } else {
+            self.image(context, decoration.asset, None, command.destination)
+        }
+    }
+
     fn image(
         &self,
         context: &CanvasRenderingContext2d,
@@ -780,6 +938,7 @@ pub(crate) struct Recipe {
     custom: bool,
     pub(crate) eyes: Option<StandardEyeGeometry>,
     pub(crate) decoration: Option<FaceDecoration>,
+    pub(crate) antenna: Option<AntennaDecoration>,
     pub(crate) style: BodyStyle,
     effects: [Option<BodyAssetUse>; 3],
 }

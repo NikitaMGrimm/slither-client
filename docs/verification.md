@@ -38,6 +38,44 @@ pull requests, and manual dispatch. Normal tests and CI require no external
 reference and do not connect to game servers. Dependency and toolchain setup may
 access package sources. Release-plz remains dormant.
 
+## Draw-driven ordinary antennas
+
+The opt-in ordinary-antenna implementation passes 407 native all-target tests,
+133 Node tests and a fresh real-Wasm build/full smoke with 7,226 recorder
+assertions. Formatting, doctests, strict rustdoc and native/Wasm Clippy pass.
+Synthetic coverage includes exact six-channel Float32 stepping, draw-only
+cadence, both bulb modes, zero alpha, retained bounds and object lifetimes,
+source/revision coherence, ordered Setup draws and shared resource boundaries.
+Standard-renderer tests include eligible and rejected inner gates with
+non-saturated first-death alpha witnesses.
+
+Independent read-only review identified three issues, now corrected and
+rechecked: rounded lookup indices return arithmetic errors, new antenna APIs
+acquire native patterns before reset, and random tapes use intrinsic Float64
+brand/length validation. Regressions preserve legacy pattern-failure ordering,
+reject spoofed tapes without reading shadow getters, and retain valid tapes
+whose own length property differs from their intrinsic length. Earlier failed
+fixtures and review witnesses remain preserved outside the repository.
+
+Stock Windows Chrome 156.0.8078.48 verification is partial: 3,836 executed
+checks passed with no assertion or initialization failure. The N9 configuration
+completed both lanes and fresh-context repeats, using the same authored inputs,
+source pixels, camera policy and 31 update/draw pairs as the retained baseline.
+Those primary checks cover exact channels, rotation, native calls and repeated
+pixels. A frozen pre-operation artifact reservation guard stopped the allocation
+after 140 of 330 planned draws and four of 22 planned pixel checkpoints; there
+was no observed hard-cap breach or retry. Complete NULL/legacy equivalence,
+N8/N11, lifecycle, death, fault, Setup, resize and LQ browser checks remain unrun.
+Two PNGs and full compressed returns are retained; independent cleanup and input
+integrity audits pass.
+
+The separate stock Windows Firefox 158.0.1 attempt is inconclusive: fixture
+instrumentation failed before any product assertion or pixel checkpoint. Its one
+startup/session was consumed without retry; cleanup passed and the failed
+returns remain preserved. Synthetic Canvas recorders do not rasterize or establish original
+pixels, full host mapping, pending-source timing, extension installation,
+performance or server acceptance. See the [antenna contract](antenna-presentation.md).
+
 ## Retained prey integration
 
 The retained-prey integration has passed 360 native all-target tests, 127 Node

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add appearance-owned ordinary antenna chains with explicit draw-time random
+  inputs, both bulb rotation modes, shared borrowed sources and both animated
+  render paths. Preserve antenna cursor/alpha effects before standard death
+  highlighting and stage ordered Setup steps within shared ingress budgets.
+
 - Replace the animated gray arena circle with a late red vector band and open
   inner stroke in both renderers and ordered Setup draws. Retain the own-draw
   camera angle/distance through reset and no-own draws; use the eased radius

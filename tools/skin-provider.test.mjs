@@ -49,6 +49,130 @@ function addDecoration(f) {
   f.metadata.faceDecoration = { kind: 'paired-side-images', geometry: sideGeometry(), image: { asset: 0 } };
 }
 
+const antennaGeometry = () => ({ kind: 'ordinary-chain', nodes: 8,
+  outerColor: 0x123456, innerColor: 0xabcdef, innerOpacity: 0.375,
+  repeatedInnerStrokes: true, rotateBulb: false,
+  bulb: { offsetX: -7.25, offsetY: 2.5, width: 19, height: 23, scale: 0.625, opacity: 0.75 } });
+function addAntenna(f) {
+  f.metadata.antenna = { kind: 'ordinary-chain', geometry: antennaGeometry(),
+    image: { asset: 0, sourceMode: 'whole' } };
+}
+
+test('optional ordinary antenna preserves exact absent/null legacy shapes and borrowed identity', () => {
+  for (const make of [fixture, bodyFixture]) {
+    const f = make(); const legacy = f.resolve();
+    for (const value of [undefined, null]) {
+      f.metadata.antenna = value; assert.deepEqual(f.resolve(), legacy);
+      assert.equal(Object.hasOwn(f.resolve().recipe, 'antenna'), false);
+    }
+    addAntenna(f); const { recipe } = f.resolve(); const antenna = recipe.antenna;
+    assert.deepEqual(recipe.supportedFeatures, [...legacy.recipe.supportedFeatures, 'ordinary-antenna']);
+    assert.equal(antenna.image.asset, recipe.palettes[0].variants[0].asset);
+    assert.equal(antenna.image.asset.source, f.canvas);
+    assert.equal(antenna.image.sourceMode, 'whole');
+    assert.deepEqual(antenna.image.sourceRect, [0, 0, 20, 30]);
+    for (const value of [antenna, antenna.geometry, antenna.geometry.bulb, antenna.image]) assert(Object.isFrozen(value));
+    f.metadata.antenna.geometry.bulb.width = 31;
+    assert.equal(antenna.geometry.bulb.width, 19);
+    assert.equal(recipe.attachment, null);
+  }
+});
+
+test('ordinary antenna validates every numeric field without losing admitted signed zeros', () => {
+  const f = fixture(); addAntenna(f); const a = f.metadata.antenna;
+  const fields = [
+    ['innerOpacity', 0, 1, false], ['outerColor', 0, 0xffffff, true], ['innerColor', 0, 0xffffff, true],
+    ['offsetX', -65535, 65535, false], ['offsetY', -65535, 65535, false],
+    ['width', Number.MIN_VALUE, 65535, false], ['height', Number.MIN_VALUE, 65535, false],
+    ['scale', Number.MIN_VALUE, 256, false], ['opacity', 0, 1, false],
+  ];
+  for (const [key, min, max, integral] of fields) {
+    const bulb = Object.hasOwn(a.geometry.bulb, key);
+    const input = bulb ? a.geometry.bulb : a.geometry; const original = input[key];
+    for (const value of [NaN, Infinity, -Infinity, min - 1, max + 1, null, undefined, '1', {},
+      ...(integral ? [1.25] : [])]) {
+      input[key] = value; assert.throws(() => f.resolve(), undefined, key);
+    }
+    input[key] = min; assert.doesNotThrow(() => f.resolve());
+    input[key] = max; assert.doesNotThrow(() => f.resolve());
+    input[key] = -0;
+    if (min > 0) assert.throws(() => f.resolve());
+    else assert(Object.is((bulb ? f.resolve().recipe.antenna.geometry.bulb : f.resolve().recipe.antenna.geometry)[key], -0));
+    delete input[key]; Object.setPrototypeOf(input, { [key]: original }); assert.throws(() => f.resolve());
+    Object.setPrototypeOf(input, Object.prototype);
+    let calls = 0;
+    Object.defineProperty(input, key, { configurable: true, get() { calls++; return original; } });
+    assert.throws(() => f.resolve(), /Accessor/); assert.equal(calls, 0);
+    Object.defineProperty(input, key, { configurable: true, writable: true, enumerable: true, value: original });
+  }
+});
+
+test('ordinary topology, flags and unsupported post-bulb strokes are explicit', () => {
+  const f = fixture(); addAntenna(f); const a = f.metadata.antenna;
+  for (const nodes of [8, 9, 11]) { a.geometry.nodes = nodes; assert.equal(f.resolve().recipe.antenna.geometry.nodes, nodes); }
+  for (const nodes of [0, 7, 8.5, 10, 12, '8', null, undefined]) {
+    a.geometry.nodes = nodes; assert.throws(() => f.resolve());
+  }
+  a.geometry.nodes = 8;
+  for (const key of ['rotateBulb', 'repeatedInnerStrokes']) {
+    for (const value of [false, true]) { a.geometry[key] = value; assert.equal(f.resolve().recipe.antenna.geometry[key], value); }
+    for (const value of [0, 1, 'false', null, undefined]) { a.geometry[key] = value; assert.throws(() => f.resolve()); }
+    a.geometry[key] = false;
+  }
+  for (const record of [a, a.geometry]) {
+    record.kind = 'static-attachment'; assert.throws(() => f.resolve()); record.kind = 'ordinary-chain';
+    record.postBulbStrokes = false; assert.doesNotThrow(() => f.resolve());
+    for (const value of [true, 1, null, 'false']) { record.postBulbStrokes = value; assert.throws(() => f.resolve()); }
+    delete record.postBulbStrokes;
+  }
+  assert.equal(Object.hasOwn(f.resolve().recipe.antenna.geometry, 'postBulbStrokes'), false);
+});
+
+test('antenna requires explicit whole-source borrowing and rejects even a full crop', () => {
+  const f = fixture(); addAntenna(f); const image = f.metadata.antenna.image;
+  for (const mode of [undefined, null, 'crop', 'scaled', 1]) {
+    image.sourceMode = mode; assert.throws(() => f.resolve());
+  }
+  image.sourceMode = 'whole';
+  for (const rect of [[0, 0, 20, 30], [1, 1, 2, 2], null, []]) {
+    image.sourceRect = rect; assert.throws(() => f.resolve());
+  }
+  delete image.sourceRect; assert.doesNotThrow(() => f.resolve());
+  let calls = 0; Object.defineProperty(image, 'sourceMode', { get() { calls++; return 'whole'; } });
+  assert.throws(() => f.resolve(), /Accessor/); assert.equal(calls, 0);
+});
+
+test('antenna readiness and unsupported requirements share provider status and revision policy', () => {
+  const f = fixture(); addAntenna(f);
+  const source = new f.realm.HTMLCanvasElement();
+  f.catalog.push({ source, state: 'pending' }); f.metadata.antenna.image.asset = 2;
+  let value = f.resolve(); assert.equal(value.status, 'pending');
+  assert.equal(value.recipe.antenna.image.asset.source, source);
+  f.catalog[2].state = 'ready'; assert.equal(f.resolve().status, 'ready');
+  f.snapshot.revision = -0; assert(Object.is(f.resolve().revision, -0));
+  f.metadata.unsupportedFeatures = ['required-special-topology']; assert.equal(f.resolve().status, 'unsupported');
+  assert.deepEqual(f.resolve().recipe.unsupportedFeatures, ['required-special-topology']);
+  f.metadata.unsupportedFeatures = []; f.catalog[2].state = 'unsupported'; assert.equal(f.resolve().status, 'unsupported');
+  f.catalog[2] = { source: null, state: 'ready' }; assert.equal(f.resolve().status, 'pending');
+  f.catalog[2] = { source, state: 'ready' }; source.width = 0; assert.equal(f.resolve().status, 'pending');
+  source.width = 20;
+  f.metadata.attachment = { asset: 0, anchor: 'head', scale: 1, pivotX: 0, pivotY: 0, opacity: 1 };
+  value = f.resolve(); assert(value.recipe.supportedFeatures.includes('ordinary-antenna'));
+  assert(value.recipe.supportedFeatures.includes('head-attachment')); assert(value.recipe.attachment);
+});
+
+test('antenna nested metadata is synchronous own data and never invokes accessors', () => {
+  const f = fixture(); addAntenna(f);
+  for (const [record, key] of [[f.metadata, 'antenna'], [f.metadata.antenna, 'geometry'],
+    [f.metadata.antenna, 'image'], [f.metadata.antenna.geometry, 'bulb']]) {
+    const original = record[key]; record[key] = Object.assign(Promise.resolve(), original);
+    assert.throws(() => f.resolve(), /synchronous/); record[key] = original;
+    let calls = 0; Object.defineProperty(record, key, { configurable: true, get() { calls++; return original; } });
+    assert.throws(() => f.resolve(), /Accessor/); assert.equal(calls, 0);
+    Object.defineProperty(record, key, { configurable: true, writable: true, enumerable: true, value: original });
+  }
+});
+
 test('optional paired-side metadata preserves the exact legacy shape when absent or null', () => {
   const f = fixture(); const legacy = f.resolve();
   for (const value of [undefined, null]) {
@@ -642,7 +766,7 @@ test('import and resolution never access ambient DOM, network, pixels or source 
   try {
     for (const key of keys) Object.defineProperty(globalThis, key, { configurable: true, get() { assert.fail(`global ${key}`); } });
     const { createSkinProvider: create } = await import('../web/skin-provider.mjs?synthetic-side-effects');
-    const f = bodyFixture();
+    const f = bodyFixture(); addAntenna(f);
     for (const { source } of f.catalog) {
       for (const key of ['getContext', 'getImageData', 'toDataURL', 'toBlob', 'src', 'currentSrc', 'decode', 'cloneNode']) {
         Object.defineProperty(source, key, { get() { assert.fail(`source ${key}`); }, set() { assert.fail(`source write ${key}`); } });
