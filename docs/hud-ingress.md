@@ -105,7 +105,11 @@ only actions. Both share one step/commit latch; do not call both for one step.
 The result is an observation of existing effects, not a transaction spanning
 later native or observer failure. Reducer publication remains caller-owned.
 
-Visible length/rank/final UI, fade/readout scheduling, leaderboard rows,
+Visible length/rank/final UI, leaderboard rows,
 announcements and full login UI remain separate. Synthetic native, Node and
 real-Wasm recorder evidence does not establish browser pixels, installed-host
 compatibility or server acceptance. See [verification](verification.md).
+
+The separate [semantic reducer](hud-state.md) consumes these copied observations
+and stages fade/readout state in explicitly enabled gameplay without adding
+packet parsing, score arithmetic, clocks or DOM ownership.
