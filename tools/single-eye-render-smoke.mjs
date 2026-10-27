@@ -71,7 +71,7 @@ export function singleEyeRenderSmoke(wasm, { fixture, appearance: appearancePack
       const before = f.state(), trace = f.target.context.trace.slice();
       rejects(() => f.render(), 'legacy standard rendering cannot silently replace required image eyes');
       eq(f.state(), before); eq(f.target.context.trace, trace);
-      rejects(() => f.scene.eye_layouts(960, 540), 'paired-only diagnostics reject the active image family');
+      rejects(() => f.scene.drawn_eyes(960, 540), /drawn_eyes requires paired faces/);
       eq(f.state(), before, 'diagnostics advance no clock');
       f.scene.apply_frame(Uint8Array.of(115, 0, 0, 1), false);
       f.scene.advance(84, false).free(); f.target.context.trace = [];
