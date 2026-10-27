@@ -2,6 +2,11 @@
 
 ## Protocol boundary
 
+The extension's optional [private nickname-edit gate](extension.md#private-nickname-edit-defaults)
+permits bounded native defaults for one exact registered text field while
+fencing original handlers. It preserves raw gameplay input and activates no
+field binding or login UI; native editing behavior remains unverified.
+
 The Rust library builds as `rlib` and `cdylib`. It opens no sockets and fetches no
 assets. Native code has no runtime dependencies; browser bindings use wasm32-only
 wasm-bindgen 0.2.129 and web-sys 0.3.106.

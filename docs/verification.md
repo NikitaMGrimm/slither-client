@@ -38,6 +38,53 @@ pull requests, and manual dispatch. Normal tests and CI require no external
 reference and do not connect to game servers. Dependency and toolchain setup may
 access package sources. Release-plz remains dormant.
 
+## Private nickname-edit default gate
+
+The integrated gate/bootstrap slice passes 810 Node tests, including 91 focused
+gate/bootstrap/profile/input cases and the existing 47 package tests. Eighteen
+new gate cases use deliberate native receiver brands, fixed descriptor owners
+and Window/Document/target propagation doubles. They cover the closed field
+lease, optional versus critical capture failure, bounded keyboard/input-type
+tables, temporary ineligibility, permanent observed invalidation, post-callback
+rechecks, one primary selection gesture, reentry and exact falsy primary errors.
+
+An additional actual authored bootstrap/gameplay/input composition case checks
+raw ArrowLeft/Right/ArrowUp/Space holds and outside-target keyup through modifier,
+composition and eligibility changes. Every newly fenced notification adds zero
+control/source/clock/send observations. Its Wasm boundary is a synthetic double;
+it is not a native-browser input test. Existing profile-bootstrap cases retain
+their synthetic network guards.
+
+A fresh web build and the existing full real-Wasm matrix pass. Generated
+JS/Wasm/validator fingerprints remain byte-identical to the DEL integration;
+native sources are unchanged. Both 44-file packages build with the same fixed
+module graph, manifests and permissions. Formatting and whitespace checks pass.
+The native test/Clippy suites are unchanged evidence from the DEL integration,
+not rerun results for this JavaScript-only slice.
+
+The absent-registration-API baseline failure is retained. Three later failed
+attempts came from test setup/expectations: a deliberately throwing router reused
+by a follow-up probe, an incorrect Ctrl+Space permission expectation, and a
+missing-capability fixture invoking a native-brand getter on its prototype.
+Corrected fixtures pass; those failures did not require product changes.
+
+Independent review then exposed a selectionchange fencing gap: Document-only
+capture let a later Window capture host listener run first. A retained parent
+regression observes one such host call before correction. The gate now captures
+that event once at Window, and the propagation fixture includes Window before
+Document even for non-bubbling selectionchange. The regression verifies zero
+host calls, one attributed owned notification, and continued fencing with no
+lease or field focus. This is event-path algorithm evidence, not browser execution;
+see [DOM event dispatch](https://dom.spec.whatwg.org/#concept-event-dispatch).
+
+These are authored Node/default-decision and separate real-Wasm/package checks.
+Actual descriptor support, visibility options, native propagation/defaults,
+typing/IME/clipboard/selection, CSS, installed-host/CSP and server acceptance
+remain unverified. No field is bound or registered by production startup, and
+no sanitizer, focus, value mutation or login UI is added. Noncancelable and
+postmutation notifications are not value rollback. See the
+[private API and bounds](extension.md#private-nickname-edit-defaults).
+
 ## DEL nickname admission
 
 The aligned session/Rust nickname boundary passes 791 Node and 492 native

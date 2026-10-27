@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test, after } from 'node:test';
+import { createGateTestDom, attachGateTestRealm } from './game-gate-test-fixture.mjs';
 import { Script, createContext, runInContext } from 'node:vm';
 import { createStockHostSnapshot } from '../web/stock-host-snapshot.mjs';
 import { createStockSkinAdapter } from '../web/stock-skin-provider.mjs';
@@ -25,8 +26,8 @@ const gateSource=readFileSync(new URL('../extension/game-gate.js',import.meta.ur
 const bootstrapSource=readFileSync(new URL('../extension/game-bootstrap.mjs',import.meta.url),'utf8');
 const testSource=readFileSync(new URL('./game-bootstrap.test.mjs',import.meta.url),'utf8');
 const hostFunctions=testSource.slice(testSource.indexOf('function fixture('),testSource.indexOf("\ntest('an unarmed"));
-const {fixture,wasmDouble}=new Script(`(function(gateSource,Script,createContext,runInContext,assert){
-  ${hostFunctions}\nreturn {fixture,wasmDouble};})`).runInThisContext()(gateSource,Script,createContext,runInContext,assert);
+const {fixture,wasmDouble}=new Script(`(function(gateSource,Script,createContext,runInContext,assert,createGateTestDom,attachGateTestRealm){
+  ${hostFunctions}\nreturn {fixture,wasmDouble};})`).runInThisContext()(gateSource,Script,createContext,runInContext,assert,createGateTestDom,attachGateTestRealm);
 // Keep the actual modules and data records in ONE JS realm. Only the synthetic
 // Window/native boundary below is adapted; no acquirer/factory override exists.
 const makeBootstrap=new Script(`(function(init,wasm,createStockHostSnapshot,createStockSkinAdapter,
@@ -85,10 +86,11 @@ async function harness() {
   // This test Window facade supplies same-realm synthetic profile capabilities;
   // every DOM/source object and privately claimed base capability keeps identity.
   const realm={};const slot=Symbol.for('slither.client.gate.v1');
-  for(const key of Reflect.ownKeys(f.realm))if(![slot,'top','window','globalThis'].includes(key)) {
+  for(const key of Reflect.ownKeys(f.realm))if(![slot,'top','window','globalThis','document','location'].includes(key)) {
     Object.defineProperty(realm,key,Object.getOwnPropertyDescriptor(f.realm,key));
   }
-  realm.top=realm;realm.window=realm;
+  // The profile facade is not the native Window; retain its existing mutable values.
+  realm.document=f.document;realm.location=f.realm.location;realm.top=realm;realm.window=realm;
   const gate=Object.freeze({metadata:()=>f.gate.metadata(),claim(id){
     const native=f.gate.claim(id);
     return Object.freeze({...native,liveProfile:caps,

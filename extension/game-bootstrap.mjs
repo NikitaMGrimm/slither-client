@@ -6,6 +6,13 @@ import { createStockHostSnapshot } from './stock-host-snapshot.mjs';
 import { desktopBackingSize } from './desktop-layout.mjs';
 import { createStockGameplay } from './stock-gameplay.mjs';
 
+// Gate-only notifications must not add gameplay control/source observations.
+const editNotifications = new Set(['keypress', 'beforeinput', 'input', 'compositionstart', 'compositionupdate', 'compositionend',
+  'copy', 'cut', 'paste', 'selectstart', 'select', 'selectionchange', 'dblclick', 'contextmenu',
+  'focus', 'blur', 'focusin', 'focusout', 'mouseenter', 'mouseleave', 'mouseover', 'mouseout',
+  'pointerenter', 'pointerleave', 'pointerover', 'pointerout', 'pointercancel', 'touchcancel',
+  'dragstart', 'drag', 'dragenter', 'dragleave', 'dragover', 'drop', 'dragend']);
+
 /** Actual MAIN entry. Session binding is local capability injection, never a page-message command. */
 export async function startGamePage({ realm = globalThis, initialize = init, wasmApi = wasm } = {}) {
   const gate = realm[Symbol.for('slither.client.gate.v1')];
@@ -47,6 +54,7 @@ export async function startGamePage({ realm = globalThis, initialize = init, was
   const size = () => desktopBackingSize(realm.innerWidth, realm.innerHeight);
   native.setInput(event => {
     if (event.type === 'click' && event.target === reload) { native.ordinaryReload(); return; }
+    if (editNotifications.has(event.type)) return;
     if (disposed || !controller) return;
     if (event.type === 'resize') {
       try { const backing = size(); controller.resize(backing.width, backing.height); } catch (error) { fail(error); }

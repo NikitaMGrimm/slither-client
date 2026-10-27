@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add private opt-in native nickname-edit default permission for one exact text
+  field while fencing original handlers and preserving raw gameplay input.
+  Field binding and native-browser editing acceptance remain separate.
+
 - Admit literal DEL nickname bytes unchanged through session staging and the
   Rust encoder, keeping the exact 0..24-byte `0x20..=0x7f` domain.
 
