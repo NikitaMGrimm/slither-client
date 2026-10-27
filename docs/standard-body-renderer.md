@@ -207,10 +207,12 @@ realm. Revisions are explicit trusted content/readiness commitments; a same-size
 host repaint cannot be detected by dimension checks.
 
 Limits per recipe remain 256 palettes/runs/variants and catalog IDs 0..4095.
-Frame totals are at most 262,144 active curve samples, 524,304 body image commands,
+Frame totals are at most 262,144 active curve samples, 524,304 image commands,
 4096 referenced catalog entries (counted per recipe), 4096 distinct source objects
-and 262,144 asset uses, shared with face assets. A separate fixed ceiling allows
-1024 side-image commands (two per retained object, at most 512). The aggregate
+and 262,144 asset uses, shared with face assets. Face commands consume the shared
+image budget: paired decoration and single-image eyes use two; the complete
+[mouth family](mouth-face.md) uses three. At most 512 retained objects can
+therefore submit 1,536 mouth-face images in one draw. The aggregate
 body command budget is checked by the planner
 before each complete plan allocation. No recipe, source, revision or command is
 cached in AnimatedScene after the call; live source references last only through

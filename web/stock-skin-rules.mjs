@@ -157,7 +157,11 @@ export function resolveStockSkin(request, nsr = false) {
           baseImage: freeze({ source: 'jsebi', sourceRect: freeze([0, 0, 64, 64]) }),
           pupilImage: freeze({ source: 'jsepi', sourceRect: freeze([0, 0, 48, 48]) }) };
         break;
-      case 40: unsupportedFeatures.push('mouth-face'); break;
+      case 40:
+        eyes = { kind: 'mouth-face', geometry: freeze({ pupilTravel: 2.3 }),
+          eyeMarks: freeze({ source: 'ecmc', sourceMode: 'whole' }),
+          mouth: freeze({ source: 'jmou', sourceMode: 'whole' }) };
+        break;
       case 41:
         Object.assign(eyes, { distance: 34, separation: 14, radius: 8, pupilRadius: 4.5,
           pupilTravel: 3, outlineWidth: 3, eyeOpacity: 1 });

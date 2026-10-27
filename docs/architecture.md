@@ -342,6 +342,13 @@ nondecorated and eye-less completions. Standalone body entry-alpha semantics rem
 caller-owned. See the [complete face contract](standard-body-renderer.md#complete-ordinary-paired-faces)
 for source readiness, crop, trust and unsupported-family boundaries.
 
+`FaceGeometry::Mouth` uses the same appearance and gaze timeline for a complete
+three-image face. Both renderers share ordered whole-source submission: two marks
+borrow one source and the mouth another. This family establishes root alpha one
+independently of body spawn/death opacity. Numeric metadata stays separate from
+ready borrowed sources, and face selection leaves prior body plans unchanged.
+See [mouth faces](mouth-face.md).
+
 `AppearancePresentation` extends that numeric ownership with an optional ordinary
 antenna on each stable client entry. The full appearance resolver is required for
 later appearances once enabled. The client retains separate 210-margin antenna

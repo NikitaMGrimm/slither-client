@@ -8,6 +8,7 @@ import { presentationSmoke } from './presentation-smoke.mjs';
 import { animatedSmoke } from './animated-smoke.mjs';
 import { qualitySmoke } from './quality-smoke.mjs';
 import { bodyRenderSmoke } from './body-render-smoke.mjs';
+import { mouthFaceRenderSmoke } from './mouth-face-render-smoke.mjs';
 import { clientControlSmoke } from './client-control-smoke.mjs';
 import { stockRenderSmoke } from './stock-render-smoke.mjs';
 import { stockSessionSmoke } from './stock-session-smoke.mjs';
@@ -109,6 +110,7 @@ console.log('Synthetic coupled animation, curve and lifecycle Wasm ABI passed.')
 qualitySmoke(wasm);
 console.log('Synthetic desktop quality preference, timing and rejection Wasm ABI passed.');
 console.log('Synthetic borrowed standard-body Canvas ABI passed:', bodyRenderSmoke(wasm));
+console.log('Synthetic complete mouth-face Canvas ABI passed:', mouthFaceRenderSmoke(wasm));
 console.log('Synthetic pre-motion control ABI passed:', clientControlSmoke(wasm));
 console.log('Synthetic live-source stock adapter ABI passed:', stockRenderSmoke(wasm));
 console.log('Synthetic caller-owned stock session ABI passed:', stockSessionSmoke(wasm));

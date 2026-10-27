@@ -1,6 +1,8 @@
 //! Appearance-owned image eyes, sharing the existing face and gaze timeline.
 
-use super::{BodyRect, EyeLayoutInput, PairedFaceGeometry, PresentationError, finite};
+use super::{
+    BodyRect, EyeLayoutInput, MouthFaceGeometry, PairedFaceGeometry, PresentationError, finite,
+};
 use crate::{math, state::Point};
 
 /// Authoritative numeric face family. Image sources belong to the draw caller.
@@ -10,6 +12,8 @@ pub enum FaceGeometry {
     Paired(PairedFaceGeometry),
     /// One image eye followed by one image pupil.
     SingleImage(SingleEyeGeometry),
+    /// Two gaze-following marks followed by a mouth image.
+    Mouth(MouthFaceGeometry),
 }
 
 impl Default for FaceGeometry {
@@ -24,6 +28,7 @@ impl FaceGeometry {
         match self {
             Self::Paired(geometry) => geometry.validate(),
             Self::SingleImage(geometry) => geometry.validate(),
+            Self::Mouth(geometry) => geometry.validate(),
         }
     }
 
@@ -32,6 +37,7 @@ impl FaceGeometry {
         match self {
             Self::Paired(geometry) => geometry.eyes.pupil_travel,
             Self::SingleImage(geometry) => geometry.pupil_travel,
+            Self::Mouth(geometry) => geometry.pupil_travel,
         }
     }
 
@@ -39,15 +45,23 @@ impl FaceGeometry {
     pub fn paired(&self) -> Option<&PairedFaceGeometry> {
         match self {
             Self::Paired(geometry) => Some(geometry),
-            Self::SingleImage(_) => None,
+            Self::SingleImage(_) | Self::Mouth(_) => None,
         }
     }
 
     /// Image-eye metadata, without selecting or retaining artwork.
     pub fn single_image(&self) -> Option<&SingleEyeGeometry> {
         match self {
-            Self::Paired(_) => None,
+            Self::Paired(_) | Self::Mouth(_) => None,
             Self::SingleImage(geometry) => Some(geometry),
+        }
+    }
+
+    /// Complete three-image mouth metadata, without retaining artwork.
+    pub fn mouth(&self) -> Option<&MouthFaceGeometry> {
+        match self {
+            Self::Mouth(geometry) => Some(geometry),
+            Self::Paired(_) | Self::SingleImage(_) => None,
         }
     }
 }

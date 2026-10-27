@@ -197,7 +197,7 @@ export function createSkinProvider({ trusted, realm, resolveHostRecipe, normaliz
       }
 
       const eyeInput = field(normalized, 'eyes');
-      const eyeKind = choice(field(eyeInput, 'kind'), ['standard', 'none', 'single-image'], 'eyes kind');
+      const eyeKind = choice(field(eyeInput, 'kind'), ['standard', 'none', 'single-image', 'mouth-face'], 'eyes kind');
       const eyes = { kind: eyeKind };
       if (eyeKind === 'standard') {
         for (const key of ['distance', 'separation', 'radius', 'pupilRadius', 'pupilTravel', 'outlineWidth']) {
@@ -216,6 +216,21 @@ export function createSkinProvider({ trusted, realm, resolveHostRecipe, normaliz
         for (const key of ['baseImage', 'pupilImage']) {
           const image = field(eyeInput, key);
           if (image instanceof Promise) throw new TypeError('Single image source metadata must be synchronous');
+          eyes[key] = assetUse(image, true);
+        }
+      } else if (eyeKind === 'mouth-face') {
+        if (eyeInput instanceof Promise) throw new TypeError('Mouth face must be synchronous');
+        const input = field(eyeInput, 'geometry');
+        if (input instanceof Promise) throw new TypeError('Mouth geometry must be synchronous');
+        eyes.geometry = freeze({ pupilTravel: number(field(input, 'pupilTravel'), 0, 4096, 'pupilTravel') });
+        for (const key of ['eyeMarks', 'mouth']) {
+          const image = field(eyeInput, key);
+          if (image instanceof Promise) throw new TypeError('Mouth source metadata must be synchronous');
+          const mode = field(image, 'sourceMode');
+          field(image, 'sourceRect');
+          if (mode !== 'whole' || Object.hasOwn(image, 'sourceRect')) {
+            throw new TypeError('Mouth face requires an explicit whole source without sourceRect');
+          }
           eyes[key] = assetUse(image, true);
         }
       }
@@ -297,7 +312,7 @@ export function createSkinProvider({ trusted, realm, resolveHostRecipe, normaliz
         return tag;
       }));
       const supportedFeatures = freeze(['body-palettes', ...(eyeKind === 'standard' ? ['standard-eyes']
-        : eyeKind === 'single-image' ? ['single-image-eye'] : []), ...effectKinds,
+        : eyeKind === 'single-image' ? ['single-image-eye'] : eyeKind === 'mouth-face' ? ['mouth-face'] : []), ...effectKinds,
         ...(attachment ? ['head-attachment'] : []), ...(bodyStyle ? ['standard-body-style'] : []),
         ...(faceDecoration ? ['paired-side-images'] : []), ...(antenna ? ['ordinary-antenna'] : [])]);
       const recipe = freeze({ basePalette, custom, runs, palettes, variantMode, variantPeriod, eyes: freeze(eyes), effects,
