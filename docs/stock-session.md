@@ -25,6 +25,12 @@ the packet sink exactly once. Session controls commit after that sink succeeds.
 Setup establishes connected/playing state before own appearance. Removing the
 own snake does not end the session; explicit life-control packets do.
 
+The alternative `subscribeWithHud` uses the same staged controls and publishes
+a copied command-indexed report before state notification. It requires a
+synchronous complete-packet report producer; see the
+[opt-in planning contract](stock-client.md#opt-in-session-hud-planning).
+The existing subscription remains the default gameplay path.
+
 One outstanding ping uses the original strict timing gates. Pong clears pending
 and lag status, allowing gradual clock recovery; it does not reset the lag
 multiplier. Game-over lag resets are offered through `pendingActions` and

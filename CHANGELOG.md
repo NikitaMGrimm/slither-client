@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add opt-in session HUD planning with command-indexed lifecycle guards, closed
+  copied reports and terminal failure handling that preserves every thrown value.
+  Native report production, gameplay wiring and visible HUD remain separate.
+
 - Add explicit bounded borrowed decoders for leaderboard and public-announcement
   packets, with complete-tail validation and preserved raw bytes. HUD routing
   and presentation remain separate.
