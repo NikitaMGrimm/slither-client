@@ -14,7 +14,7 @@ const bindingFiles = ['slither_client.js', 'slither_client_bg.wasm'];
 const gameWebFiles = ['stock-client.mjs', 'stock-skin-provider.mjs', 'stock-skin-rules.mjs',
   'stock-host-snapshot.mjs', 'stock-food-provider.mjs', 'stock-prey-provider.mjs', 'stock-asset-sources.mjs',
   'skin-provider.mjs', 'desktop-layout.mjs', 'client-input.mjs', 'stock-gameplay.mjs',
-  'stock-session.mjs', 'stock-hud-contract.mjs', 'handshake-session.mjs', 'stock-live-profile.mjs'];
+  'stock-session.mjs', 'stock-hud-contract.mjs', 'stock-hud-state.mjs', 'handshake-session.mjs', 'stock-live-profile.mjs'];
 const gameFiles = [['game-activation.mjs', 'activation.mjs'], ['game-gate.js', 'gate.js'],
   ['game-link.js', 'link.js'], ['game-bootstrap.mjs', 'bootstrap.mjs'], ['game-host.css', 'host.css']];
 

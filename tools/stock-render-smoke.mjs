@@ -186,7 +186,7 @@ export function stockRenderSmoke(wasm, { control = true } = {}) {
       const actual = scene[name].bind(scene);
       scene[name] = (...args) => {
         events.push(name); const step = actual(...args);
-        const record = { step, freed: false }; steps.push(record);
+        const record = { step, delta: step.delta, freed: false }; steps.push(record);
         const free = step.free.bind(step);
         step.free = () => { assert.equal(record.freed, false, 'One owned step free'); free(); record.freed = true; events.push('free'); };
         return step;
@@ -415,13 +415,19 @@ export function stockRenderSmoke(wasm, { control = true } = {}) {
           cases.push('real-post-lifecycle-playing-and-populated-registry-reset');
         } finally { f.close(); }
       }
-      for (const withHud of [false, true]) {
+      for (const [withHud, withReadout] of [[false, false], [true, false], [true, true]]) {
         const f = fixture();
         let gameplay;
         try {
           if (withHud) f.scene.enable_score_tracking();
           let now = 0, nextTimer = 0;
-          const queue = [], timers = new Map(), sockets = [], fatal = [], flags = [], reports = [];
+          const queue = [], timers = new Map(), sockets = [], fatal = [], flags = [], reports = [], observedHud = [];
+          const nativeScore = f.scene.score_view.bind(f.scene);
+          let scoreReads = 0;
+          f.scene.score_view = () => {
+            eq(f.held, null, 'Readout score access follows source release');
+            scoreReads++; return nativeScore();
+          };
           const advance = f.quality.advance.bind(f.quality);
           const statistics = f.quality.update_statistics.bind(f.quality);
           f.quality.advance = (step, value) => { flags.push(['quality', value]); return advance(step, value); };
@@ -433,7 +439,7 @@ export function stockRenderSmoke(wasm, { control = true } = {}) {
               queue.shift()();
             }
           };
-          gameplay = createStockGameplay({ scene: f.scene, quality: f.quality, controller: f.client, wasm,
+          gameplay = createStockGameplay({ scene: f.scene, quality: f.quality, controller: f.client, wasm, hudReadout: withReadout,
             now: () => now, defer: callback => queue.push(callback),
             setInterval(callback, period) { eq(period, 25); const id = ++nextTimer; timers.set(id, callback); return id; },
             clearInterval: id => timers.delete(id), onStatus() {}, onFatal: error => fatal.push(error),
@@ -443,6 +449,7 @@ export function stockRenderSmoke(wasm, { control = true } = {}) {
               ok(Object.isFrozen(report)); ok(Object.isFrozen(report.events));
               rejects(() => gameplay.frame(now), /reentrant/);
               rejects(() => gameplay.dispose(), /reentry/);
+              if (withReadout) observedHud.push(gameplay.hudSnapshot());
               reports.push(report);
             } : undefined,
             createSocket(endpoint) {
@@ -475,13 +482,36 @@ export function stockRenderSmoke(wasm, { control = true } = {}) {
               [[0, 'setup'], [0, 'setup-draw'], [1, 'own-length-scheduled'], [4, 'setup'], [4, 'setup-draw']]);
             eq(reports[0].events[1].view.status, 'no-own');
             eq(reports[0].events[4].view.status, 'ready');
+            if (withReadout) {
+              eq(observedHud[0].ownToken, null, 'A private packet observer sees only committed state');
+              eq(gameplay.hudSnapshot().ownToken, reports[0].events[2].token);
+              eq(gameplay.hudSnapshot().dirty, true); eq(gameplay.hudSnapshot().current, null);
+              eq(gameplay.hudSnapshot().requestedOpacity, { readout: 0, header: 0, rows: 0, announcement: 0 });
+              eq(scoreReads, 0, 'Ineligible Setup samples require no native score getter');
+              now = 42;
+              socket.onmessage({ data: Uint8Array.of(108, 0, 0, 17, 0, 33).buffer }); drain();
+              eq(gameplay.hudSnapshot().fade, 0); eq(gameplay.hudSnapshot().dirty, true);
+              eq(gameplay.hudSnapshot().current, null); eq(scoreReads, 0);
+              const steps = f.steps.length, quality = f.quality.snapshot(), draws = f.client.diagnostics().draws;
+              gameplay.render();
+              eq(scoreReads, 1); eq(gameplay.hudSnapshot().dirty, false);
+              eq(gameplay.hudSnapshot().current, { score: nativeScore().score, rank: 17, population: 33,
+                ownToken: nativeScore().own.token });
+              gameplay.resize(960, 540);
+              eq(scoreReads, 1, 'A clean resized readout does not poll scores');
+              eq(f.steps.length, steps); eq(f.quality.snapshot(), quality);
+              eq(f.client.diagnostics().draws, draws + 2);
+              now = 43; gameplay.frame(now); drain();
+              eq(gameplay.hudSnapshot().fade, 0.01 * f.steps.at(-1).delta);
+              eq(scoreReads, 1, 'Alive fading does not dirty the readout');
+            }
             const before = f.scene.score_view(), qualityBefore = f.quality.snapshot();
             const stepsBefore = f.steps.length, drawsBefore = f.client.diagnostics().draws;
             now = 44;
             socket.onmessage({ data: bundle([112], [108, 0, 0, 17, 0, 33], [118, 1],
               [104, 0, 0, ...u24(8388607)], [82, 9], setup()).buffer }); drain();
-            eq(reports.length, 2);
-            const report = reports[1];
+            eq(reports.length, withReadout ? 3 : 2);
+            const report = reports.at(-1);
             eq(report.events.map(event => [event.commandIndex, event.kind]),
               [[1, 'leaderboard'], [2, 'final-score'], [3, 'own-length-scheduled'], [5, 'setup'], [5, 'setup-draw']]);
             eq(report.events[1].view, before, 'Final sample precedes later mass/R/Setup through every real layer');
@@ -491,6 +521,15 @@ export function stockRenderSmoke(wasm, { control = true } = {}) {
             eq(f.steps.length, stepsBefore); eq(f.quality.snapshot(), qualityBefore);
             eq(f.client.diagnostics().draws, drawsBefore + 1, 'One actual Setup draw is counted once');
             ok(Object.isFrozen(report.events[1].view.own));
+            if (withReadout) {
+              const view = gameplay.hudSnapshot();
+              eq(view.final, { score: before.score, exclamation: before.score > 1000, ownToken: before.own.token });
+              eq(view.current, { score: report.events[4].view.score, rank: 17, population: 33,
+                ownToken: before.own.token });
+              eq(view.dirty, false); eq(view.fade, -1);
+              eq(view.requestedOpacity, { readout: 0, header: 0, rows: 0, announcement: 0 });
+              ok(Object.isFrozen(view.current)); ok(Object.isFrozen(view.final));
+            }
           }
           now = 48;
           gameplay.event({ type: 'pointermove', clientX: 480, clientY: 100 }, { width: 960, height: 540 });
@@ -518,8 +557,86 @@ export function stockRenderSmoke(wasm, { control = true } = {}) {
           eq(f.scene.control_view().own, null);
           eq(f.scene.food_state().sourceCount, 0); eq(f.scene.prey_state().sourceCount, 0);
           eq(f.held, null); eq(f.captures, f.ends);
-          cases.push(withHud ? 'real-hud-session-controller-render-and-life-end-composition'
+          if (withReadout) {
+            const view = gameplay.hudSnapshot();
+            eq(view.ownToken, null); eq(view.rank, 0); eq(view.population, 0);
+            eq(view.fade, -1); eq(view.requestedOpacity, { readout: -1, header: -0.85, rows: -1, announcement: -1 });
+            ok(view.current !== null); ok(view.final !== null);
+            gameplay.dispose(); eq(gameplay.hudSnapshot(), null);
+          }
+          cases.push(withReadout ? 'real-staged-readout-intermediate-Setup-score-and-completion-history'
+            : withHud ? 'real-hud-session-controller-render-and-life-end-composition'
             : 'real-gameplay-session-input-render-and-life-end-composition');
+        } finally {
+          try { gameplay?.dispose(); } finally { f.close(); }
+        }
+      }
+      for (const failedDefer of [false, true]) {
+        const f = fixture();
+        let gameplay;
+        try {
+          f.scene.enable_score_tracking();
+          let now = 0, nextTimer = 0, scoreReads = 0, timerCleanup = 0;
+          let refuseDefer = false;
+          const queue = [], timers = new Map(), sockets = [], failures = [];
+          const secondary = new Error('Authored timer cleanup failure');
+          const drain = () => {
+            let count = 0;
+            while (queue.length) { ok(++count <= 1000); queue.shift()(); }
+          };
+          gameplay = createStockGameplay({ scene: f.scene, quality: f.quality, controller: f.client,
+            wasm, hudReadout: true, now: () => now, defer(callback) {
+              if (refuseDefer) throw new Error('Authored unavailable scheduler');
+              queue.push(callback);
+            },
+            setInterval(callback) { const id = ++nextTimer; timers.set(id, callback); return id; },
+            clearInterval(id) { timerCleanup++; timers.delete(id); throw secondary; },
+            onStatus() {}, onFatal: value => failures.push(value),
+            createSocket() {
+              const socket = { readyState: 0, bufferedAmount: 0, closes: 0,
+                send() {}, close() { this.closes++; this.readyState = 3; } };
+              sockets.push(socket); return socket;
+            },
+          });
+          gameplay.play({ endpoint: 'ws://192.0.2.9:1234/slither',
+            profile: { clientVersion: 7, password: new Uint8Array(20).fill(3), protocolVersion: 19 },
+            nickname: 'Authored readout failure', skin: 27, customSkin: new Uint8Array() });
+          gameplay.frame(now); drain();
+          const socket = sockets[0]; socket.readyState = 1; socket.onopen(); drain();
+          socket.onmessage({ data: Uint8Array.from([54, ...syntheticChallenge('B'.repeat(27))]).buffer }); drain();
+          now = 40;
+          socket.onmessage({ data: bundle(setup(), snake(0, 27), [108, 0, 0, 17, 0, 33]).buffer }); drain();
+          const committed = gameplay.hudSnapshot();
+          eq(committed.dirty, true); eq(committed.current, null); eq(timers.size, 1);
+          const beforeDraws = f.client.diagnostics().draws;
+          refuseDefer = failedDefer;
+          f.scene.score_view = () => {
+            eq(f.held, null, 'Required score getter runs after the successful Canvas/source operation');
+            scoreReads++; throw undefined;
+          };
+          let threw = false, observed;
+          try { gameplay.render(); } catch (value) { threw = true; observed = value; }
+          eq(threw, true); eq(observed, undefined); eq(scoreReads, 1);
+          eq(gameplay.hudSnapshot(), committed, 'Failed required read does not publish a partial state');
+          eq(f.client.diagnostics().draws, beforeDraws + 1, 'The completed native draw is not rolled back');
+          eq(f.held, null); eq(f.captures, f.ends);
+          const captures = f.captures, nativeState = f.state();
+          socket.onmessage({ data: Uint8Array.of(104, 0, 0, ...u24(8388607)).buffer });
+          eq(f.captures, captures, 'Retained fatal blocks later ingress before source capture');
+          eq(f.state(), nativeState, 'A failed gameplay cannot commit another native packet');
+          eq(socket.closes, 1); eq(gameplay.hudSnapshot(), committed);
+          if (failedDefer) {
+            let cleanupThrew = false, cleanupFailure;
+            try { gameplay.dispose(); } catch (value) { cleanupThrew = true; cleanupFailure = value; }
+            eq(cleanupThrew, true); eq(cleanupFailure, undefined);
+          }
+          drain();
+          eq(failures.length, 1); eq(failures[0], undefined, 'Secondary cleanup cannot mask the primary');
+          eq(timerCleanup, 1); eq(timers.size, 0); eq(socket.closes, 1);
+          eq(gameplay.diagnostics().disposed, true); eq(gameplay.hudSnapshot(), null);
+          rejects(() => gameplay.frame(48), /stopped|reentrant/);
+          cases.push(failedDefer ? 'real-fatal-readout-blocks-ingress-despite-unavailable-scheduler'
+            : 'real-required-readout-primary-undefined-survives-cleanup-and-withholds-publication');
         } finally {
           try { gameplay?.dispose(); } finally { f.close(); }
         }

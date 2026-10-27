@@ -42,8 +42,8 @@ The default produces both ignored directories:
 - `dist/extension/chrome`
 - `dist/extension/firefox`
 
-Each contains exactly 41 files: the original preview package, fixed game
-activation/gate/link/bootstrap/CSS, fifteen authored game modules and a generated
+Each contains exactly 42 files: the original preview package, fixed game
+activation/gate/link/bootstrap/CSS, sixteen authored game modules and a generated
 JS/Wasm/validator module graph for each renderer. Preview HTML/modules are copied unchanged
 under `scene/`; null simulator configuration disables its local connection.
 The game entry imports no synthetic resolver or fixture.

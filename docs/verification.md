@@ -38,6 +38,48 @@ pull requests, and manual dispatch. Normal tests and CI require no external
 reference and do not connect to game servers. Dependency and toolchain setup may
 access package sources. Release-plz remains dormant.
 
+## Semantic HUD readout composition
+
+The integrated semantic reducer and gameplay path pass 754 Node tests. The pure
+slice independently passes 251 focused cases and six private probes, including
+512 legal packet partitions with identical bounded state. Six worker mutation
+controls verify token checks, Setup gates, reset history, completion precedence,
+alive fade rate and ineligible dirty retention. Gameplay adds 62 focused cases against
+the actual session, controller, input and reducer with authored native doubles.
+
+A fresh build preserves the existing JS/Wasm fingerprints and regenerates the
+byte-exact updated shared validator. The full real-Wasm suite passes; the stock
+helper now has 1264 assertions across sixteen cases. Added actual composition
+checks cover prior committed snapshots inside observers, release-before-score
+reads, required read once versus clean resize, no extra step/quality phase,
+intermediate Setup/current versus final scores, and completion history/reset.
+A required getter throwing `undefined` after a successful native draw remains
+the primary through a throwing timer cleanup; no partial HUD state publishes,
+fatal notification occurs once and the socket closes once. A retained fatal value
+also blocks subsequent HUD ingress before source capture or native commit, even
+when deferred cleanup cannot be scheduled. Both packages build
+with 42 files and retain exact module/resource closure.
+
+Worker failures remain preserved: the gameplay draft initially allowed nested
+status-driven draws to publish before reconciliation completed, and existing
+cleanup/scheduling paths could lose falsy primaries. Regressions pass after the
+narrow staging/cleanup corrections. Two authored fixture mistakes were corrected
+without changing session or input behavior. The parent's first full run used a
+25-character failure-fixture nickname; shortening it to the admitted wire bound
+passes without a product change. The earlier missing-mode baseline is retained.
+Final independent review exposed HUD ingress continuing after a fatal score-read
+failure. The retained Node regression observed a second native commit; checking
+fatal presence at HUD entry fixes all six primary-value cases with queued or
+unavailable scheduling. The extended pre-fix Wasm run exits with an uncaught
+`undefined` during cleanup, so that transcript alone does not identify the
+failing assertion. The corrected real-Wasm cases verify unchanged native state,
+no additional source capture and exact `undefined` preservation.
+
+Native sources remain unchanged from the 489-test journal integration. These are
+authored Node/real-Wasm Canvas-recorder results, not DOM/CSS, raster pixels,
+installed-host, full login or server acceptance. Bootstrap does not enable the
+mode. See [semantic state and publication limits](hud-state.md).
+
 ## Same-step HUD lifecycle observation
 
 The additive session facade passes 659 Node tests, including 48 new lifecycle

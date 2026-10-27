@@ -107,6 +107,11 @@ function scoreView(value, readyRequired = false) {
   return freeze(view);
 }
 
+/** Copy the existing enabled score-view grammar without requiring readiness. */
+export function copyHudScoreView(value) {
+  return scoreView(value);
+}
+
 const eventFields = {
   setup: ['commandIndex', 'kind', 'tableMax'],
   'setup-draw': ['commandIndex', 'kind', 'view'],
