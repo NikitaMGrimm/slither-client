@@ -78,6 +78,9 @@ a claim of measured garbage collection. Actual owner cleanup remains separate.
 ## Explicit bootstrap owner
 
 Trusted local initialization may select `startGamePage({ hudReadout: true })`.
+Use the side-effect-free runtime factory with explicit initialization/Wasm
+dependencies when an entry must select options before the claim. Importing the
+default bootstrap in an armed realm immediately starts its default runtime.
 The default and automatic entry remain false and expose no HUD binding method.
 The option must be a boolean. True requires the gate's complete optional frozen
 `native.hudDom` capability, enables score tracking before gameplay starts and
@@ -111,11 +114,44 @@ then attempts the remaining owners while preserving the first thrown value.
 Partial native text/style writes cannot be rolled back. Unbind/disposal removes
 no nodes and restores no DOM values.
 
+## Original owned HUD composition
+
+An explicit [package selection](extension.md#package-selected-owned-hud) starts
+the same runtime with `hudReadout:true, ownedHudUi:true`. Visible mode requires
+semantic readout mode; invalid combinations reject before gate access. The
+entry does not import the default bootstrap or claim twice.
+
+The import-free UI builder validates and copies closed inputs, then returns an
+inert frozen `{mount,dispose}` lease. Its once-only mount creates exactly 13
+Elements and 8 Text nodes with the existing renderer's topology. The runtime
+retains the lease before mounting under its HUD operation guard, exits that
+guard, and binds `readout-and-final` through the existing binding method. A
+second binding rejects while that slot is occupied.
+
+The authored lower-left layout uses monospace/tabular numbers and fixed widths:
+17ch current length, 5ch rank and population, and 18ch final length. Labels are
+`Length: `, `Place: `, ` / ` and `Last length: `. Numeric text stays empty until
+the corresponding history exists. The final line is always present and is
+independent of readout opacity. Publications change only the existing
+renderer-owned text/local styles; layout does not resize with the values.
+
+The gate captures four additional own native methods in optional sibling
+`native.ownedHudDom`, reusing the existing captured Document. Unsupported capture
+omits that sibling as a whole without altering `native.hudDom`. Construction
+performs no source, profile, clock, measured-layout or original-page lookup.
+
+Failed mounting preserves its exact thrown value and leaves cleanup to the
+runtime after guard exit. Disposal first releases nickname/HUD references, then
+attempts to remove only its own mount at the original parent while the document
+is current. Removal may fail or leave nodes behind; there is no retry or DOM
+restoration. The passive renderer's own unbind/dispose still removes no nodes.
+
 ## Activation and evidence limits
 
 The passive APIs and explicit owner add no Play route, input listener, timer,
 source acquisition, game socket, message/global command, CSP change or permission.
 Default startup remains unbound and supplies no HUD nodes or text policy.
+The owned entry chooses original labels/layout explicitly at package time.
 
 Authored Node capability doubles and real-Wasm/Canvas-recorder composition cover
 the documented checks in [verification](verification.md). They do not establish

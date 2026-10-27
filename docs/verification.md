@@ -38,9 +38,43 @@ pull requests, and manual dispatch. Normal tests and CI require no external
 reference and do not connect to game servers. Dependency and toolchain setup may
 access package sources. Release-plz remains dormant.
 
+## Owned HUD entry and construction
+
+The frozen construction/builder/runtime integration passes 245 focused Node
+tests with zero skips: 18 actual entry/module-graph cases, 50 package cases,
+101 bootstrap cases, 33 profile/nickname cases, 29 construction capture cases
+and 14 builder cases. The actual gate/runtime/default/owned-entry/builder and
+reducer/view/DOM modules share a VM document realm; native operations and the
+generated-Wasm boundary are authored doubles. Package tests use labelled
+synthetic Wasm metadata.
+
+Native capture separately passes 133 focused cases,
+including 29 new actual-gate cases. The builder passes 292 focused cases,
+including 14 owned tests and 3,682 before/after boundary-failure cases. These
+checks use native-operation doubles and genuine unchanged HUD modules.
+
+The unchanged default entry retained as the selected explicit entry fails the
+desired score-tracking assertion. Loader/realm fixture mistakes and all failed
+attempts remain retained outside Git. Owned-mode raw asynchronous/generator
+callback validation runs before initialization; legacy semantic-only behavior
+is preserved. Independent capture/builder review reruns 212 focused tests and
+three additional synthetic composition probes with no supported P1/P2 finding.
+
+The final combined source passes all 1,061 Node tests with zero skips and the
+full prebuilt real-Wasm matrix. All 44 selected compiled Rust/Cargo/toolchain
+inputs match the retained matching-bindgen build; no new Rust build is claimed.
+Both default and owned-HUD packages contain 92 files across Chrome/Firefox.
+All 184 package files verify, and the only differences between the selections
+are the two chosen bootstrap copies. Permissions, host matches and CSP stay
+unchanged; the only added resources are runtime and owned-HUD helpers.
+
+No native DOM/CSS, pixels, installed-host, profile HTTP, gameplay or server
+acceptance is established by these tests.
+
 ## Explicit bootstrap HUD owner
 
-The integrated optional native HUD capture and bootstrap owner pass 997 Node
+Before the runtime extraction above, the integrated optional native HUD capture
+and bootstrap owner passed 997 Node
 tests with zero skips. The focused integrated run passes 379 cases: 101 bootstrap,
 60 native-capability capture and 218 existing HUD cases. All 71 original literal
 bootstrap cases and the automatic-entry code remain unchanged. Independent
