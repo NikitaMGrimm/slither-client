@@ -8,6 +8,7 @@ Canvas2D rendering and an optional local simulator connection.
 - [Verification](verification.md): builds, tests, optional comparisons, and results.
 - [Provenance](provenance.md): source/asset policy and external reference identity.
 - [Roadmap](roadmap.md): client state, deterministic rendering, and packaging.
+- [Optional responsiveness experiments](future/responsiveness.md): saved proposals, not implemented behavior.
 - [Releases](releases.md): dormant release configuration and readiness criteria.
 - [Contributing](../CONTRIBUTING.md): changes, review, and reporting.
 
