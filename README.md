@@ -77,7 +77,7 @@ controls visual gaze,
 including in the synthetic preview. The synthetic fixture uses original
 stand-ins with ordered body effects, retained food/prey animation and adaptive quality.
 Local simulator mode keeps its basic snake stand-ins and uses the same retained
-food path. Full skins, other special faces and static accessories remain pending.
+food path. Full skins, stock static accessories and installed-host integration remain pending.
 The received-anchor preview at `/` remains available for comparison.
 
 Both animated renderers draw the nearby arena edge as a late red band and open
@@ -128,6 +128,11 @@ draws with supplied random units; standard rendering also preserves its effect
 on the following death pass. Trusted ready whole-source bulbs are required.
 The default page keeps its existing fixtures; host skin mapping and pending-source
 timing remain separate.
+
+The additive [static accessory APIs](docs/static-accessory.md) retain one optional
+head image beside a Paired or Mouth face, using an explicit ready borrowed crop.
+They preserve the existing body/antenna timeline and keep stock loading and
+selection separate.
 
 CI checks native Rust on Linux and Windows and runs a real Wasm ABI smoke test
 on Linux. Release-plz remains dormant; ordinary pushes do not publish artifacts.

@@ -33,6 +33,7 @@ mod quality;
 mod score;
 mod single_eye;
 mod snake;
+mod static_accessory;
 
 pub use antenna::{
     AntennaBarrierEffect, AntennaBulbCommand, AntennaBulbGeometry, AntennaCullBounds,
@@ -51,10 +52,11 @@ pub use body_painter::{
 pub use boundary::{BOUNDARY_SAMPLES, BoundaryRadius};
 pub use camera::{CAMERA_SAMPLES, CameraCorrections};
 pub use client::{
-    AnimatedClient, AntennaDrawBudget, AntennaRandomRequest, AppearancePresentation,
-    ClientControlActions, ClientControlView, ClientPresentationError, ClientScoreView,
-    FacePresentation, MAX_DRAW_SAMPLES, MAX_RETAINED_SNAKES, MAX_RETAINED_TOTAL_BODY_POINTS,
-    OwnControlView, OwnScoreView, PreparedBodyGeometry, PreparedSnake, ScoreStatus,
+    AccessoryPresentation, AnimatedClient, AntennaDrawBudget, AntennaRandomRequest,
+    AppearanceContext, AppearancePresentation, ClientControlActions, ClientControlView,
+    ClientPresentationError, ClientScoreView, FacePresentation, MAX_DRAW_SAMPLES,
+    MAX_RETAINED_SNAKES, MAX_RETAINED_TOTAL_BODY_POINTS, OwnControlView, OwnScoreView,
+    PreparedAccessorySnake, PreparedBodyGeometry, PreparedSnake, ScoreStatus,
 };
 pub use curve::{
     CurveInput, CurveOutput, CurveSample, CurveVertex, MAX_CURVE_SAMPLES, sample_curve,
@@ -91,6 +93,7 @@ pub use quality::{QualityMode, QualitySnapshot, QualityState};
 pub use score::{ScoreError, ScoreTables};
 pub use single_eye::{FaceGeometry, SingleEyeGeometry, SingleEyeLayout};
 pub use snake::{AnchorView, SnakeMetrics, SnakePresentation};
+pub use static_accessory::{StaticHeadAccessoryGeometry, StaticHeadAccessoryLayout};
 
 /// Number of samples in each head position/fraction correction channel.
 pub const HEAD_SAMPLES: usize = 53;

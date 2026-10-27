@@ -298,8 +298,27 @@ export function createSkinProvider({ trusted, realm, resolveHostRecipe, normaliz
       }
       let attachment = null;
       if (attachmentInput !== undefined && attachmentInput !== null) {
+        // A present tag must never fall through to the permissive legacy shape.
+        const tagged = typeof attachmentInput === 'object' && 'kind' in attachmentInput;
+        if (tagged) {
+          if (attachmentInput instanceof Promise) throw new TypeError('Static head attachment must be synchronous');
+          const keys = ['kind', 'asset', 'sourceMode', 'sourceRect', 'anchor', 'forward', 'scale', 'pivotX', 'pivotY', 'opacity'];
+          if (Reflect.ownKeys(attachmentInput).length !== keys.length || keys.some(key => !Object.hasOwn(attachmentInput, key))) {
+            throw new TypeError('Static head attachment requires exactly its ten own fields');
+          }
+          for (const key of keys) field(attachmentInput, key);
+          choice(field(attachmentInput, 'kind'), ['static-head-image'], 'attachment kind');
+          choice(field(attachmentInput, 'sourceMode'), ['crop'], 'attachment sourceMode');
+          choice(eyeKind, ['standard', 'mouth-face'], 'static head attachment face family');
+          choice(field(attachmentInput, 'opacity'), [1], 'static head attachment opacity');
+          const rect = list(field(attachmentInput, 'sourceRect'), 4, 4, 'sourceRect');
+          if (!Object.is(rect[0], +0) || !Object.is(rect[1], +0)) {
+            throw new TypeError('Static head attachment requires positive-zero sourceRect origin');
+          }
+        }
         attachment = freeze({
-          ...assetUse(attachmentInput),
+          ...(tagged ? assetUse(attachmentInput, true) : assetUse(attachmentInput)),
+          ...(tagged ? { kind: 'static-head-image', forward: number(field(attachmentInput, 'forward'), 0, 4096, 'attachment forward') } : {}),
           anchor: choice(field(attachmentInput, 'anchor'), ['head'], 'attachment anchor'),
           scale: number(field(attachmentInput, 'scale'), Number.MIN_VALUE, 256, 'attachment scale'),
           pivotX: number(field(attachmentInput, 'pivotX'), -65535, 65535, 'attachment pivotX'),

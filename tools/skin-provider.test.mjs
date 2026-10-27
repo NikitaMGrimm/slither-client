@@ -1142,3 +1142,237 @@ test('import and resolution never access ambient DOM, network, pixels or source 
   const source = await readFile(new URL('../web/skin-provider.mjs', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /\b(?:import|fetch|WebSocket|XMLHttpRequest|createElement|getContext|getImageData|toDataURL|toBlob|eval)\s*\(|\bnew\s+(?:Image|HTMLCanvasElement|HTMLImageElement)\b/);
 });
+
+// Original synthetic static accessory metadata; no stock selection or renderer claim.
+const staticAttachment = () => ({ kind: 'static-head-image', asset: 0, sourceMode: 'crop',
+  sourceRect: [0, 0, 20, 30], anchor: 'head', forward: 5, scale: 0.25,
+  pivotX: 3, pivotY: 7, opacity: 1 });
+
+test('static head attachment retains a full crop and complete frozen metadata without bodyStyle', () => {
+  for (const make of [fixture, bodyFixture]) {
+    for (const mouth of [false, true]) {
+      const f = make(); if (mouth) addMouthFace(f);
+      addAntenna(f); if (!mouth) addDecoration(f);
+      f.metadata.attachment = staticAttachment();
+      const input = f.metadata.attachment;
+      f.catalog[0].revision = 'accessory-content';
+      const { recipe, status } = f.resolve(); const attachment = recipe.attachment;
+      assert.equal(status, 'ready');
+      assert.deepEqual(Object.keys(attachment).sort(), ['kind', 'asset', 'sourceMode', 'sourceRect',
+        'anchor', 'forward', 'scale', 'pivotX', 'pivotY', 'opacity'].sort());
+      assert.equal(attachment.kind, 'static-head-image'); assert.equal(attachment.forward, 5);
+      assert.equal(attachment.sourceMode, 'crop'); assert.equal(attachment.anchor, 'head');
+      assert.equal(attachment.scale, 0.25); assert.equal(attachment.pivotX, 3);
+      assert.equal(attachment.pivotY, 7); assert.equal(attachment.opacity, 1);
+      assert.deepEqual(attachment.sourceRect, [0, 0, 20, 30]);
+      assert.notEqual(attachment, input); assert.notEqual(attachment.sourceRect, input.sourceRect);
+      assert.equal(attachment.asset, recipe.palettes[0].variants[0].asset);
+      assert.equal(attachment.asset, recipe.antenna.image.asset);
+      assert.equal(attachment.asset.source, f.canvas); assert.equal(attachment.asset.revision, 'accessory-content');
+      for (const value of [attachment, attachment.asset, attachment.sourceRect]) assert(Object.isFrozen(value));
+      assert(!Object.isFrozen(f.canvas));
+      assert.equal(recipe.supportedFeatures.filter(tag => tag === 'head-attachment').length, 1);
+      if (make === bodyFixture && !mouth) assert.equal(recipe.supportedFeatures.length, 9);
+      input.forward = 9; input.sourceRect[2] = 1; input.pivotX = 10;
+      assert.equal(attachment.forward, 5); assert.equal(attachment.sourceRect[2], 20); assert.equal(attachment.pivotX, 3);
+    }
+  }
+});
+
+test('static head attachment uses declared partial extents and common actual-source containment', () => {
+  const f = fixture(); f.metadata.attachment = staticAttachment();
+  const input = f.metadata.attachment; input.asset = 1; input.sourceRect = [0, 0, 20.5, 12.25];
+  const attachment = f.resolve().recipe.attachment;
+  assert.equal(attachment.sourceMode, 'crop'); assert.equal(attachment.asset.source, f.image);
+  assert.equal(attachment.asset.width, 40); assert.equal(attachment.asset.height, 50);
+  assert.deepEqual(attachment.sourceRect, [0, 0, 20.5, 12.25]);
+  for (const sourceRect of [[0, 0, 41, 12], [0, 0, 20, 51]]) {
+    input.sourceRect = sourceRect; assert.throws(() => f.resolve(), /actual asset dimensions/);
+  }
+  input.sourceRect = [0, 0, Number.MIN_VALUE, 50]; assert.equal(f.resolve().status, 'ready');
+  f.image.naturalWidth = 65535; f.image.naturalHeight = 65535;
+  input.sourceRect = [0, 0, 65535, 65535]; assert.deepEqual(f.resolve().recipe.attachment.sourceRect, input.sourceRect);
+});
+
+test('static head attachment requires explicit crop and canonical positive-zero origins', () => {
+  for (const sourceRect of [undefined, null, [], [0, 0, 1], [0, 0, 1, 1, 1],
+    [-0, 0, 1, 1], [0, -0, 1, 1], [1, 0, 1, 1], [0, 0.5, 1, 1],
+    [-1, 0, 1, 1], [0, 0, 0, 1], [0, 0, -0, 1], [0, 0, 1, -1],
+    [0, 0, Infinity, 1], [0, 0, 1, NaN], [0, 0, 65536, 1], [0, 0, '1', 1]]) {
+    const f = fixture(); f.metadata.attachment = { ...staticAttachment(), sourceRect };
+    assert.throws(() => f.resolve(), undefined, `sourceRect ${String(sourceRect)}`);
+  }
+  for (const sourceMode of [undefined, null, 'whole', 'CROP', true, {}]) {
+    const f = fixture(); f.metadata.attachment = { ...staticAttachment(), sourceMode };
+    assert.throws(() => f.resolve());
+  }
+});
+
+test('static head attachment bounds geometry without coercion and preserves signed-zero metadata', () => {
+  for (const [key, values] of [['forward', [0, -0, Number.MIN_VALUE, 4096]],
+    ['scale', [Number.MIN_VALUE, 0.25, 256]], ['pivotX', [-65535, -0, 0, 65535]],
+    ['pivotY', [-65535, -0, 0, 65535]]]) {
+    for (const value of values) {
+      const f = fixture(); f.metadata.attachment = { ...staticAttachment(), [key]: value };
+      const before = f.resolve().recipe.attachment;
+      assert(Object.is(before[key], value), key);
+      if (Object.is(value, -0)) {
+        f.metadata.attachment[key] = +0; f.snapshot.revision = 'changed';
+        const after = f.resolve().recipe.attachment;
+        assert(Object.is(before[key], -0)); assert(Object.is(after[key], +0));
+        assert(!Object.is(before[key], after[key]), 'retained coherence can distinguish the exact admitted bits');
+      }
+    }
+  }
+  let coerced = 0;
+  const coercible = { valueOf() { coerced++; return 1; }, toString() { coerced++; return '1'; } };
+  for (const key of ['forward', 'scale', 'pivotX', 'pivotY']) {
+    const outside = key === 'forward' ? [-Number.MIN_VALUE, 4096.001]
+      : key === 'scale' ? [0, -0, -1, 256.001] : [-65535.001, 65535.001];
+    for (const value of [undefined, null, true, '1', coercible, NaN, Infinity, -Infinity, ...outside]) {
+      const f = fixture(); f.metadata.attachment = { ...staticAttachment(), [key]: value };
+      assert.throws(() => f.resolve(), undefined, key);
+    }
+  }
+  assert.equal(coerced, 0);
+  for (const [key, values] of [['asset', [-1, 2, 0.5, '0', undefined]],
+    ['anchor', [undefined, null, 'body', 'HEAD', {}]], ['opacity', [undefined, null, 0, -0, 0.5, 1.01, '1', NaN]]]) {
+    for (const value of values) {
+      const f = fixture(); f.metadata.attachment = { ...staticAttachment(), [key]: value };
+      assert.throws(() => f.resolve(), undefined, key);
+    }
+  }
+});
+
+test('static head attachment is a closed own-data record and never observes rejected accessors', () => {
+  for (const key of Object.keys(staticAttachment())) {
+    const f = fixture(); const input = staticAttachment(); f.metadata.attachment = input;
+    const value = input[key]; let reads = 0;
+    Object.defineProperty(input, key, { configurable: true, get() { reads++; return value; } });
+    assert.throws(() => f.resolve()); assert.equal(reads, 0, key);
+    delete input[key]; Object.setPrototypeOf(input, { [key]: value });
+    assert.throws(() => f.resolve(), undefined, `inherited ${key}`);
+  }
+  for (const key of ['extra', 'then', Symbol('extra')]) {
+    const f = fixture(); f.metadata.attachment = staticAttachment(); let reads = 0;
+    Object.defineProperty(f.metadata.attachment, key, { get() { reads++; return () => {}; } });
+    assert.throws(() => f.resolve()); assert.equal(reads, 0);
+  }
+  for (const kind of [undefined, null, 'unknown', 'static-attachment', 1, {}]) {
+    const f = fixture(); f.metadata.attachment = { ...staticAttachment(), kind };
+    assert.throws(() => f.resolve());
+  }
+  const f = fixture(); f.metadata.attachment = Object.assign(Object.create(null), staticAttachment());
+  assert.equal(f.resolve().recipe.attachment.kind, 'static-head-image');
+});
+
+test('static head attachment rejects decorated promises and own/inherited crop accessors without observation', () => {
+  const f = fixture(); f.metadata.attachment = Object.assign(Promise.resolve(), staticAttachment());
+  assert.throws(() => f.resolve(), /synchronous/);
+  for (const index of ['0', '1', '2', '3']) {
+    const g = fixture(); const input = staticAttachment(); g.metadata.attachment = input;
+    const value = input.sourceRect[index]; let reads = 0;
+    Object.defineProperty(input.sourceRect, index, { configurable: true, get() { reads++; return value; } });
+    assert.throws(() => g.resolve(), /Accessor/); assert.equal(reads, 0);
+    delete input.sourceRect[index]; Object.setPrototypeOf(input.sourceRect, { [index]: value });
+    assert.throws(() => g.resolve());
+  }
+  const g = fixture(); g.metadata.attachment = staticAttachment();
+  g.metadata.attachment.sourceRect = Object.assign(Promise.resolve(), { 0: 0, 1: 0, 2: 20, 3: 30, length: 4 });
+  assert.throws(() => g.resolve());
+});
+
+test('static head attachment rejects selected single-image and none families even with pending assets', () => {
+  for (const kind of ['single-image', 'none']) {
+    for (const state of ['ready', 'pending', 'unsupported']) {
+      const f = fixture();
+      if (kind === 'single-image') addSingleEye(f); else f.metadata.eyes = { kind };
+      f.metadata.attachment = staticAttachment(); f.catalog[0].state = state;
+      assert.throws(() => f.resolve());
+      f.metadata.attachment = null; assert.equal(f.resolve().recipe.attachment, null);
+    }
+  }
+});
+
+test('static head attachment shares readiness, feature precedence, exact source uses and revision snapshots', () => {
+  for (const mouth of [false, true]) {
+    const f = bodyFixture(); if (mouth) addMouthFace(f);
+    f.metadata.attachment = { ...staticAttachment(), asset: 4 };
+    f.catalog.push({ source: null, state: 'ready', revision: -0 });
+    const pending = f.resolve(); assert.equal(pending.status, 'pending');
+    assert.equal(pending.recipe.attachment.sourceMode, 'crop');
+    assert.equal(pending.recipe.attachment.sourceRect, null);
+    assert.equal(pending.recipe.attachment.asset.source, null);
+    assert(pending.recipe.supportedFeatures.includes('head-attachment'));
+    f.metadata.unsupportedFeatures = ['required-synthetic-feature']; assert.equal(f.resolve().status, 'unsupported');
+    f.metadata.unsupportedFeatures = []; f.catalog[4].state = 'unsupported'; assert.equal(f.resolve().status, 'unsupported');
+    const image = new f.realm.HTMLImageElement(); image.complete = false;
+    f.catalog[4] = { source: image, state: 'pending', revision: -0 };
+    assert.equal(f.resolve().status, 'pending'); image.complete = true;
+    const ready = f.resolve(); assert.equal(ready.status, 'ready');
+    assert.equal(ready.recipe.attachment.asset.source, image);
+    assert(Object.is(ready.recipe.attachment.asset.revision, -0));
+    f.catalog[4].revision = +0; f.snapshot.revision = 'after'; image.naturalWidth = 25;
+    const after = f.resolve(); assert(Object.is(after.recipe.attachment.asset.revision, +0));
+    assert.equal(ready.recipe.attachment.asset.width, 40); assert.equal(after.recipe.attachment.asset.width, 25);
+    assert.equal(pending.recipe.attachment.asset.source, null);
+    image.naturalHeight = 0; assert.equal(f.resolve().status, 'pending');
+    f.catalog[4].state = 'unsupported'; assert.equal(f.resolve().status, 'unsupported');
+    f.catalog[4] = { source: new f.realm.HTMLCanvasElement(), state: 'pending' }; assert.equal(f.resolve().status, 'pending');
+    f.catalog[4].state = 'ready'; assert.equal(f.resolve().status, 'ready');
+    f.metadata.attachment.asset = 0;
+    const alias = f.resolve().recipe;
+    assert.equal(alias.attachment.asset, alias.palettes[0].variants[0].asset);
+  }
+});
+
+test('nonready host envelopes do not observe tagged attachment metadata or install geometry', () => {
+  const f = fixture(); let reads = 0;
+  Object.defineProperty(f.metadata, 'attachment', { get() { reads++; return staticAttachment(); } });
+  for (const status of ['pending', 'unsupported']) {
+    f.metadata.status = status;
+    assert.deepEqual(f.resolve(), { schema: 1, revision: 'synthetic-1', status, recipe: null });
+  }
+  assert.equal(reads, 0); f.metadata.status = 'ready';
+  assert.throws(() => f.resolve(), /Accessor/); assert.equal(reads, 0);
+});
+
+test('tagged accessory borrowing observes only native readiness scalars and never source content capabilities', () => {
+  const f = fixture(); f.metadata.attachment = { ...staticAttachment(), asset: 2 };
+  const image = new f.realm.HTMLImageElement(); f.catalog.push({ source: image, state: 'ready' });
+  for (const key of ['src', 'currentSrc', 'decode', 'cloneNode', 'getContext', 'getImageData', 'toDataURL', 'toBlob']) {
+    Object.defineProperty(image, key, { get() { assert.fail(`accessory source ${key}`); } });
+  }
+  Object.freeze(image);
+  assert.equal(f.resolve().recipe.attachment.asset.source, image);
+  for (const source of [{ naturalWidth: 40, naturalHeight: 50, complete: true }, fixture().image]) {
+    f.catalog[2].source = source; assert.throws(() => f.resolve(), /trusted realm/);
+  }
+  const bad = new f.realm.HTMLImageElement(); let reads = 0;
+  Object.defineProperty(bad, 'complete', { get() { reads++; return true; } });
+  f.catalog[2].source = bad; assert.throws(() => f.resolve(), /Accessor/); assert.equal(reads, 0);
+});
+
+test('legacy untagged attachments retain exact shapes, mode inference, opacity and family compatibility', () => {
+  for (const make of [fixture, bodyFixture]) {
+    for (const kind of ['standard', 'single-image', 'mouth-face', 'none']) {
+      const f = make(); if (kind === 'single-image') addSingleEye(f);
+      else if (kind === 'mouth-face') addMouthFace(f); else if (kind === 'none') f.metadata.eyes = { kind };
+      const absent = f.resolve();
+      for (const rect of [undefined, [1, 2, 5, 6]]) {
+        f.metadata.attachment = { asset: 0, anchor: 'head', scale: 2, pivotX: -0, pivotY: 4, opacity: 0.5,
+          ...(rect === undefined ? {} : { sourceRect: rect }) };
+        const result = f.resolve();
+        assert.equal(result.status, 'ready');
+        const asset = result.recipe.palettes[0].variants[0].asset;
+        assert.deepEqual(result.recipe.attachment, { asset, sourceRect: rect ?? [0, 0, 20, 30],
+          ...(make === bodyFixture ? { sourceMode: rect === undefined ? 'whole' : 'crop' } : {}),
+          anchor: 'head', scale: 2, pivotX: -0, pivotY: 4, opacity: 0.5 });
+        assert.deepEqual(result.recipe.supportedFeatures, [...absent.recipe.supportedFeatures.filter(tag => tag !== 'standard-body-style'),
+          'head-attachment', ...(make === bodyFixture ? ['standard-body-style'] : [])]);
+      }
+      delete f.metadata.attachment; assert.deepEqual(f.resolve(), absent);
+      f.metadata.attachment = null; assert.deepEqual(f.resolve(), absent);
+    }
+  }
+});

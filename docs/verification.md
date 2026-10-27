@@ -38,6 +38,33 @@ pull requests, and manual dispatch. Normal tests and CI require no external
 reference and do not connect to game servers. Dependency and toolchain setup may
 access package sources. Release-plz remains dormant.
 
+## Static head accessories
+
+The integrated generic accessory change passes 907 Node tests and 535 native
+all-target tests. Formatting, doctests, strict native/Wasm Clippy, a fresh web
+build with wasm-bindgen 0.2.129, and the full real-Wasm suite pass. Both extension
+packages build with the existing 88-file graph and permissions.
+
+The focused actual-Wasm recorder adds 142 cases and 769 assertions. It exercises
+all 13 additive entrypoints, both rendering lanes, Paired/Mouth ordering and
+alpha, optional antenna/side images, mixed families, signed-zero coherence,
+explicit crops, source revisions/aliases, pending rejection, exceptions and
+model rollback. Ordered Setup/prey/HUD paths share the existing source pool and
+budgets. Cases include 512 objects, 1,536 side/accessory images, 2,048 Mouth/
+accessory images, source/catalog/use limits, 64 Setup plans and backing pixels.
+The exact global 524,304 image-command limit/limit-plus-one is source-accounted
+but is not separately instantiated by this helper.
+
+Native arithmetic tests cover large-head cancellation and pure finite underflow;
+those are not browser last-bit witnesses. The browser rational fixture accounts
+for the existing draw-time zoom transition. Missing-API baselines, loader/fixture
+mistakes and all candidate attempts remain retained outside Git.
+
+These checks use authored synthetic metadata and a logical Canvas recorder.
+They do not establish native Canvas pixels, original artwork, stock lazy loading,
+installed-host behavior or gameplay/server acceptance. The stock no-accessory
+guard remains. See [static accessories](static-accessory.md).
+
 ## Bootstrap cleanup failures
 
 The cleanup repair passes 102 focused Node tests across bootstrap, profile,

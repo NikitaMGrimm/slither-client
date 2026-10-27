@@ -8,8 +8,8 @@ use crate::antenna_browser::{
     AntennaDecoration, PresentationSources, geometry, reject_post_bulb, same_antenna,
 };
 use crate::face_browser::{
-    FacePresentationSources, FaceSources, MouthFaceSources, SingleEyeSources, mouth_geometry,
-    single_eye_geometry,
+    AccessorySources, FacePresentationSources, FaceSources, MouthFaceSources, SingleEyeSources,
+    accessory_geometry, mouth_geometry, single_eye_geometry,
 };
 use crate::presentation::{
     AntennaBulbCommand, AppearancePresentation, BodyAsset, BodyAssetStatus, BodyAssetUse,
@@ -17,6 +17,7 @@ use crate::presentation::{
     BodyStyle, BodyVariantMode, ClientPresentationError, FaceGeometry, FacePresentation,
     MouthFaceLayout, OrdinaryAntennaGeometry, PairedFaceGeometry, PairedSideGeometry,
     PairedSideLayout, SingleEyeLayout, SnakePresentation, StandardEyeGeometry,
+    StaticHeadAccessoryGeometry, StaticHeadAccessoryLayout,
 };
 use crate::state::Appearance;
 
@@ -625,7 +626,7 @@ impl BorrowedSources {
         request: &Object,
         target: &HtmlCanvasElement,
     ) -> Result<Recipe, JsValue> {
-        self.resolve_inner(callback, request, target, false, None, None)
+        self.resolve_inner(callback, request, target, false, None, None, None, false)
     }
 
     pub(crate) fn resolve_with_antenna(
@@ -635,7 +636,7 @@ impl BorrowedSources {
         target: &HtmlCanvasElement,
         retained: Option<&OrdinaryAntennaGeometry>,
     ) -> Result<Recipe, JsValue> {
-        self.resolve_inner(callback, request, target, true, retained, None)
+        self.resolve_inner(callback, request, target, true, retained, None, None, false)
     }
 
     pub(crate) fn resolve_with_face(
@@ -652,9 +653,33 @@ impl BorrowedSources {
             true,
             retained.antenna.as_ref(),
             Some(&retained.face),
+            None,
+            false,
         )
     }
 
+    pub(crate) fn resolve_with_accessory(
+        &mut self,
+        callback: &Function,
+        request: &Object,
+        target: &HtmlCanvasElement,
+        retained: &FacePresentation,
+        accessory: Option<&StaticHeadAccessoryGeometry>,
+        basic: bool,
+    ) -> Result<Recipe, JsValue> {
+        self.resolve_inner(
+            callback,
+            request,
+            target,
+            true,
+            retained.antenna.as_ref(),
+            Some(&retained.face),
+            Some(accessory),
+            basic,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn resolve_inner(
         &mut self,
         callback: &Function,
@@ -663,6 +688,8 @@ impl BorrowedSources {
         allow_antenna: bool,
         retained: Option<&OrdinaryAntennaGeometry>,
         retained_face: Option<&FaceGeometry>,
+        retained_accessory: Option<Option<&StaticHeadAccessoryGeometry>>,
+        basic: bool,
     ) -> Result<Recipe, JsValue> {
         let snapshot = callback.call1(&JsValue::UNDEFINED, request)?;
         if snapshot.is_instance_of::<js_sys::Promise>() {
@@ -679,42 +706,13 @@ impl BorrowedSources {
         if has_antenna && !allow_antenna {
             return Err(error("antenna requires an explicit antenna renderer"));
         }
-        if !field(&raw, "attachment")?.is_null() {
+        let attachment = field(&raw, "attachment")?;
+        let has_accessory = !attachment.is_null();
+        if has_accessory && retained_accessory.is_none() {
             return Err(error("attachments are unsupported by standard renderer"));
         }
         if !list(field(&raw, "unsupportedFeatures")?, 0, 256)?.is_empty() {
             return Err(error("unsupported standard recipe features"));
-        }
-        let mut features = Vec::new();
-        for feature in list(field(&raw, "supportedFeatures")?, 1, 8)? {
-            let feature = text(feature)?;
-            if feature == "single-image-eye" && retained_face.is_none() {
-                return Err(error("single image eyes require an explicit face renderer"));
-            }
-            if feature == "mouth-face" && retained_face.is_none() {
-                return Err(error("mouth faces require an explicit face renderer"));
-            }
-            if feature == "ordinary-antenna" && !allow_antenna {
-                return Err(error("antenna requires an explicit antenna renderer"));
-            }
-            if ![
-                "body-palettes",
-                "standard-eyes",
-                "outline",
-                "shadow",
-                "death-highlight",
-                "standard-body-style",
-                "paired-side-images",
-                "ordinary-antenna",
-                "single-image-eye",
-                "mouth-face",
-            ]
-            .contains(&feature.as_str())
-                || features.contains(&feature)
-            {
-                return Err(error("unsupported standard recipe feature"));
-            }
-            features.push(feature);
         }
         let raw_eyes = field(&raw, "eyes")?;
         let eye_kind = text(field(&raw_eyes, "kind")?)?;
@@ -729,19 +727,64 @@ impl BorrowedSources {
         };
         let decoration = field(&raw, "faceDecoration")?;
         let has_decoration = !decoration.is_null() && !decoration.is_undefined();
-        if features.len()
-            != 5 + usize::from(eyes.is_some())
-                + usize::from(single_image)
-                + usize::from(mouth_face)
-                + usize::from(has_decoration)
-                + usize::from(has_antenna)
-            || features.iter().any(|f| f == "standard-eyes") != eyes.is_some()
-            || features.iter().any(|f| f == "single-image-eye") != single_image
-            || features.iter().any(|f| f == "mouth-face") != mouth_face
-            || features.iter().any(|f| f == "paired-side-images") != has_decoration
-            || features.iter().any(|f| f == "ordinary-antenna") != has_antenna
-            || (has_decoration && eyes.is_none())
+        if has_decoration && eyes.is_none() || has_accessory && (single_image || eye_kind == "none")
         {
+            return Err(error(
+                "unsupported face decoration or accessory combination",
+            ));
+        }
+        // Match the complete represented feature set, including basic projections
+        // without a body style. No ignored feature may masquerade as ready.
+        let mut expected = vec!["body-palettes".to_owned()];
+        if eyes.is_some() {
+            expected.push("standard-eyes".into());
+        }
+        if single_image {
+            expected.push("single-image-eye".into());
+        }
+        if mouth_face {
+            expected.push("mouth-face".into());
+        }
+        if has_decoration {
+            expected.push("paired-side-images".into());
+        }
+        if has_antenna {
+            expected.push("ordinary-antenna".into());
+        }
+        if has_accessory {
+            expected.push("head-attachment".into());
+        }
+        let style = field(&raw, "bodyStyle")?;
+        let has_style = !style.is_null() && !style.is_undefined();
+        if has_style {
+            expected.push("standard-body-style".into());
+        }
+        let effects = list(field(&raw, "effects")?, 0, 3)?;
+        for effect in &effects {
+            let kind = text(field(effect, "kind")?)?;
+            if !["outline", "shadow", "death-highlight"].contains(&kind.as_str())
+                || expected.contains(&kind)
+            {
+                return Err(error("unsupported or duplicate standard effect"));
+            }
+            expected.push(kind);
+        }
+        if !basic && (!has_style || effects.len() != 3) {
+            return Err(error("complete standard style and effects required"));
+        }
+        let mut features = Vec::new();
+        for feature in list(
+            field(&raw, "supportedFeatures")?,
+            1,
+            if retained_accessory.is_some() { 9 } else { 8 },
+        )? {
+            let feature = text(feature)?;
+            if !expected.contains(&feature) || features.contains(&feature) {
+                return Err(error("unsupported or duplicate standard recipe feature"));
+            }
+            features.push(feature);
+        }
+        if features.len() != expected.len() {
             return Err(error("inconsistent standard feature metadata"));
         }
         let mut recipe = Recipe {
@@ -755,6 +798,7 @@ impl BorrowedSources {
             custom: flag(field(&raw, "custom")?)?,
             face: None,
             antenna: None,
+            accessory: None,
             style: BodyStyle {
                 detailed_segments: false,
                 swell: 0.,
@@ -804,6 +848,28 @@ impl BorrowedSources {
         };
         if let Some(retained) = retained_face {
             check_face(recipe.face.as_ref(), retained)?;
+        }
+        if let Some(retained) = retained_accessory {
+            recipe.accessory = self.accessory(
+                &attachment,
+                &mut recipe.assets,
+                &mut recipe.catalog_ids,
+                &revision,
+                target,
+            )?;
+            let matches = match (recipe.accessory.as_ref(), retained) {
+                (None, None) => true,
+                (Some(actual), Some(retained)) => actual.geometry.same_bits(retained),
+                _ => false,
+            };
+            if !matches {
+                return Err(error(
+                    "recipe accessory differs from retained appearance geometry",
+                ));
+            }
+        }
+        if basic {
+            return Ok(recipe);
         }
         for palette in list(field(&raw, "palettes")?, 1, 256)? {
             let mut variants = Vec::new();
@@ -895,6 +961,39 @@ impl BorrowedSources {
             )?);
         }
         Ok(recipe)
+    }
+
+    fn accessory(
+        &mut self,
+        value: &JsValue,
+        assets: &mut Vec<BodyAsset>,
+        catalog_ids: &mut Vec<usize>,
+        revision: &JsValue,
+        target: &HtmlCanvasElement,
+    ) -> Result<Option<AccessorySources>, JsValue> {
+        if value.is_null() {
+            return Ok(None);
+        }
+        if text(field(value, "kind")?)? != "static-head-image"
+            || text(field(value, "anchor")?)? != "head"
+            || text(field(value, "sourceMode")?)? != "crop"
+            || num(field(value, "opacity")?, 1., 1.)? != 1.
+        {
+            return Err(error("unsupported static head accessory"));
+        }
+        let geometry = accessory_geometry(value, "scale")?;
+        let usage = self.usage(assets, catalog_ids, value, revision, target)?;
+        let source_rect = usage
+            .source_rect
+            .ok_or_else(|| error("explicit accessory crop required"))?;
+        if source_rect.x.to_bits() != 0 || source_rect.y.to_bits() != 0 {
+            return Err(error("accessory crop origin must be positive zero"));
+        }
+        Ok(Some(AccessorySources {
+            geometry,
+            asset: assets[usage.asset],
+            source_rect,
+        }))
     }
 
     fn antenna(
@@ -1079,6 +1178,31 @@ impl BorrowedSources {
         self.image(context, command.asset, command.source_rect, d)
     }
 
+    /// One fixed crop in its own screen-space scope, even at zero alpha.
+    pub(crate) fn submit_accessory(
+        &self,
+        context: &CanvasRenderingContext2d,
+        source: &AccessorySources,
+        layout: &StaticHeadAccessoryLayout,
+    ) -> Result<(), JsValue> {
+        context.save();
+        let result = (|| {
+            context.set_transform(1., 0., 0., 1., 0., 0.)?;
+            context.set_global_composite_operation("source-over")?;
+            context.translate(layout.translation.x, layout.translation.y)?;
+            context.rotate(layout.rotation)?;
+            context.set_global_alpha(layout.alpha);
+            self.image(
+                context,
+                source.asset,
+                Some(source.source_rect),
+                layout.destination,
+            )
+        })();
+        context.restore();
+        result
+    }
+
     /// One bounded pair, shared source identity, alpha one and source-over.
     /// Restore even when transform or image submission throws.
     pub(crate) fn submit_face(
@@ -1217,6 +1341,7 @@ pub(crate) struct Recipe {
     custom: bool,
     pub(crate) face: Option<FaceSources>,
     pub(crate) antenna: Option<AntennaDecoration>,
+    pub(crate) accessory: Option<AccessorySources>,
     pub(crate) style: BodyStyle,
     effects: [Option<BodyAssetUse>; 3],
 }
