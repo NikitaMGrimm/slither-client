@@ -60,6 +60,32 @@ another attempt. No installed-browser cleanup, native editing, real-Wasm cleanup
 profile acquisition or server acceptance follows from these tests. The default
 startup still registers no nickname field.
 
+## Local nickname-field owner
+
+The integrated private owner composition passes 896 Node tests, including
+164 focused bootstrap/gate/policy/profile/input tests. Its 19 new actual-source
+bootstrap cases cover closed request/ticket shapes, zero startup registration,
+same-router correction before filtering, unchanged raw gameplay delivery and
+absence of extra control/source/clock/send observations.
+
+Reentry and fault cases retain exact falsy primaries through request reflection,
+registration, native handling and unregister cleanup. They cover caught nested
+violations, late publication failure, stale occupied leases, old tickets,
+held controller work, field-only failure without active-stack native disposal,
+field-first complete cleanup and the existing startup/runtime cleanup controls.
+The genuine missing-method failure and all candidate/check records are retained.
+
+The full prebuilt real-Wasm suite passes with unchanged generated JS/Wasm and
+validator bytes. Both browser packages contain 44 files; only their bootstrap
+copies change from the mouth-face package, and both match the current source.
+Native Rust behavior is unchanged; this integration reuses its existing build.
+
+These tests execute the actual gate IIFE and bootstrap with authored VM/native
+receiver and Wasm doubles. They do not establish native browser execution of
+the owner composition, field attachment, caret, IME, clipboard, undo, Firefox,
+installed-host/UI or server acceptance. Startup remains unbound. See
+[the local owner API](extension.md#local-nickname-field-owner).
+
 ## Lease-bound nickname input policy
 
 The opt-in policy integration passes 836 Node tests, including 117 focused
@@ -80,7 +106,8 @@ A test-only single-claim facade composes actual bootstrap/gameplay/input modules
 with the handler before the existing notification filter. It verifies no extra
 control/source/clock/send/socket effects and preserves input errors through gate
 finalization. The Wasm boundary there is a synthetic double; production startup
-still registers no field and installs no such handler hook.
+still registers no field. The separate explicit local owner API above now
+installs its private handler when a caller supplies a field.
 
 A fresh web build and the unchanged full real-Wasm suite pass. Generated
 JS/Wasm/validator fingerprints remain exact; both packages contain 44 files with
