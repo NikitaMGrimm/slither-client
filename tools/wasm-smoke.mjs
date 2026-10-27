@@ -31,6 +31,13 @@ assert.deepEqual(wasm.decode_frame(Uint8Array.of(112), false),
   Uint8Array.of(0, 0, 0, 1, 112), 'packed pong uses a big-endian u32 command length');
 assert.throws(() => wasm.solve_challenge(Uint8Array.of(0, 1)));
 assert.throws(() => wasm.encode_login(1, new Uint8Array(19), 'Synthetic', 0, new Uint8Array()));
+const delNickname = '\u007f'.repeat(24), delCustom = Uint8Array.of(3, 1);
+assert.deepEqual(wasm.encode_login(1, profile.password, delNickname, 255, delCustom),
+  Uint8Array.from([115, 30, 0, 1, ...profile.password, 255, 24,
+    ...new Array(24).fill(127), 0, 255, ...delCustom]), 'Real Rust ABI preserves every DEL nickname byte');
+for (const nickname of ['\u001f', '\u0080', delNickname + '\u007f']) {
+  assert.throws(() => wasm.encode_login(1, profile.password, nickname, 0, new Uint8Array()));
+}
 console.log('Synthetic Wasm ABI handshake passed; no reference files or sockets used.');
 
 const scene = new wasm.Scene();

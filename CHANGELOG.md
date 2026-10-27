@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Admit literal DEL nickname bytes unchanged through session staging and the
+  Rust encoder, keeping the exact 0..24-byte `0x20..=0x7f` domain.
+
 - Add copied semantic HUD views with per-role readiness and a passive fixed-node
   renderer using supplied native DOM capabilities. Preserve displayed/final
   history and raw opacity requests; attachment and activation remain separate.

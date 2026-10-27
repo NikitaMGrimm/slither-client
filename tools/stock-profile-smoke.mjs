@@ -372,13 +372,15 @@ export async function stockProfileSmoke(wasm) {
     ok(appearance); challenge = challengeFixture(); eq(wasm.setup_protocol_version(setup), 19);
     eq(wasm.solve_challenge(challenge), Uint8Array.from({ length: 27 }, (_, i) => 65 + (3 + i * 4) % 26));
 
-    {
+    for (const nickname of [null, '\u007f'.repeat(24)]) {
       const h = harness({ holdFetch: true, holdDigest: true });
       eq(h.counts.fetchCalls, 0); eq(h.allocations.length, 0); eq(h.timers.size, 0);
       // A prior fractional native step must survive the eventual Play reset.
       h.frame(3); const prior = h.controls.at(-1); eq(prior.accumulated, 0.375);
       h.event({ type: 'keydown', code: 'ArrowLeft' }); h.event({ type: 'keydown', code: 'Space' });
-      const original = request(), expectedRequest = { ...original, customSkin: original.customSkin.slice() };
+      const original = request();
+      if (nickname !== null) original.nickname = nickname;
+      const expectedRequest = { ...original, customSkin: original.customSkin.slice() };
       const pending = h.begin(original);
       original.nickname = 'Changed'; original.skin = 27; original.customSkin.fill(255);
       const world = h.scene.snapshot(), quality = h.quality.snapshot(), frames = h.counts.frameCalls;
@@ -406,7 +408,9 @@ export async function stockProfileSmoke(wasm) {
       ok(socket.sent.slice(sends).some(bytes => bytes.length === 1 && bytes[0] === 188), 'Latest wait-time pointer is sent');
       await rejects(h.begin(), /attempt|already/i); eq(h.counts.fetchCalls, 1);
       h.dispose(); h.assertCleared();
-      cases.push('actual-acquirer-staged-login-real-Rust-clock-reset-controller-handshake-Setup-and-latest-input');
+      cases.push(nickname === null
+        ? 'actual-acquirer-staged-login-real-Rust-clock-reset-controller-handshake-Setup-and-latest-input'
+        : 'actual-acquirer-DEL24-login-real-Rust-stage-handshake-and-copied-intent');
     }
     for (const failure of ['staleAfterStage', 'disposeAfterStage', 'cleanupFailure']) {
       const h = harness({ [failure]: true });

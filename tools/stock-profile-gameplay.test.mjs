@@ -95,7 +95,7 @@ function harness(options = {}) {
     encode_login(version, password, nickname, skin, custom) {
       encoded.push({ version, password: [...password], nickname, skin, custom: [...custom] });
       options.onEncode?.(h);
-      if (!/^[ -~]{0,24}$/.test(nickname) || skin < 0 || skin > 255 || custom.length > 255) throw new Error('Synthetic semantic rejection');
+      if (!/^[\x20-\x7f]{0,24}$/.test(nickname) || skin < 0 || skin > 255 || custom.length > 255) throw new Error('Synthetic semantic rejection');
       return Uint8Array.from([115, 30, version >> 8, version & 255, ...password, skin, nickname.length,
         ...new TextEncoder().encode(nickname), 0, 255, ...custom]);
     },
@@ -309,13 +309,24 @@ test('readiness loss after full controller operation but before commit cancels w
   h.flush(); assert.equal(h.sockets.length, 0);
 });
 
+test('live-profile DEL nickname stages unchanged before the ordinary socket commit', async () => {
+  const h = harness(), nickname = '\u007f'.repeat(24);
+  await h.gameplay.playWithLiveProfile({ ...request(), nickname });
+  assert.equal(h.encoded[0].nickname, nickname);
+  assert.equal(h.sockets.length, 0);
+  h.tick(8);
+  assert.equal(h.sockets.length, 1);
+  assert.equal(h.counts.fetched, 1);
+  h.gameplay.dispose(); h.flush(); h.assertWiped();
+});
+
 test('acquirer failure and semantic staging rejection consume one attempt without silent external fallback', async () => {
   const h = harness({ digest: () => new Uint8Array(32) });
   await assert.rejects(h.gameplay.playWithLiveProfile(request()), e => e.code === 'hash-mismatch');
   assert.throws(() => h.gameplay.play(externalRequest()), /stopped/); h.flush();
   assert.equal(h.counts.fetched, 1); assert.equal(h.sockets.length, 0); h.assertWiped();
   const bad = harness();
-  await assert.rejects(bad.gameplay.playWithLiveProfile({ ...request(), nickname: '\u007f' }), e => e.code === 'consumer-failed');
+  await assert.rejects(bad.gameplay.playWithLiveProfile({ ...request(), nickname: '\u0080' }), e => e.code === 'consumer-failed');
   assert.equal(bad.counts.fetched, 1); assert.equal(bad.sockets.length, 0); assert.equal(bad.counts.qualityCalls, 0);
 });
 

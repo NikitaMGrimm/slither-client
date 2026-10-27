@@ -7,8 +7,8 @@ assets. Native code has no runtime dependencies; browser bindings use wasm32-onl
 wasm-bindgen 0.2.129 and web-sys 0.3.106.
 
 - `protocol::encode_login` accepts caller-supplied client-version and 20-byte
-  password values. Nicknames may be empty or contain up to 24 printable ASCII
-  bytes; custom skin data is limited to 255 bytes.
+  password values. Nicknames may be empty or contain up to 24 ASCII bytes in
+  `0x20..=0x7f`, including literal DEL; custom skin data is limited to 255 bytes.
 - `challenge::solve_challenge` accepts at most 512 encoded bytes and a closed
   token grammar with two fixed-length literals and a fixed copy loop. It rejects
   unsupported syntax without evaluating a general program.

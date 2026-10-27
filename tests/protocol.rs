@@ -1,4 +1,4 @@
-//! Synthetic protocol layouts only; no official login or frame payloads.
+//! Original synthetic protocol layouts only; no official login or frame payloads.
 
 use slither_client::protocol::{
     ElapsedHeader::{Absent, TwoBytes},
@@ -30,7 +30,7 @@ fn login_layout_preserves_runtime_inputs() {
 }
 
 #[test]
-fn login_boundaries_and_printable_ascii() {
+fn login_boundaries_and_ascii_space_through_del() {
     assert_eq!(
         encode_login(u16::MAX, &[255; 20], &"~".repeat(24), 255, Some(&[0; 255]))
             .unwrap()
@@ -40,7 +40,7 @@ fn login_boundaries_and_printable_ascii() {
     for nickname in [
         "x".repeat(25),
         "\n".into(),
-        "\x7f".into(),
+        "\u{80}".into(),
         "é".into(),
         "🦀".into(),
     ] {
@@ -53,6 +53,72 @@ fn login_boundaries_and_printable_ascii() {
         encode_login(0, &[0; 20], " ", 0, Some(&[0; 256])),
         Err(ProtocolError::CustomSkin)
     );
+}
+
+#[test]
+fn login_del_at_maximum_length_preserves_exact_wire_bytes_and_custom_tail() {
+    let nickname = "\x7f".repeat(24);
+    let packet = encode_login(0x1234, &[0x5a; 20], &nickname, 255, Some(&[0, 127, 255])).unwrap();
+    let mut expected = vec![115, 30, 18, 52];
+    expected.extend([90; 20]);
+    expected.extend([255, 24]);
+    expected.extend([127; 24]);
+    expected.extend([0, 255, 0, 127, 255]);
+    assert_eq!(packet, expected);
+}
+
+#[test]
+fn login_exhaustive_ascii_domain_and_lengths_preserve_each_byte() {
+    // Original synthetic cases: every admitted ASCII byte at every legal length.
+    for byte in 32_u8..=127 {
+        for length in 0..=24 {
+            let nickname = char::from(byte).to_string().repeat(length);
+            let packet = encode_login(0, &[0; 20], &nickname, 0, None).unwrap();
+            assert_eq!(packet.len(), 28 + length);
+            assert_eq!(&packet[..4], &[115, 30, 0, 0]);
+            assert_eq!(&packet[4..24], &[0; 20]);
+            assert_eq!(&packet[24..26], &[0, length as u8]);
+            assert_eq!(&packet[26..26 + length], vec![byte; length]);
+            assert_eq!(&packet[26 + length..], &[0, 255]);
+        }
+    }
+    let spaced = encode_login(0, &[0; 20], "  A  B  ", 0, None).unwrap();
+    assert_eq!(
+        &spaced[24..],
+        &[0, 8, 32, 32, 65, 32, 32, 66, 32, 32, 0, 255]
+    );
+}
+
+#[test]
+fn login_rejects_controls_non_ascii_and_every_overlong_ascii_byte() {
+    for byte in 0_u8..=255 {
+        let nickname = format!("A{}Z", char::from(byte));
+        if !(32..128).contains(&byte) {
+            assert_eq!(
+                encode_login(0, &[0; 20], &nickname, 0, None),
+                Err(ProtocolError::Nickname),
+                "byte {byte}"
+            );
+        } else {
+            assert_eq!(
+                encode_login(
+                    0,
+                    &[0; 20],
+                    &char::from(byte).to_string().repeat(25),
+                    0,
+                    None
+                ),
+                Err(ProtocolError::Nickname),
+                "25 repetitions of byte {byte}"
+            );
+        }
+    }
+    for nickname in ["\u{100}", "\u{2028}", "\u{ffff}", "\u{10000}", "\u{10ffff}"] {
+        assert_eq!(
+            encode_login(0, &[0; 20], nickname, 0, None),
+            Err(ProtocolError::Nickname)
+        );
+    }
 }
 
 #[test]
