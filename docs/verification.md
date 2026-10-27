@@ -442,6 +442,27 @@ enables the factory at initial ingress. These synthetic observations do not
 establish original artwork/loading, browser pixels, full game-page/session UI,
 extension activation or gameplay acceptance. See [stock adapters](stock-client.md).
 
+## Complete mouth-face integration
+
+The integrated feature passes 877 Node tests and 514 native all-target tests,
+formatting, doctests, strict native/Wasm Clippy, a fresh matching-bindgen web
+build and the full real-Wasm smoke matrix. Chrome/Firefox packages contain
+88 files; changed runtime copies match the reviewed authored/generated inputs.
+
+The focused real-Wasm recorder passes 1,852 assertions across 34 cases through
+both renderers. Coverage includes exact three-image whole-source order and
+transforms, root alpha one during spawn/death, retained travel including signed
+zero, mixed families, preclear rejection, source/revision changes, exceptions and
+scope unwinding, ordered Setup retention and shared command/catalog/asset-use
+budgets. A 512-appearance case submits 1,536 face images. Stock-adapter smoke
+also exercises the actual built-in selection and rejects an unpainted required
+mouth before clear. The actual gate/bootstrap test verifies the final painting
+commitment and later invalidation without invoking host functions.
+
+These native, synthetic Node and real-Wasm results do not establish native Canvas
+pixels, original artwork/loading, installed-host compatibility or game-server
+acceptance. See [mouth faces](mouth-face.md) for the API and source boundary.
+
 ## Single image eye integration
 
 The additive face-family path passes 426 native all-target tests and 169 Node

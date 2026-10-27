@@ -137,17 +137,18 @@ function fixture({ armed = true, late = false, sourcePending = false, href = 'ht
       }
       return entry;
     });
-    for (const name of ['komc', 'ksmc', 'kdmc', 'acbulb', 'cdbulb', 'jsebi', 'jsepi']) {
+    for (const name of ['komc', 'ksmc', 'kdmc', 'acbulb', 'cdbulb', 'jsebi', 'jsepi', 'ecmc']) {
       realm[name] = canvas();
-      if (name === 'jsebi' || name === 'jsepi') {
+      if (name === 'jsebi' || name === 'jsepi' || name === 'ecmc') {
         realm[name].width = realm[name].height = name === 'jsebi' ? 64 : 48;
         realm[name].getContext('2d').fillRect(0, 0, realm[name].width, realm[name].height);
       }
     }
     realm.sesti = new Image();
     for (const name of ['kwkbulb', 'pwdbulb', 'playbulb', 'leafbulb', 'swissbulb',
-      'moldovabulb', 'vietnambulb', 'argentinabulb', 'movbulb', 'bonkbulb', 'sest']) {
+      'moldovabulb', 'vietnambulb', 'argentinabulb', 'movbulb', 'bonkbulb', 'sest', 'jmou']) {
       realm[name] = new Canvas();
+      if (name === 'jmou') { realm[name].width = 79; realm[name].height = 130; }
       if (!sourcePending) realm[name].getContext('2d').drawImage(name === 'sest' ? realm.sesti : canvas(), 0, 0);
     }
     realm.bg_hex = new Image();
@@ -294,6 +295,34 @@ test('native paint observation distinguishes generated completion, blank downloa
   assert.equal(native.painted(bulb), false);
   body.getContext('2d').clearRect(0, 0, 1, 1);
   assert.equal(native.generated(body), false);
+});
+
+test('mouth canvas paint commitment survives completed loading and invalidates on later mutation', () => {
+  const f = fixture({ sourcePending: true }); f.host();
+  const native = f.gate.claim(f.gate.metadata().id), mouth = f.realm.jmou;
+  f.complete();
+  assert.equal(native.generated(f.realm.ecmc), true);
+  assert.equal(native.painted(mouth), false, 'dimensions alone cannot complete a downloaded canvas');
+  const context = mouth.getContext('2d');
+  context.fillRect(0, 0, 1, 1);
+  assert.equal(native.painted(mouth), false, 'an arbitrary successful paint is not the final image commitment');
+  const source = f.canvas();
+  context.drawImage(source, 0, 0);
+  assert.equal(native.painted(mouth), true);
+  const firstStamp = native.stamp(mouth);
+  context.drawImage(source, 0, 0);
+  assert(native.stamp(mouth) > firstStamp, 'same-size repaint revises content');
+  context.clearRect(0, 0, 1, 1);
+  assert.equal(native.painted(mouth), false);
+  f.faults.paint = true;
+  assert.throws(() => context.drawImage(source, 0, 0), /native paint failure/);
+  assert.equal(native.painted(mouth), false);
+  f.faults.paint = false;
+  context.drawImage(source, 0, 0);
+  assert.equal(native.painted(mouth), true);
+  mouth.width = mouth.width;
+  assert.equal(native.painted(mouth), false);
+  assert.equal(f.original, 0); assert.equal(f.sockets, 0);
 });
 
 test('host snapshot preserves full source identities/metrics and revisions without host function calls', () => {

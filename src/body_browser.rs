@@ -8,14 +8,15 @@ use crate::antenna_browser::{
     AntennaDecoration, PresentationSources, geometry, reject_post_bulb, same_antenna,
 };
 use crate::face_browser::{
-    FacePresentationSources, FaceSources, SingleEyeSources, single_eye_geometry,
+    FacePresentationSources, FaceSources, MouthFaceSources, SingleEyeSources, mouth_geometry,
+    single_eye_geometry,
 };
 use crate::presentation::{
     AntennaBulbCommand, AppearancePresentation, BodyAsset, BodyAssetStatus, BodyAssetUse,
     BodyBlend, BodyFade, BodyImageCommand, BodyPaintRecipe, BodyPalette, BodyRect, BodyRun,
     BodyStyle, BodyVariantMode, ClientPresentationError, FaceGeometry, FacePresentation,
-    OrdinaryAntennaGeometry, PairedFaceGeometry, PairedSideGeometry, PairedSideLayout,
-    SingleEyeLayout, SnakePresentation, StandardEyeGeometry,
+    MouthFaceLayout, OrdinaryAntennaGeometry, PairedFaceGeometry, PairedSideGeometry,
+    PairedSideLayout, SingleEyeLayout, SnakePresentation, StandardEyeGeometry,
 };
 use crate::state::Appearance;
 
@@ -241,6 +242,9 @@ fn check_face(actual: Option<&FaceSources>, retained: &FaceGeometry) -> Result<(
                 && same_decoration(decoration.as_ref(), retained.decoration.as_ref())
         }
         (Some(FaceSources::SingleImage(actual)), FaceGeometry::SingleImage(retained)) => {
+            actual.geometry.same_bits(retained)
+        }
+        (Some(FaceSources::Mouth(actual)), FaceGeometry::Mouth(retained)) => {
             actual.geometry.same_bits(retained)
         }
         _ => false,
@@ -475,7 +479,7 @@ impl BorrowedSources {
         }))
     }
 
-    /// Resolve both face images and any antenna through this call's shared pool.
+    /// Resolve the selected face and any antenna through this call's shared pool.
     pub(crate) fn resolve_generalized_presentation(
         &mut self,
         callback: &Function,
@@ -513,6 +517,19 @@ impl BorrowedSources {
                     return Err(error("single image eyes cannot have paired decoration"));
                 }
                 FaceSources::SingleImage(self.single_eye(
+                    &eyes,
+                    &mut assets,
+                    &mut catalog_ids,
+                    &revision,
+                    target,
+                )?)
+            }
+            "mouth-face" => {
+                let decoration = field(&raw_face, "decoration")?;
+                if !decoration.is_null() && !decoration.is_undefined() {
+                    return Err(error("mouth faces cannot have paired decoration"));
+                }
+                FaceSources::Mouth(self.mouth_face(
                     &eyes,
                     &mut assets,
                     &mut catalog_ids,
@@ -562,6 +579,43 @@ impl BorrowedSources {
         Ok(SingleEyeSources {
             geometry,
             images: [image("baseImage")?, image("pupilImage")?],
+        })
+    }
+
+    fn mouth_face(
+        &mut self,
+        value: &JsValue,
+        assets: &mut Vec<BodyAsset>,
+        catalog_ids: &mut Vec<usize>,
+        revision: &JsValue,
+        target: &HtmlCanvasElement,
+    ) -> Result<MouthFaceSources, JsValue> {
+        if text(field(value, "kind")?)? != "mouth-face" {
+            return Err(error("mouth face metadata required"));
+        }
+        let geometry = mouth_geometry(&field(value, "geometry")?)?;
+        let mut image = |key| -> Result<BodyAsset, JsValue> {
+            let raw = field(value, key)?;
+            if text(field(&raw, "sourceMode")?)? != "whole" {
+                return Err(error("mouth face images require whole sources"));
+            }
+            let usage = self.usage(assets, catalog_ids, &raw, revision, target)?;
+            if usage.source_rect.is_some() {
+                return Err(error("cropped mouth face images are unsupported"));
+            }
+            Ok(assets[usage.asset])
+        };
+        let eye_marks = image("eyeMarks")?;
+        let mouth = image("mouth")?;
+        // The shared marks source is submitted twice: charge three actual uses.
+        self.uses += 1;
+        if self.uses > 262_144 {
+            return Err(error("frame asset-use budget exceeded"));
+        }
+        Ok(MouthFaceSources {
+            geometry,
+            eye_marks,
+            mouth,
         })
     }
 
@@ -637,6 +691,9 @@ impl BorrowedSources {
             if feature == "single-image-eye" && retained_face.is_none() {
                 return Err(error("single image eyes require an explicit face renderer"));
             }
+            if feature == "mouth-face" && retained_face.is_none() {
+                return Err(error("mouth faces require an explicit face renderer"));
+            }
             if feature == "ordinary-antenna" && !allow_antenna {
                 return Err(error("antenna requires an explicit antenna renderer"));
             }
@@ -650,6 +707,7 @@ impl BorrowedSources {
                 "paired-side-images",
                 "ordinary-antenna",
                 "single-image-eye",
+                "mouth-face",
             ]
             .contains(&feature.as_str())
                 || features.contains(&feature)
@@ -661,10 +719,12 @@ impl BorrowedSources {
         let raw_eyes = field(&raw, "eyes")?;
         let eye_kind = text(field(&raw_eyes, "kind")?)?;
         let single_image = eye_kind == "single-image";
+        let mouth_face = eye_kind == "mouth-face";
         let eyes = match eye_kind.as_str() {
             "none" => None,
             "standard" => Some(standard_eyes(&raw_eyes)?),
             "single-image" if retained_face.is_some() => None,
+            "mouth-face" if retained_face.is_some() => None,
             _ => return Err(error("unsupported eye geometry")),
         };
         let decoration = field(&raw, "faceDecoration")?;
@@ -672,10 +732,12 @@ impl BorrowedSources {
         if features.len()
             != 5 + usize::from(eyes.is_some())
                 + usize::from(single_image)
+                + usize::from(mouth_face)
                 + usize::from(has_decoration)
                 + usize::from(has_antenna)
             || features.iter().any(|f| f == "standard-eyes") != eyes.is_some()
             || features.iter().any(|f| f == "single-image-eye") != single_image
+            || features.iter().any(|f| f == "mouth-face") != mouth_face
             || features.iter().any(|f| f == "paired-side-images") != has_decoration
             || features.iter().any(|f| f == "ordinary-antenna") != has_antenna
             || (has_decoration && eyes.is_none())
@@ -723,6 +785,14 @@ impl BorrowedSources {
         )?;
         recipe.face = if single_image {
             Some(FaceSources::SingleImage(self.single_eye(
+                &raw_eyes,
+                &mut recipe.assets,
+                &mut recipe.catalog_ids,
+                &revision,
+                target,
+            )?))
+        } else if mouth_face {
+            Some(FaceSources::Mouth(self.mouth_face(
                 &raw_eyes,
                 &mut recipe.assets,
                 &mut recipe.catalog_ids,
@@ -1080,6 +1150,35 @@ impl BorrowedSources {
         })();
         context.restore();
         result
+    }
+
+    pub(crate) fn submit_mouth_face(
+        &self,
+        context: &CanvasRenderingContext2d,
+        sources: &MouthFaceSources,
+        layout: &MouthFaceLayout,
+    ) -> Result<(), JsValue> {
+        // Body commands flatten their scopes. Re-establish the modeled root
+        // state inherited by this family, independently of body/death opacity.
+        context.set_transform(1., 0., 0., 1., 0., 0.)?;
+        context.set_global_composite_operation("source-over")?;
+        context.set_global_alpha(1.);
+        for (image, asset) in
+            layout
+                .images
+                .iter()
+                .zip([sources.eye_marks, sources.eye_marks, sources.mouth])
+        {
+            context.save();
+            let result = (|| {
+                context.translate(image.translation.x, image.translation.y)?;
+                context.rotate(image.rotation)?;
+                self.image(context, asset, None, image.destination)
+            })();
+            context.restore();
+            result?;
+        }
+        Ok(())
     }
 
     fn image(
