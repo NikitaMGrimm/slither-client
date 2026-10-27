@@ -11,6 +11,7 @@ Canvas2D rendering and an optional local simulator connection.
 - [HUD packet projections](hud-packets.md): bounded borrowed leaderboard and announcement decoding.
 - [HUD packet journal](hud-ingress.md): explicit command-time scores, lifecycle guards and session/controller routing.
 - [Semantic HUD state](hud-state.md): bounded packet/step/draw reduction, retained identity and readout eligibility.
+- [HUD views and passive rendering](hud-view.md): copied history, truthful readiness and supplied fixed-node DOM capabilities.
 - [Retained desktop food](food-presentation.md): factories, source ownership and ordered paint passes.
 - [Retained prey](prey-presentation.md): independent appearances, motion, capture and borrowed sources.
 - [Ordinary antennas](antenna-presentation.md): appearance state, draw cadence, supplied randomness and borrowed bulbs.

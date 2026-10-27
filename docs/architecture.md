@@ -107,6 +107,10 @@ history and requested opacities. Explicit gameplay readout mode stages it throug
 packet, same-step lifecycle and successful draw boundaries, with required score
 reads outside the native borrow and after held-source release.
 
+The separate [HUD view and passive renderer](hud-view.md) project committed
+history and consume exact owner-supplied DOM capabilities/nodes. Readiness is
+explicit; bootstrap attachment and visible UI remain separate.
+
 `presentation` provides explicit-time arithmetic separately from received state.
 `FrameClock` clamps elapsed milliseconds divided by eight to 0..=5, applies lag
 decay/recovery, and derives integer steps from differences of accumulated floors.
