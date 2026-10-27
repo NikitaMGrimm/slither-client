@@ -157,6 +157,51 @@ export function bodyRenderSmoke(wasm) {
     arenaEdgeRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok, rejects });
     antennaRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok, rejects });
     singleEyeRenderSmoke(wasm, { fixture, appearance, eq, ok, rejects });
+    const contentRevisions = fixture();
+    try {
+      const f = contentRevisions;
+      const revisions = new Map();
+      for (const entry of f.catalog) {
+        if (!revisions.has(entry.source)) revisions.set(entry.source, `content-${revisions.size}`);
+        entry.revision = revisions.get(entry.source);
+      }
+      let captures = 0;
+      f.transform(value => ({ ...value, revision: `capture-${++captures}` }));
+      f.render();
+      ok(captures > 1, 'one frame borrows shared sources under distinct catalog revisions');
+      ok(bodyImages(f).length > 0, 'stable content revisions permit actual shared-source submission');
+      const shared = f.sources[0], content = revisions.get(shared);
+      const entry = () => ({ asset: { source: shared, kind: 'canvas', status: 'ready', revision: content,
+        width: shared.width, height: shared.height }, width: shared.width, height: shared.height,
+      halfWidth: shared.width / 2, halfHeight: shared.height / 2 });
+      f.scene.reset();
+      f.scene.apply_frame_with_factories(bundle(syntheticSetup(), appearance(), [70, 108, 108, 0, 128, 128, 20]), false,
+        () => ({ eyes: vanillaEyes(), decoration: { kind: 'none' } }),
+        request => ({ randomPhaseUnit: 0, randomWobbleUnit: 0, palette: { color: request.palette,
+          count: 1, bodies: [entry()], outlines: [entry()], glows: [entry()] } }));
+      f.render();
+      const retainedFood = f.scene.food_state();
+      eq(retainedFood.foods.length, 1, 'a retained food may share a body raster under its content revision');
+      f.catalog[0].revision = f.catalog[7].revision = 'changed-shared-content';
+      eq(String(checkAtomic(f)), 'incoherent shared body/face and food source snapshot');
+      eq(f.scene.food_state(), retainedFood, 'conflicting body revision preserves the retained food registry');
+      f.catalog[0].revision = f.catalog[7].revision = content;
+      const initial = f.catalog[7].revision;
+      for (const invalid of ['conflicting-content', -0]) {
+        f.catalog[7].revision = invalid;
+        checkAtomic(f);
+      }
+      f.catalog[7].revision = initial;
+      f.render();
+      f.transform(value => {
+        const usage = value.recipe.palettes[0].variants[0];
+        const asset = { ...usage.asset };
+        Object.defineProperty(asset, 'revision', { get() { throw new Error('revision getter must remain unread'); } });
+        return { ...value, recipe: { ...value.recipe, palettes: [{ ...value.recipe.palettes[0],
+          variants: [{ ...usage, asset }, ...value.recipe.palettes[0].variants.slice(1)] }, ...value.recipe.palettes.slice(1)] } };
+      });
+      eq(String(checkAtomic(f)), 'metadata accessor at revision');
+    } finally { contentRevisions.close(); }
     const style = { ...vanillaEyes(), distance: 9.25, separation: 4.75, radius: 4.25,
       pupilRadius: 1.5, pupilTravel: 0.02, outlineWidth: 2.5,
       eyeColor: 0x123456, pupilColor: 0xabcdef, eyeOpacity: 0.6, pupilOpacity: 0.8 };

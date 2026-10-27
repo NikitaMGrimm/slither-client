@@ -98,6 +98,15 @@ retained display when the caller observes a new revision. Old results retain
 their old numeric snapshot and exact live source references; later host repaint
 can still change what those references draw.
 
+An asset-catalog entry may also supply its own `revision` in the same scalar
+domain. This content revision is copied to every use of that asset. It must
+change when that source's content, readiness or dimensions change, and remain
+stable across unrelated catalog changes. The enclosing revision still describes
+the complete capture. Body and face submission use the asset revision when
+present; legacy entries continue to use the enclosing revision. When a source
+is also retained by food or prey, all uses must supply its exact same content
+revision and dimensions.
+
 The result is `{ schema: 1, revision, status, recipe }`. A non-ready host recipe
 returns `recipe: null`. Otherwise metadata arrays and records are copied and
 frozen, and each asset use becomes:
@@ -107,6 +116,7 @@ frozen, and each asset use becomes:
   asset: {
     id: number; source: HTMLCanvasElement | HTMLImageElement | null;
     kind: 'canvas' | 'image' | null; width: number; height: number; status: Status;
+    revision?: string | number; // explicit source content revision, when supplied
   };
   sourceRect: readonly [number, number, number, number] | null;
   sourceMode?: 'whole' | 'crop'; // bodyStyle uses, and every face-decoration image

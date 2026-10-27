@@ -335,6 +335,16 @@ input eligibility. `drawn_snakes` returns copied numeric snapshots with original
 own identity and draw ordinals; `drawn_eyes` observes current paired-eye layouts
 without advancing any clock. A style-aware numeric preparation is also exposed.
 
+The additive `advance_with_control` computes the same existing clock step and
+calls a synchronous control capability before entity motion. Its copied view
+retains the original own identity, raw absolute head and displayed camera even
+after own removal. Closed gaze, reset, lag-reset and connection actions validate
+before staged mutation; motion consumes the already computed step. Callback
+failure rolls back numeric/source state, while external effects cannot roll
+back. The callback must not reenter its scene. The authored
+[stock asset and input adapters](stock-client.md) use this boundary without a
+second clock or local own-snake turn prediction.
+
 `web/animated.mjs` runs update then render once per animation callback, applying
 incoming packets immediately. It frees steps and the session, cancels callbacks
 on pagehide, and continues animation after local transport disconnection. The

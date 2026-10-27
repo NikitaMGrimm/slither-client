@@ -43,6 +43,37 @@ function bodyFixture() {
   return f;
 }
 
+test('source content revisions stay independent of the enclosing catalog revision', () => {
+  const f = fixture();
+  const unchanged = f.resolve().recipe.palettes[0].variants[0].asset;
+  assert(!Object.hasOwn(unchanged, 'revision'), 'legacy assets keep their existing output shape');
+  f.catalog[0].revision = 'content-1';
+  f.catalog[1].revision = -0;
+  const first = f.resolve();
+  f.snapshot.revision = 'synthetic-2';
+  const second = f.resolve();
+  assert.equal(second.revision, 'synthetic-2');
+  for (const value of [first, second]) {
+    const [a, b] = value.recipe.palettes.map(palette => palette.variants[0].asset);
+    assert.equal(a.revision, 'content-1');
+    assert(Object.is(b.revision, -0));
+    assert.equal(a.source, f.canvas);
+    assert(Object.isFrozen(a));
+  }
+});
+
+test('source content revisions validate the same closed domain without invoking getters', () => {
+  const f = fixture();
+  for (const invalid of [null, '', 'x'.repeat(129), NaN, Infinity, -1, 1.5, {}, true]) {
+    f.catalog[0].revision = invalid;
+    assert.throws(() => f.resolve(), /revision/);
+  }
+  let reads = 0;
+  Object.defineProperty(f.catalog[0], 'revision', { get() { reads++; return 1; } });
+  assert.throws(() => f.resolve(), /Accessor unsupported at revision/);
+  assert.equal(reads, 0);
+});
+
 const sideGeometry = () => ({ forward: 11.375, lateral: 3.125, lateralBias: 0.375,
   rotationOffset: 0.287, imageScale: 0.3125, pivotX: 9.25, pivotY: -7.5, width: 47, height: 31 });
 function addDecoration(f) {
