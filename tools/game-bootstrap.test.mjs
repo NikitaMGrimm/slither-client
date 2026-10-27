@@ -26,7 +26,7 @@ function connect(f, runtime) {
   runtime.play(playRequest()); f.frame(); f.socket.open(); f.socket.message([54, 1]); f.socket.message(setup); f.flush();
 }
 
-function fixture({ armed = true, late = false, sourcePending = false } = {}) {
+function fixture({ armed = true, late = false, sourcePending = false, href = 'https://slither.io/' } = {}) {
   const dimensions = new WeakMap(), images = new WeakMap();
   const log = [], messages = [], raf = new Map(), timers = new Map(), intervals = new Map(), microtasks = [], faults = {};
   const events = new EventTarget();
@@ -80,15 +80,15 @@ function fixture({ armed = true, late = false, sourcePending = false } = {}) {
   };
   const sessionStorage = new Storage();
   if (armed) sessionStorage.setItem('__slitherClientArmV1', JSON.stringify({ schema: 1, build: 'gamepage-v1',
-    id: 'a'.repeat(32), url: 'https://slither.io/', expires: Date.now() + 25000 }));
+    id: 'a'.repeat(32), url: href, expires: Date.now() + 25000 }));
   let socket;
-  const realm = { document, location: { href: 'https://slither.io/', reload() { reloads++; } },
+  const realm = { document, location: { href, reload() { reloads++; } },
     sessionStorage, localStorage: new Storage(), Storage, HTMLCanvasElement: Canvas,
     HTMLImageElement: Image, CanvasRenderingContext2D: Context, URL, Uint8Array, Math,
     innerWidth: 960, innerHeight: 540, performance: { now: () => now },
     addEventListener: events.addEventListener.bind(events), removeEventListener: events.removeEventListener.bind(events),
     postMessage(data) { messages.push(data); const event = new Event('message'); Object.assign(event,
-      { data, source: actualRealm, origin: 'https://slither.io' }); events.dispatchEvent(event); },
+      { data, source: actualRealm, origin: new URL(href).origin }); events.dispatchEvent(event); },
     requestAnimationFrame(callback) { const id = ++serial; raf.set(id, callback); return id; },
     cancelAnimationFrame(id) { raf.delete(id); log.push(['cancel', id]); },
     setTimeout(callback) { const id = ++serial; timers.set(id, callback); return id; },
@@ -251,6 +251,7 @@ test('armed document holds original callbacks/socket, privately claims native sc
   const id = f.gate.metadata().id;
   assert.throws(() => f.gate.claim('wrong'), /claimed/);
   const native = f.gate.claim(id);
+  assert.equal(Object.hasOwn(native, 'liveProfile'), false);
   assert.equal('WebSocket' in native, false);
   let calls = 0; native.requestAnimationFrame(() => { calls++; }); f.frame();
   assert.equal(calls, 1); assert.equal(f.original, 0);
@@ -385,12 +386,27 @@ test('single auto-entry exposes only a local module runtime promise and never im
   const source = bootstrapSource.replace(/^import .+;\r?$/gm, '').replace(/^export /gm, '');
   const module = new Script(`${source}\n({gamePageRuntime,startGamePage});`).runInContext(f.context);
   const runtime = await module.gamePageRuntime;
-  assert.equal(typeof runtime.play, 'function'); assert.equal(runtime.bindSession, undefined);
+  assert.equal(typeof runtime.play, 'function'); assert.equal(typeof runtime.playWithLiveProfile, 'function');
+  assert.equal(runtime.bindSession, undefined);
   assert.equal(f.sockets, 0); assert.equal(f.original, 0);
   assert.equal(f.realm.gamePageRuntime, undefined, 'capability is module-local');
   await assert.rejects(module.startGamePage(), /Armed document-start gate/);
   runtime.dispose();
   assert.equal(f.raf.size, 0); assert.equal(f.intervals.size, 0);
+});
+
+test('HTTP/www external-profile bootstrap remains usable when optional profile capture is absent', async () => {
+  for (const href of ['http://slither.io/', 'https://www.slither.io/']) {
+    const f=fixture({href});f.host();f.complete();const wasm=wasmDouble(f);
+    const runtime=await startGamePage({realm:f.realm,wasmApi:wasm.api});
+    assert.equal(runtime.diagnostics().connected,false);assert.equal(f.sockets,0);
+    await assert.rejects(runtime.playWithLiveProfile({endpoint:'ws://192.0.2.1:1234/slither',
+      nickname:'Synthetic',skin:24,customSkin:new Uint8Array()}),/unavailable/i);
+    assert.equal(runtime.diagnostics().gameplay.session.phase,'ready');assert.equal(f.sockets,0);
+    connect(f,runtime);
+    assert.equal(runtime.diagnostics().connected,true);assert.equal(f.sockets,1);assert.equal(f.original,0);
+    runtime.dispose();assert.equal(f.socket.closes,1);assert.equal(f.raf.size,0);
+  }
 });
 
 test('missing/pending host capabilities stop before scene construction and remain explicit', async () => {

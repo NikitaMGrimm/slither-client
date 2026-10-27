@@ -40,11 +40,12 @@ access package sources. Release-plz remains dormant.
 
 ## Explicit game-page composition
 
-The composed extension sources pass 356 Node tests. A fresh Wasm build passes
+The composed extension sources pass 449 Node tests. A fresh Wasm build passes
 the full ABI smoke: 7,624 body assertions, 38 control cases, 252 stock/gameplay
-assertions across ten cases, and eight session scenarios. The native sources
+assertions across ten cases, eight session scenarios and 643 profile assertions
+across ten cases. The native sources
 are unchanged from the 434-test integration below. Both extension packages
-build with 37 files each and retain the exact generated module fingerprints.
+build with 38 files each and retain the exact generated module fingerprints.
 
 The real-Wasm gameplay fixture composes the actual session, input, controller,
 skin/entity adapters and renderer with authored sources and an in-memory socket.
@@ -64,6 +65,29 @@ activation, native browser CSP/Trusted Types, live host loading/pixels, real
 profile acquisition and connected gameplay remain unverified. The earlier
 temporary Firefox foundation install and its blocked launcher automation do
 not establish acceptance of this composed package. See [extension](extension.md).
+
+## Explicit profile acquisition
+
+The optional profile path uses authored acquisition, captured native operations
+and a private synchronous Play consumer. Synthetic tests cover exact byte/EOF
+and read/deadline bounds, complete hash checks before closed parsing, owned-byte
+cleanup, cancellation and late results. Pure verifier tests use real Node
+WebCrypto with wholly synthetic pins. Positive production-factory fixtures use
+authored full-size padding/declarations and an explicitly labelled digest double;
+real crypto correctly rejects those synthetic bytes against the production pin.
+No archive-backed passing fixture is used.
+
+Gameplay and bootstrap composition tests use the actual acquirer/session/input
+modules with authored document, Canvas, acquisition, socket and Wasm doubles.
+They check no startup acquisition, copied intent, preserved key releases/pointer
+changes during the wait, post-consumer failure/disposal, stale document/assets
+and rejection after rendering before socket commit. Cleanup regressions cover
+session closure despite intent-buffer errors and original failure identity,
+including an `undefined` throw. These synthetic results do not establish actual
+source acquisition, native browser/CSP behavior or server acceptance.
+
+The approved runtime exception and separate agent-run HTTP/game-connection limits
+are defined in [provenance](provenance.md#explicit-play-profile-acquisition).
 
 ## Stock adapters and same-clock input
 

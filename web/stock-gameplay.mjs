@@ -1,9 +1,32 @@
-import { createStockSession } from './stock-session.mjs';
+import { createStockSession, stockEndpoint } from './stock-session.mjs';
 import { createClientInput } from './client-input.mjs';
+import { createStockLiveProfileAcquirer } from './stock-live-profile.mjs';
+
+function ownRecord(value, names) {
+  if (!value || typeof value !== 'object' || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) {
+    throw new TypeError('Gameplay own-data record required');
+  }
+  const fields = Object.getOwnPropertyDescriptors(value);
+  const record = {};
+  for (const key of Reflect.ownKeys(fields)) {
+    if (typeof key !== 'string' || !names.includes(key) || !Object.hasOwn(fields[key], 'value')) {
+      throw new TypeError('Invalid gameplay record field');
+    }
+    record[key] = fields[key].value;
+  }
+  for (const key of names) if (!Object.hasOwn(record, key)) throw new TypeError(`Missing gameplay field: ${key}`);
+  return record;
+}
+
+function profileError(code) {
+  const error = new Error(`Live profile gameplay: ${code}`);
+  error.code = code;
+  return error;
+}
 
 /** Trusted local composition; transports, native time and the scene remain caller-owned. */
 export function createStockGameplay({ scene, quality, controller, wasm, createSocket, now,
-  defer, setInterval, clearInterval, onStatus, onFatal }) {
+  defer, setInterval, clearInterval, onStatus, onFatal, liveProfile }) {
   for (const [record, names] of [[scene, ['control_view', 'set_connected', 'reset_lag']],
     [quality, ['begin_connection']], [controller, ['packet', 'frame']]]) {
     for (const name of names) if (typeof record?.[name] !== 'function') throw new TypeError(`Gameplay capability required: ${name}`);
@@ -11,10 +34,38 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
   for (const callback of [defer, setInterval, clearInterval, onStatus, onFatal]) {
     if (typeof callback !== 'function') throw new TypeError('Gameplay scheduling/notification capability required');
   }
+  const profileOptions = liveProfile === undefined ? undefined
+    : ownRecord(liveProfile, ['capabilities', 'isCurrentDocument']);
+  if (profileOptions && typeof profileOptions.isCurrentDocument !== 'function') throw new TypeError('Current-document checker required');
   const input = createClientInput({ protocolVersion: 19 });
   const session = createStockSession({ wasm, createSocket, now });
   let disposed = false, active = false, queued = false, dirty = true, hasFatal = false, fatal, uiTimer;
   let nativeConnected = false;
+  let profilePhase = profileOptions ? 'idle' : 'unavailable';
+  let profileIntent, checkingCurrent = false;
+  const acquiring = () => profilePhase === 'acquiring';
+  function current(intent) {
+    if (disposed || hasFatal || profileIntent !== intent || intent.cancelled || checkingCurrent) return false;
+    checkingCurrent = true;
+    try {
+      return profileOptions.isCurrentDocument() === true && !disposed && !hasFatal
+        && profileIntent === intent && !intent.cancelled;
+    } catch { return false; }
+    finally { checkingCurrent = false; }
+  }
+  function clearRequest(intent) {
+    if (!intent?.request) return;
+    try { profileOptions.capabilities.bytes.clear(intent.request.customSkin); }
+    finally { intent.request = undefined; }
+  }
+  function cancelProfile(intent) {
+    intent.cancelled = true;
+    // Attempt all owned cleanup without replacing the primary rejection, even undefined.
+    for (const cleanup of [() => intent.acquirer?.dispose(),
+      () => session.close('profile-cancelled'), () => clearRequest(intent)]) {
+      try { cleanup(); } catch { /* The caller preserves its primary failure. */ }
+    }
+  }
   const schedule = () => {
     if (disposed || queued) return;
     queued = true;
@@ -41,13 +92,23 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
     if (disposed) return;
     if (active) throw new Error('Gameplay disposal reentry');
     disposed = true;
+    profilePhase = 'disposed';
+    const profileCleanupErrors = [];
+    if (profileIntent) {
+      profileIntent.cancelled = true;
+      for (const cleanup of [() => profileIntent.acquirer?.dispose(), () => clearRequest(profileIntent)]) {
+        try { cleanup(); } catch (error) { profileCleanupErrors.push(error); }
+      }
+    }
     clearUiTimer();
     unsubscribe();
     input.pagehide();
     session.close('host-disposed');
+    if (profileCleanupErrors.length) throw profileCleanupErrors[0];
   }
   function reconcile() {
     if (disposed) return;
+    if (acquiring()) return;
     if (active) { schedule(); return; }
     try {
       if (hasFatal) {
@@ -82,7 +143,7 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
     } catch (error) { latchError(error); }
   }
   function run(callback) {
-    if (disposed || active || hasFatal) throw new Error('Gameplay stopped or reentrant');
+    if (disposed || active || hasFatal || checkingCurrent) throw new Error('Gameplay stopped or reentrant');
     reconcile();
     if (disposed || hasFatal) throw new Error('Gameplay stopped');
     active = true;
@@ -103,13 +164,63 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
   }
   return Object.freeze({
     play(request) {
-      if (disposed || active || hasFatal) throw new Error('Gameplay stopped or reentrant');
+      if (disposed || active || hasFatal || checkingCurrent) throw new Error('Gameplay stopped or reentrant');
+      if (acquiring()) throw profileError('acquiring');
       // Invalid profiles are correctable caller errors, with no connection/quality effects.
       session.play(request);
       try { quality.begin_connection(); } catch (error) { latchError(error); throw error; }
     },
+    async playWithLiveProfile(request) {
+      if (disposed || active || hasFatal || checkingCurrent) throw new Error('Gameplay stopped or reentrant');
+      if (!profileOptions) throw profileError('unavailable');
+      if (profilePhase !== 'idle' || session.snapshot().phase !== 'ready') throw profileError('already-attempted');
+      const intent = { cancelled: false, started: false };
+      profileIntent = intent; profilePhase = 'acquiring';
+      try {
+        const data = ownRecord(request, ['endpoint', 'nickname', 'skin', 'customSkin']);
+        const endpoint = stockEndpoint(data.endpoint);
+        if (typeof data.nickname !== 'string' || !Number.isInteger(data.skin)) throw new TypeError('Invalid gameplay login shape');
+        const bytes = profileOptions.capabilities.bytes;
+        const length = bytes.length(data.customSkin);
+        // Bound the owned async intent copy to the wire's one-byte custom length.
+        if (!Number.isInteger(length) || length < 0 || length > 255) throw new TypeError('Custom intent exceeds byte budget');
+        const customSkin = bytes.allocate(length);
+        intent.request = { endpoint, nickname: data.nickname, skin: data.skin, customSkin };
+        bytes.copy(customSkin, data.customSkin, 0);
+        if (!current(intent)) throw profileError('stale-intent');
+        intent.started = true;
+        intent.acquirer = createStockLiveProfileAcquirer({ capabilities: profileOptions.capabilities,
+          isCurrentDocument: () => current(intent) });
+        await intent.acquirer.acquireForPlay(profile => {
+          if (!current(intent)) throw profileError('stale-intent');
+          session.play({ ...intent.request, profile });
+        });
+        if (!current(intent)) throw profileError('stale-intent');
+        quality.begin_connection();
+        if (!current(intent)) throw profileError('stale-intent');
+        clearRequest(intent);
+        profilePhase = 'ready'; dirty = true; schedule();
+      } catch (error) {
+        if (!intent.started && !disposed) {
+          try { clearRequest(intent); } catch { /* Preserve the original request failure. */ }
+          profileIntent = undefined; profilePhase = 'idle';
+        } else {
+          cancelProfile(intent);
+          if (!disposed) { profilePhase = 'failed'; latchError(error); }
+        }
+        throw error;
+      }
+    },
     frame(nowMs) {
+      // RAF keeps running while the private consumer may have staged a login, but
+      // neither native reset nor commit can run until acquisition has fully fulfilled.
+      if (acquiring() && !disposed) return undefined;
       return run(() => {
+        // Reconciliation notifications may start an intent after the entry check.
+        if (acquiring()) return undefined;
+        if (profilePhase === 'ready' && !current(profileIntent)) {
+          cancelProfile(profileIntent); profilePhase = 'failed'; throw profileError('stale-intent');
+        }
         const flags = session.beforeUpdate(nowMs);
         const result = controller.frame(nowMs, { lagging: flags.lagging, playing: flags.playing,
           readPlaying: () => session.snapshot().playing,
@@ -126,9 +237,16 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
             return { ...actions, ...(intent.gazeHeading === null ? {} : { gazeHeading: intent.gazeHeading }) };
           },
         });
+        if (profilePhase === 'ready' && !current(profileIntent)) {
+          cancelProfile(profileIntent); profilePhase = 'failed'; throw profileError('stale-intent');
+        }
         // Render, quality, step free AND held source release must all succeed first.
         session.commitControl();
-        nativeConnected = session.snapshot().connected;
+        const state = session.snapshot();
+        if (profilePhase === 'ready' && state.constructorAttempts > 0) {
+          profilePhase = 'committed'; profileIntent = undefined;
+        }
+        nativeConnected = state.connected;
         return result;
       });
     },
@@ -143,7 +261,7 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
         else if (event.type === 'blur') input.blur();
       });
     },
-    diagnostics: () => Object.freeze({ disposed, active, session: session.snapshot(), input: input.snapshot() }),
+    diagnostics: () => Object.freeze({ disposed, active, profilePhase, session: session.snapshot(), input: input.snapshot() }),
     dispose,
   });
 }

@@ -23,8 +23,39 @@ Comparison tooling expects this pinned external client:
 
 The fingerprint identifies the expected bytes; it does not assert that the live
 URL still serves them or establish permission or compatibility. The repository
-does not include or download this reference. Optional archive requirements and
-the bounded comparison results are documented in [verification](verification.md).
+does not include this reference. Development tooling, normal tests and CI do not
+download it or use its contents as a passing fixture. Optional archive requirements
+and bounded comparison results are documented in [verification](verification.md).
+
+## Explicit Play profile acquisition
+
+An optional runtime exception permits one explicit Play acquisition in the
+canonical, top-level, secure `https://slither.io` document. Authored code may
+request only the pinned URL above as inert bytes, using captured native fetch
+with credentials omitted, redirects rejected, no cache and no referrer. It must
+observe complete EOF, the exact decoded size and full SHA-256 before parsing the
+two pinned numeric declarations with a closed data grammar. It never evaluates,
+imports or invokes the downloaded program.
+
+Acquisition permits one attempt per document, at most 224092 decoded bytes,
+1024 reader calls including EOF and a 5000 ms total deadline. Source drift,
+cancellation, unsupported capabilities or malformed data stop the attempt
+without a game socket, default profile, fallback request or automatic retry.
+External caller profiles remain an explicit separate path.
+
+The owned source and digest buffers clear before the private synchronous
+authored consumer runs; its borrowed password clears afterward, including on
+failure. Source/profile values must not be persisted, logged, exposed through
+messages/globals/diagnostics or returned from acquisition. Browser/native
+internal copies cannot be guaranteed erased. A matching fetch identifies only
+the returned bytes, not the executed page program, asset compatibility, server
+freshness or acceptance.
+
+The captured capabilities, acquirer and final session/bootstrap composition need
+independent current-code review before shipping. Agent-run HTTP verification
+requires a separate exact one-request/no-session/no-socket authorization. Game
+connections retain the manual single-attempt ledger requirements; this exception
+does not renew or bypass a consumed ledger.
 
 ## Branding and license
 
