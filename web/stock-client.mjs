@@ -53,17 +53,23 @@ export function createStockClient({ scene, quality, adapter, hostAssets, target,
     if (stopped) throw new Error('Stock controller stopped');
     busy = true;
     let began = false;
+    let result, failure;
+    let failed = false;
     try {
       if (snapshot) { operation = adapter.beginOperation(); began = true; }
-      return callback();
+      result = callback();
     } catch (error) {
       stopped = true;
-      throw error;
-    } finally {
-      try { if (began) adapter.endOperation(); }
-      catch (error) { stopped = true; throw error; }
-      finally { operation = null; busy = false; }
+      failed = true;
+      failure = error;
     }
+    try { if (began) adapter.endOperation(); }
+    catch (error) {
+      stopped = true;
+      if (!failed) { failed = true; failure = error; }
+    } finally { operation = null; busy = false; }
+    if (failed) throw failure;
+    return result;
   }
   function countDraws(count) {
     if (!Number.isSafeInteger(count) || count < 0 || count > 0xffffffff) throw new RangeError('Invalid successful Setup draw count');

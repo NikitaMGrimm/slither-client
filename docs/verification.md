@@ -41,7 +41,7 @@ access package sources. Release-plz remains dormant.
 ## Stock adapters and same-clock input
 
 The frozen native/input/asset integration passes 434 native all-target tests and
-270 Node tests, formatting, doctests, strict rustdoc and native/Wasm Clippy. A
+272 Node tests, formatting, doctests, strict rustdoc and native/Wasm Clippy. A
 fresh generated module passes the full existing Wasm ABI smoke with 7,624 body
 recorder assertions. The additive pre-motion control helper passes 38 real-Wasm
 cases; the stock adapter helper passes 211 assertions across eight cases using

@@ -81,6 +81,42 @@ test('generalized packet dispatch installs real face, food, prey, recipe and ran
   assert.throws(() => args[2]({ skin: 0 }), /outside operation/);
 });
 
+test('operation cleanup preserves the primary thrown value even when both failures are undefined', () => {
+  for (const primary of [new Error('original render failure'), undefined]) {
+    for (const cleanup of [new Error('cleanup failure'), undefined]) {
+      const f = fixture();
+      const end = f.adapter.endOperation;
+      f.adapter.endOperation = () => { end(); throw cleanup; };
+      f.onRender = () => { throw primary; };
+      let threw = false;
+      try { f.client.render(); }
+      catch (error) { threw = true; assert.equal(error, primary); }
+      assert.equal(threw, true);
+      assert.equal(f.active, false);
+      assert.equal(f.events.filter(event => event === 'end').length, 1);
+      assert.equal(f.client.diagnostics().stopped, true);
+      assert.throws(() => f.client.render(), /stopped/);
+      assert.doesNotThrow(() => f.client.dispose(), 'cleanup always releases the operation guard');
+    }
+  }
+});
+
+test('cleanup alone propagates its original thrown value and stops the controller', () => {
+  for (const cleanup of [new Error('cleanup failure'), undefined]) {
+    const f = fixture();
+    const end = f.adapter.endOperation;
+    f.adapter.endOperation = () => { end(); throw cleanup; };
+    let threw = false;
+    try { f.client.render(); }
+    catch (error) { threw = true; assert.equal(error, cleanup); }
+    assert.equal(threw, true);
+    assert.equal(f.client.diagnostics().draws, 1);
+    assert.equal(f.client.diagnostics().stopped, true);
+    assert.equal(f.active, false);
+    assert.doesNotThrow(() => f.client.dispose());
+  }
+});
+
 test('frame does one advance and quality update before one stock draw; statistics see prior successful Setup draws', () => {
   const f = fixture(); f.client.packet(Uint8Array.of(0)); f.events.length = 0;
   f.nextStatistics = true;
