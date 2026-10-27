@@ -17,7 +17,7 @@ const gameWebFiles = ['stock-client.mjs', 'stock-skin-provider.mjs', 'stock-skin
   'stock-session.mjs', 'stock-hud-contract.mjs', 'stock-hud-state.mjs', 'stock-hud-view.mjs',
   'stock-hud-dom.mjs', 'handshake-session.mjs', 'stock-live-profile.mjs'];
 const gameFiles = [['game-activation.mjs', 'activation.mjs'], ['game-gate.js', 'gate.js'],
-  ['game-link.js', 'link.js'], ['game-bootstrap.mjs', 'bootstrap.mjs'], ['game-host.css', 'host.css']];
+  ['game-link.js', 'link.js'], ['game-runtime.mjs', 'runtime.mjs'], ['game-owned-hud-ui.mjs', 'owned-hud-ui.mjs'], ['game-host.css', 'host.css']];
 
 function within(root, candidate) {
   const relative = path.relative(root, candidate);
@@ -67,7 +67,8 @@ function validateModules(files) {
 }
 
 /** Package an explicitly trusted existing build. This never builds or executes client code. */
-export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir } = {}) {
+export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, gameEntry = 'default' } = {}) {
+  if (gameEntry !== 'default' && gameEntry !== 'owned-hud') throw new TypeError('gameEntry must be default or owned-hud');
   projectRoot = path.resolve(projectRoot);
   webDir = path.resolve(projectRoot, webDir ?? 'dist/web');
   outputDir = path.resolve(projectRoot, outputDir ?? 'dist/extension');
@@ -123,6 +124,8 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir } 
   const common = new Map(pageFiles.map(name => [`scene/${name}`, readFile(path.join(projectRoot, 'web', name))]));
   for (const name of ['launcher.html', 'launcher.js']) common.set(name, readFile(path.join(projectRoot, 'extension', name)));
   for (const [source, destination] of gameFiles) common.set(`game/${destination}`, readFile(path.join(projectRoot, 'extension', source)));
+  common.set('game/bootstrap.mjs', readFile(path.join(projectRoot, 'extension',
+    gameEntry === 'default' ? 'game-bootstrap.mjs' : 'game-owned-hud-entry.mjs')));
   for (const name of gameWebFiles) common.set(`game/${name}`, readFile(path.join(projectRoot, 'web', name)));
   common.set('LICENSE', readFile(path.join(projectRoot, 'LICENSE')));
   common.set('scene/config.json', Buffer.from('{"simulatorUrl":null}\n'));
@@ -149,7 +152,7 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir } 
     const errors = checkEntry('manifest.json', manifestBytes);
     if (errors.length) throw new Error(errors.join('\n'));
     const manifest = JSON.parse(manifestBytes);
-    const expected = new Set(['game/bootstrap.mjs', ...gameWebFiles.map(name => `game/${name}`),
+    const expected = new Set(['game/bootstrap.mjs', 'game/runtime.mjs', 'game/owned-hud-ui.mjs', ...gameWebFiles.map(name => `game/${name}`),
       ...bindingFiles.map(name => `game/pkg/${name}`)]);
     const declarations = manifest.web_accessible_resources;
     const matches = ['http://slither.io/*', 'https://slither.io/*', 'http://www.slither.io/*', 'https://www.slither.io/*'];
@@ -190,11 +193,14 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir } 
 export function extensionArguments(args) {
   const options = {};
   for (let index = 0; index < args.length; index += 2) {
-    const key = { '--web-dir': 'webDir', '--output-dir': 'outputDir' }[args[index]];
-    if (!key || options[key] !== undefined || !args[index + 1] || args[index + 1].startsWith('--')) {
-      throw new Error('Usage: node tools/build-extension.mjs [--web-dir <trusted build directory>] [--output-dir <fresh dist/extension path>]');
+    const key = { __proto__: null, '--web-dir': 'webDir', '--output-dir': 'outputDir', '--game-entry': 'gameEntry' }[args[index]];
+    if (!key || options[key] !== undefined || typeof args[index + 1] !== 'string' || !args[index + 1] || args[index + 1].startsWith('--')) {
+      throw new Error('Usage: node tools/build-extension.mjs [--web-dir <trusted build directory>] [--output-dir <fresh dist/extension path>] [--game-entry <default|owned-hud>]');
     }
     options[key] = args[index + 1];
+  }
+  if (options.gameEntry !== undefined && options.gameEntry !== 'default' && options.gameEntry !== 'owned-hud') {
+    throw new TypeError('gameEntry must be default or owned-hud');
   }
   return options;
 }

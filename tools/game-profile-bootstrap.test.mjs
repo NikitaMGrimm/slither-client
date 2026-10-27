@@ -23,7 +23,7 @@ after(()=>{for(const [name,descriptor] of networkGlobals) {
 }});
 
 const gateSource=readFileSync(new URL('../extension/game-gate.js',import.meta.url),'utf8');
-const bootstrapSource=readFileSync(new URL('../extension/game-bootstrap.mjs',import.meta.url),'utf8');
+const bootstrapSource=readFileSync(new URL('../extension/game-runtime.mjs',import.meta.url),'utf8');
 const testSource=readFileSync(new URL('./game-bootstrap.test.mjs',import.meta.url),'utf8');
 const hostFunctions=testSource.slice(testSource.indexOf('function fixture('),testSource.indexOf("\ntest('an unarmed"));
 const {fixture,wasmDouble}=new Script(`(function(gateSource,Script,createContext,runInContext,assert,createGateTestDom,attachGateTestRealm){
@@ -33,7 +33,7 @@ const {fixture,wasmDouble}=new Script(`(function(gateSource,Script,createContext
 const makeBootstrap=new Script(`(function(init,wasm,createStockHostSnapshot,createStockSkinAdapter,
   createStockClient,createStockEntityAssets,desktopBackingSize,createStockGameplay){
   ${bootstrapSource.replace(/^import .+;\r?$/gm,'').replace(/^export /gm,'')}
-  return startGamePage;})`).runInThisContext();
+  return (options = {}) => startGamePage({initialize:init,wasmApi:wasm,...options});})`).runInThisContext();
 const startGamePage=makeBootstrap(async()=>{},{},createStockHostSnapshot,createStockSkinAdapter,
   createStockClient,createStockEntityAssets,desktopBackingSize,createStockGameplay);
 const route='https://slither.io/s/game1107249518.js';

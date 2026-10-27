@@ -112,6 +112,21 @@
     } catch { return; }
   }
   const hudDom = captureHudDom();
+  function captureOwnedHudDom() {
+    if (hudDom === undefined) return;
+    try {
+      const document = realm.Document.prototype, node = realm.Node.prototype;
+      const createElement = method(document, 'createElement'), createTextNode = method(document, 'createTextNode');
+      const appendChild = method(node, 'appendChild'), removeChild = method(node, 'removeChild');
+      return freeze({ schema: 1, document: hudDom.document, dom: freeze({
+        createElement: (receiver, tag) => createElement(receiver, tag),
+        createTextNode: (receiver, text) => createTextNode(receiver, text),
+        appendChild: (receiver, child) => appendChild(receiver, child),
+        removeChild: (receiver, child) => removeChild(receiver, child),
+      }) });
+    } catch { return; }
+  }
+  const ownedHudDom = captureOwnedHudDom();
   function current(generation) {
     return !ended && claimed && input !== undefined && generation === routerGeneration
       && realm[slot] === gateRecord && editing.top(realm) === realm
@@ -414,6 +429,7 @@
     native.now = realm.performance.now.bind(realm.performance);
     native.random = realm.Math.random.bind(realm.Math);
     if (hudDom !== undefined) native.hudDom = hudDom;
+    if (ownedHudDom !== undefined) native.ownedHudDom = ownedHudDom;
     const liveProfile = captureLiveProfile();
     if (liveProfile !== undefined) native.liveProfile = liveProfile;
     const storage = realm.localStorage;

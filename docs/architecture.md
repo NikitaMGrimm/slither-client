@@ -116,10 +116,12 @@ reads outside the native borrow and after held-source release.
 
 The separate [HUD view and passive renderer](hud-view.md) project committed
 history and consume exact owner-supplied DOM capabilities/nodes. An explicit
-bootstrap `hudReadout: true` option binds fixed caller-owned nodes through the
+runtime `hudReadout: true` option binds fixed caller-owned nodes through the
 gate's optional captured DOM capability and publishes after committed gameplay
-operations. Default startup stays unbound; visible UI and node selection remain
-separate. This owner composition has synthetic coverage; native acceptance is
+operations. The side-effect-free runtime factory lets an entry select this mode
+before the one-shot claim. Default startup stays unbound. A separately selected
+owned-HUD package entry supplies an original fixed 21-node UI through four
+additional captured construction operations. This composition has synthetic coverage; native acceptance is
 separate from the earlier isolated renderer checks.
 
 `presentation` provides explicit-time arithmetic separately from received state.
