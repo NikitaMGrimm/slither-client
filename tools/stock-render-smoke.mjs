@@ -7,6 +7,7 @@ import { createStockSkinAdapter } from '../web/stock-skin-provider.mjs';
 import { createStockClient } from '../web/stock-client.mjs';
 import { createStockEntityAssets } from '../web/stock-food-provider.mjs';
 import { createStockGameplay } from '../web/stock-gameplay.mjs';
+import { createStockSession } from '../web/stock-session.mjs';
 import { syntheticChallenge } from './reference-parity.mjs';
 
 // Original authored synthetic packets, live-source doubles and Canvas command
@@ -521,6 +522,81 @@ export function stockRenderSmoke(wasm, { control = true } = {}) {
             : 'real-gameplay-session-input-render-and-life-end-composition');
         } finally {
           try { gameplay?.dispose(); } finally { f.close(); }
+        }
+      }
+      for (const victory of [false, true]) {
+        const f = fixture();
+        let session;
+        try {
+          f.scene.enable_score_tracking();
+          let now = 0;
+          const sockets = [], failures = [];
+          session = createStockSession({ wasm, now: () => now, createSocket() {
+            eq(f.held, null); eq(f.steps.at(-1).freed, true);
+            const socket = { readyState: 0, bufferedAmount: 0, sent: [], closes: 0,
+              send(bytes) { this.sent.push(Array.from(bytes)); },
+              close() { this.closes++; this.readyState = 3; } };
+            sockets.push(socket); return socket;
+          } });
+          session.subscribeWithHud({ packet: (bytes, elapsed, plan) => f.client.packetWithHud(bytes, elapsed, plan),
+            hud() {}, state() {}, error: value => failures.push(value) });
+          session.play({ endpoint: 'ws://192.0.2.9:1234/slither',
+            profile: { clientVersion: 7, password: new Uint8Array(20).fill(3), protocolVersion: 19 },
+            nickname: 'Synthetic lifecycle', skin: 27, customSkin: new Uint8Array() });
+          const frame = time => {
+            now = time;
+            const flags = session.beforeUpdate(now);
+            let observed;
+            f.client.frame(now, { lagging: flags.lagging, playing: flags.playing,
+              readPlaying: () => session.snapshot().playing,
+              control(request) {
+                const result = session.afterStepWithHud(request);
+                observed = { result, delta: request.delta };
+                return result.actions;
+              } });
+            session.commitControl();
+            eq(f.held, null); eq(f.steps.at(-1).freed, true);
+            ok(Object.isFrozen(observed.result)); ok(Object.isFrozen(observed.result.actions));
+            ok(Object.isFrozen(observed.result.lifecycle));
+            eq(observed.result.lifecycle.returnFraction, session.snapshot().returnFraction);
+            return observed;
+          };
+          eq(sockets.length, 0);
+          const initial = frame(0);
+          eq(initial.result.lifecycle, { schema: 1, deathPending: false,
+            returnActive: false, returnCompleted: false, returnFraction: 0 });
+          eq(sockets.length, 1);
+          const socket = sockets[0]; socket.readyState = 1; socket.onopen();
+          socket.onmessage({ data: Uint8Array.from([54, ...syntheticChallenge('B'.repeat(27))]).buffer });
+          now = 40;
+          socket.onmessage({ data: bundle(setup(), snake(0, 27)).buffer });
+          session.uiTick(540);
+          now = 600; socket.onmessage({ data: Uint8Array.of(118, victory ? 1 : 0).buffer });
+          const boundary = frame(2200);
+          eq(boundary.result.lifecycle.deathPending, true);
+          eq(boundary.result.lifecycle.returnActive, false, 'The lifecycle uses the strict 1600ms boundary');
+          const active = frame(2201);
+          eq(active.result.lifecycle.returnActive, true); eq(active.result.lifecycle.returnCompleted, false);
+          eq(active.result.lifecycle.returnFraction, 1 - 0.004 * active.delta,
+            'The observed facet uses the actual native clock delta once');
+          let completed;
+          for (let count = 0; count < 60; count++) {
+            const observed = frame(now + 40);
+            if (observed.result.lifecycle.returnCompleted) { completed = observed; break; }
+          }
+          ok(completed, 'Return completes within the bounded authored schedule');
+          eq(completed.result.lifecycle, { schema: 1, deathPending: false,
+            returnActive: true, returnCompleted: true, returnFraction: 0 });
+          eq(session.snapshot().playing, false); eq(session.snapshot().connected, victory);
+          eq(socket.closes, victory ? 0 : 1);
+          eq(f.scene.control_view().connected, victory);
+          eq(f.scene.control_view().own === null, !victory);
+          const following = frame(now + 40);
+          eq(following.result.lifecycle.returnActive, false); eq(following.result.lifecycle.returnCompleted, false);
+          eq(failures, []); eq(f.captures, f.ends);
+          cases.push(victory ? 'real-same-step-victory-return-lifecycle' : 'real-same-step-disconnect-return-lifecycle');
+        } finally {
+          try { session?.close(); } finally { f.close(); }
         }
       }
       for (const malformed of [() => Promise.resolve({}), () => ({ unknownAction: true }), () => ({ gazeHeading: NaN }),

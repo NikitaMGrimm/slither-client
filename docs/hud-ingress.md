@@ -85,6 +85,26 @@ each renderer graph and adds its exact generated path to the output game
 manifest. Source manifests declare fixed resources; generated output contains
 no wildcard permission. See [extension packaging](extension.md).
 
+## Same-step lifecycle observation
+
+After selecting the HUD subscription, `session.afterStepWithHud(request)`
+returns a deeply frozen `{actions, lifecycle}` from the same lifecycle fold as
+`afterStep`. Return only `actions` to the existing native control callback;
+retain the copied observation for work after the operation succeeds.
+
+`lifecycle` has exactly `{schema: 1, deathPending, returnActive,
+returnCompleted, returnFraction}`. Death presence is sampled after the fold.
+The two return flags come from the actual subtraction/completion branches;
+the completing step has both flags true, even when a victory return remains
+connected. A close-only `v2` does not create either edge. The fraction is the
+existing post-fold value, without a second clock or fade calculation.
+
+The new facade requires HUD subscription mode before reading the request or
+consuming a step. The legacy `afterStep` remains valid in both modes and returns
+only actions. Both share one step/commit latch; do not call both for one step.
+The result is an observation of existing effects, not a transaction spanning
+later native or observer failure. Reducer publication remains caller-owned.
+
 Visible length/rank/final UI, fade/readout scheduling, leaderboard rows,
 announcements and full login UI remain separate. Synthetic native, Node and
 real-Wasm recorder evidence does not establish browser pixels, installed-host
