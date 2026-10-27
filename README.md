@@ -24,10 +24,11 @@
 
 Version `0.1.0-alpha.0` is unreleased. The client provides bounded handshake
 primitives, atomic protocol-19 scene state, and Rust/Wasm Canvas2D previews
-with three stand-in palettes. The animated preview connects prediction, body
+with authored previews and live-source adapters. The animated preview connects prediction, body
 corrections, sampled curves and a following camera. Deterministic synthetic scenes
 run offline; an optional loopback simulator connection adds pointer heading and Space boost.
-There is no fully playable game or installed browser extension.
+Chrome/Firefox packages include experimental explicit game-page activation.
+Complete installed gameplay remains unverified.
 See [architecture](docs/architecture.md) for supported inputs and limits.
 
 Local loopback browser verification demonstrated Wasm execution, exact source
@@ -128,8 +129,11 @@ See [releases](docs/releases.md) and the [roadmap](docs/roadmap.md).
 
 Build the [Chrome/Firefox extension packages](docs/extension.md) with
 `npm run build:web` followed by `npm run build:extension`. These package the
-current authored client and Wasm for local installation. Game-page replacement,
-complete host assets and end-to-end gameplay remain work in progress.
+current authored client and Wasm for local installation. Explicit activation
+holds the original scheduling/socket paths and binds authored presentation to
+existing ready source objects. The local session API requires an external
+profile and a selected endpoint; no Play UI or automatic connection is provided.
+Live host/CSP compatibility and end-to-end gameplay remain unverified.
 
 ## Source and license
 

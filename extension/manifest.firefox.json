@@ -1,19 +1,24 @@
 {
   "manifest_version": 3,
-  "name": "SlitherClient authored preview",
+  "name": "SlitherClient",
   "version": "0.1.0",
-  "description": "Offline authored Rust/Wasm client preview. Game-page replacement and gameplay integration remain pending.",
+  "description": "Explicit game-page Rust/Wasm bootstrap and offline preview. Explicit external profile required for session Play.",
+  "permissions": ["activeTab", "scripting"],
   "action": {
-    "default_title": "Open SlitherClient authored preview",
+    "default_title": "SlitherClient",
     "default_popup": "launcher.html"
   },
+  "web_accessible_resources": [{
+    "matches": ["http://slither.io/*", "https://slither.io/*", "http://www.slither.io/*", "https://www.slither.io/*"],
+    "resources": ["game/bootstrap.mjs", "game/stock-host-snapshot.mjs", "game/stock-client.mjs", "game/stock-skin-provider.mjs", "game/stock-skin-rules.mjs", "game/skin-provider.mjs", "game/stock-food-provider.mjs", "game/stock-prey-provider.mjs", "game/stock-asset-sources.mjs", "game/desktop-layout.mjs", "game/client-input.mjs", "game/stock-gameplay.mjs", "game/stock-session.mjs", "game/handshake-session.mjs", "game/pkg/slither_client.js", "game/pkg/slither_client_bg.wasm"]
+  }],
   "content_security_policy": {
     "extension_pages": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"
   },
   "browser_specific_settings": {
     "gecko": {
       "id": "slither-client@nikitamgrimm",
-      "data_collection_permissions": { "required": ["none"] }
+      "data_collection_permissions": { "required": ["authenticationInfo"] }
     }
   }
 }

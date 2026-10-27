@@ -12,17 +12,29 @@ const projectRoot = fileURLToPath(new URL('..', import.meta.url));
 const pageNames = ['animated.html', 'animated.mjs', 'desktop-layout.mjs', 'scene.css',
   'synthetic-scene.mjs', 'synthetic-body.mjs', 'synthetic-food.mjs', 'synthetic-prey.mjs',
   'skin-provider.mjs', 'loopback-session.mjs'];
+const gameWebNames = ['stock-client.mjs', 'stock-skin-provider.mjs', 'stock-skin-rules.mjs',
+  'stock-host-snapshot.mjs', 'stock-food-provider.mjs', 'stock-prey-provider.mjs', 'stock-asset-sources.mjs',
+  'skin-provider.mjs', 'desktop-layout.mjs', 'client-input.mjs', 'stock-gameplay.mjs',
+  'stock-session.mjs', 'handshake-session.mjs'];
+const gameSources = [['game-activation.mjs', 'activation.mjs'], ['game-gate.js', 'gate.js'],
+  ['game-link.js', 'link.js'], ['game-bootstrap.mjs', 'bootstrap.mjs'], ['game-host.css', 'host.css']];
 
 // Original synthetic Wasm with empty constructor exports, never a playable fixture.
-function syntheticWasm() {
+function syntheticWasm(omit) {
   const text = value => [...Buffer.from(value)];
-  const section = (id, bytes) => [id, bytes.length, ...bytes];
+  const leb = value => value < 128 ? [value] : [(value & 127) | 128, ...leb(value >>> 7)];
+  const section = (id, bytes) => [id, ...leb(bytes.length), ...bytes];
   const entry = (name, kind, index) => [name.length, ...text(name), kind, index];
+  const functions = ['animatedscene_new', 'desktopquality_new',
+    'animatedscene_apply_frame_and_render_standard_with_face_presentation_and_prey',
+    'animatedscene_render_standard_with_face_presentation_at_size',
+    'animatedscene_control_view', 'animatedscene_advance_with_control', 'animatedscene_reset_lag',
+    'encode_login', 'solve_challenge', 'decode_frame', 'setup_protocol_version'].filter(name => name !== omit);
   return Buffer.from([0, 97, 115, 109, 1, 0, 0, 0,
     ...section(1, [1, 0x60, 0, 0]),
     ...section(3, [2, 0, 0]),
     ...section(5, [1, 0, 1]),
-    ...section(7, [3, ...entry('memory', 2, 0), ...entry('animatedscene_new', 0, 0), ...entry('desktopquality_new', 0, 1)]),
+    ...section(7, [functions.length + 1, ...entry('memory', 2, 0), ...functions.flatMap(name => entry(name, 0, 0))]),
     ...section(10, [2, 2, 0, 0x0b, 2, 0, 0x0b]),
   ]);
 }
@@ -46,7 +58,8 @@ function fixture(t) {
   }
   write('LICENSE', fs.readFileSync(path.join(projectRoot, 'LICENSE')));
   for (const name of pageNames) write(`web/${name}`, fs.readFileSync(path.join(projectRoot, 'web', name)));
-  for (const name of ['manifest.chrome.json', 'manifest.firefox.json', 'launcher.html', 'launcher.js']) {
+  for (const name of gameWebNames) write(`web/${name}`, fs.readFileSync(path.join(projectRoot, 'web', name)));
+  for (const name of ['manifest.chrome.json', 'manifest.firefox.json', 'launcher.html', 'launcher.js', ...gameSources.map(value => value[0])]) {
     write(`extension/${name}`, fs.readFileSync(path.join(projectRoot, 'extension', name)));
   }
   write('dist/web/slither_client.js', syntheticGlue);
@@ -69,10 +82,12 @@ test('default packages have a closed deterministic inventory and preserve author
   f.write('dist/web/unselected.wasm', Buffer.from('not a package input'));
   f.write('raw/synthetic-excluded.txt', 'Original synthetic excluded fixture.');
   const expectedPerBrowser = ['LICENSE', 'launcher.html', 'launcher.js', 'manifest.json', 'scene/config.json',
-    ...pageNames.map(name => `scene/${name}`), 'scene/pkg/slither_client.js', 'scene/pkg/slither_client_bg.wasm'].sort();
+    ...pageNames.map(name => `scene/${name}`), 'scene/pkg/slither_client.js', 'scene/pkg/slither_client_bg.wasm',
+    ...gameWebNames.map(name => `game/${name}`), ...gameSources.map(value => `game/${value[1]}`),
+    'game/pkg/slither_client.js', 'game/pkg/slither_client_bg.wasm'].sort();
   const result = f.build();
   assert.deepEqual(result.files.map(file => file.path), ['chrome', 'firefox'].flatMap(browser => expectedPerBrowser.map(name => `${browser}/${name}`)));
-  assert.equal(result.files.length, 34);
+  assert.equal(result.files.length, 74);
   assert(result.files.every(file => file.bytes > 0 && /^[a-f0-9]{64}$/.test(file.sha256)));
   assert.deepEqual(f.build(), result, 'an identical rerun neither accumulates nor changes files');
   for (const browser of ['chrome', 'firefox']) {
@@ -86,14 +101,14 @@ test('default packages have a closed deterministic inventory and preserve author
   }
 });
 
-test('MV3 browser differences, action and offline Wasm CSP are explicit and require no permissions', t => {
+test('MV3 browser differences, explicit activation permissions, closed WAR and offline Wasm CSP', t => {
   const f = fixture(t);
   f.build();
   const chrome = JSON.parse(fs.readFileSync(path.join(f.output, 'chrome/manifest.json')));
   const firefox = JSON.parse(fs.readFileSync(path.join(f.output, 'firefox/manifest.json')));
   assert.equal(chrome.version_name, '0.1.0-alpha.0');
   assert.deepEqual(firefox.browser_specific_settings, {
-    gecko: { id: 'slither-client@nikitamgrimm', data_collection_permissions: { required: ['none'] } },
+    gecko: { id: 'slither-client@nikitamgrimm', data_collection_permissions: { required: ['authenticationInfo'] } },
   });
   const { version_name, ...sharedChrome } = chrome;
   const { browser_specific_settings, ...sharedFirefox } = firefox;
@@ -102,7 +117,15 @@ test('MV3 browser differences, action and offline Wasm CSP are explicit and requ
     assert.equal(manifest.manifest_version, 3);
     assert.equal(manifest.version, '0.1.0');
     assert.equal(manifest.action.default_popup, 'launcher.html');
-    for (const key of ['permissions', 'host_permissions', 'optional_host_permissions', 'content_scripts', 'background', 'web_accessible_resources', 'externally_connectable']) {
+    assert.deepEqual(manifest.permissions, ['activeTab', 'scripting']);
+    assert.deepEqual(manifest.web_accessible_resources, [{
+      matches: ['http://slither.io/*', 'https://slither.io/*', 'http://www.slither.io/*', 'https://www.slither.io/*'],
+      resources: ['game/bootstrap.mjs', 'game/stock-host-snapshot.mjs', 'game/stock-client.mjs', 'game/stock-skin-provider.mjs',
+        'game/stock-skin-rules.mjs', 'game/skin-provider.mjs', 'game/stock-food-provider.mjs', 'game/stock-prey-provider.mjs',
+        'game/stock-asset-sources.mjs', 'game/desktop-layout.mjs', 'game/client-input.mjs',
+        'game/stock-gameplay.mjs', 'game/stock-session.mjs', 'game/handshake-session.mjs', 'game/pkg/slither_client.js', 'game/pkg/slither_client_bg.wasm'],
+    }]);
+    for (const key of ['host_permissions', 'optional_host_permissions', 'content_scripts', 'background', 'externally_connectable']) {
       assert.equal(Object.hasOwn(manifest, key), false, key);
     }
     const directives = Object.fromEntries(manifest.content_security_policy.extension_pages.split(';').filter(value => value.trim()).map(value => {
@@ -180,6 +203,18 @@ for (const [name, change, expected] of [
   });
 }
 
+for (const name of ['animatedscene_control_view', 'animatedscene_advance_with_control', 'animatedscene_reset_lag',
+  'encode_login', 'solve_challenge', 'decode_frame', 'setup_protocol_version']) {
+  test(`missing production gameplay ABI ${name} fails before package output`, t => {
+    const f = fixture(t);
+    f.write('dist/web/slither_client_bg.wasm', syntheticWasm(name));
+    const future = new Date('2030-01-01T00:00:00Z');
+    fs.utimesSync(path.join(f.root, 'dist/web/slither_client_bg.wasm'), future, future);
+    assert.throws(() => f.build(), new RegExp(`Wasm/glue export mismatch: ${name}`));
+    assert.equal(fs.existsSync(f.output), false);
+  });
+}
+
 test('unrecognized or changed output is preserved rather than merged or overwritten', t => {
   const f = fixture(t);
   f.build();
@@ -218,10 +253,10 @@ test('CLI requires unambiguous paths and confines outputs to the ignored extensi
   }
   for (const outputDir of ['dist/elsewhere', '.', 'dist/extension/../../outside']) assert.throws(() => f.build({ outputDir }), /must stay inside/);
   assert.throws(() => f.build({ webDir: 'dist/extension' }), /must be separate/);
-  assert.equal(f.build({ outputDir: 'dist/extension/fresh' }).files.length, 34);
+  assert.equal(f.build({ outputDir: 'dist/extension/fresh' }).files.length, 74);
 });
 
-const launcher = new Script(fs.readFileSync(new URL('../extension/launcher.js', import.meta.url), 'utf8'));
+const launcher = new Script(fs.readFileSync(new URL('../extension/launcher.js', import.meta.url), 'utf8').replace(/^import .+;\r?$/gm, ''));
 for (const namespace of ['chrome', 'browser']) {
   test(`${namespace} action popup opens only the packaged page and then closes, without a socket`, async () => {
     const calls = [];
@@ -230,12 +265,14 @@ for (const namespace of ['chrome', 'browser']) {
       runtime: { getURL(resource) { calls.push(['getURL', resource]); return `extension-synthetic://id/${resource}`; } },
       tabs: { async create(options) { calls.push(['create', options]); } },
     };
-    const result = launcher.runInNewContext({ [namespace]: api,
+    const elements = Object.fromEntries(['activate', 'preview', 'status'].map(id => [id, { disabled: false, textContent: '', addEventListener(type, callback) { this.click = callback; } }]));
+    launcher.runInNewContext({ [namespace]: api, activateGamePage: () => { throw new Error('Activation was not clicked'); },
       window: { close() { closed++; } },
-      document: { getElementById() { throw new Error('unexpected launch failure'); } },
+      document: { getElementById: id => elements[id] },
       WebSocket() { sockets++; throw new Error('Sockets are forbidden'); },
     });
-    await result;
+    assert.deepEqual(calls, []);
+    await elements.preview.click();
     assert.equal(JSON.stringify(calls), JSON.stringify([
       ['getURL', 'scene/animated.html'], ['create', { url: 'extension-synthetic://id/scene/animated.html' }],
     ]));
@@ -246,12 +283,29 @@ for (const namespace of ['chrome', 'browser']) {
 
 test('launcher reports tab creation failure and keeps its status visible', async () => {
   const status = { textContent: '' };
+  const elements = { status, activate: { addEventListener(type, callback) { this.click = callback; } },
+    preview: { addEventListener(type, callback) { this.click = callback; } } };
   let closed = false;
-  await launcher.runInNewContext({ browser: {
+  launcher.runInNewContext({ activateGamePage() { throw new Error('Activation was not clicked'); }, browser: {
     runtime: { getURL: () => 'extension-synthetic://id/scene/animated.html' },
     tabs: { create: async () => { throw new Error('synthetic denied tab'); } },
-  }, window: { close: () => { closed = true; } }, document: { getElementById: () => status } });
-  assert.match(status.textContent, /Could not open authored preview: Error: synthetic denied tab/);
+  }, window: { close: () => { closed = true; } }, document: { getElementById: id => elements[id] } });
+  await elements.preview.click();
+  assert.match(status.textContent, /SlitherClient: Error: synthetic denied tab/);
   assert.equal(closed, false);
   assert.match(fs.readFileSync(new URL('../extension/launcher.html', import.meta.url), 'utf8'), /name="referrer" content="no-referrer"/);
 });
+
+for (const mutate of [
+  manifest => manifest.web_accessible_resources[0].matches.push('https://*.slither.io/*'),
+  manifest => manifest.web_accessible_resources[0].resources.push('scene/animated.mjs'),
+  manifest => { manifest.web_accessible_resources[0].extension_ids = ['*']; },
+]) {
+  test('builder refuses broadened host/resource declarations before output creation', t => {
+    const f = fixture(t);
+    const manifest = JSON.parse(fs.readFileSync(path.join(f.root, 'extension/manifest.chrome.json')));
+    mutate(manifest); f.write('extension/manifest.chrome.json', JSON.stringify(manifest));
+    assert.throws(() => f.build(), /web-accessible resources must match/);
+    assert.equal(fs.existsSync(f.output), false);
+  });
+}

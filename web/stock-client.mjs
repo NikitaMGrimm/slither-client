@@ -85,24 +85,28 @@ export function createStockClient({ scene, quality, adapter, hostAssets, target,
   function updateOptions(nowMs, options) {
     finite(nowMs, 'time');
     if (options === null || typeof options !== 'object') throw new TypeError('Update options required');
-    const { lagging = false, playing = true, gazeHeading, onStep, control } = options;
+    const { lagging = false, playing = true, gazeHeading, onStep, control, readPlaying } = options;
     flag(lagging); flag(playing);
     if (gazeHeading !== undefined) finite(gazeHeading, 'gaze heading');
     synchronousCallback(onStep, 'onStep');
     synchronousCallback(control, 'control');
+    synchronousCallback(readPlaying, 'readPlaying');
+    if (readPlaying !== undefined && control === undefined) throw new TypeError('readPlaying requires control');
     if (control !== undefined) {
       requireMethod(scene, 'advance_with_control');
       if (gazeHeading !== undefined) throw new TypeError('Return gazeHeading from control actions');
     }
-    return { lagging, playing, gazeHeading, onStep, control };
+    return { lagging, playing, gazeHeading, onStep, control, readPlaying };
   }
-  function advance(nowMs, { lagging, playing, gazeHeading, onStep, control }) {
+  function advance(nowMs, { lagging, playing, gazeHeading, onStep, control, readPlaying }) {
     if (gazeHeading !== undefined) scene.set_gaze_heading(gazeHeading);
     const step = control === undefined ? scene.advance(nowMs, lagging)
       : scene.advance_with_control(nowMs, lagging, control);
     let observed;
+    let currentPlaying = playing;
     try {
-      quality.advance(step, playing);
+      if (readPlaying !== undefined) currentPlaying = flag(readPlaying());
+      quality.advance(step, currentPlaying);
       if (onStep !== undefined) {
         const wholeSteps = step.whole_steps;
         const delta = step.delta;
@@ -118,7 +122,7 @@ export function createStockClient({ scene, quality, adapter, hostAssets, target,
       if (result !== null && (typeof result === 'object' || typeof result === 'function')
         && typeof result.then === 'function') throw new TypeError('onStep callback must be synchronous');
     }
-    if (quality.update_statistics(nowMs, drawsSinceStatistics, playing)) drawsSinceStatistics = 0;
+    if (quality.update_statistics(nowMs, drawsSinceStatistics, currentPlaying)) drawsSinceStatistics = 0;
   }
   return freeze({
     packet(bytes, elapsedHeader = false) {

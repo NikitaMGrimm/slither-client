@@ -38,6 +38,33 @@ pull requests, and manual dispatch. Normal tests and CI require no external
 reference and do not connect to game servers. Dependency and toolchain setup may
 access package sources. Release-plz remains dormant.
 
+## Explicit game-page composition
+
+The composed extension sources pass 356 Node tests. A fresh Wasm build passes
+the full ABI smoke: 7,624 body assertions, 38 control cases, 252 stock/gameplay
+assertions across ten cases, and eight session scenarios. The native sources
+are unchanged from the 434-test integration below. Both extension packages
+build with 37 files each and retain the exact generated module fingerprints.
+
+The real-Wasm gameplay fixture composes the actual session, input, controller,
+skin/entity adapters and renderer with authored sources and an in-memory socket.
+It checks staged Play/reset before construction, handshake, complete Setup,
+current gaze, own-removal retention, life return, same-frame quality flags and
+populated-registry cleanup. It opens no network connection.
+
+Independent security review found that mutation stamps alone could incorrectly
+mark blank or failed generated canvases ready. The corrected gate requires a
+successful paint commitment; dimension-only, clear/reset and failed-paint
+witnesses remain pending. Focused rechecks found no actionable issue in that
+correction or the later post-control playing binding. The separate controller
+recheck also passed its real-Wasm probes.
+
+These are source, packaging and synthetic ABI results. Installed extension
+activation, native browser CSP/Trusted Types, live host loading/pixels, real
+profile acquisition and connected gameplay remain unverified. The earlier
+temporary Firefox foundation install and its blocked launcher automation do
+not establish acceptance of this composed package. See [extension](extension.md).
+
 ## Stock adapters and same-clock input
 
 The frozen native/input/asset integration passes 434 native all-target tests and
