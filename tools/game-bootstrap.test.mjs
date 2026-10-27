@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import { createGateTestDom, attachGateTestRealm } from './game-gate-test-fixture.mjs';
 import { Script, createContext, runInContext } from 'node:vm';
 import { activateGamePage, armDocument, gamePage } from '../extension/game-activation.mjs';
 import { createStockHostSnapshot } from '../web/stock-host-snapshot.mjs';
@@ -26,16 +27,14 @@ function connect(f, runtime) {
   runtime.play(playRequest()); f.frame(); f.socket.open(); f.socket.message([54, 1]); f.socket.message(setup); f.flush();
 }
 
-function fixture({ armed = true, late = false, sourcePending = false, href = 'https://slither.io/' } = {}) {
+function fixture({ armed = true, late = false, sourcePending = false, href = 'https://slither.io/',
+  missingEdit = false, missingFence = false, missingNative } = {}) {
   const dimensions = new WeakMap(), images = new WeakMap();
   const log = [], messages = [], raf = new Map(), timers = new Map(), intervals = new Map(), microtasks = [], faults = {};
   const events = new EventTarget();
   let serial = 0, now = 0, reloads = 0, sockets = 0, original = 0, actualRealm;
-  class Element extends EventTarget {
-    constructor(tag) { super(); this.tagName = tag; this.children = []; this.id = ''; this.textContent = ''; }
-    appendChild(value) { this.children.push(value); return value; }
-    setAttribute() {}
-  }
+  const dom = createGateTestDom();
+  const { Element } = dom;
   class Canvas extends Element {
     constructor() { super('canvas'); dimensions.set(this, { width: 32, height: 32 }); }
     get width() { return dimensions.get(this).width; }
@@ -69,11 +68,12 @@ function fixture({ armed = true, late = false, sourcePending = false, href = 'ht
     setItem(name, value) { this.values.set(name, value); }
     removeItem(name) { this.values.delete(name); }
   }
-  const document = new Element('document');
+  const document = new dom.Document();
   document.readyState = late ? 'complete' : 'loading';
   document.documentElement = new Element('html'); document.head = new Element('head'); document.body = new Element('body');
+  document.appendChild(document.documentElement);
   document.documentElement.appendChild(document.head); document.documentElement.appendChild(document.body);
-  document.createElement = name => name === 'canvas' ? new Canvas() : new Element(name);
+  document.createElement = name => name === 'canvas' ? new Canvas() : name === 'input' ? new dom.Input() : new Element(name);
   document.getElementById = id => {
     function find(element) { if (element.id === id) return element; for (const child of element.children) { const found = find(child); if (found) return found; } }
     return find(document.documentElement);
@@ -109,6 +109,18 @@ function fixture({ armed = true, late = false, sourcePending = false, href = 'ht
   const context = createContext(realm);
   runInContext('window = globalThis; top = globalThis;', context);
   actualRealm = runInContext('globalThis', context);
+  const edit = attachGateTestRealm(dom, realm, document, actualRealm);
+  if (missingEdit) delete dom.Element.prototype.checkVisibility;
+  if (missingFence) delete dom.FenceEvent.prototype.stopImmediatePropagation;
+  if (missingNative) {
+    const [owner, name] = missingNative;
+    const target = owner === 'Window' ? realm : owner === 'Location' ? realm.location : realm[owner].prototype;
+    const captured = Object.getOwnPropertyDescriptor(target, name);
+    // Keep early legacy property reads usable while removing the selected getter.
+    if (captured.get) Object.defineProperty(target, name, { configurable: true, writable: true,
+      value: owner === 'Window' || owner === 'Location' ? target[name] : undefined });
+    else delete target[name];
+  }
   const nativeRaf = realm.requestAnimationFrame;
   new Script(gateSource).runInContext(context);
   function canvas() { const value = new Canvas(); value.getContext('2d').fillRect(0, 0, 32, 32); return value; }
@@ -142,7 +154,7 @@ function fixture({ armed = true, late = false, sourcePending = false, href = 'ht
     for (const name of ['oef', 'redraw', 'connect', 'setSkin', 'newSlither']) realm[name] = () => { original++; throw new Error(`Original ${name} invoked`); };
   }
   function complete() { document.readyState = 'interactive'; document.dispatchEvent(new Event('DOMContentLoaded')); }
-  return { realm: actualRealm, context, document, messages, log, raf, timers, intervals, faults, host, canvas, complete,
+  return { realm: actualRealm, context, document, edit, messages, log, raf, timers, intervals, faults, host, canvas, complete,
     get gate() { return actualRealm[Symbol.for('slither.client.gate.v1')]; },
     get sockets() { return sockets; }, get original() { return original; }, get reloads() { return reloads; }, nativeRaf,
     get socket() { return socket; },
@@ -156,12 +168,12 @@ function fixture({ armed = true, late = false, sourcePending = false, href = 'ht
 
 function wasmDouble(f) {
   const calls = [], values = {};
-  let sceneFrees = 0, qualityFrees = 0, stepFrees = 0;
+  let sceneFrees = 0, qualityFrees = 0, stepFrees = 0, controlReads = 0;
   const request = { skin: 24, id: 1, cosmetic: 255, x: 0, y: 0, customBytes: new Uint8Array(), own: true, drawOrdinal: 0 };
   class AnimatedScene {
     constructor() { calls.push('scene'); this.connected = false; this.own = null; this.borrowed = false; }
     outside() { assert.equal(this.borrowed, false, 'no native reentry'); }
-    control_view() { this.outside(); return { own: this.own, camera: { x: 100, y: 200 }, zoom: 1, follows: true, connected: this.connected }; }
+    control_view() { this.outside(); controlReads++; return { own: this.own, camera: { x: 100, y: 200 }, zoom: 1, follows: true, connected: this.connected }; }
     reset_lag() { this.outside(); calls.push('reset_lag'); }
     advance_with_control(now, lagging, callback) {
       this.outside(); const control = this.control_view(); this.borrowed = true;
@@ -223,7 +235,7 @@ function wasmDouble(f) {
     },
   };
   return { api, calls, values,
-    counts: () => ({ sceneFrees, qualityFrees, stepFrees }) };
+    counts: () => ({ sceneFrees, qualityFrees, stepFrees }), controlReads: () => controlReads };
 }
 
 test('an unarmed/expired/wrong-host document leaves scheduling and sockets untouched', () => {
@@ -539,6 +551,60 @@ test('held input suppresses original listeners after one private owner claims di
   f.realm.addEventListener('click', () => { old++; });
   native.setInput(() => {});
   f.event('click'); assert.equal(old, 0);
+});
+
+test('actual gate/bootstrap/gameplay/input retain all raw original events and filter only new notifications', async () => {
+  const f = fixture(); f.host(); f.complete(); const wasm = wasmDouble(f);
+  // Observe the existing single claim, retaining the exact private native record.
+  // startGamePage itself claims once; no product constructor or installation hook.
+  const gateSlot = Symbol.for('slither.client.gate.v1');
+  const claim = f.gate.claim;
+  // Access to the claimed record is deliberately only via a local facade.
+  let native;
+  const facade = { ...f.realm, top: null, document: f.document, location: f.realm.location };
+  facade.top = facade;
+  facade[gateSlot] = Object.freeze({ metadata: f.gate.metadata, claim(id) { native = claim(id); return native; } });
+  const runtime = await startGamePage({ realm: facade, wasmApi: wasm.api });
+  const parent = f.document.createElement('div'), field = f.document.createElement('input');
+  f.document.body.appendChild(parent); parent.appendChild(field); f.edit.state(f.document).active = field;
+  const record = runInContext('({schema:1,element:null,parent:null})', f.context);
+  record.element = field; record.parent = parent;
+  const lease = native.registerNicknameEditField(record);
+  const input = () => runtime.diagnostics().gameplay.input;
+  for (const [code, key, flag] of [['ArrowLeft', 'ArrowLeft', 'leftHeld'], ['ArrowRight', 'ArrowRight', 'rightHeld'],
+    ['ArrowUp', 'ArrowUp', 'boostKeyHeld'], ['Space', ' ', 'boostKeyHeld']]) {
+    for (const options of [{}, { ctrlKey: true }, { isComposing: true }]) {
+      const before = wasm.controlReads();
+      const event = f.edit.dispatch('keydown', { target: field, code, key, ...options });
+      assert.equal(event.defaultPrevented, code === 'Space' && options.ctrlKey === true,
+        `${code}/${JSON.stringify(options)}`); assert.equal(input()[flag], true);
+      assert.equal(wasm.controlReads(), before + 1);
+      f.edit.state(parent).visible = false; f.edit.state(f.document).active = parent;
+      f.edit.dispatch('keyup', { target: parent, code, key, ...options });
+      assert.equal(input()[flag], false); assert.equal(wasm.controlReads(), before + 2);
+      f.edit.state(parent).visible = true; f.edit.state(f.document).active = field;
+    }
+  }
+  const added = ['keypress', 'beforeinput', 'input', 'compositionstart', 'compositionupdate', 'compositionend',
+    'copy', 'cut', 'paste', 'selectstart', 'select', 'selectionchange', 'dblclick', 'contextmenu',
+    'focus', 'blur', 'focusin', 'focusout', 'mouseenter', 'mouseleave', 'mouseover', 'mouseout',
+    'pointerenter', 'pointerleave', 'pointerover', 'pointerout', 'pointercancel', 'touchcancel',
+    'dragstart', 'drag', 'dragenter', 'dragleave', 'dragover', 'drop', 'dragend'];
+  const before = { controls: wasm.controlReads(), calls: [...wasm.calls], input: input(),
+    raf: [...f.raf.keys()], timers: [...f.timers.keys()], intervals: [...f.intervals.keys()] };
+  for (const type of added) f.edit.dispatch(type, { target: type === 'selectionchange' ? f.document : field, key: 'a', inputType: 'insertText' });
+  assert.deepEqual({ controls: wasm.controlReads(), calls: wasm.calls, input: input(),
+    raf: [...f.raf.keys()], timers: [...f.timers.keys()], intervals: [...f.intervals.keys()] }, before);
+  for (const type of ['pointerdown', 'pointerup', 'pointermove', 'mousedown', 'mouseup', 'mousemove',
+    'touchstart', 'touchend', 'touchmove', 'click', 'wheel']) {
+    const controls = wasm.controlReads();
+    f.edit.dispatch(type, { target: field, clientX: 400, clientY: 200, buttons: 1 });
+    assert.equal(wasm.controlReads(), controls + 1, type);
+  }
+  f.edit.dispatch('keydown', { target: field, key: 'ArrowLeft', code: 'ArrowLeft' });
+  lease.unregister(); f.edit.dispatch('keyup', { target: parent, key: 'ArrowLeft', code: 'ArrowLeft' });
+  assert.equal(input().leftHeld, false);
+  assert.equal(f.original, 0); assert.equal(f.sockets, 0); runtime.dispose();
 });
 
 test('unrelated capture changes keep entity source revisions stable across actual packet operations', async () => {
