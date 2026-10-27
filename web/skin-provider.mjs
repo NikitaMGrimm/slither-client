@@ -192,7 +192,7 @@ export function createSkinProvider({ trusted, realm, resolveHostRecipe, normaliz
       }
 
       const eyeInput = field(normalized, 'eyes');
-      const eyeKind = choice(field(eyeInput, 'kind'), ['standard', 'none'], 'eyes kind');
+      const eyeKind = choice(field(eyeInput, 'kind'), ['standard', 'none', 'single-image'], 'eyes kind');
       const eyes = { kind: eyeKind };
       if (eyeKind === 'standard') {
         for (const key of ['distance', 'separation', 'radius', 'pupilRadius', 'pupilTravel', 'outlineWidth']) {
@@ -200,6 +200,19 @@ export function createSkinProvider({ trusted, realm, resolveHostRecipe, normaliz
         }
         for (const key of ['eyeColor', 'pupilColor', 'outlineColor']) eyes[key] = integer(field(eyeInput, key), 0, 0xffffff, key);
         for (const key of ['eyeOpacity', 'pupilOpacity', 'angleSmoothing']) eyes[key] = number(field(eyeInput, key), 0, 1, key);
+      } else if (eyeKind === 'single-image') {
+        if (eyeInput instanceof Promise) throw new TypeError('Single image eyes must be synchronous');
+        const input = field(eyeInput, 'geometry');
+        if (input instanceof Promise) throw new TypeError('Single image geometry must be synchronous');
+        const geometry = {};
+        for (const key of ['baseSize', 'pupilSize']) geometry[key] = number(field(input, key), Number.MIN_VALUE, 4096, key);
+        geometry.pupilTravel = number(field(input, 'pupilTravel'), 0, 4096, 'pupilTravel');
+        eyes.geometry = freeze(geometry);
+        for (const key of ['baseImage', 'pupilImage']) {
+          const image = field(eyeInput, key);
+          if (image instanceof Promise) throw new TypeError('Single image source metadata must be synchronous');
+          eyes[key] = assetUse(image, true);
+        }
       }
 
       const effectKinds = new Set();
@@ -278,7 +291,8 @@ export function createSkinProvider({ trusted, realm, resolveHostRecipe, normaliz
         if (typeof tag !== 'string' || !/^[a-z][a-z0-9-]{0,63}$/.test(tag)) throw new TypeError('Invalid unsupported feature tag');
         return tag;
       }));
-      const supportedFeatures = freeze(['body-palettes', ...(eyeKind === 'standard' ? ['standard-eyes'] : []), ...effectKinds,
+      const supportedFeatures = freeze(['body-palettes', ...(eyeKind === 'standard' ? ['standard-eyes']
+        : eyeKind === 'single-image' ? ['single-image-eye'] : []), ...effectKinds,
         ...(attachment ? ['head-attachment'] : []), ...(bodyStyle ? ['standard-body-style'] : []),
         ...(faceDecoration ? ['paired-side-images'] : []), ...(antenna ? ['ordinary-antenna'] : [])]);
       const recipe = freeze({ basePalette, custom, runs, palettes, variantMode, variantPeriod, eyes: freeze(eyes), effects,

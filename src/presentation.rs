@@ -28,6 +28,7 @@ mod length;
 mod prey;
 mod prey_painter;
 mod quality;
+mod single_eye;
 mod snake;
 
 pub use antenna::{
@@ -48,8 +49,8 @@ pub use boundary::{BOUNDARY_SAMPLES, BoundaryRadius};
 pub use camera::{CAMERA_SAMPLES, CameraCorrections};
 pub use client::{
     AnimatedClient, AntennaDrawBudget, AntennaRandomRequest, AppearancePresentation,
-    ClientPresentationError, MAX_DRAW_SAMPLES, MAX_RETAINED_SNAKES, MAX_RETAINED_TOTAL_BODY_POINTS,
-    PreparedBodyGeometry, PreparedSnake,
+    ClientPresentationError, FacePresentation, MAX_DRAW_SAMPLES, MAX_RETAINED_SNAKES,
+    MAX_RETAINED_TOTAL_BODY_POINTS, PreparedBodyGeometry, PreparedSnake,
 };
 pub use curve::{
     CurveInput, CurveOutput, CurveSample, CurveVertex, MAX_CURVE_SAMPLES, sample_curve,
@@ -78,6 +79,7 @@ pub use prey_painter::{
     PreyPaintPass, PreyPaintPlan, plan_prey,
 };
 pub use quality::{QualityMode, QualitySnapshot, QualityState};
+pub use single_eye::{FaceGeometry, SingleEyeGeometry, SingleEyeLayout};
 pub use snake::{AnchorView, SnakeMetrics, SnakePresentation};
 
 /// Number of samples in each head position/fraction correction channel.

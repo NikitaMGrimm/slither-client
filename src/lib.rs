@@ -26,6 +26,9 @@ mod animated_browser;
 mod body_browser;
 
 #[cfg(target_arch = "wasm32")]
+mod face_browser;
+
+#[cfg(target_arch = "wasm32")]
 mod antenna_browser;
 
 #[cfg(target_arch = "wasm32")]

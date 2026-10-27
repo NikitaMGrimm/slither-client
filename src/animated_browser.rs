@@ -8,21 +8,22 @@ use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, HtmlImageElement};
 use crate::{
     antenna_browser::{AntennaDecoration, appearance as parse_appearance},
     body_browser::{
-        BorrowedSources, FaceDecoration, Recipe, ResolveError, appearance_request, paired_face,
-        request, same_decoration, same_eyes, standard_eyes,
+        BorrowedSources, Recipe, ResolveError, appearance_request, paired_face, request,
+        same_decoration, same_eyes, standard_eyes,
     },
     canvas_browser::{CanvasFrame, CanvasPreflight, draw_sprite},
+    face_browser::{FaceSources, appearance as parse_face_presentation},
     food_browser::FoodSources,
     presentation::{
         AnimatedClient, AntennaDrawBudget, AntennaPath, AntennaRandomRequest,
         AppearancePresentation, ArenaEdgeInput, ArenaEdgePlan, BodyPaintError, BodyPaintInput,
         BodyPaintPlan, BodyPaintQuality, BodyPaintView, BodyPaintVisual, CurveInput, CurveOutput,
-        EyeLayoutInput, FoodImageCommand, FoodPaintInput, FoodPaintPlan, MAX_BODY_PAINT_COMMANDS,
-        MAX_DRAW_SAMPLES, MAX_RETAINED_SNAKES, OrdinaryAntennaGeometry, PairedSideLayout,
-        PreparedAntenna, PreparedSnake, PreyEaterPose, PreyImageCommand, PreyPaintInput,
-        PreyPaintPlan, QualitySnapshot, SnakePresentation, StandardEyeLayout, Turn,
-        plan_arena_edge, plan_food, plan_prey, plan_standard_body, plan_standard_body_with_antenna,
-        sample_curve_with_heading,
+        EyeLayoutInput, FaceGeometry, FacePresentation, FoodImageCommand, FoodPaintInput,
+        FoodPaintPlan, MAX_BODY_PAINT_COMMANDS, MAX_DRAW_SAMPLES, MAX_RETAINED_SNAKES,
+        OrdinaryAntennaGeometry, PairedSideLayout, PreparedAntenna, PreparedSnake, PreyEaterPose,
+        PreyImageCommand, PreyPaintInput, PreyPaintPlan, QualitySnapshot, SingleEyeLayout,
+        SnakePresentation, StandardEyeLayout, Turn, plan_arena_edge, plan_food, plan_prey,
+        plan_standard_body, plan_standard_body_with_antenna, sample_curve_with_heading,
     },
     presentation_browser::AnimationStep,
     prey_browser::PreySources,
@@ -33,6 +34,16 @@ use crate::{
 
 fn error(message: impl std::fmt::Display) -> JsValue {
     JsValue::from_str(&message.to_string())
+}
+
+fn paired_presentation(value: FacePresentation) -> Result<AppearancePresentation, ResolveError> {
+    Ok(AppearancePresentation {
+        face: *value
+            .face
+            .paired()
+            .ok_or_else(|| error("paired face required by legacy API"))?,
+        antenna: value.antenna,
+    })
 }
 
 fn record<const N: usize>(fields: [(&str, JsValue); N]) -> Result<JsValue, JsValue> {
@@ -1027,6 +1038,338 @@ impl AnimatedScene {
         )
     }
 
+    /// Retain the selected numeric face family before its first update; no sources are required.
+    pub fn apply_frame_with_face_presentation(
+        &mut self,
+        bytes: &[u8],
+        elapsed_header: bool,
+        resolve_appearance: &js_sys::Function,
+    ) -> Result<(), JsValue> {
+        self.apply_face_factories(bytes, elapsed_header, resolve_appearance, None, None, true)
+    }
+
+    /// Select face mode and retain creation-selected food inputs atomically.
+    pub fn apply_frame_with_face_presentation_and_factories(
+        &mut self,
+        bytes: &[u8],
+        elapsed_header: bool,
+        resolve_appearance: &js_sys::Function,
+        resolve_food: &js_sys::Function,
+    ) -> Result<(), JsValue> {
+        self.apply_face_factories(
+            bytes,
+            elapsed_header,
+            resolve_appearance,
+            Some(resolve_food),
+            None,
+            true,
+        )
+    }
+
+    /// Select face mode and retain food and prey creation inputs in wire order.
+    pub fn apply_frame_with_face_presentation_and_all_factories(
+        &mut self,
+        bytes: &[u8],
+        elapsed_header: bool,
+        resolve_appearance: &js_sys::Function,
+        resolve_food: &js_sys::Function,
+        resolve_prey: &js_sys::Function,
+    ) -> Result<(), JsValue> {
+        self.apply_face_factories(
+            bytes,
+            elapsed_header,
+            resolve_appearance,
+            Some(resolve_food),
+            Some(resolve_prey),
+            true,
+        )
+    }
+
+    /// Submit every Setup draw with tagged faces and shared ingress budgets.
+    #[allow(clippy::too_many_arguments)]
+    pub fn apply_frame_and_render_with_face_presentation(
+        &mut self,
+        bytes: &[u8],
+        elapsed_header: bool,
+        resolve_appearance: &js_sys::Function,
+        resolve_food: &js_sys::Function,
+        target: HtmlCanvasElement,
+        palette_0: HtmlCanvasElement,
+        palette_1: HtmlCanvasElement,
+        palette_2: HtmlCanvasElement,
+        background: HtmlImageElement,
+        width: f64,
+        height: f64,
+        detailed_style: bool,
+        resolve_presentation: &js_sys::Function,
+        resolve_random: &js_sys::Function,
+        quality: &DesktopQuality,
+    ) -> Result<u32, JsValue> {
+        self.apply_and_render(
+            bytes,
+            elapsed_header,
+            resolve_appearance,
+            resolve_food,
+            None,
+            target,
+            [palette_0, palette_1, palette_2],
+            background,
+            DrawSize::new(width, height)?,
+            DrawLane::BasicFace {
+                detailed: detailed_style,
+                presentation: resolve_presentation,
+                random: resolve_random,
+            },
+            quality.applied(),
+        )
+    }
+
+    /// Submit ordered standard-body Setup draws with complete tagged face metadata.
+    #[allow(clippy::too_many_arguments)]
+    pub fn apply_frame_and_render_standard_with_face_presentation(
+        &mut self,
+        bytes: &[u8],
+        elapsed_header: bool,
+        resolve_appearance: &js_sys::Function,
+        resolve_food: &js_sys::Function,
+        target: HtmlCanvasElement,
+        palette_0: HtmlCanvasElement,
+        palette_1: HtmlCanvasElement,
+        palette_2: HtmlCanvasElement,
+        background: HtmlImageElement,
+        width: f64,
+        height: f64,
+        resolve_recipe: &js_sys::Function,
+        resolve_random: &js_sys::Function,
+        quality: &DesktopQuality,
+    ) -> Result<u32, JsValue> {
+        self.apply_and_render(
+            bytes,
+            elapsed_header,
+            resolve_appearance,
+            resolve_food,
+            None,
+            target,
+            [palette_0, palette_1, palette_2],
+            background,
+            DrawSize::new(width, height)?,
+            DrawLane::StandardFace {
+                recipe: resolve_recipe,
+                random: resolve_random,
+            },
+            quality.applied(),
+        )
+    }
+
+    /// Include retained prey in every ordered tagged-face Setup draw.
+    #[allow(clippy::too_many_arguments)]
+    pub fn apply_frame_and_render_with_face_presentation_and_prey(
+        &mut self,
+        bytes: &[u8],
+        elapsed_header: bool,
+        resolve_appearance: &js_sys::Function,
+        resolve_food: &js_sys::Function,
+        resolve_prey: &js_sys::Function,
+        target: HtmlCanvasElement,
+        palette_0: HtmlCanvasElement,
+        palette_1: HtmlCanvasElement,
+        palette_2: HtmlCanvasElement,
+        background: HtmlImageElement,
+        width: f64,
+        height: f64,
+        detailed_style: bool,
+        resolve_presentation: &js_sys::Function,
+        resolve_random: &js_sys::Function,
+        quality: &DesktopQuality,
+    ) -> Result<u32, JsValue> {
+        self.apply_and_render(
+            bytes,
+            elapsed_header,
+            resolve_appearance,
+            resolve_food,
+            Some(resolve_prey),
+            target,
+            [palette_0, palette_1, palette_2],
+            background,
+            DrawSize::new(width, height)?,
+            DrawLane::BasicFace {
+                detailed: detailed_style,
+                presentation: resolve_presentation,
+                random: resolve_random,
+            },
+            quality.applied(),
+        )
+    }
+
+    /// Share source and image budgets across standard-body Setup draws with prey.
+    #[allow(clippy::too_many_arguments)]
+    pub fn apply_frame_and_render_standard_with_face_presentation_and_prey(
+        &mut self,
+        bytes: &[u8],
+        elapsed_header: bool,
+        resolve_appearance: &js_sys::Function,
+        resolve_food: &js_sys::Function,
+        resolve_prey: &js_sys::Function,
+        target: HtmlCanvasElement,
+        palette_0: HtmlCanvasElement,
+        palette_1: HtmlCanvasElement,
+        palette_2: HtmlCanvasElement,
+        background: HtmlImageElement,
+        width: f64,
+        height: f64,
+        resolve_recipe: &js_sys::Function,
+        resolve_random: &js_sys::Function,
+        quality: &DesktopQuality,
+    ) -> Result<u32, JsValue> {
+        self.apply_and_render(
+            bytes,
+            elapsed_header,
+            resolve_appearance,
+            resolve_food,
+            Some(resolve_prey),
+            target,
+            [palette_0, palette_1, palette_2],
+            background,
+            DrawSize::new(width, height)?,
+            DrawLane::StandardFace {
+                recipe: resolve_recipe,
+                random: resolve_random,
+            },
+            quality.applied(),
+        )
+    }
+
+    /// Draw tagged faces at the requested backing size without advancing update clocks.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_with_face_presentation_at_size(
+        &mut self,
+        target: HtmlCanvasElement,
+        palette_0: HtmlCanvasElement,
+        palette_1: HtmlCanvasElement,
+        palette_2: HtmlCanvasElement,
+        background: HtmlImageElement,
+        width: f64,
+        height: f64,
+        detailed_style: bool,
+        resolve_presentation: &js_sys::Function,
+        resolve_random: &js_sys::Function,
+        quality: &DesktopQuality,
+    ) -> Result<(), JsValue> {
+        self.render_at_size(
+            target,
+            [palette_0, palette_1, palette_2],
+            background,
+            DrawSize::new(width, height)?,
+            DrawLane::BasicFace {
+                detailed: detailed_style,
+                presentation: resolve_presentation,
+                random: resolve_random,
+            },
+            quality.applied(),
+        )
+    }
+
+    /// Draw standard bodies and tagged faces at the requested backing size.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_standard_with_face_presentation_at_size(
+        &mut self,
+        target: HtmlCanvasElement,
+        palette_0: HtmlCanvasElement,
+        palette_1: HtmlCanvasElement,
+        palette_2: HtmlCanvasElement,
+        background: HtmlImageElement,
+        width: f64,
+        height: f64,
+        resolve_recipe: &js_sys::Function,
+        resolve_random: &js_sys::Function,
+        quality: &DesktopQuality,
+    ) -> Result<(), JsValue> {
+        self.render_at_size(
+            target,
+            [palette_0, palette_1, palette_2],
+            background,
+            DrawSize::new(width, height)?,
+            DrawLane::StandardFace {
+                recipe: resolve_recipe,
+                random: resolve_random,
+            },
+            quality.applied(),
+        )
+    }
+
+    /// Preflight native contexts and patterns before resetting the target for tagged faces.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_with_face_presentation(
+        &mut self,
+        target: HtmlCanvasElement,
+        palette_0: HtmlCanvasElement,
+        palette_1: HtmlCanvasElement,
+        palette_2: HtmlCanvasElement,
+        background: HtmlImageElement,
+        detailed_style: bool,
+        resolve_presentation: &js_sys::Function,
+        resolve_random: &js_sys::Function,
+        quality: &DesktopQuality,
+    ) -> Result<(), JsValue> {
+        self.render_committed(
+            target,
+            [palette_0, palette_1, palette_2],
+            background,
+            DrawLane::BasicFace {
+                detailed: detailed_style,
+                presentation: resolve_presentation,
+                random: resolve_random,
+            },
+            quality.applied(),
+        )
+    }
+
+    /// Preflight a standard-body tagged-face draw before resetting the target.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_standard_with_face_presentation(
+        &mut self,
+        target: HtmlCanvasElement,
+        palette_0: HtmlCanvasElement,
+        palette_1: HtmlCanvasElement,
+        palette_2: HtmlCanvasElement,
+        background: HtmlImageElement,
+        resolve_recipe: &js_sys::Function,
+        resolve_random: &js_sys::Function,
+        quality: &DesktopQuality,
+    ) -> Result<(), JsValue> {
+        self.render_committed(
+            target,
+            [palette_0, palette_1, palette_2],
+            background,
+            DrawLane::StandardFace {
+                recipe: resolve_recipe,
+                random: resolve_random,
+            },
+            quality.applied(),
+        )
+    }
+
+    /// Prepare numeric tagged-face draw feedback; do not also render the same draw.
+    pub fn prepare_draw_with_face_presentation(
+        &mut self,
+        width: f64,
+        height: f64,
+        quality_scale: f64,
+        detailed_style: bool,
+        resolve_random: &js_sys::Function,
+    ) -> Result<(), JsValue> {
+        self.client
+            .prepare_draw_with_face_presentation(
+                dimensions(width)?,
+                dimensions(height)?,
+                quality_scale,
+                detailed_style,
+                |input| antenna_random(resolve_random, input),
+            )
+            .map_err(|e| e.0)?;
+        Ok(())
+    }
+
     /// Advance the animation clock and drawn entities; free the returned step.
     pub fn advance(&mut self, now_ms: f64, lagging: bool) -> Result<AnimationStep, JsValue> {
         let inner = self.client.advance(now_ms, lagging).map_err(error)?;
@@ -1087,6 +1430,46 @@ impl AnimatedScene {
             )
             .map_err(|e| e.0)?;
         Ok(())
+    }
+
+    /// Copied family and shared gaze state for every retained appearance.
+    /// Native Number fields preserve signed zeros; observation advances no clock.
+    pub fn face_state(&self) -> Result<JsValue, JsValue> {
+        let snakes = js_sys::Array::new();
+        for (token, own, drawn, snake) in self.client.snake_objects() {
+            let face = match snake.active_face_geometry() {
+                FaceGeometry::Paired(_) => {
+                    record([("kind", "paired".into()), ("geometry", JsValue::NULL)])?
+                }
+                FaceGeometry::SingleImage(geometry) => record([
+                    ("kind", "single-image".into()),
+                    (
+                        "geometry",
+                        record([
+                            ("baseSize", geometry.base_size.into()),
+                            ("pupilSize", geometry.pupil_size.into()),
+                            ("pupilTravel", geometry.pupil_travel.into()),
+                        ])?,
+                    ),
+                ])?,
+            };
+            let eyes = snake.eyes();
+            snakes.push(&record([
+                ("token", serial(token.serial())),
+                ("id", snake.metrics().id.into()),
+                ("own", own.into()),
+                ("drawn", drawn.into()),
+                ("face", face),
+                ("heading", eyes.heading().into()),
+                ("targetHeading", eyes.target_heading().into()),
+                ("pupilX", eyes.pupil().x.into()),
+                ("pupilY", eyes.pupil().y.into()),
+            ])?);
+        }
+        record([
+            ("enabled", self.client.face_presentation_enabled().into()),
+            ("snakes", snakes.into()),
+        ])
     }
 
     /// Fresh copies of retained appearance chains; observation advances no clock.
@@ -1421,6 +1804,7 @@ impl AnimatedScene {
             }
             let layout = snake
                 .eye_geometry()
+                .ok_or_else(|| error("drawn_eyes requires paired faces"))?
                 .layout(
                     snake.eyes().heading(),
                     snake.eyes().pupil(),
@@ -1719,13 +2103,37 @@ impl AnimatedScene {
         resolve_food: Option<&js_sys::Function>,
         resolve_prey: Option<&js_sys::Function>,
     ) -> Result<(), JsValue> {
+        self.apply_face_factories(
+            bytes,
+            elapsed_header,
+            resolve_appearance,
+            resolve_food,
+            resolve_prey,
+            false,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn apply_face_factories(
+        &mut self,
+        bytes: &[u8],
+        elapsed_header: bool,
+        resolve_appearance: &js_sys::Function,
+        resolve_food: Option<&js_sys::Function>,
+        resolve_prey: Option<&js_sys::Function>,
+        generalized: bool,
+    ) -> Result<(), JsValue> {
         let mut prepared = self.client.clone();
         let foods = RefCell::new(self.food_sources.clone());
         let preys = RefCell::new(self.prey_sources.clone());
         let mut appearance = |input: &crate::state::Appearance| -> Result<_, ResolveError> {
             let raw = resolve_appearance
                 .call1(&JsValue::UNDEFINED, &appearance_request(input)?.into())?;
-            Ok(parse_appearance(&raw)?)
+            if generalized {
+                Ok(parse_face_presentation(&raw)?)
+            } else {
+                Ok(FacePresentation::from(parse_appearance(&raw)?))
+            }
         };
         let mut food = |spawn: &crate::state::FoodSpawnInput, zoom| -> Result<_, ResolveError> {
             let callback = resolve_food.ok_or_else(|| error("food factory resolver required"))?;
@@ -1750,11 +2158,28 @@ impl AnimatedScene {
                 .resolve_limited(callback, spawn, zoom, catalog, snapshots)?)
         };
         let header = elapsed_header_kind(elapsed_header);
-        if resolve_prey.is_some() {
-            prepared.apply_frame_with_appearance_and_all_factories(
+        if generalized && resolve_prey.is_some() {
+            prepared.apply_frame_with_face_presentation_and_all_factories(
                 bytes,
                 header,
                 &mut appearance,
+                &mut food,
+                &mut prey,
+            )
+        } else if generalized && resolve_food.is_some() {
+            prepared.apply_frame_with_face_presentation_and_factories(
+                bytes,
+                header,
+                &mut appearance,
+                &mut food,
+            )
+        } else if generalized {
+            prepared.apply_frame_with_face_presentation(bytes, header, &mut appearance)
+        } else if resolve_prey.is_some() {
+            prepared.apply_frame_with_appearance_and_all_factories(
+                bytes,
+                header,
+                |input| paired_presentation(appearance(input)?),
                 &mut food,
                 &mut prey,
             )
@@ -1762,11 +2187,13 @@ impl AnimatedScene {
             prepared.apply_frame_with_appearance_and_factories(
                 bytes,
                 header,
-                &mut appearance,
+                |input| paired_presentation(appearance(input)?),
                 &mut food,
             )
         } else {
-            prepared.apply_frame_with_appearance(bytes, header, &mut appearance)
+            prepared.apply_frame_with_appearance(bytes, header, |input| {
+                paired_presentation(appearance(input)?)
+            })
         }
         .map_err(|e| e.0)?;
         self.commit_all(prepared, foods.into_inner(), preys.into_inner())
@@ -1848,11 +2275,13 @@ impl AnimatedScene {
         let mut appearance = |appearance: &crate::state::Appearance| -> Result<_, ResolveError> {
             let raw = resolve_appearance
                 .call1(&JsValue::UNDEFINED, &appearance_request(appearance)?.into())?;
-            if lane.with_antenna() {
-                Ok(parse_appearance(&raw)?)
+            if lane.with_face_presentation() {
+                Ok(parse_face_presentation(&raw)?)
+            } else if lane.with_antenna() {
+                Ok(FacePresentation::from(parse_appearance(&raw)?))
             } else {
-                Ok(AppearancePresentation {
-                    face: paired_face(&raw)?,
+                Ok(FacePresentation {
+                    face: FaceGeometry::Paired(paired_face(&raw)?),
                     antenna: None,
                 })
             }
@@ -1921,11 +2350,28 @@ impl AnimatedScene {
                 Ok(())
             };
         let header = elapsed_header_kind(elapsed_header);
-        if lane.with_antenna() && resolve_prey.is_some() {
-            prepared.apply_frame_with_appearance_and_all_factories_and_setup(
+        if lane.with_face_presentation() && resolve_prey.is_some() {
+            prepared.apply_frame_with_face_presentation_and_all_factories_and_setup(
                 bytes,
                 header,
                 &mut appearance,
+                &mut food_factory,
+                &mut prey_factory,
+                &mut on_setup,
+            )
+        } else if lane.with_face_presentation() {
+            prepared.apply_frame_with_face_presentation_and_factories_and_setup(
+                bytes,
+                header,
+                &mut appearance,
+                &mut food_factory,
+                &mut on_setup,
+            )
+        } else if lane.with_antenna() && resolve_prey.is_some() {
+            prepared.apply_frame_with_appearance_and_all_factories_and_setup(
+                bytes,
+                header,
+                |input| paired_presentation(appearance(input)?),
                 &mut food_factory,
                 &mut prey_factory,
                 &mut on_setup,
@@ -1934,7 +2380,7 @@ impl AnimatedScene {
             prepared.apply_frame_with_appearance_and_factories_and_setup(
                 bytes,
                 header,
-                &mut appearance,
+                |input| paired_presentation(appearance(input)?),
                 &mut food_factory,
                 &mut on_setup,
             )
@@ -1942,7 +2388,7 @@ impl AnimatedScene {
             prepared.apply_frame_with_all_factories_and_setup(
                 bytes,
                 header,
-                |input| Ok::<_, ResolveError>(appearance(input)?.face),
+                |input| Ok::<_, ResolveError>(paired_presentation(appearance(input)?)?.face),
                 &mut food_factory,
                 &mut prey_factory,
                 &mut on_setup,
@@ -1951,7 +2397,7 @@ impl AnimatedScene {
             prepared.apply_frame_with_factories_and_setup(
                 bytes,
                 header,
-                |input| Ok::<_, ResolveError>(appearance(input)?.face),
+                |input| Ok::<_, ResolveError>(paired_presentation(appearance(input)?)?.face),
                 &mut food_factory,
                 &mut on_setup,
             )
@@ -2075,6 +2521,7 @@ impl AnimatedScene {
             detailed_style,
             resolve_face,
             None,
+            false,
             &mut budget,
         )?;
         let camera = prepared.camera().position();
@@ -2284,23 +2731,46 @@ enum DrawLane<'a> {
         recipe: &'a js_sys::Function,
         random: &'a js_sys::Function,
     },
+    BasicFace {
+        detailed: bool,
+        presentation: &'a js_sys::Function,
+        random: &'a js_sys::Function,
+    },
+    StandardFace {
+        recipe: &'a js_sys::Function,
+        random: &'a js_sys::Function,
+    },
 }
 
 impl DrawLane<'_> {
     fn with_antenna(self) -> bool {
         matches!(
             self,
-            Self::BasicAntenna { .. } | Self::StandardAntenna { .. }
+            Self::BasicAntenna { .. }
+                | Self::StandardAntenna { .. }
+                | Self::BasicFace { .. }
+                | Self::StandardFace { .. }
         )
     }
+
+    fn with_face_presentation(self) -> bool {
+        matches!(self, Self::BasicFace { .. } | Self::StandardFace { .. })
+    }
+}
+
+enum FaceLayout {
+    Paired {
+        eyes: Option<StandardEyeLayout>,
+        decoration: Option<[PairedSideLayout; 2]>,
+    },
+    SingleImage(SingleEyeLayout),
 }
 
 enum PlannedSnakePaint {
     Basic {
         snakes: Vec<PreparedSnake>,
-        layouts: Vec<StandardEyeLayout>,
-        decorations: Vec<Option<FaceDecoration>>,
-        decoration_layouts: Vec<Option<[PairedSideLayout; 2]>>,
+        layouts: Vec<FaceLayout>,
+        faces: Vec<FaceSources>,
         antennas: Vec<Option<AntennaDecoration>>,
     },
     Standard {
@@ -2310,9 +2780,8 @@ enum PlannedSnakePaint {
 }
 struct StandardDraw {
     plan: Option<BodyPaintPlan>,
-    layout: Option<StandardEyeLayout>,
+    layout: FaceLayout,
     root_alpha: f64,
-    decoration_layout: Option<[PairedSideLayout; 2]>,
     antenna: Option<PreparedAntenna>,
 }
 struct PlannedScene {
@@ -2523,11 +2992,23 @@ fn prepare_snakes<F>(
     budget: &mut DrawBudget,
     resolve_style: F,
     random: Option<&js_sys::Function>,
+    generalized: bool,
 ) -> Result<Vec<PreparedSnake>, JsValue>
 where
     F: FnMut(usize, bool, &SnakePresentation) -> Result<bool, ResolveError>,
 {
-    let result = if let Some(random) = random {
+    let result = if generalized {
+        let random = random.ok_or_else(|| error("face presentation random resolver required"))?;
+        prepared.prepare_draw_resolved_with_face_presentation_limited_staged(
+            size.width,
+            size.height,
+            quality_scale,
+            budget.samples,
+            &mut budget.antenna,
+            resolve_style,
+            |input| antenna_random(random, input),
+        )
+    } else if let Some(random) = random {
         prepared.prepare_draw_resolved_with_antenna_limited_staged(
             size.width,
             size.height,
@@ -2562,6 +3043,89 @@ fn drawn_antenna_geometry(
     )
 }
 
+fn face_image_count(face: Option<&FaceSources>) -> usize {
+    match face {
+        Some(FaceSources::SingleImage(_))
+        | Some(FaceSources::Paired {
+            decoration: Some(_),
+            ..
+        }) => 2,
+        _ => 0,
+    }
+}
+
+fn plan_face(
+    snake: &PreparedSnake,
+    face: Option<&FaceSources>,
+    view: EyeLayoutInput,
+) -> Result<FaceLayout, JsValue> {
+    match face {
+        Some(FaceSources::SingleImage(_)) => Ok(FaceLayout::SingleImage(
+            snake
+                .face_geometry
+                .single_image()
+                .ok_or_else(|| error("single image geometry required"))?
+                .layout(snake.face_heading, snake.pupil, view)
+                .map_err(error)?,
+        )),
+        Some(FaceSources::Paired { decoration, .. }) => Ok(FaceLayout::Paired {
+            eyes: Some(
+                snake
+                    .eye_geometry
+                    .ok_or_else(|| error("paired geometry required"))?
+                    .layout(snake.face_heading, snake.pupil, view)
+                    .map_err(error)?,
+            ),
+            decoration: decoration
+                .as_ref()
+                .map(|d| d.geometry.layout(snake.face_heading, view).map_err(error))
+                .transpose()?,
+        }),
+        None => Ok(FaceLayout::Paired {
+            eyes: None,
+            decoration: None,
+        }),
+    }
+}
+
+fn submit_selected_face(
+    sources: &BorrowedSources,
+    context: &CanvasRenderingContext2d,
+    face: Option<&FaceSources>,
+    layout: FaceLayout,
+    basic: bool,
+) -> Result<(), JsValue> {
+    match layout {
+        FaceLayout::SingleImage(layout) => {
+            let Some(FaceSources::SingleImage(face)) = face else {
+                return Err(error("planned single image sources missing"));
+            };
+            sources.submit_single_eye(context, face, &layout)?;
+            context.set_global_alpha(1.);
+        }
+        FaceLayout::Paired { eyes, decoration } => {
+            if let Some(layout) = eyes {
+                draw_eyes(context, layout)?;
+            }
+            context.set_global_alpha(1.);
+            if basic {
+                context.set_global_composite_operation("source-over")?;
+            }
+            if let Some(layouts) = decoration {
+                let Some(FaceSources::Paired {
+                    decoration: Some(face),
+                    ..
+                }) = face
+                else {
+                    return Err(error("planned paired decoration missing"));
+                };
+                sources.submit_face(context, face, layouts)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_standard(
     prepared: &mut AnimatedClient,
@@ -2570,6 +3134,7 @@ fn build_standard(
     size: DrawSize,
     resolve_recipe: &js_sys::Function,
     random: Option<&js_sys::Function>,
+    generalized: bool,
     applied: QualitySnapshot,
     budget: &mut DrawBudget,
 ) -> Result<PlannedSnakePaint, JsValue> {
@@ -2587,7 +3152,19 @@ fn build_standard(
         budget,
         |ordinal, own, snake| -> Result<bool, ResolveError> {
             let request = request(ordinal, own, snake)?;
-            let recipe = if random.is_some() {
+            let recipe = if generalized {
+                sources.resolve_with_face(
+                    resolve_recipe,
+                    &request,
+                    target,
+                    &FacePresentation {
+                        face: *snake.active_face_geometry(),
+                        antenna: *retained
+                            .get(ordinal)
+                            .ok_or_else(|| error("missing retained antenna configuration"))?,
+                    },
+                )?
+            } else if random.is_some() {
                 sources.resolve_with_antenna(
                     resolve_recipe,
                     &request,
@@ -2600,24 +3177,38 @@ fn build_standard(
             } else {
                 sources.resolve(resolve_recipe, &request, target)?
             };
-            if let Some(eyes) = &recipe.eyes
-                && !same_eyes(eyes, snake.eye_geometry())
-            {
-                return Err(error("recipe eyes differ from retained appearance geometry").into());
-            }
-            if !same_decoration(
-                recipe.decoration.as_ref(),
-                snake.face_geometry().decoration.as_ref(),
-            ) {
-                return Err(
-                    error("recipe decoration differs from retained appearance geometry").into(),
-                );
+            if !generalized {
+                let retained = snake
+                    .face_geometry()
+                    .ok_or_else(|| error("legacy renderer requires paired face"))?;
+                let decoration = match &recipe.face {
+                    Some(FaceSources::Paired { eyes, decoration }) => {
+                        if !same_eyes(eyes, &retained.eyes) {
+                            return Err(error(
+                                "recipe eyes differ from retained appearance geometry",
+                            )
+                            .into());
+                        }
+                        decoration.as_ref()
+                    }
+                    None => None,
+                    Some(FaceSources::SingleImage(_)) => {
+                        return Err(error("legacy renderer requires paired face").into());
+                    }
+                };
+                if !same_decoration(decoration, retained.decoration.as_ref()) {
+                    return Err(error(
+                        "recipe decoration differs from retained appearance geometry",
+                    )
+                    .into());
+                }
             }
             let detailed = recipe.style.detailed_segments;
             push(&mut recipes, recipe)?;
             Ok(detailed)
         },
         random,
+        generalized,
     )?;
     if snakes.len() > MAX_RETAINED_SNAKES {
         return Err(error("face command budget exceeded"));
@@ -2645,33 +3236,22 @@ fn build_standard(
                 .checked_sub(1)
                 .ok_or_else(|| error("scene image budget exceeded"))?;
         }
-        if recipe.decoration.is_some() {
-            remaining = remaining
-                .checked_sub(2)
-                .ok_or_else(|| error("scene image budget exceeded"))?;
-        }
+        remaining = remaining
+            .checked_sub(face_image_count(recipe.face.as_ref()))
+            .ok_or_else(|| error("scene image budget exceeded"))?;
         let m = snake.metrics;
-        let layout = if recipe.eyes.is_some() {
-            Some(
-                snake
-                    .eye_geometry
-                    .layout(
-                        snake.face_heading,
-                        snake.pupil,
-                        EyeLayoutInput {
-                            corrected_head: m.corrected_head,
-                            camera,
-                            viewport_half,
-                            scale: m.scale,
-                            zoom,
-                            death_progress: m.death_progress,
-                        },
-                    )
-                    .map_err(error)?,
-            )
-        } else {
-            None
-        };
+        let layout = plan_face(
+            snake,
+            recipe.face.as_ref(),
+            EyeLayoutInput {
+                corrected_head: m.corrected_head,
+                camera,
+                viewport_half,
+                scale: m.scale,
+                zoom,
+                death_progress: m.death_progress,
+            },
+        )?;
         let mut root_alpha = entry_alpha;
         let plan = if let Some(geometry) = &snake.body_geometry {
             let palettes = recipe.palettes();
@@ -2735,32 +3315,12 @@ fn build_standard(
         } else {
             None
         };
-        let decoration_layout = recipe
-            .decoration
-            .as_ref()
-            .map(|d| {
-                d.geometry
-                    .layout(
-                        snake.face_heading,
-                        EyeLayoutInput {
-                            corrected_head: m.corrected_head,
-                            camera,
-                            viewport_half,
-                            scale: m.scale,
-                            zoom,
-                            death_progress: m.death_progress,
-                        },
-                    )
-                    .map_err(error)
-            })
-            .transpose()?;
         push(
             &mut draws,
             StandardDraw {
                 plan,
                 layout,
                 root_alpha,
-                decoration_layout,
                 antenna: snake.antenna.clone(),
             },
         )?;
@@ -2779,10 +3339,11 @@ fn build_basic(
     detailed_style: bool,
     resolve_face: Option<&js_sys::Function>,
     random: Option<&js_sys::Function>,
+    generalized: bool,
     budget: &mut DrawBudget,
 ) -> Result<PlannedSnakePaint, JsValue> {
     let DrawSize { width, height } = size;
-    let mut decorations = Vec::new();
+    let mut faces = Vec::new();
     let mut antennas = Vec::new();
     let retained = if random.is_some() {
         drawn_antenna_geometry(prepared)?
@@ -2795,43 +3356,70 @@ fn build_basic(
         quality_scale,
         budget,
         |ordinal, own, snake| -> Result<bool, ResolveError> {
-            let (decoration, antenna) = if random.is_some() {
-                let retained = AppearancePresentation {
-                    face: *snake.face_geometry(),
+            let (face, antenna) = if generalized {
+                let retained = FacePresentation {
+                    face: *snake.active_face_geometry(),
                     antenna: *retained
                         .get(ordinal)
                         .ok_or_else(|| error("missing retained antenna configuration"))?,
                 };
-                let resolved = sources.resolve_presentation(
+                let resolved = sources.resolve_generalized_presentation(
                     resolve_face.ok_or_else(|| error("presentation resolver required"))?,
                     &request(ordinal, own, snake)?,
                     &retained,
                     target,
                 )?;
-                (resolved.decoration, resolved.antenna)
-            } else if let Some(resolve_face) = resolve_face {
-                (
-                    sources.resolve_face(
-                        resolve_face,
-                        &request(ordinal, own, snake)?,
-                        snake.face_geometry(),
-                        target,
-                    )?,
-                    None,
-                )
+                (resolved.face, resolved.antenna)
             } else {
-                if snake.face_geometry().decoration.is_some() {
-                    return Err(
-                        error("decorated face requires render_with_face_decorations").into(),
-                    );
-                }
-                (None, None)
+                let paired = snake
+                    .face_geometry()
+                    .ok_or_else(|| error("legacy renderer requires paired face"))?;
+                let (decoration, antenna) = if random.is_some() {
+                    let retained = AppearancePresentation {
+                        face: *paired,
+                        antenna: *retained
+                            .get(ordinal)
+                            .ok_or_else(|| error("missing retained antenna configuration"))?,
+                    };
+                    let resolved = sources.resolve_presentation(
+                        resolve_face.ok_or_else(|| error("presentation resolver required"))?,
+                        &request(ordinal, own, snake)?,
+                        &retained,
+                        target,
+                    )?;
+                    (resolved.decoration, resolved.antenna)
+                } else if let Some(resolve_face) = resolve_face {
+                    (
+                        sources.resolve_face(
+                            resolve_face,
+                            &request(ordinal, own, snake)?,
+                            paired,
+                            target,
+                        )?,
+                        None,
+                    )
+                } else {
+                    if paired.decoration.is_some() {
+                        return Err(
+                            error("decorated face requires render_with_face_decorations").into(),
+                        );
+                    }
+                    (None, None)
+                };
+                (
+                    FaceSources::Paired {
+                        eyes: paired.eyes,
+                        decoration,
+                    },
+                    antenna,
+                )
             };
-            push(&mut decorations, decoration)?;
+            push(&mut faces, face)?;
             push(&mut antennas, antenna)?;
             Ok(detailed_style)
         },
         random,
+        generalized,
     )?;
     if snakes.len() > MAX_RETAINED_SNAKES {
         return Err(error("face command budget exceeded"));
@@ -2844,44 +3432,20 @@ fn build_basic(
     };
     budget.prepared(&snakes)?;
     // Complete numeric validation before the target's destructive width reset.
-    let layouts = collect_layouts(snakes.iter().map(|snake| {
-        snake
-            .eye_geometry
-            .layout(
-                snake.face_heading,
-                snake.pupil,
-                EyeLayoutInput {
-                    corrected_head: snake.metrics.corrected_head,
-                    camera,
-                    viewport_half,
-                    scale: snake.metrics.scale,
-                    zoom,
-                    death_progress: snake.metrics.death_progress,
-                },
-            )
-            .map_err(error)
+    let layouts = collect_layouts(snakes.iter().zip(&faces).map(|(snake, face)| {
+        plan_face(
+            snake,
+            Some(face),
+            EyeLayoutInput {
+                corrected_head: snake.metrics.corrected_head,
+                camera,
+                viewport_half,
+                scale: snake.metrics.scale,
+                zoom,
+                death_progress: snake.metrics.death_progress,
+            },
+        )
     }))?;
-    let decoration_layouts =
-        collect_layouts(snakes.iter().zip(&decorations).map(|(snake, decoration)| {
-            decoration
-                .as_ref()
-                .map(|d| {
-                    d.geometry
-                        .layout(
-                            snake.face_heading,
-                            EyeLayoutInput {
-                                corrected_head: snake.metrics.corrected_head,
-                                camera,
-                                viewport_half,
-                                scale: snake.metrics.scale,
-                                zoom,
-                                death_progress: snake.metrics.death_progress,
-                            },
-                        )
-                        .map_err(error)
-                })
-                .transpose()
-        }))?;
     let image_count = snakes
         .iter()
         .try_fold(0_usize, |count, snake| {
@@ -2897,12 +3461,9 @@ fn build_basic(
                 })
         })
         .and_then(|count| {
-            decorations
-                .iter()
-                .filter(|d| d.is_some())
-                .count()
-                .checked_mul(2)
-                .and_then(|sides| count.checked_add(sides))
+            faces.iter().try_fold(count, |count, face| {
+                count.checked_add(face_image_count(Some(face)))
+            })
         })
         .ok_or_else(|| error("scene image budget exceeded"))?;
     budget.images = budget
@@ -2912,8 +3473,7 @@ fn build_basic(
     Ok(PlannedSnakePaint::Basic {
         snakes,
         layouts,
-        decorations,
-        decoration_layouts,
+        faces,
         antennas,
     })
 }
@@ -2928,6 +3488,7 @@ fn build_paint(
     applied: QualitySnapshot,
     budget: &mut DrawBudget,
 ) -> Result<PlannedSnakePaint, JsValue> {
+    let generalized = lane.with_face_presentation();
     match lane {
         DrawLane::Basic { detailed, face } => build_basic(
             prepared,
@@ -2938,12 +3499,18 @@ fn build_paint(
             detailed,
             Some(face),
             None,
+            false,
             budget,
         ),
         DrawLane::Standard(recipe) => build_standard(
-            prepared, sources, target, size, recipe, None, applied, budget,
+            prepared, sources, target, size, recipe, None, false, applied, budget,
         ),
         DrawLane::BasicAntenna {
+            detailed,
+            presentation,
+            random,
+        }
+        | DrawLane::BasicFace {
             detailed,
             presentation,
             random,
@@ -2956,15 +3523,18 @@ fn build_paint(
             detailed,
             Some(presentation),
             Some(random),
+            generalized,
             budget,
         ),
-        DrawLane::StandardAntenna { recipe, random } => build_standard(
+        DrawLane::StandardAntenna { recipe, random }
+        | DrawLane::StandardFace { recipe, random } => build_standard(
             prepared,
             sources,
             target,
             size,
             recipe,
             Some(random),
+            generalized,
             applied,
             budget,
         ),
@@ -3171,18 +3741,13 @@ impl PlannedScene {
             PlannedSnakePaint::Basic {
                 snakes,
                 layouts,
-                decorations,
-                decoration_layouts,
+                faces,
                 antennas,
             } => {
                 // Preserve subtraction-before-scaling for body screen coordinates. The
                 // borrowed background/food preview above retains its existing transform.
-                for ((((snake, layout), decoration), side_layouts), antenna) in snakes
-                    .into_iter()
-                    .zip(layouts)
-                    .zip(&decorations)
-                    .zip(decoration_layouts)
-                    .zip(&antennas)
+                for (((snake, layout), face), antenna) in
+                    snakes.into_iter().zip(layouts).zip(&faces).zip(&antennas)
                 {
                     context.set_transform(1., 0., 0., 1., viewport_half.x, viewport_half.y)?;
                     let m = snake.metrics;
@@ -3213,16 +3778,7 @@ impl PlannedScene {
                     if let Some(plan) = &snake.antenna {
                         submit_antenna(sources, context, antenna.as_ref(), plan)?;
                     }
-                    draw_eyes(context, layout)?;
-                    context.set_global_alpha(1.);
-                    context.set_global_composite_operation("source-over")?;
-                    if let Some(side_layouts) = side_layouts {
-                        sources.submit_face(
-                            context,
-                            decoration.as_ref().expect("planned decoration"),
-                            side_layouts,
-                        )?;
-                    }
+                    submit_selected_face(sources, context, Some(face), layout, true)?;
                 }
             }
             PlannedSnakePaint::Standard { draws, recipes } => {
@@ -3231,7 +3787,6 @@ impl PlannedScene {
                         plan,
                         layout,
                         root_alpha,
-                        decoration_layout,
                         antenna,
                     },
                     recipe,
@@ -3257,17 +3812,7 @@ impl PlannedScene {
                     }
                     context.set_global_alpha(root_alpha);
                     context.set_global_composite_operation("source-over")?;
-                    if let Some(layout) = layout {
-                        draw_eyes(context, layout)?;
-                    }
-                    context.set_global_alpha(1.);
-                    if let Some(layouts) = decoration_layout {
-                        sources.submit_face(
-                            context,
-                            recipe.decoration.as_ref().expect("planned decoration"),
-                            layouts,
-                        )?;
-                    }
+                    submit_selected_face(sources, context, recipe.face.as_ref(), layout, false)?;
                 }
             }
         }

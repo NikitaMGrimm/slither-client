@@ -1,9 +1,10 @@
 //! Ordered packet, update, and draw transitions for one absolute presentation snake.
 
 use super::{
-    AngleCorrections, BodyGeometry, CurveInput, CurveOutput, FrameStep, HeadCorrections,
-    HeadMotion, LengthPresentation, PairedFaceGeometry, PresentationError, StandardEyeGeometry,
-    StandardEyeState, Turn, curve::single_anchor_eye_target, finite, sample_curve_with_heading,
+    AngleCorrections, BodyGeometry, CurveInput, CurveOutput, FaceGeometry, FrameStep,
+    HeadCorrections, HeadMotion, LengthPresentation, PairedFaceGeometry, PresentationError,
+    StandardEyeGeometry, StandardEyeState, Turn, curve::single_anchor_eye_target, finite,
+    sample_curve_with_heading,
 };
 use crate::{
     math,
@@ -99,7 +100,7 @@ pub struct SnakePresentation {
     body: BodyGeometry,
     length: LengthPresentation,
     eyes: StandardEyeState,
-    face_geometry: PairedFaceGeometry,
+    face_geometry: FaceGeometry,
     turn_rate: f64,
     speed_angle_divisor: f64,
     base_cruise_speed: f64,
@@ -197,6 +198,21 @@ impl SnakePresentation {
         setup: &Setup,
         zoom: f64,
         face_geometry: PairedFaceGeometry,
+    ) -> Result<Self, PresentationError> {
+        Self::from_appearance_with_active_face_geometry(
+            appearance,
+            setup,
+            zoom,
+            FaceGeometry::Paired(face_geometry),
+        )
+    }
+
+    /// Install the selected numeric face before any pupil advancement.
+    pub fn from_appearance_with_active_face_geometry(
+        appearance: &Appearance,
+        setup: &Setup,
+        zoom: f64,
+        face_geometry: FaceGeometry,
     ) -> Result<Self, PresentationError> {
         face_geometry.validate()?;
         validate_zoom(zoom)?;
@@ -499,7 +515,7 @@ impl SnakePresentation {
                 next.alive,
             )?;
             next.eyes
-                .advance(step, next.alive, next.face_geometry.eyes.pupil_travel)?;
+                .advance(step, next.alive, next.face_geometry.pupil_travel())?;
             next.body.advance(step.whole_steps);
             next.head_corrections.advance(step.whole_steps);
             next.angle_corrections.advance(step.whole_steps);
@@ -592,13 +608,18 @@ impl SnakePresentation {
         &self.eyes
     }
 
-    /// Standard paired-eye geometry; special topologies are not inferred from skin IDs.
-    pub fn eye_geometry(&self) -> &StandardEyeGeometry {
-        &self.face_geometry.eyes
+    /// Paired-eye geometry when selected; image eyes have no paired substitute.
+    pub fn eye_geometry(&self) -> Option<&StandardEyeGeometry> {
+        self.face_geometry.paired().map(|face| &face.eyes)
     }
 
-    /// Complete appearance-owned numeric style, independent of wire-ID lookup.
-    pub fn face_geometry(&self) -> &PairedFaceGeometry {
+    /// Paired face when selected, independent of wire-ID lookup.
+    pub fn face_geometry(&self) -> Option<&PairedFaceGeometry> {
+        self.face_geometry.paired()
+    }
+
+    /// Authoritative appearance-owned family, without a paired fallback.
+    pub fn active_face_geometry(&self) -> &FaceGeometry {
         &self.face_geometry
     }
 

@@ -139,8 +139,14 @@ fn appearance_resolver_visits_wire_order_including_short_removed_and_reconfigure
     )
     .unwrap();
     assert_eq!(seen, [(7, 2000.), (7, 2100.), (9, 5000.), (9, 6000.)]);
-    assert_eq!(c.own_snake().unwrap().eye_geometry(), &eye_style(0.01));
-    assert_eq!(c.snake(9).unwrap().eye_geometry(), &eye_style(0.04));
+    assert_eq!(
+        c.own_snake().unwrap().eye_geometry().unwrap(),
+        &eye_style(0.01)
+    );
+    assert_eq!(
+        c.snake(9).unwrap().eye_geometry().unwrap(),
+        &eye_style(0.04)
+    );
     assert_eq!(c.retained_count(), 3);
     assert!(c.drawn_own_snake().is_none());
 }
@@ -165,11 +171,17 @@ fn duplicate_death_and_reused_ids_retain_appearance_styles() {
     )
     .unwrap();
     assert!(!c.own_snake().unwrap().metrics().alive);
-    assert_eq!(c.own_snake().unwrap().eye_geometry(), &eye_style(0.02));
-    assert_eq!(c.snake(7).unwrap().eye_geometry(), &eye_style(0.06));
+    assert_eq!(
+        c.own_snake().unwrap().eye_geometry().unwrap(),
+        &eye_style(0.02)
+    );
+    assert_eq!(
+        c.snake(7).unwrap().eye_geometry().unwrap(),
+        &eye_style(0.06)
+    );
     assert_eq!(
         c.drawn_snakes()
-            .map(|s| s.eye_geometry().pupil_travel)
+            .map(|s| s.eye_geometry().unwrap().pupil_travel)
             .collect::<Vec<_>>(),
         [0.02, 0.04, 0.06]
     );

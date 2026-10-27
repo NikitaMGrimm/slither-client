@@ -98,12 +98,12 @@ fn appearance_style_controls_the_first_fractional_pupil_update_and_is_owned() {
         assert_eq!(snake.custom_skin(), &[2, 9]);
         snake.advance(step(0.5, 0)).unwrap();
         assert_eq!(snake.eyes().pupil(), Point { x: travel, y: 0. });
-        assert_eq!(snake.eye_geometry().pupil_travel, travel);
+        assert_eq!(snake.eye_geometry().unwrap().pupil_travel, travel);
         snake.mark_dead();
         snake.set_gaze_heading(std::f64::consts::PI).unwrap();
         snake.advance(step(0.5, 1)).unwrap();
         assert_eq!(snake.eyes().pupil().x, -travel);
-        assert_eq!(snake.eye_geometry().pupil_travel, travel);
+        assert_eq!(snake.eye_geometry().unwrap().pupil_travel, travel);
     }
 }
 

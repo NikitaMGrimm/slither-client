@@ -7,12 +7,15 @@ use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, HtmlImageElement};
 use crate::antenna_browser::{
     AntennaDecoration, PresentationSources, geometry, reject_post_bulb, same_antenna,
 };
+use crate::face_browser::{
+    FacePresentationSources, FaceSources, SingleEyeSources, single_eye_geometry,
+};
 use crate::presentation::{
     AntennaBulbCommand, AppearancePresentation, BodyAsset, BodyAssetStatus, BodyAssetUse,
     BodyBlend, BodyFade, BodyImageCommand, BodyPaintRecipe, BodyPalette, BodyRect, BodyRun,
-    BodyStyle, BodyVariantMode, ClientPresentationError, OrdinaryAntennaGeometry,
-    PairedFaceGeometry, PairedSideGeometry, PairedSideLayout, SnakePresentation,
-    StandardEyeGeometry,
+    BodyStyle, BodyVariantMode, ClientPresentationError, FaceGeometry, FacePresentation,
+    OrdinaryAntennaGeometry, PairedFaceGeometry, PairedSideGeometry, PairedSideLayout,
+    SingleEyeLayout, SnakePresentation, StandardEyeGeometry,
 };
 use crate::state::Appearance;
 
@@ -172,7 +175,7 @@ pub(crate) fn same_eyes(a: &StandardEyeGeometry, b: &StandardEyeGeometry) -> boo
         .all(|(a, b)| a.to_bits() == b.to_bits())
 }
 
-fn side_geometry(value: &JsValue) -> Result<PairedSideGeometry, JsValue> {
+pub(crate) fn side_geometry(value: &JsValue) -> Result<PairedSideGeometry, JsValue> {
     Ok(PairedSideGeometry {
         forward: num(field(value, "forward")?, 0., 4096.)?,
         lateral: num(field(value, "lateral")?, 0., 4096.)?,
@@ -229,6 +232,25 @@ pub(crate) fn same_decoration(a: Option<&FaceDecoration>, b: Option<&PairedSideG
         (Some(a), Some(b)) => a.geometry.same_bits(b),
         _ => false,
     }
+}
+
+fn check_face(actual: Option<&FaceSources>, retained: &FaceGeometry) -> Result<(), JsValue> {
+    let matches = match (actual, retained) {
+        (Some(FaceSources::Paired { eyes, decoration }), FaceGeometry::Paired(retained)) => {
+            same_eyes(eyes, &retained.eyes)
+                && same_decoration(decoration.as_ref(), retained.decoration.as_ref())
+        }
+        (Some(FaceSources::SingleImage(actual)), FaceGeometry::SingleImage(retained)) => {
+            actual.geometry.same_bits(retained)
+        }
+        _ => false,
+    };
+    if !matches {
+        return Err(error(
+            "recipe face differs from retained appearance geometry",
+        ));
+    }
+    Ok(())
 }
 
 /// Each callback gets a new plain request and a copied custom byte array.
@@ -453,13 +475,103 @@ impl BorrowedSources {
         }))
     }
 
+    /// Resolve both face images and any antenna through this call's shared pool.
+    pub(crate) fn resolve_generalized_presentation(
+        &mut self,
+        callback: &Function,
+        request: &Object,
+        retained: &FacePresentation,
+        target: &HtmlCanvasElement,
+    ) -> Result<FacePresentationSources, JsValue> {
+        let value = callback.call1(&JsValue::UNDEFINED, request)?;
+        let revision = revision(field(&value, "revision")?)?;
+        let raw_face = field(&value, "face")?;
+        let kind = text(field(&raw_face, "kind")?)?;
+        let mut assets = Vec::new();
+        let mut catalog_ids = Vec::new();
+        let eyes = field(&raw_face, "eyes")?;
+        let face = match kind.as_str() {
+            "paired" => {
+                let raw = field(&raw_face, "decoration")?;
+                if raw.is_undefined() {
+                    return Err(error("explicit face decoration or null required"));
+                }
+                FaceSources::Paired {
+                    eyes: standard_eyes(&eyes)?,
+                    decoration: self.decoration(
+                        &raw,
+                        &mut assets,
+                        &mut catalog_ids,
+                        &revision,
+                        target,
+                    )?,
+                }
+            }
+            "single-image" => {
+                let decoration = field(&raw_face, "decoration")?;
+                if !decoration.is_null() && !decoration.is_undefined() {
+                    return Err(error("single image eyes cannot have paired decoration"));
+                }
+                FaceSources::SingleImage(self.single_eye(
+                    &eyes,
+                    &mut assets,
+                    &mut catalog_ids,
+                    &revision,
+                    target,
+                )?)
+            }
+            _ => return Err(error("unsupported face family")),
+        };
+        check_face(Some(&face), &retained.face)?;
+        let raw = field(&value, "antenna")?;
+        if raw.is_undefined() {
+            return Err(error("explicit antenna or null required"));
+        }
+        let antenna = self.antenna(&raw, &mut assets, &mut catalog_ids, &revision, target)?;
+        if !same_antenna(antenna.as_ref(), retained.antenna.as_ref()) {
+            return Err(error(
+                "recipe antenna differs from retained appearance geometry",
+            ));
+        }
+        Ok(FacePresentationSources { face, antenna })
+    }
+
+    fn single_eye(
+        &mut self,
+        value: &JsValue,
+        assets: &mut Vec<BodyAsset>,
+        catalog_ids: &mut Vec<usize>,
+        revision: &JsValue,
+        target: &HtmlCanvasElement,
+    ) -> Result<SingleEyeSources, JsValue> {
+        if text(field(value, "kind")?)? != "single-image" {
+            return Err(error("single image eye metadata required"));
+        }
+        let geometry = single_eye_geometry(&field(value, "geometry")?)?;
+        let mut image = |key| -> Result<(BodyAsset, BodyRect), JsValue> {
+            let usage = self.usage(assets, catalog_ids, &field(value, key)?, revision, target)?;
+            let asset = assets[usage.asset];
+            let rect = usage.source_rect.unwrap_or(BodyRect {
+                x: 0.,
+                y: 0.,
+                width: f64::from(asset.width),
+                height: f64::from(asset.height),
+            });
+            Ok((asset, rect))
+        };
+        Ok(SingleEyeSources {
+            geometry,
+            images: [image("baseImage")?, image("pupilImage")?],
+        })
+    }
+
     pub(crate) fn resolve(
         &mut self,
         callback: &Function,
         request: &Object,
         target: &HtmlCanvasElement,
     ) -> Result<Recipe, JsValue> {
-        self.resolve_inner(callback, request, target, false, None)
+        self.resolve_inner(callback, request, target, false, None, None)
     }
 
     pub(crate) fn resolve_with_antenna(
@@ -469,7 +581,24 @@ impl BorrowedSources {
         target: &HtmlCanvasElement,
         retained: Option<&OrdinaryAntennaGeometry>,
     ) -> Result<Recipe, JsValue> {
-        self.resolve_inner(callback, request, target, true, retained)
+        self.resolve_inner(callback, request, target, true, retained, None)
+    }
+
+    pub(crate) fn resolve_with_face(
+        &mut self,
+        callback: &Function,
+        request: &Object,
+        target: &HtmlCanvasElement,
+        retained: &FacePresentation,
+    ) -> Result<Recipe, JsValue> {
+        self.resolve_inner(
+            callback,
+            request,
+            target,
+            true,
+            retained.antenna.as_ref(),
+            Some(&retained.face),
+        )
     }
 
     fn resolve_inner(
@@ -479,6 +608,7 @@ impl BorrowedSources {
         target: &HtmlCanvasElement,
         allow_antenna: bool,
         retained: Option<&OrdinaryAntennaGeometry>,
+        retained_face: Option<&FaceGeometry>,
     ) -> Result<Recipe, JsValue> {
         let snapshot = callback.call1(&JsValue::UNDEFINED, request)?;
         if snapshot.is_instance_of::<js_sys::Promise>() {
@@ -504,6 +634,9 @@ impl BorrowedSources {
         let mut features = Vec::new();
         for feature in list(field(&raw, "supportedFeatures")?, 1, 8)? {
             let feature = text(feature)?;
+            if feature == "single-image-eye" && retained_face.is_none() {
+                return Err(error("single image eyes require an explicit face renderer"));
+            }
             if feature == "ordinary-antenna" && !allow_antenna {
                 return Err(error("antenna requires an explicit antenna renderer"));
             }
@@ -516,6 +649,7 @@ impl BorrowedSources {
                 "standard-body-style",
                 "paired-side-images",
                 "ordinary-antenna",
+                "single-image-eye",
             ]
             .contains(&feature.as_str())
                 || features.contains(&feature)
@@ -524,19 +658,24 @@ impl BorrowedSources {
             }
             features.push(feature);
         }
-        let eyes = field(&raw, "eyes")?;
-        let eyes = match text(field(&eyes, "kind")?)?.as_str() {
+        let raw_eyes = field(&raw, "eyes")?;
+        let eye_kind = text(field(&raw_eyes, "kind")?)?;
+        let single_image = eye_kind == "single-image";
+        let eyes = match eye_kind.as_str() {
             "none" => None,
-            "standard" => Some(standard_eyes(&eyes)?),
+            "standard" => Some(standard_eyes(&raw_eyes)?),
+            "single-image" if retained_face.is_some() => None,
             _ => return Err(error("unsupported eye geometry")),
         };
         let decoration = field(&raw, "faceDecoration")?;
         let has_decoration = !decoration.is_null() && !decoration.is_undefined();
         if features.len()
             != 5 + usize::from(eyes.is_some())
+                + usize::from(single_image)
                 + usize::from(has_decoration)
                 + usize::from(has_antenna)
             || features.iter().any(|f| f == "standard-eyes") != eyes.is_some()
+            || features.iter().any(|f| f == "single-image-eye") != single_image
             || features.iter().any(|f| f == "paired-side-images") != has_decoration
             || features.iter().any(|f| f == "ordinary-antenna") != has_antenna
             || (has_decoration && eyes.is_none())
@@ -552,8 +691,7 @@ impl BorrowedSources {
             variant_mode: BodyVariantMode::First,
             variant_period: 1,
             custom: flag(field(&raw, "custom")?)?,
-            eyes,
-            decoration: None,
+            face: None,
             antenna: None,
             style: BodyStyle {
                 detailed_segments: false,
@@ -576,13 +714,27 @@ impl BorrowedSources {
                 "recipe antenna differs from retained appearance geometry",
             ));
         }
-        recipe.decoration = self.decoration(
+        let decoration = self.decoration(
             &decoration,
             &mut recipe.assets,
             &mut recipe.catalog_ids,
             &revision,
             target,
         )?;
+        recipe.face = if single_image {
+            Some(FaceSources::SingleImage(self.single_eye(
+                &raw_eyes,
+                &mut recipe.assets,
+                &mut recipe.catalog_ids,
+                &revision,
+                target,
+            )?))
+        } else {
+            eyes.map(|eyes| FaceSources::Paired { eyes, decoration })
+        };
+        if let Some(retained) = retained_face {
+            check_face(recipe.face.as_ref(), retained)?;
+        }
         for palette in list(field(&raw, "palettes")?, 1, 256)? {
             let mut variants = Vec::new();
             for usage in list(field(&palette, "variants")?, 1, 256)? {
@@ -902,6 +1054,28 @@ impl BorrowedSources {
         }
     }
 
+    /// Both calls use explicit source rectangles, including normalized whole sources.
+    /// The pupil inherits the single alpha assignment; either throw unwinds the scope.
+    pub(crate) fn submit_single_eye(
+        &self,
+        context: &CanvasRenderingContext2d,
+        sources: &SingleEyeSources,
+        layout: &SingleEyeLayout,
+    ) -> Result<(), JsValue> {
+        context.save();
+        let result = (|| {
+            context.set_transform(1., 0., 0., 1., 0., 0.)?;
+            context.set_global_composite_operation("source-over")?;
+            context.set_global_alpha(layout.alpha);
+            for ((asset, rect), destination) in sources.images.iter().zip(layout.destinations) {
+                self.image(context, *asset, Some(*rect), destination)?;
+            }
+            Ok(())
+        })();
+        context.restore();
+        result
+    }
+
     fn image(
         &self,
         context: &CanvasRenderingContext2d,
@@ -936,8 +1110,7 @@ pub(crate) struct Recipe {
     variant_mode: BodyVariantMode,
     variant_period: usize,
     custom: bool,
-    pub(crate) eyes: Option<StandardEyeGeometry>,
-    pub(crate) decoration: Option<FaceDecoration>,
+    pub(crate) face: Option<FaceSources>,
     pub(crate) antenna: Option<AntennaDecoration>,
     pub(crate) style: BodyStyle,
     effects: [Option<BodyAssetUse>; 3],
