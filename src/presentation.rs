@@ -49,8 +49,9 @@ pub use boundary::{BOUNDARY_SAMPLES, BoundaryRadius};
 pub use camera::{CAMERA_SAMPLES, CameraCorrections};
 pub use client::{
     AnimatedClient, AntennaDrawBudget, AntennaRandomRequest, AppearancePresentation,
-    ClientPresentationError, FacePresentation, MAX_DRAW_SAMPLES, MAX_RETAINED_SNAKES,
-    MAX_RETAINED_TOTAL_BODY_POINTS, PreparedBodyGeometry, PreparedSnake,
+    ClientControlActions, ClientControlView, ClientPresentationError, FacePresentation,
+    MAX_DRAW_SAMPLES, MAX_RETAINED_SNAKES, MAX_RETAINED_TOTAL_BODY_POINTS, OwnControlView,
+    PreparedBodyGeometry, PreparedSnake,
 };
 pub use curve::{
     CurveInput, CurveOutput, CurveSample, CurveVertex, MAX_CURVE_SAMPLES, sample_curve,

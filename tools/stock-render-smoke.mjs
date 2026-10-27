@@ -1,0 +1,436 @@
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createStockSkinAdapter } from '../web/stock-skin-provider.mjs';
+import { createStockClient } from '../web/stock-client.mjs';
+import { createStockEntityAssets } from '../web/stock-food-provider.mjs';
+
+// Original authored synthetic packets, live-source doubles and Canvas command
+// recorder. This exercises real Wasm, without raster pixels or a host runtime.
+const u16 = value => [value >>> 8 & 255, value & 255];
+const u24 = value => [value >>> 16 & 255, value >>> 8 & 255, value & 255];
+const center = 32550;
+const absolute = value => u24(Math.round((center + value) * 5));
+const bundle = (...commands) => Uint8Array.from(commands.flatMap(command => [...u16(command.length), ...command]));
+const setup = () => [97, ...u24(center), ...u16(430), ...u16(300), ...u16(217),
+  48, ...u16(539), ...u16(40), ...u16(1400), ...u16(33), ...u16(28), ...u16(430),
+  19, 42, ...u16(1), ...u24(1000)];
+function snake(id, skin, x = 0, y = 0, custom = []) {
+  return [115, ...u16(id), ...u24(0), 48, ...u24(0), ...u16(128), ...u24(0), skin,
+    ...absolute(x), ...absolute(y), 0, custom.length, ...custom, 0,
+    ...absolute(x - 122), ...absolute(y), ...Array.from({ length: 10 }, () => [143, 127]).flat(), ...u16(0)];
+}
+const food = (offset = 128) => [70, 108, 108, 0, offset, 128, 20];
+const prey = id => [121, ...u16(id), 0, ...absolute(15), ...absolute(-10), 20, 48,
+  ...u24(0), ...u24(0), ...u16(1000)];
+const custom = [3, 8, 1, 42, 9, 0, 201, 7, 2, 0];
+
+/** Exercise actual stock adapters/controller through an initialized Wasm module. */
+export function stockRenderSmoke(wasm, { control = true } = {}) {
+  if (typeof control !== 'boolean') throw new TypeError('Explicit stock smoke control boolean required');
+  if (control && typeof wasm.AnimatedScene?.prototype.advance_with_control !== 'function') {
+    throw new Error('Stock smoke requires native advance_with_control; use explicit source-only mode for older candidates');
+  }
+  let assertions = 0;
+  const cases = [];
+  const eq = (actual, expected, message) => { assertions++; assert.deepEqual(actual, expected, message); };
+  const ok = (value, message) => { assertions++; assert.ok(value, message); };
+  const rejects = (callback, match, message) => { assertions++; assert.throws(callback, match, message); };
+
+  class CanvasRenderingContext2D {
+    trace = []; stack = []; alpha = 1; blend = 'source-over'; transforms = []; path = [];
+    fillStyle = '#000000'; strokeStyle = '#000000'; lineWidth = 1; lineCap = 'butt'; lineJoin = 'miter';
+    failSource = null;
+    reset() {
+      this.trace.push({ op: 'reset' }); this.stack = []; this.alpha = 1; this.blend = 'source-over';
+      this.transforms = []; this.path = []; this.fillStyle = '#000000'; this.strokeStyle = '#000000';
+      this.lineWidth = 1; this.lineCap = 'butt'; this.lineJoin = 'miter';
+    }
+    get globalAlpha() { return this.alpha; }
+    set globalAlpha(value) {
+      if (Number.isFinite(value) && value >= 0 && value <= 1) this.alpha = value;
+      this.trace.push({ op: 'alpha', requested: value, effective: this.alpha });
+    }
+    get globalCompositeOperation() { return this.blend; }
+    set globalCompositeOperation(value) { this.blend = value; }
+    state() {
+      return { alpha: this.alpha, blend: this.blend, transforms: this.transforms.slice(),
+        fillStyle: this.fillStyle, strokeStyle: this.strokeStyle, lineWidth: this.lineWidth,
+        lineCap: this.lineCap, lineJoin: this.lineJoin };
+    }
+    save() { this.stack.push(this.state()); }
+    restore() { assert.ok(this.stack.length > 0, 'Canvas restore must balance a save'); Object.assign(this, this.stack.pop()); }
+    setTransform(...values) { this.transforms = [['identity', ...values]]; }
+    translate(...values) { this.transforms.push(['translate', ...values]); }
+    scale(...values) { this.transforms.push(['scale', ...values]); }
+    rotate(...values) { this.transforms.push(['rotate', ...values]); }
+    createPattern(source, repetition) { return { source, repetition }; }
+    fillRect(...args) { this.trace.push({ op: 'rect', args }); }
+    beginPath() { this.path = []; }
+    arc(...args) { this.path.push(['arc', ...args]); }
+    moveTo(...args) { this.path.push(['move', ...args]); }
+    lineTo(...args) { this.path.push(['line', ...args]); }
+    closePath() { this.path.push(['close']); }
+    fill() { this.trace.push({ op: 'fill', path: this.path.slice(), ...this.state() }); }
+    stroke() { this.trace.push({ op: 'stroke', path: this.path.slice(), ...this.state() }); }
+    drawImage(source, ...args) {
+      if (source === this.failSource) throw new Error('Authored stock Canvas image fault');
+      assert.ok(source instanceof HTMLCanvasElement || source instanceof HTMLImageElement, 'Existing exact raster source required');
+      assert.ok([2, 4, 8].includes(args.length) && args.every(Number.isFinite), 'Supported finite image overload');
+      this.trace.push({ op: 'image', source, args, ...this.state() });
+    }
+  }
+  class HTMLCanvasElement {
+    #width; #height;
+    context = new CanvasRenderingContext2D();
+    constructor(name, width = 48, height = 48) {
+      this.name = name; this.#width = width; this.#height = height; this.context.canvas = this;
+    }
+    get width() { return this.#width; }
+    set width(value) { this.#width = value; this.context.reset(); }
+    get height() { return this.#height; }
+    set height(value) { this.#height = value; this.context.reset(); }
+    getContext(kind) { assert.equal(kind, '2d'); return this.context; }
+  }
+  class HTMLImageElement {
+    #width; #height; #complete;
+    constructor(name, width = 48, height = 48, complete = true) {
+      this.name = name; this.#width = width; this.#height = height; this.#complete = complete;
+    }
+    get naturalWidth() { return this.#width; }
+    get naturalHeight() { return this.#height; }
+    get complete() { return this.#complete; }
+  }
+  const realm = { HTMLCanvasElement, HTMLImageElement, CanvasRenderingContext2D };
+  const globals = new Map(Object.entries(realm).map(([key, value]) => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, key);
+    Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
+    return [key, descriptor];
+  }));
+
+  function fixture() {
+    const readiness = [];
+    const source = (name, width = 48, height = 48, image = false) => {
+      const object = image ? new HTMLImageElement(name, width, height) : new HTMLCanvasElement(name, width, height);
+      readiness.push({ source: object, state: 'ready', revision: `authored-content:${readiness.length}` });
+      return object;
+    };
+    const host = { nsr: false,
+      alcsc: Uint8Array.from({ length: 256 }, (_, index) => Number(index <= 35 || [37, 39, 41].includes(index))),
+      per_color_imgs: Array.from({ length: 42 }, (_, color) => ({ klp: color !== 36,
+        kmcs: Array.from({ length: color === 36 ? 60 : 7 }, (_, index) => source(`body:${color}:${index}`)),
+        kfmc: source(`boost:${color}`) })) };
+    for (const slot of ['komc', 'ksmc', 'kdmc', 'acbulb', 'cdbulb', 'kwkbulb', 'pwdbulb', 'playbulb',
+      'leafbulb', 'swissbulb', 'moldovabulb', 'vietnambulb', 'argentinabulb', 'movbulb', 'bonkbulb', 'sest']) {
+      host[slot] = source(slot, 48, 48, slot === 'sest');
+    }
+    host.jsebi = source('jsebi', 64, 64);
+    host.jsepi = source('jsepi', 48, 48);
+    for (let color = 0; color <= 9; color++) {
+      const entry = host.per_color_imgs[color]; entry.ic = 2;
+      for (const [family, width, height, halfWidth, halfHeight, count] of [
+        ['imgs', 'fws', 'fhs', 'fw2s', 'fh2s', 2], ['oimgs', 'ofws', 'ofhs', 'ofw2s', 'ofh2s', 2],
+        ['gimgs', 'gfws', 'gfhs', 'gfw2s', 'gfh2s', 3], ['pr_imgs', 'pr_fws', 'pr_fhs', 'pr_fw2s', 'pr_fh2s', 4],
+      ]) {
+        for (const key of [family, width, height, halfWidth, halfHeight]) entry[key] = [];
+        for (let index = 0; index < count; index++) {
+          entry[family].push(source(`${family}:${color}:${index}`, 48, 48, family === 'pr_imgs' && index === 1));
+          entry[width].push(43.5 + index); entry[height].push(41.25 + index);
+          entry[halfWidth].push(index === 0 ? -0 : 20.125 + index); entry[halfHeight].push(19.75 + index);
+        }
+      }
+    }
+    // One authored exact object intentionally crosses body, food and prey pools.
+    const shared = host.per_color_imgs[0].kmcs[0];
+    host.per_color_imgs[0].gimgs.fill(shared);
+    const target = new HTMLCanvasElement('target', 960, 540);
+    const background = new HTMLImageElement('background', 32, 32);
+    let raw = { revision: 1, normalGameplay: true, ownAccessory: -1, host, readiness };
+    let held = null;
+    const events = [], recipes = [], foods = [], preys = [], tapes = [], steps = [];
+    let captures = 0, ends = 0, units = 0;
+    const random = () => { units++; return (units % 32) / 32; };
+    const actualAdapter = createStockSkinAdapter({ realm, random, readSnapshot() {
+      assert.equal(held, null, 'No stale held capture'); captures++; held = raw; events.push('capture'); return held;
+    } });
+    const adapter = {
+      beginOperation: () => actualAdapter.beginOperation(),
+      endOperation() { try { return actualAdapter.endOperation(); } finally { held = null; ends++; events.push('end'); } },
+      resolveAppearance: request => actualAdapter.resolveAppearance(request),
+      resolveRecipe(request) {
+        assert.equal(held, raw); const result = actualAdapter.resolveRecipe(request);
+        recipes.push({ request, result }); return result;
+      },
+      resolveAntennaRandom(request) {
+        const result = actualAdapter.resolveAntennaRandom(request); tapes.push({ request, result }); return result;
+      },
+    };
+    const entities = createStockEntityAssets({ realm, random, snapshotForOperation(operation) {
+      assert.notEqual(held, null, 'Factory must use held skin capture'); assert.equal(held, raw);
+      assert.ok(Object.is(operation.revision, held.revision)); events.push('entity-held'); return held;
+    } });
+    const hostAssets = {
+      resolveFood(request, operation) { const result = entities.resolveFood(request, operation); foods.push({ request, result }); return result; },
+      resolvePrey(request, operation) { const result = entities.resolvePrey(request, operation); preys.push({ request, result }); return result; },
+    };
+    const scene = new wasm.AnimatedScene(0);
+    const quality = new wasm.DesktopQuality(1, 0);
+    quality.begin_connection();
+    for (const name of ['advance', 'advance_with_control']) {
+      if (typeof scene[name] !== 'function') continue;
+      const actual = scene[name].bind(scene);
+      scene[name] = (...args) => {
+        events.push(name); const step = actual(...args);
+        const record = { step, freed: false }; steps.push(record);
+        const free = step.free.bind(step);
+        step.free = () => { assert.equal(record.freed, false, 'One owned step free'); free(); record.freed = true; events.push('free'); };
+        return step;
+      };
+    }
+    for (const name of ['apply_frame_and_render_standard_with_face_presentation_and_prey', 'render_standard_with_face_presentation_at_size']) {
+      const actual = scene[name].bind(scene);
+      scene[name] = (...args) => { events.push(name.startsWith('apply') ? 'packet' : 'render'); return actual(...args); };
+    }
+    const qualityAdvance = quality.advance.bind(quality), statistics = quality.update_statistics.bind(quality);
+    quality.advance = (step, playing) => {
+      assert.equal(step, steps.at(-1).step, 'Quality borrows the actual returned step');
+      assert.equal(steps.at(-1).freed, false); events.push('quality'); return qualityAdvance(step, playing);
+    };
+    quality.update_statistics = (...args) => { events.push(['statistics', ...args]); return statistics(...args); };
+    const client = createStockClient({ scene, quality, adapter, hostAssets, target,
+      palettes: host.per_color_imgs.slice(0, 3).map(entry => entry.kmcs[0]), background, width: 960, height: 540 });
+    return { client, scene, quality, target, host, readiness, shared, recipes, foods, preys, tapes, steps, events,
+      get captures() { return captures; }, get ends() { return ends; }, get held() { return held; }, get units() { return units; },
+      get raw() { return raw; },
+      churn() { host.leafbulb = source('replacement-unrelated-bulb'); raw = { ...raw, revision: raw.revision + 1 }; },
+      changeContent() { readiness.find(entry => entry.source === shared).revision = 'authored-content:changed'; raw = { ...raw, revision: raw.revision + 1 }; },
+      state() { return [scene.snapshot(), scene.food_state(), scene.prey_state()]; },
+      images() { return target.context.trace.filter(command => command.op === 'image'); },
+      resets() { return target.context.trace.filter(command => command.op === 'reset').length; },
+      close() { client.dispose(); scene.free(); quality.free(); },
+    };
+  }
+  function checkOperation(f, callback) {
+    const before = f.captures, ends = f.ends;
+    const result = callback();
+    eq(f.captures, before + 1, 'Exactly one raw capture per draw/packet operation');
+    eq(f.ends, ends + 1, 'Release exactly the operation that captured');
+    eq(f.held, null); eq(f.target.context.stack.length, 0, 'Balanced native Canvas scopes');
+    return result;
+  }
+  const seed = f => checkOperation(f, () => f.client.packet(bundle(setup(), snake(0, 0),
+    snake(7, 25, 45, 35), snake(8, 27, -50, 25), snake(9, 27, 20, -40, custom),
+    snake(10, 40, -20, -35, custom), snake(11, 41, 70, -20), food(), prey(31), setup())));
+  try {
+    {
+      const f = fixture();
+      try {
+        eq(seed(f), 2, 'Both ordered Setup draws are counted');
+        eq(f.client.diagnostics().draws, 2); eq(f.steps.length, 0, 'Packets/Setup never update');
+        eq(f.scene.food_state().foods.length, 1); eq(f.scene.prey_state().preys.length, 1);
+        eq(f.foods.length, 1); eq(f.preys.length, 1);
+        eq([f.foods[0].result.palette.count, f.preys[0].result.palette.bodies.length, f.preys[0].result.palette.glows.length], [2, 4, 3]);
+        eq(f.foods[0].result.palette.glows[0].asset.source, f.shared);
+        eq(f.preys[0].result.palette.glows[0].asset.source, f.shared);
+        const recipe = id => f.recipes.find(entry => entry.request.id === id).result.recipe;
+        eq(recipe(0).eyes.kind, 'standard'); eq(recipe(7).antenna.kind, 'ordinary-chain');
+        eq(recipe(8).eyes.kind, 'single-image');
+        for (const id of [9, 10]) {
+          eq(recipe(id).custom, true); eq(recipe(id).eyes.kind, 'standard'); eq(recipe(id).antenna, undefined);
+          eq(recipe(id).bodyStyle.swell, 0); eq(recipe(id).bodyStyle.detailedSegments, false);
+        }
+        const pair = f.images().filter(command => [f.host.jsebi, f.host.jsepi].includes(command.source));
+        eq(pair.length, 2); eq(pair.map(command => command.source), [f.host.jsebi, f.host.jsepi]);
+        ok(pair.every(command => command.args.length === 8 && command.blend === 'source-over'));
+        ok(pair.every(command => !command.transforms.some(transform => transform[0] === 'rotate')));
+        eq(pair.map(command => command.args.slice(0, 4)), [[0, 0, 64, 64], [0, 0, 48, 48]]);
+        const trace = f.target.context.trace;
+        const firstImage = prefix => trace.findIndex(command => command.op === 'image' && command.source.name.startsWith(prefix));
+        ok(firstImage('oimgs:0:') < firstImage('imgs:0:'), 'Food outlines precede food bodies');
+        ok(firstImage('imgs:0:') < firstImage('pr_imgs:0:'), 'Food bodies precede prey bodies');
+        ok(firstImage('pr_imgs:0:') < firstImage('body:'), 'Prey bodies precede standard snake bodies');
+        ok(trace.some(command => command.op === 'fill' && command.path[0]?.[0] === 'arc'), 'Actual ordinary paired eye paths are present');
+        const faceSources = new Set([f.host.jsebi, f.host.jsepi, f.host.sest]);
+        const lastFace = trace.findLastIndex(command => command.op === 'fill' && command.path[0]?.[0] === 'arc'
+          || command.op === 'image' && faceSources.has(command.source));
+        const lateImages = trace.slice(lastFace + 1).filter(command => command.op === 'image');
+        eq(lateImages.length, 8, 'Both retained entities paint four late glow calls after the selected snake faces');
+        ok(lateImages.every(command => command.source === f.shared && command.blend === 'lighter'));
+        const observed = [];
+        checkOperation(f, () => f.client.frame(40, { onStep(value) {
+          ok(Object.isFrozen(value)); eq(f.steps.at(-1).freed, true); observed.push(value);
+        } }));
+        eq(observed.length, 1); eq(observed[0].nowMs, 40);
+        eq(f.events.filter(event => event === 'advance').length, 1);
+        eq(f.events.filter(event => event === 'quality').length, 1);
+        eq(f.events.filter(event => event === 'free').length, 1);
+        const ordered = f.events.filter(event => ['advance', 'quality', 'free', 'render'].includes(event));
+        eq(ordered, ['advance', 'quality', 'free', 'render']);
+        eq(f.events.find(Array.isArray), ['statistics', 40, 2, true]);
+        eq(f.client.diagnostics().draws, 3);
+        checkOperation(f, () => f.client.frame(48));
+        ok(f.tapes.length > 0, 'Real antenna preparation requests supplied random units');
+        ok(f.tapes.every(({ request, result }) => result instanceof Float64Array && result.length === 2 * request.randomPairCount));
+        ok(f.images().some(command => command.source === f.host.cdbulb));
+        ok(f.images().some(command => command.source === f.shared));
+        eq(f.units, 2 * (f.foods.length + f.preys.length) + f.tapes.reduce((total, entry) => total + entry.result.length, 0),
+          'Actual entity and antenna callbacks consume exactly their supplied units');
+        const captures = f.captures;
+        f.client.update(56);
+        eq(f.captures, captures, 'Update alone does not capture or draw');
+        const beforeResize = [f.scene.food_state().foods, f.scene.prey_state().preys, f.quality.snapshot(), f.steps.length];
+        const draws = f.client.diagnostics().draws;
+        checkOperation(f, () => f.client.resize(800, 480));
+        eq([f.target.width, f.target.height], [800, 480]);
+        eq([f.scene.food_state().foods, f.scene.prey_state().preys, f.quality.snapshot(), f.steps.length], beforeResize);
+        eq(f.client.diagnostics().draws, draws + 1);
+        const intervalDraws = f.client.diagnostics().drawsSinceStatistics;
+        checkOperation(f, () => f.client.frame(1101));
+        eq(f.events.findLast(Array.isArray), ['statistics', 1101, intervalDraws, true]);
+        eq(f.client.diagnostics().drawsSinceStatistics, 1, 'Due statistics consume prior draws before this frame is counted');
+        eq(JSON.parse(f.quality.snapshot()).lastStatisticsMs, 1101);
+        eq(f.steps.at(-1).freed, true);
+        cases.push('real-stock-faces-factories-order-clock-resize');
+      } finally { f.close(); }
+    }
+    {
+      const f = fixture();
+      try {
+        seed(f);
+        const retained = f.scene.food_state().foods[0];
+        const priorRevision = f.foods[0].result.palette.glows[0].asset.revision;
+        f.churn();
+        checkOperation(f, () => f.client.packet(bundle(food(129), prey(32))));
+        eq(f.scene.food_state().foods.find(entry => entry.instance === retained.instance), retained);
+        eq(f.preys.at(-1).result.palette.glows[0].asset.revision, priorRevision);
+        eq(f.foods.at(-1).result.palette.glows[0].asset.revision, priorRevision);
+        checkOperation(f, () => f.client.render());
+        const lastOwn = f.recipes.findLast(entry => entry.request.id === 0).result.recipe;
+        eq(lastOwn.palettes[0].variants[0].asset.source, f.shared);
+        eq(lastOwn.palettes[0].variants[0].asset.revision, priorRevision);
+        eq(f.client.diagnostics().stopped, false);
+        cases.push('retained-source-revisions-and-body-food-prey-aliases');
+      } finally { f.close(); }
+    }
+    {
+      const f = fixture();
+      try {
+        seed(f); f.changeContent();
+        const before = f.state(), resets = f.resets(), draws = f.client.diagnostics().draws;
+        rejects(() => f.client.render(), /incoherent|revision/i);
+        eq(f.state(), before); eq(f.resets(), resets, 'Content mismatch fails before target reset');
+        eq(f.client.diagnostics().draws, draws); eq(f.client.diagnostics().stopped, true); eq(f.held, null);
+        rejects(() => f.client.render(), /stopped/);
+        cases.push('explicit-content-mismatch-is-atomic-and-terminal');
+      } finally { f.close(); }
+    }
+    {
+      const f = fixture();
+      try {
+        const before = f.state();
+        rejects(() => f.client.packet(bundle(setup(), snake(0, 40), setup())), /Unsupported stock appearance/);
+        eq(f.state(), before); eq(f.resets(), 0); eq(f.steps.length, 0); eq(f.units, 0);
+        eq(f.captures, 1); eq(f.ends, 1); eq(f.held, null); eq(f.client.diagnostics().stopped, true);
+        cases.push('skin40-before-clear');
+      } finally { f.close(); }
+    }
+    {
+      const f = fixture();
+      try {
+        seed(f); f.host.per_color_imgs[0].fws[0] = NaN;
+        const before = f.state(), resets = f.resets(), units = f.units;
+        rejects(() => f.client.packet(Uint8Array.from(food(129))), /metric/);
+        eq(f.state(), before); eq(f.resets(), resets); eq(f.units, units);
+        eq(f.held, null); eq(f.client.diagnostics().stopped, true);
+        cases.push('malformed-real-factory-terminal');
+      } finally { f.close(); }
+    }
+    {
+      const f = fixture();
+      try {
+        seed(f); f.target.context.failSource = f.host.jsepi;
+        const before = f.state(), resets = f.resets(), draws = f.client.diagnostics().draws;
+        rejects(() => f.client.render(), /Authored stock Canvas image fault/);
+        eq(f.state(), before); ok(f.resets() > resets, 'Native submission started before the injected image fault');
+        eq(f.target.context.stack.length, 0); eq(f.client.diagnostics().draws, draws);
+        eq(f.client.diagnostics().stopped, true); eq(f.held, null);
+        cases.push('late-native-canvas-fault-restores-and-rolls-back');
+      } finally { f.close(); }
+    }
+    if (control) {
+      const f = fixture();
+      try {
+        checkOperation(f, () => f.client.packet(bundle(setup(), snake(0, 0), food(), prey(31), setup())));
+        f.client.update(40);
+        const prior = f.scene.control_view();
+        const priorPupil = JSON.parse(f.scene.snapshot()).own.eyes.pupilY;
+        const start = f.events.length;
+        let callbacks = 0, observations = 0;
+        checkOperation(f, () => f.client.frame(48, { control(request) {
+          callbacks++; eq(request.nowMs, 48); eq(request.control, prior);
+          ok(request.delta > 0); eq(request.wholeSteps, 1); eq(request.step, undefined);
+          ok(typeof request.control.own.token === 'bigint');
+          return { gazeHeading: Math.PI / 2 };
+        }, onStep(value) {
+          observations++; eq(f.steps.at(-1).freed, true); eq(value.delta, 1); eq(value.wholeSteps, 1);
+        } }));
+        eq(callbacks, 1); eq(observations, 1);
+        eq(f.scene.control_view().own.gazeHeading, Math.PI / 2);
+        ok(f.scene.control_view().own.rawHead.x !== prior.own.rawHead.x, 'Motion follows the copied pre-motion control readout');
+        ok(JSON.parse(f.scene.snapshot()).own.eyes.pupilY > priorPupil, 'Control gaze affects this same update');
+        eq(f.events.slice(start).filter(event => typeof event === 'string' && ['advance', 'advance_with_control', 'quality', 'free', 'render'].includes(event)),
+          ['advance_with_control', 'quality', 'free', 'render']);
+        cases.push('real-premotion-control-own-readout-same-tick-gaze');
+      } finally { f.close(); }
+      for (const malformed of [() => Promise.resolve({}), () => ({ unknownAction: true }), () => ({ gazeHeading: NaN }),
+        () => Object.defineProperty({}, 'gazeHeading', { get() { throw new Error('Getter must not run'); }, enumerable: true })]) {
+        const f = fixture();
+        try {
+          seed(f); const before = f.state(), qualityBefore = f.quality.snapshot(), resets = f.resets(), steps = f.steps.length;
+          rejects(() => f.client.frame(48, { control: malformed }), /synchronous|record|unknown|finite|own data/);
+          eq(f.state(), before); eq(f.resets(), resets); eq(f.steps.length, steps);
+          eq(f.quality.snapshot(), qualityBefore, 'Rejected control actions do not advance quality');
+          eq(f.client.diagnostics().stopped, true); eq(f.held, null); eq(f.captures, f.ends);
+          rejects(() => f.client.update(56), /stopped/);
+        } finally { f.close(); }
+      }
+      cases.push('native-control-malformed-action-rollback-terminal');
+    }
+    return Object.freeze({ assertions, cases: Object.freeze(cases), control: control ? 'passed' : 'not-requested' });
+  } finally {
+    for (const [key, descriptor] of globals) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key];
+    }
+  }
+}
+
+async function cli(args) {
+  const options = {};
+  for (let index = 0; index < args.length; index++) {
+    const key = args[index];
+    if (key === '--source-only' && options.sourceOnly === undefined) options.sourceOnly = true;
+    else if (['--js', '--wasm'].includes(key) && options[key] === undefined && args[index + 1]) options[key] = args[++index];
+    else throw new Error('Usage: stock-render-smoke.mjs --js ABSOLUTE_JS --wasm ABSOLUTE_WASM [--source-only]');
+  }
+  for (const key of ['--js', '--wasm']) if (!path.isAbsolute(options[key] ?? '')) throw new Error(`Explicit absolute ${key} path required`);
+  const pins = () => ['--js', '--wasm'].map(key => {
+    const bytes = fs.readFileSync(options[key]);
+    return { path: options[key], bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
+  });
+  const before = pins();
+  let result;
+  try {
+    const wasm = await import(pathToFileURL(options['--js']).href);
+    wasm.initSync({ module: fs.readFileSync(options['--wasm']) });
+    result = stockRenderSmoke(wasm, { control: !options.sourceOnly });
+  } finally {
+    assert.deepEqual(pins(), before, 'Explicit candidate JS/Wasm must stay unchanged');
+    console.log(JSON.stringify({ pins: before, result: result ?? null }, null, 2));
+  }
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  cli(process.argv.slice(2)).catch(error => { console.error(error); process.exitCode = 1; });
+}

@@ -862,7 +862,7 @@ impl BorrowedSources {
         assets: &mut Vec<BodyAsset>,
         catalog_ids: &mut Vec<usize>,
         value: &JsValue,
-        revision: &JsValue,
+        snapshot_revision: &JsValue,
         target: &HtmlCanvasElement,
     ) -> Result<BodyAssetUse, JsValue> {
         self.uses += 1;
@@ -870,6 +870,12 @@ impl BorrowedSources {
             return Err(error("frame asset-use budget exceeded"));
         }
         let raw = field(value, "asset")?;
+        let content_revision = field(&raw, "revision")?;
+        let revision = if content_revision.is_undefined() {
+            snapshot_revision.clone()
+        } else {
+            revision(content_revision)?
+        };
         let id = integer(field(&raw, "id")?, 0, 4095)?;
         if text(field(&raw, "status")?)? != "ready" {
             return Err(error("body asset is not ready"));
@@ -907,7 +913,7 @@ impl BorrowedSources {
             .position(|s| s.object == borrowed.object)
         {
             let prior = &self.sources[index];
-            if !Object::is(&prior.revision, revision)
+            if !Object::is(&prior.revision, &revision)
                 || prior.width != width
                 || prior.height != height
             {
@@ -922,7 +928,7 @@ impl BorrowedSources {
             self.sources.len() - 1
         };
         let revision_token =
-            if let Some(index) = self.revisions.iter().position(|v| Object::is(v, revision)) {
+            if let Some(index) = self.revisions.iter().position(|v| Object::is(v, &revision)) {
                 index
             } else {
                 self.revisions.push(revision.clone());

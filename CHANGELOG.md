@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add authored stock skin, food and prey adapters with explicit live-source
+  readiness and content revisions, including single-image skin 27. Add desktop
+  input intents and a same-clock pre-motion control callback; full game-page
+  and session acceptance remain separate.
+
 - Add appearance-owned single image eyes, shared gaze updates and two ordered
   borrowed image draws through both animated renderer lanes and ordered Setup.
 

@@ -26,6 +26,57 @@ pub const MAX_RETAINED_TOTAL_BODY_POINTS: usize = MAX_TOTAL_BODY_POINTS * 2;
 /// Aggregate active curve samples permitted in one prepared numeric draw.
 pub const MAX_DRAW_SAMPLES: usize = MAX_RETAINED_TOTAL_BODY_POINTS * 2;
 
+/// Retained original own control data, independent of wire lookup and draw membership.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OwnControlView {
+    /// Scene-local identity; never reused across world resets, scoped to this client.
+    pub token: SnakeObjectToken,
+    /// Original wire identifier; not an object identity.
+    pub id: u16,
+    /// Absolute uncorrected predicted head before this update's motion.
+    pub raw_head: Point,
+    /// Independently retained wanted heading.
+    pub wanted_heading: f64,
+    /// Visual gaze, including after death and draw expiry.
+    pub gaze_heading: f64,
+    /// Whether live travel has ended.
+    pub dead: bool,
+    /// Current setup's turning coefficient.
+    pub turn_rate: f64,
+    /// Retained size-dependent turning coefficient.
+    pub size_turn_factor: f64,
+    /// Retained speed-dependent turning coefficient.
+    pub speed_turn_factor: f64,
+}
+
+/// Coherent copied input observation; reading it consumes neither update nor draw.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ClientControlView {
+    /// Original own object, retained until world reset, including after expiry.
+    pub own: Option<OwnControlView>,
+    /// Absolute displayed camera position.
+    pub camera: Point,
+    /// Displayed zoom from the retained draw state.
+    pub zoom: f64,
+    /// Caller-owned camera following preference.
+    pub follows: bool,
+    /// Current boundary connection gate.
+    pub connected: bool,
+}
+
+/// Closed pre-motion actions, validated together before any action is applied.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ClientControlActions {
+    /// Set retained-own visual gaze before this update's pupil movement.
+    pub gaze_heading: Option<f64>,
+    /// Perform the existing world reset while retaining the already computed step.
+    pub reset_world: bool,
+    /// Restore only the clock multiplier; the computed step is unchanged.
+    pub reset_lag: bool,
+    /// Override the connection gate after any reset.
+    pub connected: Option<bool>,
+}
+
 /// Appearance-owned numeric style; borrowed images are resolved only during drawing.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct AppearancePresentation {
@@ -434,6 +485,38 @@ impl AnimatedClient {
         self.entries.clear();
         self.foods.clear();
         self.preys.clear();
+    }
+
+    /// Restore only the lag multiplier, preserving world, timestamp and both phases.
+    pub fn reset_lag(&mut self) {
+        self.clock.reset_lag();
+    }
+
+    /// Observe the retained original own object and displayed camera before motion.
+    /// Tokens belong to this client instance; pair them with client identity when
+    /// sharing observations across clients. Reset never reuses an allocated token.
+    pub fn control_view(&self) -> ClientControlView {
+        let own = self.entries.iter().find(|entry| entry.own).map(|entry| {
+            let metrics = entry.snake.metrics();
+            OwnControlView {
+                token: entry.token,
+                id: metrics.id,
+                raw_head: metrics.raw_head,
+                wanted_heading: metrics.wanted_heading,
+                gaze_heading: entry.snake.eyes().gaze_heading(),
+                dead: !metrics.alive,
+                turn_rate: self.received.setup.as_ref().map_or(0., |setup| setup.mamu),
+                size_turn_factor: metrics.size_turn_factor,
+                speed_turn_factor: metrics.speed_turn_factor,
+            }
+        });
+        ClientControlView {
+            own,
+            camera: self.camera.position(),
+            zoom: self.camera.zoom(),
+            follows: self.camera.follows(),
+            connected: self.connected,
+        }
     }
 
     fn reset_camera(&mut self) {
@@ -1327,35 +1410,77 @@ impl AnimatedClient {
         now_ms: f64,
         lagging: bool,
     ) -> Result<FrameStep, ClientPresentationError> {
+        self.advance_with_control(now_ms, lagging, |_, _| Ok(ClientControlActions::default()))
+    }
+
+    /// Compute one retained-clock step, call control once before any entity moves,
+    /// then apply gaze, world reset, lag reset and connection override in that order.
+    /// Resets retain the computed step. Any error preserves the entire original
+    /// model, including its clock. Callback sends and other external effects cannot
+    /// roll back; callers must not automatically replay a failed control update.
+    pub fn advance_with_control<E, F>(
+        &mut self,
+        now_ms: f64,
+        lagging: bool,
+        control: F,
+    ) -> Result<FrameStep, E>
+    where
+        E: From<ClientPresentationError>,
+        F: FnOnce(FrameStep, ClientControlView) -> Result<ClientControlActions, E>,
+    {
         let mut next = self.clone();
-        let step = next.clock.advance(now_ms, lagging, false)?;
-        if let Some(boundary) = &mut next.boundary {
-            boundary.advance(step.whole_steps, next.connected);
+        let step = next
+            .clock
+            .advance(now_ms, lagging, false)
+            .map_err(ClientPresentationError::from)?;
+        let actions = control(step, next.control_view())?;
+        if let Some(heading) = actions.gaze_heading {
+            finite(&[heading]).map_err(ClientPresentationError::from)?;
         }
-        for entry in &mut next.entries {
+        if let Some(heading) = actions.gaze_heading {
+            next.set_own_gaze_heading(heading)?;
+        }
+        if actions.reset_world {
+            next.reset();
+        }
+        if actions.reset_lag {
+            next.reset_lag();
+        }
+        if let Some(connected) = actions.connected {
+            next.set_connected(connected);
+        }
+        next.advance_entities(step)?;
+        *self = next;
+        Ok(step)
+    }
+
+    fn advance_entities(&mut self, step: FrameStep) -> Result<(), ClientPresentationError> {
+        if let Some(boundary) = &mut self.boundary {
+            boundary.advance(step.whole_steps, self.connected);
+        }
+        for entry in &mut self.entries {
             if entry.drawn && !entry.snake.advance(step)? {
                 entry.drawn = false;
             }
         }
-        let entries = &next.entries;
-        let prey_turn_rate = next.received.setup.as_ref().map_or(0., |s| s.mamu2);
-        next.preys.advance(step, prey_turn_rate, |token| {
+        let entries = &self.entries;
+        let prey_turn_rate = self.received.setup.as_ref().map_or(0., |s| s.mamu2);
+        self.preys.advance(step, prey_turn_rate, |token| {
             entries
                 .iter()
                 .find(|entry| entry.token == token)
                 .map(Entry::eater_pose)
                 .ok_or(PreyError::MissingEater(token))
         })?;
-        next.foods.advance(step, |token| {
+        self.foods.advance(step, |token| {
             entries
                 .iter()
                 .find(|entry| entry.token == token)
                 .map(Entry::eater_pose)
                 .ok_or(FoodError::MissingEater(token))
         })?;
-        next.retire_entries();
-        *self = next;
-        Ok(step)
+        self.retire_entries();
+        Ok(())
     }
 
     /// Gate boundary consumption without changing clocks, samples or entity animation.

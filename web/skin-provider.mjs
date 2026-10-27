@@ -110,10 +110,14 @@ export function createSkinProvider({ trusted, realm, resolveHostRecipe, normaliz
     resolve(request, snapshot) {
       const input = requestSnapshot(request);
       const version = revision(field(snapshot, 'revision'));
-      const catalog = list(field(snapshot, 'assetCatalog'), 0, 4096, 'assetCatalog').map(entry => freeze({
-        source: field(entry, 'source'),
-        state: choice(field(entry, 'state'), ['ready', 'pending', 'unsupported'], 'asset state'),
-      }));
+      const catalog = list(field(snapshot, 'assetCatalog'), 0, 4096, 'assetCatalog').map(entry => {
+        const contentRevision = field(entry, 'revision');
+        return freeze({
+          source: field(entry, 'source'),
+          state: choice(field(entry, 'state'), ['ready', 'pending', 'unsupported'], 'asset state'),
+          ...(contentRevision === undefined ? {} : { revision: revision(contentRevision) }),
+        });
+      });
       // The adapter owns host-shape mapping. No host member names or recipes live here.
       const raw = resolveHostRecipe(input);
       const normalized = normalizeHostRecipe(raw, input);
@@ -126,7 +130,7 @@ export function createSkinProvider({ trusted, realm, resolveHostRecipe, normaliz
       function borrow(id) {
         integer(id, 0, catalog.length - 1, 'asset index');
         if (borrowed.has(id)) return borrowed.get(id);
-        const { source, state } = catalog[id];
+        const { source, state, revision: contentRevision } = catalog[id];
         let kind = null;
         let width = 0;
         let height = 0;
@@ -147,7 +151,8 @@ export function createSkinProvider({ trusted, realm, resolveHostRecipe, normaliz
             else if (kind === 'image') status = 'ready';
           }
         }
-        const asset = freeze({ id, source, kind, width, height, status });
+        const asset = freeze({ id, source, kind, width, height, status,
+          ...(contentRevision === undefined ? {} : { revision: contentRevision }) });
         borrowed.set(id, asset);
         return asset;
       }

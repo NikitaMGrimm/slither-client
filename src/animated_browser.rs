@@ -17,13 +17,14 @@ use crate::{
     presentation::{
         AnimatedClient, AntennaDrawBudget, AntennaPath, AntennaRandomRequest,
         AppearancePresentation, ArenaEdgeInput, ArenaEdgePlan, BodyPaintError, BodyPaintInput,
-        BodyPaintPlan, BodyPaintQuality, BodyPaintView, BodyPaintVisual, CurveInput, CurveOutput,
-        EyeLayoutInput, FaceGeometry, FacePresentation, FoodImageCommand, FoodPaintInput,
-        FoodPaintPlan, MAX_BODY_PAINT_COMMANDS, MAX_DRAW_SAMPLES, MAX_RETAINED_SNAKES,
-        OrdinaryAntennaGeometry, PairedSideLayout, PreparedAntenna, PreparedSnake, PreyEaterPose,
-        PreyImageCommand, PreyPaintInput, PreyPaintPlan, QualitySnapshot, SingleEyeLayout,
-        SnakePresentation, StandardEyeLayout, Turn, plan_arena_edge, plan_food, plan_prey,
-        plan_standard_body, plan_standard_body_with_antenna, sample_curve_with_heading,
+        BodyPaintPlan, BodyPaintQuality, BodyPaintView, BodyPaintVisual, ClientControlActions,
+        ClientControlView, CurveInput, CurveOutput, EyeLayoutInput, FaceGeometry, FacePresentation,
+        FoodImageCommand, FoodPaintInput, FoodPaintPlan, MAX_BODY_PAINT_COMMANDS, MAX_DRAW_SAMPLES,
+        MAX_RETAINED_SNAKES, OrdinaryAntennaGeometry, PairedSideLayout, PreparedAntenna,
+        PreparedSnake, PreyEaterPose, PreyImageCommand, PreyPaintInput, PreyPaintPlan,
+        QualitySnapshot, SingleEyeLayout, SnakePresentation, StandardEyeLayout, Turn,
+        plan_arena_edge, plan_food, plan_prey, plan_standard_body, plan_standard_body_with_antenna,
+        sample_curve_with_heading,
     },
     presentation_browser::AnimationStep,
     prey_browser::PreySources,
@@ -58,6 +59,96 @@ fn record<const N: usize>(fields: [(&str, JsValue); N]) -> Result<JsValue, JsVal
 
 fn serial(value: u64) -> JsValue {
     js_sys::BigInt::from(value).into()
+}
+
+fn control_view_record(view: ClientControlView) -> Result<JsValue, JsValue> {
+    let point = |p: Point| record([("x", p.x.into()), ("y", p.y.into())]);
+    let own = match view.own {
+        None => JsValue::NULL,
+        Some(own) => record([
+            ("token", serial(own.token.serial())),
+            ("id", own.id.into()),
+            ("rawHead", point(own.raw_head)?),
+            ("wantedHeading", own.wanted_heading.into()),
+            ("gazeHeading", own.gaze_heading.into()),
+            ("dead", own.dead.into()),
+            ("turnRate", own.turn_rate.into()),
+            ("sizeTurnFactor", own.size_turn_factor.into()),
+            ("speedTurnFactor", own.speed_turn_factor.into()),
+        ])?,
+    };
+    record([
+        ("own", own),
+        ("camera", point(view.camera)?),
+        ("zoom", view.zoom.into()),
+        ("follows", view.follows.into()),
+        ("connected", view.connected.into()),
+    ])
+}
+
+fn control_actions(value: &JsValue) -> Result<ClientControlActions, JsValue> {
+    if !value.is_object() || value.is_null() {
+        return Err(error(
+            "control callback must return a synchronous action record",
+        ));
+    }
+    // Catch structural proxy failures too, so parsing always returns through the
+    // borrowed export and releases its mutable scene borrow.
+    let prototype = js_sys::Reflect::get_prototype_of(value)?;
+    if !prototype.is_null()
+        && !js_sys::Object::is(
+            &prototype,
+            &js_sys::Object::get_prototype_of(&js_sys::Object::new()),
+        )
+    {
+        return Err(error(
+            "control actions require a plain or null-prototype record",
+        ));
+    }
+    let mut actions = ClientControlActions::default();
+    for key in js_sys::Reflect::own_keys(value)? {
+        let name = key
+            .as_string()
+            .ok_or_else(|| error("unknown control action"))?;
+        if !matches!(
+            name.as_str(),
+            "gazeHeading" | "resetWorld" | "resetLag" | "connected"
+        ) {
+            return Err(error("unknown control action"));
+        }
+        // Descriptors reject metadata getters without invoking them. Proxy traps
+        // remain effects of the trusted synchronous caller capability.
+        let descriptor = js_sys::Reflect::get_own_property_descriptor(
+            value.unchecked_ref::<js_sys::Object>(),
+            &key,
+        )?;
+        if descriptor.is_undefined()
+            || !js_sys::Object::has_own(
+                descriptor.unchecked_ref::<js_sys::Object>(),
+                &"value".into(),
+            )
+        {
+            return Err(error("control actions require own data fields"));
+        }
+        let field = js_sys::Reflect::get(&descriptor, &"value".into())?;
+        match name.as_str() {
+            "gazeHeading" => {
+                if !field.is_null() {
+                    actions.gaze_heading = Some(
+                        field
+                            .as_f64()
+                            .filter(|n| n.is_finite())
+                            .ok_or_else(|| error("control gaze must be finite or null"))?,
+                    );
+                }
+            }
+            "resetWorld" => actions.reset_world = crate::body_browser::flag(field)?,
+            "resetLag" => actions.reset_lag = crate::body_browser::flag(field)?,
+            "connected" => actions.connected = Some(crate::body_browser::flag(field)?),
+            _ => unreachable!(),
+        }
+    }
+    Ok(actions)
 }
 
 fn antenna_random_accessors() -> Result<[js_sys::Function; 2], JsValue> {
@@ -362,6 +453,17 @@ impl AnimatedScene {
         self.client.reset();
         self.food_sources.clear();
         self.prey_sources.clear();
+    }
+
+    /// Restore only the existing clock's lag multiplier, without advancing time.
+    pub fn reset_lag(&mut self) {
+        self.client.reset_lag();
+    }
+
+    /// Copied pre-motion original-own and displayed-camera data. Tokens are BigInt
+    /// serials scoped to this scene instance, never reused by world reset.
+    pub fn control_view(&self) -> Result<JsValue, JsValue> {
+        control_view_record(self.client.control_view())
     }
 
     /// Gate boundary updates only; setup activates this gate and reset clears it.
@@ -1375,6 +1477,48 @@ impl AnimatedScene {
         let inner = self.client.advance(now_ms, lagging).map_err(error)?;
         self.food_sources.retain(self.client.foods().foods());
         self.prey_sources.retain(self.client.preys().preys());
+        Ok(AnimationStep { inner })
+    }
+
+    /// Compute one step and synchronously obtain closed actions before motion.
+    /// The callback must not reenter this borrowed scene. Return an own-data
+    /// record with optional gazeHeading, resetWorld, resetLag and connected fields;
+    /// return {} for no actions. No raw Wasm step escapes into the callback.
+    /// All numeric/source state rolls back on failure; external sends and host
+    /// attempt state cannot. Do not automatically retry a failed callback/update.
+    pub fn advance_with_control(
+        &mut self,
+        now_ms: f64,
+        lagging: bool,
+        callback: &js_sys::Function,
+    ) -> Result<AnimationStep, JsValue> {
+        let mut reset_world = false;
+        let inner = self
+            .client
+            .advance_with_control::<ResolveError, _>(now_ms, lagging, |step, view| {
+                let input = record([
+                    ("nowMs", now_ms.into()),
+                    ("wholeSteps", step.whole_steps.into()),
+                    ("delta", step.delta.into()),
+                    ("unlaggedDelta", step.unlagged_delta.into()),
+                    ("doubleSteps", step.double_steps.into()),
+                    ("lagMultiplier", step.lag_multiplier.into()),
+                    ("accumulated", step.accumulated.into()),
+                    ("doubledAccumulated", step.doubled_accumulated.into()),
+                    ("control", control_view_record(view)?),
+                ])?;
+                let actions = control_actions(&callback.call1(&JsValue::UNDEFINED, &input)?)?;
+                reset_world = actions.reset_world;
+                Ok(actions)
+            })
+            .map_err(|e| e.0)?;
+        if reset_world {
+            self.food_sources.clear();
+            self.prey_sources.clear();
+        } else {
+            self.food_sources.retain(self.client.foods().foods());
+            self.prey_sources.retain(self.client.preys().preys());
+        }
         Ok(AnimationStep { inner })
     }
 

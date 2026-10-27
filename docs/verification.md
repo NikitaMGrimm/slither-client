@@ -38,6 +38,35 @@ pull requests, and manual dispatch. Normal tests and CI require no external
 reference and do not connect to game servers. Dependency and toolchain setup may
 access package sources. Release-plz remains dormant.
 
+## Stock adapters and same-clock input
+
+The frozen native/input/asset integration passes 434 native all-target tests and
+270 Node tests, formatting, doctests, strict rustdoc and native/Wasm Clippy. A
+fresh generated module passes the full existing Wasm ABI smoke with 7,624 body
+recorder assertions. The additive pre-motion control helper passes 38 real-Wasm
+cases; the stock adapter helper passes 211 assertions across eight cases using
+the actual skin/entity adapters, controller, scene and quality objects.
+
+Coverage includes unchanged-source revisions across catalog churn, shared
+body/food/prey aliases, intrinsic source scalars, exact crop/whole identities,
+single-image and antenna selection, custom suppression, ordered Setup and resize,
+same-tick control/gaze, native rollback and owned-step release. Independent
+read-only review covers the control/input seam; stock adapter corrections are
+recorded with their separate scoped review.
+
+The first control helper deliberately attempted forbidden scene reentry. All
+case bodies passed, but pinned wasm-bindgen retained an extra reference after
+rejecting those calls, preventing explicit free. The failure and isolated
+reproductions remain preserved. The corrected valid-lifetime helper retains
+callback-throw, malformed-action and structural-proxy checks and frees all three
+owners. It does not claim recovery after contract-violating reentry.
+
+One additional body/food alias fixture initially enabled food after applying
+packets, contrary to the API. Its failure is retained; the corrected fixture
+enables the factory at initial ingress. These synthetic observations do not
+establish original artwork/loading, browser pixels, full game-page/session UI,
+extension activation or gameplay acceptance. See [stock adapters](stock-client.md).
+
 ## Single image eye integration
 
 The additive face-family path passes 426 native all-target tests and 169 Node
