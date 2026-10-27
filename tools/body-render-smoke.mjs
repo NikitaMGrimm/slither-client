@@ -7,6 +7,7 @@ import { faceRenderSmoke } from './face-render-smoke.mjs';
 import { foodRenderSmoke } from './food-render-smoke.mjs';
 import { preyRenderSmoke } from './prey-render-smoke.mjs';
 import { arenaEdgeRenderSmoke, assertArenaEdge } from './arena-edge-render-smoke.mjs';
+import { antennaRenderSmoke } from './antenna-render-smoke.mjs';
 
 // Original synthetic sources and Canvas recorder. This executes the real Wasm
 // ABI, but models Canvas state; it is neither a browser nor a raster oracle.
@@ -17,10 +18,12 @@ export function bodyRenderSmoke(wasm) {
   const rejects = (fn, message) => { assertions++; assert.throws(fn, message); };
   class CanvasRenderingContext2D {
     trace = []; stack = []; alpha = 1; blend = 'source-over'; transforms = []; alphaWrites = [];
-    failSource = null; failMethod = null; failSourceAt = 1; failSourceCount = 0; failMethodAfterEyes = null;
+    failSource = null; failMethod = null; failSourceAt = 1; failSourceCount = 0; failMethodAfterEyes = null; nullPattern = false;
     beforeCanvasCall = null; path = []; pathCommands = []; fillStyle = '#000000'; strokeStyle = '#000000'; lineWidth = 1;
+    lineCap = 'butt'; lineJoin = 'miter';
     reset() { this.trace.push({ op: 'reset' }); this.stack = []; this.alpha = 1; this.blend = 'source-over'; this.transforms = []; this.alphaWrites = [];
-      this.path = []; this.pathCommands = []; this.fillStyle = '#000000'; this.strokeStyle = '#000000'; this.lineWidth = 1; }
+      this.path = []; this.pathCommands = []; this.fillStyle = '#000000'; this.strokeStyle = '#000000'; this.lineWidth = 1;
+      this.lineCap = 'butt'; this.lineJoin = 'miter'; }
     get globalAlpha() { return this.alpha; }
     set globalAlpha(requested) {
       if (Number.isFinite(requested) && requested >= 0 && requested <= 1) this.alpha = requested;
@@ -30,7 +33,8 @@ export function bodyRenderSmoke(wasm) {
     get globalCompositeOperation() { return this.blend; }
     set globalCompositeOperation(value) { this.throwIf('globalCompositeOperation'); this.blend = value; this.trace.push({ op: 'blend', value }); }
     savedState() { return { alpha: this.alpha, blend: this.blend, transforms: this.transforms.slice(),
-      fillStyle: this.fillStyle, strokeStyle: this.strokeStyle, lineWidth: this.lineWidth }; }
+      fillStyle: this.fillStyle, strokeStyle: this.strokeStyle, lineWidth: this.lineWidth,
+      lineCap: this.lineCap, lineJoin: this.lineJoin }; }
     save() { this.beforeCanvasCall?.('save', this); this.stack.push(this.savedState()); this.trace.push({ op: 'save', state: this.savedState() }); }
     restore() { Object.assign(this, this.stack.pop()); this.trace.push({ op: 'restore', state: this.savedState() }); }
     setTransform(...args) { this.throwIf('setTransform'); this.transforms = [['setTransform', ...args]]; }
@@ -43,7 +47,7 @@ export function bodyRenderSmoke(wasm) {
         throw new Error(`synthetic Canvas ${method}`);
       }
     }
-    createPattern(source, repetition) { this.throwIf('createPattern'); return { source, repetition }; }
+    createPattern(source, repetition) { this.throwIf('createPattern'); return this.nullPattern ? null : { source, repetition }; }
     beginPath() { this.throwIf('beginPath'); this.path = []; this.pathCommands = []; this.trace.push({ op: 'beginPath' }); }
     arc(...args) { this.throwIf('arc'); this.path.push(args); this.pathCommands.push({ op: 'arc', args }); this.trace.push({ op: 'arc', args }); }
     moveTo(...args) { this.throwIf('moveTo'); this.path.push(args); this.pathCommands.push({ op: 'moveTo', args }); this.trace.push({ op: 'moveTo', args }); }
@@ -51,10 +55,12 @@ export function bodyRenderSmoke(wasm) {
     closePath() { this.throwIf('closePath'); this.pathCommands.push({ op: 'closePath' }); this.trace.push({ op: 'closePath' }); }
     fillRect(...args) { this.trace.push({ op: 'fillRect', args }); }
     stroke() { this.throwIf('stroke'); this.trace.push({ op: 'stroke', path: this.path.slice(), commands: this.pathCommands.slice(), color: this.strokeStyle,
-      width: this.lineWidth, alpha: this.alpha, blend: this.blend, transforms: this.transforms.slice() }); }
+      width: this.lineWidth, alpha: this.alpha, blend: this.blend, transforms: this.transforms.slice(),
+      lineCap: this.lineCap, lineJoin: this.lineJoin }); }
     fill(...args) { this.throwIf('fill'); this.trace.push({ op: 'fill', args, path: this.path.slice(), commands: this.pathCommands.slice(),
       color: this.fillStyle, alpha: this.alpha, blend: this.blend, transforms: this.transforms.slice() }); }
     drawImage(source, ...args) {
+      this.throwIf('drawImage');
       if (source === this.failSource && ++this.failSourceCount === this.failSourceAt) throw new Error('synthetic Canvas drawImage');
       this.trace.push({ op: 'image', source, args, alpha: this.alpha, blend: this.blend,
         transforms: this.transforms.slice(), alphaWrites: this.alphaWrites.slice() });
@@ -148,6 +154,7 @@ export function bodyRenderSmoke(wasm) {
     foodRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok, rejects });
     preyRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok, rejects });
     arenaEdgeRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok, rejects });
+    antennaRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok, rejects });
     const style = { ...vanillaEyes(), distance: 9.25, separation: 4.75, radius: 4.25,
       pupilRadius: 1.5, pupilTravel: 0.02, outlineWidth: 2.5,
       eyeColor: 0x123456, pupilColor: 0xabcdef, eyeOpacity: 0.6, pupilOpacity: 0.8 };

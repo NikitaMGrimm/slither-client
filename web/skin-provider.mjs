@@ -40,6 +40,26 @@ function revision(value) {
   return integer(value, 0, Number.MAX_SAFE_INTEGER, 'revision');
 }
 
+function antennaGeometry(value) {
+  if (value instanceof Promise) throw new TypeError('Antenna geometry must be synchronous');
+  const kind = choice(field(value, 'kind'), ['ordinary-chain'], 'antenna topology');
+  const post = field(value, 'postBulbStrokes');
+  if (post !== undefined && flag(post, 'postBulbStrokes')) throw new TypeError('Post-bulb strokes are unsupported');
+  const bulbInput = field(value, 'bulb');
+  if (bulbInput instanceof Promise) throw new TypeError('Antenna bulb geometry must be synchronous');
+  const bulb = {};
+  for (const key of ['offsetX', 'offsetY']) bulb[key] = number(field(bulbInput, key), -65535, 65535, key);
+  for (const key of ['width', 'height']) bulb[key] = number(field(bulbInput, key), Number.MIN_VALUE, 65535, key);
+  bulb.scale = number(field(bulbInput, 'scale'), Number.MIN_VALUE, 256, 'bulb scale');
+  bulb.opacity = number(field(bulbInput, 'opacity'), 0, 1, 'bulb opacity');
+  return freeze({ kind, nodes: choice(field(value, 'nodes'), [8, 9, 11], 'antenna nodes'),
+    outerColor: integer(field(value, 'outerColor'), 0, 0xffffff, 'outerColor'),
+    innerColor: integer(field(value, 'innerColor'), 0, 0xffffff, 'innerColor'),
+    innerOpacity: number(field(value, 'innerOpacity'), 0, 1, 'innerOpacity'),
+    repeatedInnerStrokes: flag(field(value, 'repeatedInnerStrokes'), 'repeatedInnerStrokes'),
+    rotateBulb: flag(field(value, 'rotateBulb'), 'rotateBulb'), bulb: freeze(bulb) });
+}
+
 function requestSnapshot(request) {
   const skin = integer(field(request, 'skin'), 0, 255, 'skin');
   const custom = field(request, 'customBytes');
@@ -212,6 +232,21 @@ export function createSkinProvider({ trusted, realm, resolveHostRecipe, normaliz
         }
       }
       const attachmentInput = field(normalized, 'attachment');
+      const antennaInput = field(normalized, 'antenna');
+      let antenna = null;
+      if (antennaInput !== undefined && antennaInput !== null) {
+        if (antennaInput instanceof Promise) throw new TypeError('Antenna metadata must be synchronous');
+        const kind = choice(field(antennaInput, 'kind'), ['ordinary-chain'], 'antenna topology');
+        const post = field(antennaInput, 'postBulbStrokes');
+        if (post !== undefined && flag(post, 'postBulbStrokes')) throw new TypeError('Post-bulb strokes are unsupported');
+        const geometry = antennaGeometry(field(antennaInput, 'geometry'));
+        const image = field(antennaInput, 'image');
+        if (image instanceof Promise) throw new TypeError('Antenna image must be synchronous');
+        if (field(image, 'sourceMode') !== 'whole' || field(image, 'sourceRect') !== undefined) {
+          throw new TypeError('Antenna bulb requires an explicit whole source without sourceRect');
+        }
+        antenna = freeze({ kind, geometry, image: assetUse(image, true) });
+      }
       const decorationInput = field(normalized, 'faceDecoration');
       let faceDecoration = null;
       if (decorationInput !== undefined && decorationInput !== null) {
@@ -245,10 +280,10 @@ export function createSkinProvider({ trusted, realm, resolveHostRecipe, normaliz
       }));
       const supportedFeatures = freeze(['body-palettes', ...(eyeKind === 'standard' ? ['standard-eyes'] : []), ...effectKinds,
         ...(attachment ? ['head-attachment'] : []), ...(bodyStyle ? ['standard-body-style'] : []),
-        ...(faceDecoration ? ['paired-side-images'] : [])]);
+        ...(faceDecoration ? ['paired-side-images'] : []), ...(antenna ? ['ordinary-antenna'] : [])]);
       const recipe = freeze({ basePalette, custom, runs, palettes, variantMode, variantPeriod, eyes: freeze(eyes), effects,
         attachment, supportedFeatures, unsupportedFeatures, ...(bodyStyle ? { bodyStyle } : {}),
-        ...(faceDecoration ? { faceDecoration } : {}) });
+        ...(faceDecoration ? { faceDecoration } : {}), ...(antenna ? { antenna } : {}) });
       const statuses = [...borrowed.values()].map(asset => asset.status);
       const status = unsupportedFeatures.length || statuses.includes('unsupported') ? 'unsupported'
         : statuses.includes('pending') ? 'pending' : 'ready';

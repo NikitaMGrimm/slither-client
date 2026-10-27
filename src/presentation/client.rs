@@ -3,11 +3,13 @@
 use std::{collections::BTreeSet, error::Error, fmt};
 
 use super::{
-    AnchorView, ArenaEdgeView, BodyPaintGeometry, BodyPaintSample, BodyPaintView, BoundaryRadius,
-    CurveOutput, FollowCamera, FoodConsume, FoodCullBounds, FoodEaterPose, FoodError, FoodFactory,
-    FoodSpawn, FoodWorld, FrameClock, FrameStep, MAX_CURVE_SAMPLES, PairedFaceGeometry,
-    PairedSideGeometry, PresentationError, PreyError, PreyFactory, PreyWorld, SnakeMetrics,
-    SnakeObjectToken, SnakePresentation, StandardEyeGeometry, finite,
+    AnchorView, AntennaCullBounds, AntennaDrawInput, AntennaError, AntennaSnapshot, AntennaState,
+    ArenaEdgeView, BodyPaintGeometry, BodyPaintSample, BodyPaintView, BoundaryRadius, CurveOutput,
+    FollowCamera, FoodConsume, FoodCullBounds, FoodEaterPose, FoodError, FoodFactory, FoodSpawn,
+    FoodWorld, FrameClock, FrameStep, MAX_CURVE_SAMPLES, OrdinaryAntennaGeometry,
+    PairedFaceGeometry, PairedSideGeometry, PreparedAntenna, PresentationError, PreyError,
+    PreyFactory, PreyWorld, SnakeMetrics, SnakeObjectToken, SnakePresentation, StandardEyeGeometry,
+    finite,
 };
 use crate::{
     protocol::ElapsedHeader,
@@ -23,6 +25,101 @@ pub const MAX_RETAINED_SNAKES: usize = MAX_SNAKES * 2;
 pub const MAX_RETAINED_TOTAL_BODY_POINTS: usize = MAX_TOTAL_BODY_POINTS * 2;
 /// Aggregate active curve samples permitted in one prepared numeric draw.
 pub const MAX_DRAW_SAMPLES: usize = MAX_RETAINED_TOTAL_BODY_POINTS * 2;
+
+/// Appearance-owned numeric style; borrowed images are resolved only during drawing.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct AppearancePresentation {
+    /// Complete supported paired face, including optional side images.
+    pub face: PairedFaceGeometry,
+    /// Explicit ordinary antenna configuration, independent of wire skin identifiers.
+    pub antenna: Option<OrdinaryAntennaGeometry>,
+}
+
+/// Identity and consumption of one eligible appearance's draw-time random request.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AntennaRandomRequest {
+    /// Stable appearance identity, retained through duplicate/reused wire IDs.
+    pub token: SnakeObjectToken,
+    /// Appearance's wire identifier; diagnostic only.
+    pub id: u16,
+    /// Whether this is the retained original own object.
+    pub own: bool,
+    /// Index in the current complete draw collection, including culled entries.
+    pub draw_ordinal: usize,
+    /// Configured chain length, including the root.
+    pub node_count: usize,
+    /// Exactly one x/y pair for each non-root node.
+    pub random_pair_count: usize,
+    /// Monotonic numeric draw serial, shared by every appearance in this draw.
+    pub draw_serial: u64,
+}
+
+/// Remaining aggregate antenna resources for a disposable ingress transaction.
+/// Reuse the same budget for every ordered Setup draw; image budgets also charge bulbs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AntennaDrawBudget {
+    /// Remaining bulb image commands.
+    pub bulbs: usize,
+    /// Remaining nonempty paths.
+    pub paths: usize,
+    /// Remaining stroke commands.
+    pub strokes: usize,
+    /// Remaining stored outer and inner path vertices.
+    pub vertices: usize,
+    /// Remaining scalar random units (two per node pair).
+    pub random_units: usize,
+}
+
+impl Default for AntennaDrawBudget {
+    fn default() -> Self {
+        Self {
+            bulbs: 512,
+            paths: 1024,
+            strokes: 2048,
+            vertices: 11264,
+            random_units: 10240,
+        }
+    }
+}
+
+impl AntennaDrawBudget {
+    fn charge(
+        &mut self,
+        prepared: &PreparedAntenna,
+        random_units: usize,
+    ) -> Result<(), ClientPresentationError> {
+        let vertices = prepared
+            .outer_path
+            .len()
+            .checked_add(prepared.inner_path.len())
+            .ok_or(ClientPresentationError::Limit)?;
+        let paths = usize::from(!prepared.outer_path.is_empty())
+            + usize::from(!prepared.inner_path.is_empty());
+        *self = Self {
+            bulbs: self
+                .bulbs
+                .checked_sub(usize::from(prepared.bulb.is_some()))
+                .ok_or(ClientPresentationError::Limit)?,
+            paths: self
+                .paths
+                .checked_sub(paths)
+                .ok_or(ClientPresentationError::Limit)?,
+            strokes: self
+                .strokes
+                .checked_sub(prepared.strokes.len())
+                .ok_or(ClientPresentationError::Limit)?,
+            vertices: self
+                .vertices
+                .checked_sub(vertices)
+                .ok_or(ClientPresentationError::Limit)?,
+            random_units: self
+                .random_units
+                .checked_sub(random_units)
+                .ok_or(ClientPresentationError::Limit)?,
+        };
+        Ok(())
+    }
+}
 
 /// Owned active body-painter inputs captured during a visible snake's numeric draw.
 #[derive(Clone, Debug, PartialEq)]
@@ -50,6 +147,8 @@ impl PreparedBodyGeometry {
 /// Finish this body's eye/pupil pairs before painting the next prepared snake.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreparedSnake {
+    /// Stable appearance identity for coherent draw-time source resolution.
+    pub token: SnakeObjectToken,
     /// Index in the full draw collection, including culled entries before this one.
     pub draw_ordinal: usize,
     /// Whether this is the retained original own object, independently of wire ID.
@@ -68,11 +167,23 @@ pub struct PreparedSnake {
     pub eye_geometry: StandardEyeGeometry,
     /// Appearance-owned side-image geometry; assets are borrowed only during submission.
     pub face_decoration: Option<PairedSideGeometry>,
+    /// Exact appearance configuration, retained even when its inner gate rejects.
+    pub antenna_geometry: Option<OrdinaryAntennaGeometry>,
+    /// Numeric commands and death-barrier effect from this draw's single chain visit.
+    pub antenna: Option<PreparedAntenna>,
 }
 
 /// A failed received, numeric, or retention transition; the entire client is preserved.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ClientPresentationError {
+    /// Antenna configuration, random inputs or numeric preparation failed.
+    Antenna(AntennaError),
+    /// Full appearance metadata must be enabled before packets or after reset.
+    AppearanceModeRequiresReset,
+    /// Enabled appearance ownership requires the full resolver for new appearances.
+    AppearanceResolverRequired,
+    /// A configured drawn antenna requires an explicit draw-time random capability.
+    AntennaRandomRequired,
     /// Packet framing, validation, received-state policy, or received-state capacity failed.
     State(StateError),
     /// A presentation input or arithmetic result is invalid.
@@ -98,6 +209,16 @@ pub enum ClientPresentationError {
 impl fmt::Display for ClientPresentationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Antenna(error) => error.fmt(f),
+            Self::AppearanceModeRequiresReset => {
+                f.write_str("enable full appearance presentation before packets or after reset")
+            }
+            Self::AppearanceResolverRequired => {
+                f.write_str("appearance creation requires a full presentation resolver")
+            }
+            Self::AntennaRandomRequired => {
+                f.write_str("antenna drawing requires an explicit random capability")
+            }
             Self::State(error) => error.fmt(f),
             Self::Presentation(error) => error.fmt(f),
             Self::Food(error) => error.fmt(f),
@@ -119,11 +240,15 @@ impl fmt::Display for ClientPresentationError {
 impl Error for ClientPresentationError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
+            Self::Antenna(error) => Some(error),
             Self::State(error) => Some(error),
             Self::Presentation(error) => Some(error),
             Self::Food(error) => Some(error),
             Self::Prey(error) => Some(error),
             Self::Limit
+            | Self::AppearanceModeRequiresReset
+            | Self::AppearanceResolverRequired
+            | Self::AntennaRandomRequired
             | Self::UnsupportedMode(_)
             | Self::FoodFactoryRequired
             | Self::FoodModeRequiresReset
@@ -136,6 +261,12 @@ impl Error for ClientPresentationError {
 impl From<StateError> for ClientPresentationError {
     fn from(error: StateError) -> Self {
         Self::State(error)
+    }
+}
+
+impl From<AntennaError> for ClientPresentationError {
+    fn from(error: AntennaError) -> Self {
+        Self::Antenna(error)
     }
 }
 
@@ -167,6 +298,7 @@ struct Entry {
     own: bool,
     drawn: bool,
     snake: SnakePresentation,
+    antenna: Option<AntennaState>,
 }
 
 impl Entry {
@@ -209,6 +341,9 @@ pub struct AnimatedClient {
     preys: PreyWorld,
     prey_enabled: bool,
     last_snake_serial: u64,
+    appearance_enabled: bool,
+    antenna_bounds: Option<AntennaCullBounds>,
+    draw_serial: u64,
 }
 
 fn validate_draw_inputs(
@@ -241,6 +376,9 @@ impl AnimatedClient {
             preys: PreyWorld::new(),
             prey_enabled: false,
             last_snake_serial: 0,
+            appearance_enabled: false,
+            antenna_bounds: None,
+            draw_serial: 0,
         })
     }
 
@@ -471,17 +609,158 @@ impl AnimatedClient {
         )
     }
 
+    /// Resolve complete appearance metadata once in wire order, before its first update.
+    /// Start before packets or after reset; enabled sessions require this resolver
+    /// for later appearances. Callback effects remain external to model rollback.
+    pub fn apply_frame_with_appearance<E, F>(
+        &mut self,
+        bytes: &[u8],
+        header: ElapsedHeader,
+        resolve: F,
+    ) -> Result<FrameReport, E>
+    where
+        E: From<ClientPresentationError>,
+        F: FnMut(&Appearance) -> Result<AppearancePresentation, E>,
+    {
+        self.apply_frame_appearance_resolved(
+            bytes,
+            header,
+            resolve,
+            true,
+            |_, _| Ok(None),
+            false,
+            |_, _| Ok(None),
+            false,
+            |_, _| Ok(()),
+        )
+    }
+
+    /// Install full appearances and food factories in the same atomic event transaction.
+    pub fn apply_frame_with_appearance_and_factories<E, F, G>(
+        &mut self,
+        bytes: &[u8],
+        header: ElapsedHeader,
+        resolve: F,
+        mut resolve_food: G,
+    ) -> Result<FrameReport, E>
+    where
+        E: From<ClientPresentationError>,
+        F: FnMut(&Appearance) -> Result<AppearancePresentation, E>,
+        G: FnMut(&FoodSpawnInput, f64) -> Result<FoodFactory, E>,
+    {
+        self.apply_frame_appearance_resolved(
+            bytes,
+            header,
+            resolve,
+            true,
+            |spawn, zoom| resolve_food(spawn, zoom).map(Some),
+            true,
+            |_, _| Ok(None),
+            false,
+            |_, _| Ok(()),
+        )
+    }
+
+    /// Install full appearances and both creation factories in wire order.
+    pub fn apply_frame_with_appearance_and_all_factories<E, F, G, P>(
+        &mut self,
+        bytes: &[u8],
+        header: ElapsedHeader,
+        resolve: F,
+        mut resolve_food: G,
+        mut resolve_prey: P,
+    ) -> Result<FrameReport, E>
+    where
+        E: From<ClientPresentationError>,
+        F: FnMut(&Appearance) -> Result<AppearancePresentation, E>,
+        G: FnMut(&FoodSpawnInput, f64) -> Result<FoodFactory, E>,
+        P: FnMut(&PreySpawnInput, f64) -> Result<PreyFactory, E>,
+    {
+        self.apply_frame_appearance_resolved(
+            bytes,
+            header,
+            resolve,
+            true,
+            |spawn, zoom| resolve_food(spawn, zoom).map(Some),
+            true,
+            |spawn, zoom| resolve_prey(spawn, zoom).map(Some),
+            true,
+            |_, _| Ok(()),
+        )
+    }
+
+    /// Plan event-time Setup draws with full appearances and food factories.
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(crate) fn apply_frame_with_appearance_and_factories_and_setup<E, F, G, H>(
+        &mut self,
+        bytes: &[u8],
+        header: ElapsedHeader,
+        resolve: F,
+        mut resolve_food: G,
+        on_setup: H,
+    ) -> Result<FrameReport, E>
+    where
+        E: From<ClientPresentationError>,
+        F: FnMut(&Appearance) -> Result<AppearancePresentation, E>,
+        G: FnMut(&FoodSpawnInput, f64) -> Result<FoodFactory, E>,
+        H: FnMut(&mut AnimatedClient, &Setup) -> Result<(), E>,
+    {
+        self.apply_frame_appearance_resolved(
+            bytes,
+            header,
+            resolve,
+            true,
+            |spawn, zoom| resolve_food(spawn, zoom).map(Some),
+            true,
+            |_, _| Ok(None),
+            false,
+            on_setup,
+        )
+    }
+
+    /// Plan every ordered Setup with the complete appearance, food and prey transaction.
+    #[cfg(any(target_arch = "wasm32", test))]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn apply_frame_with_appearance_and_all_factories_and_setup<E, F, G, P, H>(
+        &mut self,
+        bytes: &[u8],
+        header: ElapsedHeader,
+        resolve: F,
+        mut resolve_food: G,
+        mut resolve_prey: P,
+        on_setup: H,
+    ) -> Result<FrameReport, E>
+    where
+        E: From<ClientPresentationError>,
+        F: FnMut(&Appearance) -> Result<AppearancePresentation, E>,
+        G: FnMut(&FoodSpawnInput, f64) -> Result<FoodFactory, E>,
+        P: FnMut(&PreySpawnInput, f64) -> Result<PreyFactory, E>,
+        H: FnMut(&mut AnimatedClient, &Setup) -> Result<(), E>,
+    {
+        self.apply_frame_appearance_resolved(
+            bytes,
+            header,
+            resolve,
+            true,
+            |spawn, zoom| resolve_food(spawn, zoom).map(Some),
+            true,
+            |spawn, zoom| resolve_prey(spawn, zoom).map(Some),
+            true,
+            on_setup,
+        )
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn apply_frame_resolved<E, F, G, P, H>(
         &mut self,
         bytes: &[u8],
         header: ElapsedHeader,
         mut resolve: F,
-        mut resolve_food: G,
+        resolve_food: G,
         enable_food: bool,
-        mut resolve_prey: P,
+        resolve_prey: P,
         enable_prey: bool,
-        mut on_setup: H,
+        on_setup: H,
     ) -> Result<FrameReport, E>
     where
         E: From<ClientPresentationError>,
@@ -490,10 +769,51 @@ impl AnimatedClient {
         P: FnMut(&PreySpawnInput, f64) -> Result<Option<PreyFactory>, E>,
         H: FnMut(&mut AnimatedClient, &Setup) -> Result<(), E>,
     {
+        self.apply_frame_appearance_resolved(
+            bytes,
+            header,
+            |appearance| {
+                Ok(AppearancePresentation {
+                    face: resolve(appearance)?,
+                    antenna: None,
+                })
+            },
+            false,
+            resolve_food,
+            enable_food,
+            resolve_prey,
+            enable_prey,
+            on_setup,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn apply_frame_appearance_resolved<E, F, G, P, H>(
+        &mut self,
+        bytes: &[u8],
+        header: ElapsedHeader,
+        mut resolve: F,
+        enable_appearance: bool,
+        mut resolve_food: G,
+        enable_food: bool,
+        mut resolve_prey: P,
+        enable_prey: bool,
+        mut on_setup: H,
+    ) -> Result<FrameReport, E>
+    where
+        E: From<ClientPresentationError>,
+        F: FnMut(&Appearance) -> Result<AppearancePresentation, E>,
+        G: FnMut(&FoodSpawnInput, f64) -> Result<Option<FoodFactory>, E>,
+        P: FnMut(&PreySpawnInput, f64) -> Result<Option<PreyFactory>, E>,
+        H: FnMut(&mut AnimatedClient, &Setup) -> Result<(), E>,
+    {
         let mut received = self.received.clone();
         let applied = received
             .apply_frame_with_events(bytes, header)
             .map_err(ClientPresentationError::from)?;
+        if enable_appearance && !self.appearance_enabled && self.received.frames_applied != 0 {
+            return Err(ClientPresentationError::AppearanceModeRequiresReset.into());
+        }
         if enable_food && !self.food_enabled && self.received.frames_applied != 0 {
             return Err(ClientPresentationError::FoodModeRequiresReset.into());
         }
@@ -504,11 +824,13 @@ impl AnimatedClient {
             self.received = received;
             self.food_enabled |= enable_food;
             self.prey_enabled |= enable_prey;
+            self.appearance_enabled |= enable_appearance;
             return Ok(applied.report);
         }
         let mut next = self.clone();
         next.food_enabled |= enable_food;
         next.prey_enabled |= enable_prey;
+        next.appearance_enabled |= enable_appearance;
         let mut setup = self.received.setup.clone();
         for event in applied.events {
             match event {
@@ -540,6 +862,9 @@ impl AnimatedClient {
                     on_setup(&mut next, setup.insert(value))?;
                 }
                 PresentationEvent::SnakeAppearance(appearance) => {
+                    if next.appearance_enabled && !enable_appearance {
+                        return Err(ClientPresentationError::AppearanceResolverRequired.into());
+                    }
                     let setup = setup
                         .as_ref()
                         .ok_or(StateError::MissingSetup)
@@ -549,9 +874,16 @@ impl AnimatedClient {
                         &appearance,
                         setup,
                         next.camera.zoom(),
-                        geometry,
+                        geometry.face,
                     )
                     .map_err(ClientPresentationError::from)?;
+                    let antenna = geometry
+                        .antenna
+                        .map(|geometry| {
+                            AntennaState::from_appearance(geometry, appearance.absolute_head)
+                        })
+                        .transpose()
+                        .map_err(ClientPresentationError::from)?;
                     let own = next.own_snake().is_none();
                     if own {
                         let position = snake
@@ -581,6 +913,7 @@ impl AnimatedClient {
                         own,
                         drawn: true,
                         snake,
+                        antenna,
                     });
                     next.check_limits()?;
                 }
@@ -841,6 +1174,35 @@ impl AnimatedClient {
         Ok(prepared)
     }
 
+    /// Prepare one numeric draw with explicit ordered antenna randomness.
+    /// This consumes the same camera, spacing and eye transition as rendering;
+    /// do not prepare again for the same draw. Callback effects cannot roll back.
+    pub fn prepare_draw_with_antenna<E, R>(
+        &mut self,
+        width: u32,
+        height: u32,
+        quality_scale: f64,
+        detailed_style: bool,
+        resolve_random: R,
+    ) -> Result<Vec<PreparedSnake>, E>
+    where
+        E: From<ClientPresentationError>,
+        R: FnMut(AntennaRandomRequest) -> Result<Vec<[f64; 2]>, E>,
+    {
+        let mut next = self.clone();
+        let prepared = next.prepare_draw_resolved_with_antenna_limited_staged(
+            width,
+            height,
+            quality_scale,
+            MAX_DRAW_SAMPLES,
+            &mut AntennaDrawBudget::default(),
+            |_, _, _| Ok(detailed_style),
+            resolve_random,
+        )?;
+        *self = next;
+        Ok(prepared)
+    }
+
     /// Prepare an already staged client without copying the world again.
     /// The caller must discard this client on any later preparation or drawing
     /// error: this method can leave partial camera, eye, spacing and flag changes.
@@ -886,15 +1248,84 @@ impl AnimatedClient {
         height: u32,
         quality_scale: f64,
         sample_limit: usize,
-        mut resolve_style: F,
+        resolve_style: F,
     ) -> Result<Vec<PreparedSnake>, E>
     where
         E: From<ClientPresentationError>,
         F: FnMut(usize, bool, &SnakePresentation) -> Result<bool, E>,
     {
+        self.prepare_draw_antenna_resolved_staged(
+            width,
+            height,
+            quality_scale,
+            sample_limit,
+            &mut AntennaDrawBudget::default(),
+            resolve_style,
+            None::<fn(AntennaRandomRequest) -> Result<Vec<[f64; 2]>, E>>,
+        )
+    }
+
+    /// Prepare once on a disposable stage with aggregate sample and antenna limits.
+    /// The caller must discard both client and budget after any later failure.
+    /// Share this budget across all ordered Setup plans in the same ingress.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn prepare_draw_resolved_with_antenna_limited_staged<E, F, R>(
+        &mut self,
+        width: u32,
+        height: u32,
+        quality_scale: f64,
+        sample_limit: usize,
+        antenna_budget: &mut AntennaDrawBudget,
+        resolve_style: F,
+        resolve_random: R,
+    ) -> Result<Vec<PreparedSnake>, E>
+    where
+        E: From<ClientPresentationError>,
+        F: FnMut(usize, bool, &SnakePresentation) -> Result<bool, E>,
+        R: FnMut(AntennaRandomRequest) -> Result<Vec<[f64; 2]>, E>,
+    {
+        self.prepare_draw_antenna_resolved_staged(
+            width,
+            height,
+            quality_scale,
+            sample_limit,
+            antenna_budget,
+            resolve_style,
+            Some(resolve_random),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn prepare_draw_antenna_resolved_staged<E, F, R>(
+        &mut self,
+        width: u32,
+        height: u32,
+        quality_scale: f64,
+        sample_limit: usize,
+        antenna_budget: &mut AntennaDrawBudget,
+        mut resolve_style: F,
+        mut resolve_random: Option<R>,
+    ) -> Result<Vec<PreparedSnake>, E>
+    where
+        E: From<ClientPresentationError>,
+        F: FnMut(usize, bool, &SnakePresentation) -> Result<bool, E>,
+        R: FnMut(AntennaRandomRequest) -> Result<Vec<[f64; 2]>, E>,
+    {
         validate_draw_inputs(width, height, quality_scale)?;
+        if resolve_random.is_none()
+            && self
+                .entries
+                .iter()
+                .any(|entry| entry.drawn && entry.antenna.is_some())
+        {
+            return Err(ClientPresentationError::AntennaRandomRequired.into());
+        }
         let sample_limit = sample_limit.min(MAX_DRAW_SAMPLES);
         let next = self;
+        next.draw_serial = next
+            .draw_serial
+            .checked_add(1)
+            .ok_or(ClientPresentationError::Limit)?;
         if let Some(own) = next.own_snake() {
             let metrics = own.metrics();
             next.camera
@@ -912,8 +1343,23 @@ impl AnimatedClient {
                 })
                 .map_err(|_| ClientPresentationError::Presentation(PresentationError))?,
             );
+            next.antenna_bounds = Some(
+                AntennaCullBounds::from_view(BodyPaintView {
+                    camera: next.camera.position(),
+                    zoom: next.camera.zoom(),
+                    half_width: f64::from(width) / 2.,
+                    half_height: f64::from(height) / 2.,
+                })
+                .map_err(ClientPresentationError::from)?,
+            );
         }
         let camera = next.camera.position();
+        let antenna_view = BodyPaintView {
+            camera,
+            zoom: next.camera.zoom(),
+            half_width: f64::from(width) / 2.,
+            half_height: f64::from(height) / 2.,
+        };
         let half_width = f64::from(width) / 2. / next.camera.zoom() + 84.;
         let half_height = f64::from(height) / 2. / next.camera.zoom() + 84.;
         let left = camera.x - half_width;
@@ -985,7 +1431,54 @@ impl AnimatedClient {
                     distance_cursor_seed,
                 })
             });
+            let antenna_geometry = entry.antenna.as_ref().map(AntennaState::geometry);
+            let antenna = if let Some(state) = &entry.antenna {
+                let metrics = entry.snake.metrics();
+                let request = state
+                    .prepare_draw(AntennaDrawInput {
+                        raw_heading: metrics.heading,
+                        corrected_head: metrics.corrected_head,
+                        scale: metrics.scale,
+                        spawn: metrics.spawn_progress,
+                        death: metrics.death_progress,
+                        active_curve_count: curve.as_ref().map_or(0, |curve| curve.samples.len()),
+                        whole_snake_visible: metrics.visible,
+                        view: antenna_view,
+                        bounds: next.antenna_bounds,
+                    })
+                    .map_err(ClientPresentationError::from)?;
+                let pair_count = request.random_pair_count();
+                let random_units = pair_count
+                    .checked_mul(2)
+                    .filter(|count| *count <= antenna_budget.random_units)
+                    .ok_or(ClientPresentationError::Limit)?;
+                let pairs = if pair_count == 0 {
+                    Vec::new()
+                } else {
+                    let callback = resolve_random
+                        .as_mut()
+                        .ok_or(ClientPresentationError::AntennaRandomRequired)?;
+                    callback(AntennaRandomRequest {
+                        token: entry.token,
+                        id: metrics.id,
+                        own: entry.own,
+                        draw_ordinal,
+                        node_count: state.geometry().nodes,
+                        random_pair_count: pair_count,
+                        draw_serial: next.draw_serial,
+                    })?
+                };
+                let (state, commands) = request
+                    .finish(&pairs)
+                    .map_err(ClientPresentationError::from)?;
+                antenna_budget.charge(&commands, random_units)?;
+                entry.antenna = Some(state);
+                Some(commands)
+            } else {
+                None
+            };
             prepared.push(PreparedSnake {
+                token: entry.token,
                 draw_ordinal,
                 own: entry.own,
                 metrics: entry.snake.metrics(),
@@ -995,6 +1488,8 @@ impl AnimatedClient {
                 pupil: entry.snake.eyes().pupil(),
                 eye_geometry: *entry.snake.eye_geometry(),
                 face_decoration: entry.snake.face_geometry().decoration,
+                antenna_geometry,
+                antenna,
             });
         }
         Ok(prepared)
@@ -1056,6 +1551,49 @@ impl AnimatedClient {
     /// Whether every prey appearance requires a retained creation factory.
     pub fn prey_enabled(&self) -> bool {
         self.prey_enabled
+    }
+
+    /// Whether new appearances require the complete numeric presentation resolver.
+    pub fn appearance_enabled(&self) -> bool {
+        self.appearance_enabled
+    }
+
+    /// Retained 210-unit root-culling bounds, refreshed only by retained-own draws.
+    pub fn antenna_bounds(&self) -> Option<AntennaCullBounds> {
+        self.antenna_bounds
+    }
+
+    /// Successful numeric draw serial; reset retains the draw timeline.
+    pub fn draw_serial(&self) -> u64 {
+        self.draw_serial
+    }
+
+    /// Copy all retained antenna channels without advancing any draw or update.
+    pub fn antenna_snapshot(&self, token: SnakeObjectToken) -> Option<AntennaSnapshot> {
+        self.entries
+            .iter()
+            .find(|entry| entry.token == token)
+            .and_then(|entry| entry.antenna.as_ref())
+            .map(AntennaState::snapshot)
+    }
+
+    /// Copy retained configuration without allocating any channel snapshots.
+    pub fn antenna_geometry(&self, token: SnakeObjectToken) -> Option<OrdinaryAntennaGeometry> {
+        self.entries
+            .iter()
+            .find(|entry| entry.token == token)
+            .and_then(|entry| entry.antenna.as_ref())
+            .map(AntennaState::geometry)
+    }
+
+    /// Stable identities, own/draw membership and read-only snakes in retained order.
+    /// The tuple is (token, own, drawn, snake), including undrawn retained own objects.
+    pub fn snake_objects(
+        &self,
+    ) -> impl Iterator<Item = (SnakeObjectToken, bool, bool, &SnakePresentation)> {
+        self.entries
+            .iter()
+            .map(|entry| (entry.token, entry.own, entry.drawn, &entry.snake))
     }
 
     /// Stable identity of the retained original own object.
@@ -1134,6 +1672,419 @@ mod resolved_draw_tests {
     use super::*;
     use crate::presentation::{BodyAsset, BodyAssetStatus, FoodSource, food_palette};
     use std::{cell::RefCell, rc::Rc};
+
+    fn antenna_style() -> AppearancePresentation {
+        AppearancePresentation {
+            face: PairedFaceGeometry::default(),
+            antenna: Some(OrdinaryAntennaGeometry {
+                nodes: 9,
+                outer_color: 0x123456,
+                inner_color: 0xabcdef,
+                inner_opacity: 0.4,
+                repeated_inner_strokes: true,
+                rotate_bulb: true,
+                bulb: super::super::AntennaBulbGeometry {
+                    offset_x: -7.,
+                    offset_y: -9.,
+                    width: 21.,
+                    height: 25.,
+                    scale: 0.75,
+                    opacity: 0.8,
+                },
+            }),
+        }
+    }
+
+    fn antenna_client() -> AnimatedClient {
+        let mut client = AnimatedClient::new(0.).unwrap();
+        client
+            .apply_frame_with_appearance_and_factories::<ClientPresentationError, _, _>(
+                &bundle(&[setup(), spawn(3, 11)]),
+                ElapsedHeader::Absent,
+                |_| Ok(antenna_style()),
+                factory,
+            )
+            .unwrap();
+        client
+    }
+
+    #[test]
+    fn antenna_setup_draws_match_ordered_controls_and_later_failure_rolls_back_chains() {
+        let mut client = antenna_client();
+        let before = client.clone();
+        let mut second = spawn(8, 19);
+        second[1..3].copy_from_slice(&8_u16.to_be_bytes());
+        let commands = [setup(), second, setup(), setup()];
+        let mut seen = Vec::new();
+        let mut states = Vec::new();
+        let mut budget = AntennaDrawBudget::default();
+        client
+            .apply_frame_with_appearance_and_factories_and_setup(
+                &bundle(&commands),
+                ElapsedHeader::Absent,
+                |_| Ok(antenna_style()),
+                factory,
+                |stage, _| {
+                    stage.prepare_draw_resolved_with_antenna_limited_staged(
+                        960,
+                        540,
+                        1.,
+                        MAX_DRAW_SAMPLES,
+                        &mut budget,
+                        |_, _, _| Ok(false),
+                        |r| {
+                            seen.push(r);
+                            Ok::<_, ClientPresentationError>(vec![[0.2, 0.8]; r.random_pair_count])
+                        },
+                    )?;
+                    states.push(stage.clone());
+                    Ok::<_, ClientPresentationError>(())
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            seen.iter()
+                .map(|r| (r.id, r.draw_serial))
+                .collect::<Vec<_>>(),
+            [(7, 1), (7, 2), (8, 2), (7, 3), (8, 3)]
+        );
+        let mut control = before.clone();
+        let mut draw_index = 0;
+        for command in &commands {
+            control
+                .apply_frame_with_appearance_and_factories::<ClientPresentationError, _, _>(
+                    command,
+                    ElapsedHeader::Absent,
+                    |_| Ok(antenna_style()),
+                    factory,
+                )
+                .unwrap();
+            if command[0] == b'a' {
+                control
+                    .prepare_draw_with_antenna(960, 540, 1., false, |r| {
+                        Ok::<_, ClientPresentationError>(vec![[0.2, 0.8]; r.random_pair_count])
+                    })
+                    .unwrap();
+                let staged = &states[draw_index];
+                assert_eq!(staged.camera, control.camera);
+                assert_eq!(staged.entries, control.entries);
+                assert_eq!(staged.antenna_bounds, control.antenna_bounds);
+                assert_eq!(staged.draw_serial, control.draw_serial);
+                draw_index += 1;
+            }
+        }
+        for fail_draw in [1, 2, 3] {
+            let mut rejected = before.clone();
+            let mut calls = 0;
+            let mut hooks = 0;
+            let mut budget = AntennaDrawBudget::default();
+            let result = rejected.apply_frame_with_appearance_and_factories_and_setup(
+                &bundle(&commands),
+                ElapsedHeader::Absent,
+                |_| Ok(antenna_style()),
+                factory,
+                |stage, _| {
+                    hooks += 1;
+                    stage.prepare_draw_resolved_with_antenna_limited_staged(
+                        960,
+                        540,
+                        1.,
+                        MAX_DRAW_SAMPLES,
+                        &mut budget,
+                        |_, _, _| Ok(false),
+                        |r| {
+                            calls += 1;
+                            Ok::<_, ClientPresentationError>(vec![[0.2, 0.8]; r.random_pair_count])
+                        },
+                    )?;
+                    if hooks == fail_draw {
+                        Err(ClientPresentationError::Limit)
+                    } else {
+                        Ok(())
+                    }
+                },
+            );
+            assert_eq!(result, Err(ClientPresentationError::Limit));
+            assert!(calls > 0);
+            assert!(
+                rejected == before,
+                "rollback includes every prior chain and draw serial"
+            );
+        }
+    }
+
+    #[test]
+    fn antenna_shared_limits_charge_actual_paths_and_reject_before_or_after_rng_atomically() {
+        let client = antenna_client();
+        let mut measured = client.clone();
+        let mut used = AntennaDrawBudget::default();
+        let output = measured
+            .prepare_draw_resolved_with_antenna_limited_staged(
+                960,
+                540,
+                1.,
+                MAX_DRAW_SAMPLES,
+                &mut used,
+                |_, _, _| Ok(false),
+                |r| Ok::<_, ClientPresentationError>(vec![[0.2, 0.8]; r.random_pair_count]),
+            )
+            .unwrap();
+        let antenna = output[0].antenna.as_ref().unwrap();
+        assert_eq!(used.bulbs, 511);
+        assert_eq!(used.paths, 1022);
+        assert_eq!(used.strokes, 2044);
+        assert_eq!(
+            used.vertices,
+            11264 - antenna.outer_path.len() - antenna.inner_path.len()
+        );
+        assert_eq!(used.random_units, 10224);
+        let vertices = antenna.outer_path.len() + antenna.inner_path.len();
+        for index in 0..6 {
+            let mut rejected = client.clone();
+            let mut budget = AntennaDrawBudget::default();
+            let sample_limit = if index == 5 { 0 } else { MAX_DRAW_SAMPLES };
+            match index {
+                0 => budget.bulbs = 0,
+                1 => budget.paths = 1,
+                2 => budget.strokes = 3,
+                3 => budget.vertices = vertices - 1,
+                4 => budget.random_units = 15,
+                _ => (),
+            }
+            let mut random_calls = 0;
+            let result = rejected.apply_frame_with_appearance_and_factories_and_setup(
+                &setup(),
+                ElapsedHeader::Absent,
+                |_| Ok(antenna_style()),
+                factory,
+                |stage, _| {
+                    stage.prepare_draw_resolved_with_antenna_limited_staged(
+                        960,
+                        540,
+                        1.,
+                        sample_limit,
+                        &mut budget,
+                        |_, _, _| Ok(false),
+                        |r| {
+                            random_calls += 1;
+                            Ok::<_, ClientPresentationError>(vec![[0.2, 0.8]; r.random_pair_count])
+                        },
+                    )?;
+                    Ok::<_, ClientPresentationError>(())
+                },
+            );
+            assert_eq!(result, Err(ClientPresentationError::Limit));
+            assert_eq!(random_calls, usize::from(index < 4));
+            assert!(
+                rejected == client,
+                "resource failure {index} must roll back the entire ingress"
+            );
+        }
+    }
+
+    #[test]
+    fn antenna_late_style_callback_failure_rolls_back_an_earlier_chain_step() {
+        let mut client = antenna_client();
+        client
+            .apply_frame_with_appearance_and_factories::<ClientPresentationError, _, _>(
+                &spawn(8, 19),
+                ElapsedHeader::Absent,
+                |_| Ok(antenna_style()),
+                factory,
+            )
+            .unwrap();
+        let before = client.clone();
+        let mut budget = AntennaDrawBudget::default();
+        let mut random_calls = 0;
+        let result = client.apply_frame_with_appearance_and_factories_and_setup(
+            &setup(),
+            ElapsedHeader::Absent,
+            |_| Ok(antenna_style()),
+            factory,
+            |stage, _| {
+                stage.prepare_draw_resolved_with_antenna_limited_staged(
+                    960,
+                    540,
+                    1.,
+                    MAX_DRAW_SAMPLES,
+                    &mut budget,
+                    |ordinal, _, _| {
+                        if ordinal == 1 {
+                            Err(ClientPresentationError::Limit)
+                        } else {
+                            Ok(false)
+                        }
+                    },
+                    |r| {
+                        random_calls += 1;
+                        Ok::<_, ClientPresentationError>(vec![[0.2, 0.8]; r.random_pair_count])
+                    },
+                )?;
+                Ok::<_, ClientPresentationError>(())
+            },
+        );
+        assert_eq!(result, Err(ClientPresentationError::Limit));
+        assert_eq!(random_calls, 1);
+        assert!(client == before);
+    }
+
+    #[test]
+    fn antenna_budget_is_shared_across_sixty_four_setup_plans_and_final_draw() {
+        let mut client = antenna_client();
+        let spawns: Vec<_> = (8_u16..15)
+            .map(|id| {
+                let mut snake = spawn(3, 11);
+                snake[1..3].copy_from_slice(&id.to_be_bytes());
+                snake
+            })
+            .collect();
+        client
+            .apply_frame_with_appearance_and_factories::<ClientPresentationError, _, _>(
+                &bundle(&spawns),
+                ElapsedHeader::Absent,
+                |_| Ok(antenna_style()),
+                factory,
+            )
+            .unwrap();
+        let before = client.clone();
+        let mut budget = AntennaDrawBudget::default();
+        let mut hooks = 0;
+        let mut calls = 0;
+        client
+            .apply_frame_with_appearance_and_factories_and_setup(
+                &bundle(&vec![setup(); 64]),
+                ElapsedHeader::Absent,
+                |_| Ok(antenna_style()),
+                factory,
+                |stage, _| {
+                    hooks += 1;
+                    stage.prepare_draw_resolved_with_antenna_limited_staged(
+                        960,
+                        540,
+                        1.,
+                        MAX_DRAW_SAMPLES,
+                        &mut budget,
+                        |_, _, _| Ok(false),
+                        |r| {
+                            calls += 1;
+                            Ok::<_, ClientPresentationError>(vec![[0.2, 0.8]; r.random_pair_count])
+                        },
+                    )?;
+                    Ok::<_, ClientPresentationError>(())
+                },
+            )
+            .unwrap();
+        assert_eq!(hooks, 64);
+        assert_eq!(calls, 512);
+        assert_eq!(budget.bulbs, 0);
+        assert_eq!(budget.paths, 0);
+        assert_eq!(budget.strokes, 0);
+        let mut rejected = before.clone();
+        let mut budget = AntennaDrawBudget::default();
+        let mut hooks = 0;
+        let result = rejected.apply_frame_with_appearance_and_factories_and_setup(
+            &bundle(&vec![setup(); 64]),
+            ElapsedHeader::Absent,
+            |_| Ok(antenna_style()),
+            factory,
+            |stage, _| {
+                hooks += 1;
+                for _ in 0..if hooks == 64 { 2 } else { 1 } {
+                    stage.prepare_draw_resolved_with_antenna_limited_staged(
+                        960,
+                        540,
+                        1.,
+                        MAX_DRAW_SAMPLES,
+                        &mut budget,
+                        |_, _, _| Ok(false),
+                        |r| Ok::<_, ClientPresentationError>(vec![[0.2, 0.8]; r.random_pair_count]),
+                    )?;
+                }
+                Ok::<_, ClientPresentationError>(())
+            },
+        );
+        assert_eq!(result, Err(ClientPresentationError::Limit));
+        assert!(rejected == before);
+    }
+
+    #[test]
+    fn antenna_full_factory_setup_preserves_every_mode_and_resolver_order() {
+        let mut client = AnimatedClient::new(0.).unwrap();
+        let mut prey = vec![b'y', 0, 1, 9];
+        prey.extend(u24(10_000));
+        prey.extend(u24(5000));
+        prey.extend([20, b'0']);
+        prey.extend(u24(0));
+        prey.extend(u24(0));
+        prey.extend(1000_u16.to_be_bytes());
+        let order = RefCell::new(Vec::new());
+        let mut budget = AntennaDrawBudget::default();
+        client
+            .apply_frame_with_appearance_and_all_factories_and_setup(
+                &bundle(&[
+                    setup(),
+                    spawn(3, 11),
+                    vec![b'f', 1, 2, 3, 4, 7, 25],
+                    prey,
+                    setup(),
+                ]),
+                ElapsedHeader::Absent,
+                |_| {
+                    order.borrow_mut().push("appearance");
+                    Ok(antenna_style())
+                },
+                |spawn, zoom| {
+                    order.borrow_mut().push("food");
+                    factory(spawn, zoom)
+                },
+                |_, _| {
+                    order.borrow_mut().push("prey");
+                    let source = FoodSource::new(
+                        BodyAsset {
+                            handle: 100,
+                            revision: 1,
+                            width: 20,
+                            height: 16,
+                            status: BodyAssetStatus::Ready,
+                        },
+                        20.,
+                        16.,
+                        10.,
+                        8.,
+                    )
+                    .unwrap();
+                    Ok::<_, ClientPresentationError>(PreyFactory {
+                        random_phase_unit: 0.2,
+                        random_rate_unit: 0.8,
+                        palette: 0,
+                        bodies: vec![source],
+                        glows: vec![source],
+                    })
+                },
+                |stage, _| {
+                    order.borrow_mut().push("setup");
+                    stage.prepare_draw_resolved_with_antenna_limited_staged(
+                        960,
+                        540,
+                        1.,
+                        MAX_DRAW_SAMPLES,
+                        &mut budget,
+                        |_, _, _| Ok(false),
+                        |r| {
+                            order.borrow_mut().push("random");
+                            Ok::<_, ClientPresentationError>(vec![[0.2, 0.8]; r.random_pair_count])
+                        },
+                    )?;
+                    Ok::<_, ClientPresentationError>(())
+                },
+            )
+            .unwrap();
+        assert!(client.food_enabled() && client.prey_enabled() && client.appearance_enabled());
+        assert_eq!(
+            *order.borrow(),
+            ["setup", "appearance", "food", "prey", "setup", "random"]
+        );
+    }
 
     #[test]
     fn all_factories_setup_hook_is_ordered_and_rolls_back_enablement() {
@@ -1325,6 +2276,8 @@ mod resolved_draw_tests {
         assert!(client.food_bounds().is_none());
         let mut control = before;
         apply_factories(&mut control, &setup());
+        assert_eq!(client.draw_serial(), 1);
+        control.draw_serial = 1;
         assert_exact_client(&client, &control);
     }
 
