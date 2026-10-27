@@ -18,13 +18,13 @@ use crate::{
         AnimatedClient, AntennaDrawBudget, AntennaPath, AntennaRandomRequest,
         AppearancePresentation, ArenaEdgeInput, ArenaEdgePlan, BodyPaintError, BodyPaintInput,
         BodyPaintPlan, BodyPaintQuality, BodyPaintView, BodyPaintVisual, ClientControlActions,
-        ClientControlView, CurveInput, CurveOutput, EyeLayoutInput, FaceGeometry, FacePresentation,
-        FoodImageCommand, FoodPaintInput, FoodPaintPlan, MAX_BODY_PAINT_COMMANDS, MAX_DRAW_SAMPLES,
-        MAX_RETAINED_SNAKES, OrdinaryAntennaGeometry, PairedSideLayout, PreparedAntenna,
-        PreparedSnake, PreyEaterPose, PreyImageCommand, PreyPaintInput, PreyPaintPlan,
-        QualitySnapshot, SingleEyeLayout, SnakePresentation, StandardEyeLayout, Turn,
-        plan_arena_edge, plan_food, plan_prey, plan_standard_body, plan_standard_body_with_antenna,
-        sample_curve_with_heading,
+        ClientControlView, ClientScoreView, CurveInput, CurveOutput, EyeLayoutInput, FaceGeometry,
+        FacePresentation, FoodImageCommand, FoodPaintInput, FoodPaintPlan, MAX_BODY_PAINT_COMMANDS,
+        MAX_DRAW_SAMPLES, MAX_RETAINED_SNAKES, OrdinaryAntennaGeometry, PairedSideLayout,
+        PreparedAntenna, PreparedSnake, PreyEaterPose, PreyImageCommand, PreyPaintInput,
+        PreyPaintPlan, QualitySnapshot, ScoreError, ScoreStatus, SingleEyeLayout,
+        SnakePresentation, StandardEyeLayout, Turn, plan_arena_edge, plan_food, plan_prey,
+        plan_standard_body, plan_standard_body_with_antenna, sample_curve_with_heading,
     },
     presentation_browser::AnimationStep,
     prey_browser::PreySources,
@@ -83,6 +83,48 @@ fn control_view_record(view: ClientControlView) -> Result<JsValue, JsValue> {
         ("zoom", view.zoom.into()),
         ("follows", view.follows.into()),
         ("connected", view.connected.into()),
+    ])
+}
+
+fn score_view_record(view: ClientScoreView) -> Result<JsValue, JsValue> {
+    let own = match view.own {
+        None => JsValue::NULL,
+        Some(own) => record([
+            ("token", serial(own.token.serial())),
+            ("id", own.id.into()),
+            ("logicalSegments", (own.logical_segments as f64).into()),
+            ("fractionalMass", own.fractional_mass.into()),
+            ("scoreAdjustment", own.score_adjustment.into()),
+            ("scoreIndex", (own.score_index as f64).into()),
+        ])?,
+    };
+    let (status, score, reason) = match view.status {
+        ScoreStatus::Disabled => ("disabled", JsValue::NULL, JsValue::NULL),
+        ScoreStatus::NoTables => ("no-tables", JsValue::NULL, JsValue::NULL),
+        ScoreStatus::NoOwn => ("no-own", JsValue::NULL, JsValue::NULL),
+        ScoreStatus::Ready(value) => ("ready", value.into(), JsValue::NULL),
+        ScoreStatus::Unsupported(reason) => (
+            "unsupported",
+            JsValue::NULL,
+            match reason {
+                ScoreError::ZeroTableMax => "zero-table-max",
+                ScoreError::InvalidFractionalMass => "invalid-fractional-mass",
+                ScoreError::IndexOutOfRange => "index-out-of-range",
+            }
+            .into(),
+        ),
+    };
+    record([
+        ("schema", 1.into()),
+        ("enabled", view.enabled.into()),
+        (
+            "tableMax",
+            view.table_max.map(JsValue::from).unwrap_or(JsValue::NULL),
+        ),
+        ("own", own),
+        ("status", status.into()),
+        ("score", score),
+        ("error", reason),
     ])
 }
 
@@ -464,6 +506,18 @@ impl AnimatedScene {
     /// serials scoped to this scene instance, never reused by world reset.
     pub fn control_view(&self) -> Result<JsValue, JsValue> {
         control_view_record(self.client.control_view())
+    }
+
+    /// Opt into score tracking before packets or after world reset. The mode and
+    /// immutable table cache survive ordinary reset; legacy ingestion is the default.
+    pub fn enable_score_tracking(&mut self) -> Result<(), JsValue> {
+        self.client.enable_score_tracking().map_err(error)
+    }
+
+    /// Copy retained original-own score inputs and status without advancing time.
+    /// The scene-scoped token is a BigInt; no table storage or mutable alias escapes.
+    pub fn score_view(&self) -> Result<JsValue, JsValue> {
+        score_view_record(self.client.score_view())
     }
 
     /// Gate boundary updates only; setup activates this gate and reset clears it.

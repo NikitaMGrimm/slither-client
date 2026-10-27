@@ -38,9 +38,32 @@ pull requests, and manual dispatch. Normal tests and CI require no external
 reference and do not connect to game servers. Dependency and toolchain setup may
 access package sources. Release-plz remains dormant.
 
+## Opt-in retained-own score state
+
+The integrated opt-in slice passes 453 native all-target tests and 449 Node
+tests, formatting, doctests, strict rustdoc and native/Wasm Clippy. A fresh web
+build passes 297 score-state ABI assertions across ten cases with five owners
+freed. The existing full ABI suite also passes, including 7,624 body assertions,
+38 control cases, 252 stock assertions, eight session scenarios and 643 profile
+assertions. All use authored fixtures with no real network connection.
+
+Native tests cover unchanged legacy R handling, canonical opt-in admission,
+same/different Setup caches and event-time callbacks, reset persistence,
+latest count/mass, retained own through expiry/reuse and complete rollback after
+late errors. The Wasm helper checks closed copied records, BigInt identity,
+negative integer results, explicit unsupported-index status and same-step reset.
+Its first fixture incorrectly expected the dead control-own object to disappear;
+that failed transcript is retained. The corrected assertion follows the existing
+retained-own contract, with no product change for that fixture failure.
+
+These are native and Node/Wasm results, using the current Node host's Math.pow.
+Browser arithmetic, installed extension, HUD and server acceptance remain
+unverified. Gameplay does not automatically enable tracking. See
+[score-state API](score-state.md).
+
 ## Native score arithmetic
 
-The caller-owned score primitive passes 444 native all-target tests, doctests,
+The initial caller-owned score primitive passed 444 native all-target tests, doctests,
 strict rustdoc, formatting and native/Wasm Clippy. Independent review passes
 36 focused native tests and finds no supported defect in ordered arithmetic,
 table boundaries, cache ownership or resource bounds. A retained mutation that

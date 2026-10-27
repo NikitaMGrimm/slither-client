@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add explicit opt-in retained-own score tracking with ordered Setup table caches,
+  canonical replacement `R`, transactional rollback and copied native/Wasm score
+  observations. Legacy ingestion remains unchanged; HUD wiring remains separate.
+
 - Add caller-owned native score tables with ordered f64 arithmetic, bounded
   plateau entries and atomic cache replacement. Gameplay score/HUD wiring and
   browser arithmetic parity remain separate.
