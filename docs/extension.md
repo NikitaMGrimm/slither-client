@@ -203,8 +203,8 @@ bind, successful frame/resize and changed deferred publication. No new queue or
 timer is added. Native/source/owner reentry stays guarded; cleanup releases the
 nickname field before the HUD and native owners. Stale bindings require explicit
 unbind; old tickets are inert. Native writes may partially complete before a
-failure and are not restored. Default startup remains unbound. Installed host,
-native owner composition remain unverified.
+failure and are not restored. Default startup remains unbound. Installed-host
+behavior and native owner composition remain unverified.
 
 ### Package-selected owned HUD
 
