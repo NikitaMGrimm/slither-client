@@ -10,6 +10,8 @@ import { createStockClient } from '../web/stock-client.mjs';
 import { createStockEntityAssets } from '../web/stock-food-provider.mjs';
 import { desktopBackingSize } from '../web/desktop-layout.mjs';
 import { createStockGameplay } from '../web/stock-gameplay.mjs';
+import { bindStockHudDom } from '../web/stock-hud-dom.mjs';
+import { projectHudView } from '../web/stock-hud-view.mjs';
 
 const networkGlobals = ['fetch', 'WebSocket'].map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)]);
 let networkAttempts = 0;
@@ -27,7 +29,8 @@ const gateSource = readFileSync(new URL('../extension/game-gate.js', import.meta
 const bootstrapSource = readFileSync(new URL('../extension/game-bootstrap.mjs', import.meta.url), 'utf8');
 const bootstrap = new Script(bootstrapSource.replace(/^import .+;\r?$/gm, '').replace(/^export /gm, '') + '\nstartGamePage;');
 const startGamePage = bootstrap.runInNewContext({ createStockHostSnapshot, createStockSkinAdapter,
-  createStockClient, createStockEntityAssets, desktopBackingSize, createStockGameplay, init: async () => {}, wasm: {} });
+  createStockClient, createStockEntityAssets, desktopBackingSize, createStockGameplay, bindStockHudDom, projectHudView,
+  init: async () => {}, wasm: {} });
 
 // Documentation-range endpoint and labelled synthetic profile, never a real transport.
 const playRequest = () => ({ endpoint: 'ws://192.0.2.1:1234/slither',
@@ -39,12 +42,12 @@ function connect(f, runtime) {
 }
 
 function fixture({ armed = true, late = false, sourcePending = false, href = 'https://slither.io/',
-  missingEdit = false, missingFence = false, missingNative } = {}) {
+  missingEdit = false, missingFence = false, missingNative, hudNative = false } = {}) {
   const dimensions = new WeakMap(), images = new WeakMap();
   const log = [], messages = [], raf = new Map(), timers = new Map(), intervals = new Map(), microtasks = [], faults = {};
   const events = new EventTarget();
   let serial = 0, now = 0, reloads = 0, sockets = 0, original = 0, actualRealm;
-  const dom = createGateTestDom();
+  const dom = createGateTestDom({ hud: hudNative });
   const { Element } = dom;
   class Canvas extends Element {
     constructor() { super('canvas'); dimensions.set(this, { width: 32, height: 32 }); }
@@ -1179,3 +1182,719 @@ test('ordinary reload wins before handle and pre-router gate failures remain out
   assert.equal(h.f.reloads, 1); assert.equal(runtime.diagnostics().disposed, false);
   ticket.unbind(); runtime.dispose();
 });
+
+// Authored local HUD capability group; no late product gate dependency or native DOM execution.
+function hudOwnerHarness({ group = true } = {}) {
+  const h = nicknameOwnerHarness(), slot = Symbol.for('slither.client.gate.v1'), gate = h.realm[slot];
+  const data = new WeakMap(), styles = new WeakMap(), domCalls = [], writes = [], hooks = {};
+  let current = true, runtime, checks = 0, scoreReads = 0, tracking = 0, commands = [];
+  let actualGameplay, gameplayOptions, snapshotReads = 0;
+  const make = (type, name = null, text = '') => {
+    const node = Object.create(null), style = Object.create(null); styles.set(style, new Map());
+    data.set(node, { type, name, text, style, parent: null, children: [], connected: true });
+    for (const key of ['nodeType', 'ownerDocument', 'parentNode', 'firstChild', 'nextSibling',
+      'isConnected', 'localName', 'namespaceURI', 'style', 'textContent', 'then']) {
+      Object.defineProperty(node, key, { get() { assert.fail(`Late HUD node access: ${key}`); } });
+    }
+    return node;
+  };
+  // The supplied document is the bootstrap's captured exact document, never a lookalike.
+  data.set(h.f.document, { type: 9, parent: null, children: [], connected: true });
+  const children = (parent, values) => {
+    data.get(parent).children = [...values];
+    for (const node of values) data.get(node).parent = parent;
+  };
+  const atom = (name, text) => {
+    const value = { element: make(1, name), text: make(3, null, text) };
+    children(value.element, [value.text]); return value;
+  };
+  const mount = make(1, 'section'); children(h.f.document, [mount]);
+  const readout = { root: make(1, 'div'), lengthLine: make(1, 'div'), rankLine: make(1, 'div'),
+    lengthLabel: atom('span', 'AUTHORED LENGTH'), lengthValue: atom('b', 'keep-length'),
+    rankLabel: atom('span', 'AUTHORED RANK'), rankValue: atom('span', 'keep-rank'),
+    separator: atom('span', 'AUTHORED /'), populationValue: atom('span', 'keep-population') };
+  const final = { root: make(1, 'div'), label: atom('span', 'AUTHORED FINAL'), value: atom('b', 'keep-final') };
+  children(readout.root, [readout.lengthLine, readout.rankLine]);
+  children(readout.lengthLine, [readout.lengthLabel.element, readout.lengthValue.element]);
+  children(readout.rankLine, [readout.rankLabel.element, readout.rankValue.element,
+    readout.separator.element, readout.populationValue.element]);
+  children(final.root, [final.label.element, final.value.element]); children(mount, [readout.root, final.root]);
+  const dom = Object.create(null);
+  const observe = (name, node, ...args) => {
+    domCalls.push([name, node, ...args]); hooks.dom?.(name, node, ...args);
+    assert(data.has(node), 'synthetic captured native Node brand'); return data.get(node);
+  };
+  for (const name of ['nodeType', 'ownerDocument', 'parentNode', 'firstChild', 'nextSibling',
+    'isConnected', 'localName', 'namespaceURI', 'style']) dom[name] = node => {
+    const value = observe(name, node);
+    if (name === 'nodeType') return value.type;
+    if (name === 'ownerDocument') return node === h.f.document ? null : h.f.document;
+    if (name === 'parentNode') return value.parent;
+    if (name === 'firstChild') return value.children[0] ?? null;
+    if (name === 'nextSibling') {
+      const siblings = value.parent === null ? [] : data.get(value.parent).children;
+      return siblings[siblings.indexOf(node) + 1] ?? null;
+    }
+    if (name === 'isConnected') return value.connected;
+    if (name === 'localName') return value.name;
+    if (name === 'namespaceURI') return 'http://www.w3.org/1999/xhtml';
+    return value.style;
+  };
+  dom.setText = (node, value) => {
+    observe('setText', node, value); data.get(node).text = value; writes.push(['text', node, value]);
+  };
+  dom.setStyle = (style, name, value) => {
+    domCalls.push(['setStyle', style, name, value]); hooks.dom?.('setStyle', style, name, value);
+    assert(styles.has(style)); styles.get(style).set(name, value); writes.push(['style', style, name, value]);
+  };
+  const hudDom = Object.freeze({ __proto__: null, schema: 1, document: h.f.document, dom: Object.freeze(dom),
+    isCurrentDocument() { checks++; hooks.current?.(); return current; } });
+  h.realm[slot] = Object.freeze({ metadata: gate.metadata, claim(id) {
+    const native = gate.claim(id); hooks.native?.(native);
+    return Object.freeze({ ...native, ...(group ? { hudDom: group === true ? hudDom
+      : typeof group === 'function' ? group(hudDom) : group } : {}) });
+  } });
+  const BaseScene = h.wasm.api.AnimatedScene;
+  const score = { value: -0, token: 7n };
+  const scoreView = () => ({ schema: 1, enabled: true, tableMax: 17,
+    own: { token: score.token, id: 7, logicalSegments: 4, fractionalMass: .5, scoreAdjustment: 3, scoreIndex: 7 },
+    status: 'ready', score: score.value, error: null });
+  h.wasm.api.AnimatedScene = class extends BaseScene {
+    enable_score_tracking() { this.outside(); tracking++; h.wasm.calls.push('enable-score'); hooks.enable?.(); }
+    advance_with_control(now, lagging, callback) {
+      return super.advance_with_control(now, lagging, request => {
+        hooks.step?.(request); return callback(request);
+      });
+    }
+    score_view() {
+      this.outside(); assert.equal(runtime?.diagnostics().captureHeld ?? false, false);
+      scoreReads++; hooks.score?.(); return scoreView();
+    }
+    apply_frame_and_render_standard_with_face_presentation_and_prey_and_hud(...args) {
+      this.outside(); this.borrowed = true; h.wasm.calls.push('hud-packet');
+      try {
+        hooks.packet?.();
+        super.apply_frame_and_render_standard_with_appearance_and_prey(...args);
+        const events = []; let setupDraws = 0;
+        for (let commandIndex = 0; commandIndex < commands.length; commandIndex++) {
+          const command = commands[commandIndex], plan = args[15];
+          if (command[0] === 97) {
+            setupDraws++; events.push({ commandIndex, kind: 'setup', tableMax: 17 },
+              { commandIndex, kind: 'setup-draw', view: scoreView() });
+          } else if (command[0] === 108 && plan.guards[commandIndex].playing) {
+            events.push({ commandIndex, kind: 'leaderboard', localRow: 2, rank: command[1] ?? 7,
+              population: command[2] ?? 23, deathPending: plan.guards[commandIndex].deathPending });
+          } else if (plan.finalCaptureIndices.includes(commandIndex)) {
+            events.push({ commandIndex, kind: 'final-score', view: scoreView() });
+          } else if ([115, 104].includes(command[0])) events.push({ commandIndex, kind: 'own-length-scheduled', token: score.token });
+        }
+        const result = { schema: 1, commandCount: commands.length, setupDraws, events };
+        hooks.report?.(result); return result;
+      } finally { this.borrowed = false; }
+    }
+  };
+  const decode = h.wasm.api.decode_frame;
+  h.wasm.api.decode_frame = bytes => {
+    const decoded = decode(bytes); commands = [];
+    for (let i = 0; i < decoded.length;) {
+      const length = decoded[i] * 16777216 + decoded[i + 1] * 65536 + decoded[i + 2] * 256 + decoded[i + 3];
+      i += 4; commands.push([...decoded.slice(i, i + length)]); i += length;
+    }
+    return decoded;
+  };
+  const nodes = (scope = 'readout-and-final') => ({ __proto__: null, schema: 1, document: h.f.document, mount,
+    textPolicy: 'authored', readout, final: scope === 'readout' ? null : final });
+  const ownerContext = createContext({ createStockHostSnapshot, createStockSkinAdapter,
+    createStockClient, createStockEntityAssets, desktopBackingSize, init: async () => {}, wasm: {},
+    createStockGameplay(options) {
+      gameplayOptions = options; hooks.gameplayOptions?.(options);
+      actualGameplay = createStockGameplay(options);
+      return Object.freeze({ ...actualGameplay, hudSnapshot() {
+        snapshotReads++; hooks.snapshot?.(); return actualGameplay.hudSnapshot();
+      } });
+    },
+    bindStockHudDom(options) {
+      const binding = bindStockHudDom(options);
+      hooks.constructed?.();
+      return Object.freeze({ ...binding, dispose() { hooks.detach?.(); return binding.dispose(); } });
+    },
+    projectHudView(snapshot, ready) {
+      const view = projectHudView(snapshot, ready); hooks.view?.(view); return view;
+    },
+  });
+  const startHud = bootstrap.runInContext(ownerContext);
+  return { ...h, hudHooks: hooks, hudDom, domCalls, writes, data, score, readout, final, mount, nodes,
+    request: (scope = 'readout-and-final') => ({ __proto__: null, schema: 1, scope, nodes: nodes(scope) }),
+    nicknameRequest: h.request,
+    async start(options = {}) {
+      runtime = await startHud({ realm: h.realm, wasmApi: h.wasm.api, hudReadout: true, ...options }); return runtime;
+    },
+    text: node => data.get(node).text, style: node => styles.get(data.get(node).style),
+    current(value) { current = value; }, get checks() { return checks; }, get scoreReads() { return scoreReads; },
+    get tracking() { return tracking; }, get snapshotReads() { return snapshotReads; },
+    get gameplay() { return actualGameplay; }, get gameplayOptions() { return gameplayOptions; },
+    ownerRecord: () => runInContext('({schema:1,scope:"readout-and-final",nodes:null})', ownerContext),
+  };
+}
+
+test('explicit HUD opt-in enables tracking once and exposes only a frozen local bind ticket', async () => {
+  const h = hudOwnerHarness(), runtime = await h.start();
+  assert.equal(typeof runtime.bindHudReadout, 'function');
+  assert.deepEqual(Object.keys(runtime), ['diagnostics', 'play', 'playWithLiveProfile', 'bindNicknameField', 'bindHudReadout', 'dispose']);
+  assert.equal(h.tracking, 1); assert.equal(h.scoreReads, 0); assert.equal(h.checks, 0);
+  const ticket = runtime.bindHudReadout(h.request());
+  assert(Object.isFrozen(ticket)); assert.deepEqual(Object.keys(ticket), ['unbind']);
+  assert.equal(h.writes.length, 0, 'missing semantic histories never become numeric zero');
+  ticket.unbind(); runtime.dispose();
+});
+
+test('explicit HUD opt-in requires the optional native group while default startup stays legacy', async () => {
+  const h = hudOwnerHarness({ group: false });
+  await assert.rejects(h.start(), /HUD/);
+  assert.equal(h.tracking, 0); assert.equal(h.f.sockets, 0);
+  const legacy = hudOwnerHarness({ group: false }), runtime = await legacy.start({ hudReadout: false });
+  assert.deepEqual(Object.keys(runtime), ['diagnostics', 'play', 'playWithLiveProfile', 'bindNicknameField', 'dispose']);
+  assert.equal(legacy.tracking, 0); assert.equal(legacy.checks, 0); runtime.dispose();
+});
+
+test('HUD boolean rejects before gate access, claim, initialization and coercion', async () => {
+  for (const value of [null, 0, '', {}, [], Promise.resolve(), new Boolean(true)]) {
+    let observations = 0;
+    const realm = new Proxy({}, { get() { observations++; throw new Error('gate access'); } });
+    const result = await rejected(() => startGamePage({ realm, hudReadout: value,
+      initialize() { observations++; } }));
+    assert.equal(result.thrown, true); assert.match(result.error.message, /boolean/); assert.equal(observations, 0);
+  }
+});
+
+test('default and explicit false keep exact scheduler, runtime keys and zero HUD observations', async () => {
+  for (const options of [{ hudReadout: undefined }, { hudReadout: false }]) {
+    const h = hudOwnerHarness(); let nativeQueue;
+    h.hudHooks.native = native => { nativeQueue = native.queueMicrotask; };
+    h.hudHooks.enable = () => assert.fail('default tracking');
+    h.hudHooks.score = () => assert.fail('default score');
+    h.hudHooks.snapshot = () => assert.fail('default HUD getter');
+    h.hudHooks.current = () => assert.fail('default HUD document');
+    const runtime = await h.start(options);
+    assert.equal(h.gameplayOptions.defer, nativeQueue); assert(!Object.hasOwn(h.gameplayOptions, 'hudReadout'));
+    assert.deepEqual(Object.keys(runtime), ['diagnostics', 'play', 'playWithLiveProfile', 'bindNicknameField', 'dispose']);
+    h.f.frame(); h.route({ type: 'resize' }); h.f.flush();
+    assert.equal(h.domCalls.length, 0); assert.equal(h.snapshotReads, 0); assert.equal(h.tracking, 0);
+    assert.equal(runtime.diagnostics().draws, 2); runtime.dispose();
+  }
+});
+
+test('true startup validates complete frozen own-data HUD group without invoking captured operations', async () => {
+  const groups = [valid => Object.freeze({ __proto__: null, ...valid, schema: 2 }),
+    valid => Object.freeze({ __proto__: null, ...valid, document: {} }),
+    valid => Object.freeze({ __proto__: null, ...valid, dom: Object.freeze({ __proto__: null }) }),
+    valid => Object.freeze({ __proto__: null, ...valid, isCurrentDocument: null }),
+    valid => ({ __proto__: null, ...valid }),
+    valid => Object.freeze({ __proto__: null, ...valid, dom: { __proto__: null, ...valid.dom } }),
+    valid => Object.freeze({ __proto__: null, ...valid, extra: true }), valid => Object.freeze(Object.create(valid)),
+    valid => Object.freeze(Object.defineProperty({ __proto__: null, ...valid }, 'dom', { get() { assert.fail('group getter'); } }))];
+  for (const group of groups) {
+    const h = hudOwnerHarness({ group }); let initialized = 0;
+    const result = await rejected(() => h.start({ initialize() { initialized++; } }));
+    assert.equal(result.thrown, true); assert.match(result.error.message, /HUD/);
+    assert.equal(initialized, 0); assert.equal(h.tracking, 0); assert.equal(h.f.raf.size, 0);
+    assert.deepEqual(h.wasm.counts(), { sceneFrees: 0, qualityFrees: 0, stepFrees: 0 });
+  }
+});
+
+test('true startup preserves exact score-enable primaries and dispose-only startup shape', async () => {
+  for (const primary of cleanupPrimaries) {
+    const h = hudOwnerHarness(); h.hudHooks.enable = () => { throw primary; };
+    h.failures.set('scene.free', new Error('secondary')); h.failures.set('status:csp-or-module-unavailable', false);
+    const result = await rejected(() => h.start());
+    assert.equal(result.thrown, true); assert(Object.is(result.error, primary));
+    assert.deepEqual(h.wasm.calls, ['scene', 'enable-score']);
+    assert.deepEqual(h.wasm.counts(), { sceneFrees: 1, qualityFrees: 0, stepFrees: 0 });
+  }
+  const h = hudOwnerHarness();
+  const runtime = await h.start({ initialize() { h.pagehide(); } });
+  assert.deepEqual(Object.keys(runtime), ['dispose']); assert.equal(h.tracking, 0);
+});
+
+test('HUD owner admits exactly three current-realm own data fields and never reads then or coerces', async () => {
+  const h = hudOwnerHarness(), runtime = await h.start(); let getters = 0;
+  const base = h.request();
+  const bad = [null, [], Promise.resolve(), Object.create(base), { ...base },
+    { __proto__: null, ...base, extra: 1 }, { __proto__: null, ...base, [Symbol('extra')]: 1 },
+    { __proto__: null, ...base, schema: '1' }, { __proto__: null, ...base, scope: { toString() { getters++; } } },
+    Object.defineProperty(h.request(), 'nodes', { get() { getters++; } }),
+    { __proto__: null, ...base, nodes: { __proto__: null, ...h.nodes(), document: {} } },
+    { __proto__: null, ...base, nodes: { __proto__: null, ...h.nodes(), extra: true } },
+    { __proto__: null, ...base, nodes: { __proto__: null, ...h.nodes(), textPolicy: 'fallback' } }];
+  for (const request of bad) assert.throws(() => runtime.bindHudReadout(request));
+  assert.equal(getters, 0); assert.equal(h.checks, 0); assert.equal(h.writes.length, 0);
+  const request = h.request(); Object.freeze(request);
+  Object.defineProperty(h.readout.root, 'toString', { value() { assert.fail('node coercion'); } });
+  const ticket = runtime.bindHudReadout(request); ticket.unbind();
+  assert.equal(runtime.diagnostics().disposed, false); runtime.dispose();
+});
+
+test('HUD binding copies exact nodes and readonly identities, renders only genuine committed per-role history', async () => {
+  const h = hudOwnerHarness(), runtime = await h.start(), views = [];
+  h.hudHooks.view = view => { views.push(view); assert(Object.isFrozen(view)); };
+  const request = h.request(), ticket = runtime.bindHudReadout(request);
+  const first = views.at(-1);
+  assert.equal(first.current.value, null); assert.equal(first.final.value, null); assert.equal(first.readiness, 'pending');
+  assert.equal(first.sceneIdentity, h.gameplay.hudSnapshot().sceneIdentity);
+  assert.equal(typeof first.documentIdentity, 'symbol');
+  const originalValue = h.readout.lengthValue.text;
+  request.nodes.readout = null; request.nodes.document = {}; request.scope = 'readout';
+  connect(h.f, runtime); h.f.socket.message([108, 7, 23]); h.f.flush();
+  assert.equal(h.text(originalValue), 'keep-length', 'header alone is not displayed current history');
+  h.f.frame();
+  assert.equal(h.text(originalValue), '0'); assert.equal(h.text(h.readout.rankValue.text), '7');
+  assert.equal(h.text(h.final.value.text), 'keep-final');
+  assert(Object.is(views.at(-1).current.value.score, -0)); assert.equal(views.at(-1).final.reason, 'no-captured-final');
+  assert.equal(views.at(-1).bindingIdentity, first.bindingIdentity);
+  assert.equal(views.at(-1).documentIdentity, first.documentIdentity);
+  assert.equal(views.at(-1).sceneIdentity, first.sceneIdentity);
+  const displayed = h.gameplay.hudSnapshot().current;
+  h.f.socket.message([108, 3, 40]); h.f.flush();
+  assert.deepEqual(h.gameplay.hudSnapshot().current, displayed);
+  assert.equal(h.text(h.readout.rankValue.text), '7', 'new header does not replace displayed history');
+  h.score.value = 1001; h.f.socket.message([118, 1]); h.f.flush();
+  assert.equal(h.text(h.final.value.text), '1001!'); assert.equal(h.text(originalValue), '0');
+  assert.equal(h.style(h.final.root).has('opacity'), false);
+  assert.equal(h.text(h.readout.lengthLabel.text), 'AUTHORED LENGTH');
+  assert.equal(h.text(h.final.label.text), 'AUTHORED FINAL');
+  const calls = h.domCalls.length, writes = h.writes.length;
+  ticket.unbind(); ticket.unbind();
+  assert.equal(h.domCalls.length, calls); assert.equal(h.writes.length, writes, 'dispose releases references without DOM effects');
+  const next = runtime.bindHudReadout(h.request());
+  assert.notEqual(views.at(-1).bindingIdentity, first.bindingIdentity);
+  assert.equal(h.text(h.final.value.text), '1001!', 'later binding reuses genuine history without score read');
+  ticket.unbind(); assert.throws(() => runtime.bindHudReadout(h.request()), /already bound/);
+  next.unbind(); runtime.dispose();
+});
+
+test('frame and resize publish after release with one draw, one committed getter, before RAF reschedule', async () => {
+  const h = hudOwnerHarness(), runtime = await h.start();
+  runtime.bindHudReadout(h.request('readout')); connect(h.f, runtime); h.f.socket.message([108, 7, 23]); h.f.flush();
+  let checks = 0, expectedRaf;
+  h.hudHooks.current = () => {
+    checks++; assert.equal(runtime.diagnostics().captureHeld, false); assert.equal(h.f.raf.size, expectedRaf);
+  };
+  const draws = runtime.diagnostics().draws, reads = h.snapshotReads, control = h.wasm.controlReads();
+  expectedRaf = 0; h.f.frame();
+  assert(checks > 0); assert.equal(runtime.diagnostics().draws, draws + 1); assert.equal(h.snapshotReads, reads + 1);
+  assert.equal(h.wasm.controlReads(), control + 1); assert.equal(h.f.raf.size, 1);
+  expectedRaf = 1;
+  h.score.value = -41; h.f.socket.message([104]); h.f.flush();
+  const resizeDraws = runtime.diagnostics().draws, resizeReads = h.snapshotReads;
+  const steps = h.wasm.calls.filter(call => Array.isArray(call) && call[0] === 'advance').length;
+  h.route({ type: 'resize' });
+  assert.equal(runtime.diagnostics().draws, resizeDraws + 1); assert.equal(h.snapshotReads, resizeReads + 1);
+  assert.equal(h.wasm.calls.filter(call => Array.isArray(call) && call[0] === 'advance').length, steps);
+  assert.equal(h.text(h.readout.lengthValue.text), '-41'); runtime.dispose();
+});
+
+test('existing deferred reconciliation publishes only changed nonnull identity with two getters and one callback', async () => {
+  const h = hudOwnerHarness(), runtime = await h.start(); runtime.bindHudReadout(h.request());
+  connect(h.f, runtime); let callbacks = 0;
+  let reads = h.snapshotReads, checks = h.checks;
+  h.gameplayOptions.defer(() => { callbacks++; }); h.f.flush();
+  assert.equal(callbacks, 1); assert.equal(h.snapshotReads - reads, 2); assert.equal(h.checks, checks);
+  reads = h.snapshotReads;
+  h.f.socket.message([108, 7, 23]);
+  assert.equal(h.snapshotReads, reads); assert.equal(h.checks, checks, 'no ingress/native publication');
+  h.f.flush();
+  assert.equal(h.snapshotReads - reads, 2); assert(h.checks > checks);
+  const state = h.gameplay.hudSnapshot(), writes = h.writes.length;
+  assert(state !== null);
+  h.failures.set('status:connected', new Error('caught reconciliation failure'));
+  h.f.socket.message([108, 3, 29]);
+  const before = h.checks; h.f.flush();
+  assert.equal(h.checks, before); assert.equal(h.writes.length, writes, 'old nonnull state is never republished');
+  assert.equal(runtime.diagnostics().disposed, true);
+});
+
+test('HUD publication performs no source/control/score/status reads and passive notifications do not publish', async () => {
+  const h = hudOwnerHarness(), runtime = await h.start(); connect(h.f, runtime);
+  h.f.socket.message([108, 7, 23]); h.f.flush(); h.f.frame();
+  const scores = h.scoreReads, controls = h.wasm.controlReads();
+  const original = Object.getOwnPropertyDescriptor(h.realm, 'per_color_imgs');
+  Object.defineProperty(h.realm, 'per_color_imgs', { configurable: true, get() { assert.fail('source recapture'); } });
+  h.hudHooks.score = () => assert.fail('score read during bind');
+  const trace = [...h.trace], ticket = runtime.bindHudReadout(h.request());
+  assert.equal(h.scoreReads, scores); assert.equal(h.wasm.controlReads(), controls); assert.deepEqual(h.trace, trace);
+  Object.defineProperty(h.realm, 'per_color_imgs', original); delete h.hudHooks.score;
+  const checks = h.checks;
+  for (const type of ['input', 'compositionstart', 'focus', 'selectionchange', 'beforeinput']) h.route({ type });
+  assert.equal(h.checks, checks); assert.equal(h.wasm.controlReads(), controls);
+  ticket.unbind(); h.f.frame(); assert.equal(h.checks, checks); runtime.dispose();
+});
+
+test('stale and pending HUD groups perform no DOM effects and occupied slots require explicit unbind', async () => {
+  const h = hudOwnerHarness(), runtime = await h.start(); connect(h.f, runtime);
+  h.f.socket.message([108, 7, 23]); h.f.flush(); h.f.frame(); h.current(false);
+  const calls = h.domCalls.length, ticket = runtime.bindHudReadout(h.request());
+  assert.equal(h.domCalls.length, calls); assert.equal(h.writes.length, 0);
+  assert.throws(() => runtime.bindHudReadout(h.request()), /already bound/);
+  h.f.frame(); assert.equal(h.domCalls.length, calls); ticket.unbind();
+  h.current(true);
+  const pending = h.request(); pending.nodes.textPolicy = 'unselected';
+  const old = runtime.bindHudReadout(pending); assert.equal(h.writes.length, 0); old.unbind();
+  const next = runtime.bindHudReadout(h.request()); const writes = h.writes.length; assert(writes > 0);
+  h.hudHooks.current = () => { old.unbind(); };
+  h.f.frame(); assert.equal(runtime.diagnostics().disposed, false); assert(h.writes.length > writes);
+  next.unbind(); runtime.dispose();
+});
+
+test('HUD request and deep node reflection preserve every falsy primary and release local candidates only', async () => {
+  for (const trap of ['getPrototypeOf', 'ownKeys', 'getOwnPropertyDescriptor']) for (const primary of cleanupPrimaries) {
+    const h = hudOwnerHarness(), runtime = await h.start();
+    const result = caught(() => runtime.bindHudReadout(new Proxy(h.request(), { [trap]() { throw primary; } })));
+    assert.equal(result.thrown, true); assert(Object.is(result.error, primary));
+    assert.equal(h.checks, 0); assert.equal(h.wasm.counts().sceneFrees, 0);
+    const deep = h.request(); deep.nodes.readout = new Proxy(h.readout, { [trap]() { throw primary; } });
+    const nested = caught(() => runtime.bindHudReadout(deep));
+    assert.equal(nested.thrown, true); assert(Object.is(nested.error, primary));
+    assert.equal(h.checks, 0); assert.equal(h.writes.length, 0); assert.equal(runtime.diagnostics().disposed, false);
+    runtime.bindHudReadout(h.request()).unbind(); runtime.dispose();
+  }
+});
+
+test('caught HUD bind reflection cross-owner violations remain sticky without native effects', async () => {
+  for (const trap of ['getPrototypeOf', 'ownKeys', 'getOwnPropertyDescriptor']) {
+    for (const action of ['hud-bind', 'nickname-bind', 'nickname-unbind', 'play', 'live-play', 'dispose', 'router']) {
+      const h = hudOwnerHarness(), runtime = await h.start(), nickname = runtime.bindNicknameField(h.nicknameRequest());
+      let first, entered = false;
+      const actions = { 'hud-bind': () => runtime.bindHudReadout(h.request()),
+        'nickname-bind': () => runtime.bindNicknameField(h.nicknameRequest()), 'nickname-unbind': nickname.unbind,
+        play: () => runtime.play(playRequest()), 'live-play': () => runtime.playWithLiveProfile(playRequest()),
+        dispose: runtime.dispose, router: () => h.route({ type: 'keydown', code: 'ArrowLeft' }) };
+      const before = { calls: [...h.wasm.calls], controls: h.wasm.controlReads(), trace: [...h.trace] };
+      const request = new Proxy(h.request(), { [trap](...args) {
+        if (!entered) { entered = true; first = caught(actions[action]); assert(first.thrown); }
+        return Reflect[trap](...args);
+      } });
+      const result = caught(() => runtime.bindHudReadout(request));
+      assert(result.thrown); assert.equal(result.error, first.error); assert.equal(h.checks, 0); assert.equal(h.writes.length, 0);
+      assert.deepEqual({ calls: h.wasm.calls, controls: h.wasm.controlReads(), trace: h.trace }, before);
+      assert.equal(h.wasm.counts().sceneFrees, 0); assert.equal(runtime.diagnostics().disposed, false);
+      runtime.bindHudReadout(h.request()).unbind(); nickname.unbind(); runtime.dispose();
+    }
+  }
+});
+
+test('nickname registration, delivery and explicit detach fence HUD reentry without freeing native owners', async () => {
+  for (const stage of ['afterRegister', 'handle', 'unregister']) {
+    const h = hudOwnerHarness(), runtime = await h.start(); let first;
+    h.hooks[stage] = () => { first = caught(() => runtime.bindHudReadout(h.request())); assert(first.thrown); };
+    if (stage === 'afterRegister') {
+      const result = caught(() => runtime.bindNicknameField(h.nicknameRequest()));
+      assert(result.thrown); assert.equal(result.error, first.error);
+      assert.equal(h.ownerTrace.filter(item => item === 'unregister').length, 1);
+    } else {
+      const nickname = runtime.bindNicknameField(h.nicknameRequest());
+      const result = caught(stage === 'handle' ? () => h.input() : nickname.unbind);
+      assert(result.thrown); assert.equal(result.error, first.error);
+      assert.equal(h.ownerTrace.filter(item => item === 'unregister').length, 1);
+      nickname.unbind();
+    }
+    assert.equal(h.checks, 0); assert.equal(h.wasm.counts().sceneFrees, 0); assert.equal(runtime.diagnostics().disposed, false);
+    h.hooks[stage] = undefined; runtime.bindHudReadout(h.request()).unbind(); runtime.dispose();
+  }
+  const h = hudOwnerHarness(), runtime = await h.start(), hud = runtime.bindHudReadout(h.request());
+  const nickname = runtime.bindNicknameField(h.nicknameRequest()); let first;
+  h.hooks.handle = () => { first = caught(hud.unbind); };
+  const result = caught(() => h.input()); assert(result.thrown); assert.equal(result.error, first.error);
+  assert.throws(() => runtime.bindHudReadout(h.request()), /already bound/);
+  assert.equal(runtime.diagnostics().disposed, false); h.hooks.handle = undefined;
+  hud.unbind(); nickname.unbind(); runtime.dispose();
+});
+
+test('explicit HUD unbind clears slot and method references before dispose and rejects caught cleanup reentry', async () => {
+  for (const action of ['bind', 'nickname', 'play', 'dispose', 'router']) {
+    const h = hudOwnerHarness(), runtime = await h.start(), ticket = runtime.bindHudReadout(h.request()); let first, calls = 0;
+    const actions = { bind: () => runtime.bindHudReadout(h.request()), nickname: () => runtime.bindNicknameField(h.nicknameRequest()),
+      play: () => runtime.play(playRequest()), dispose: runtime.dispose, router: () => h.route({ type: 'resize' }) };
+    h.hudHooks.detach = () => {
+      calls++; assert.equal(ticket.unbind(), undefined); first = caught(actions[action]); assert(first.thrown);
+    };
+    const result = caught(ticket.unbind); assert(result.thrown); assert.equal(result.error, first.error);
+    assert.equal(calls, 1); assert.equal(ticket.unbind(), undefined); assert.equal(calls, 1);
+    assert.equal(runtime.diagnostics().disposed, false); assert.equal(h.wasm.counts().sceneFrees, 0);
+    h.hudHooks.detach = undefined; runtime.bindHudReadout(h.request()).unbind(); runtime.dispose();
+  }
+});
+
+test('publication rejects caught owner/router/native reentry and cleans up only after source/native stacks return', async () => {
+  for (const stage of ['current', 'nodeType', 'setText']) {
+    for (const action of ['hud-bind', 'hud-unbind', 'nickname-bind', 'nickname-unbind', 'play', 'live-play', 'dispose', 'router', 'reload']) {
+      const h = hudOwnerHarness(), runtime = await h.start(), hud = runtime.bindHudReadout(h.request());
+      const nickname = runtime.bindNicknameField(h.nicknameRequest()); connect(h.f, runtime);
+      h.f.socket.message([108, 7, 23]); h.f.flush(); h.f.frame();
+      let first, entered = false;
+      const actions = { 'hud-bind': () => runtime.bindHudReadout(h.request()), 'hud-unbind': hud.unbind,
+        'nickname-bind': () => runtime.bindNicknameField(h.nicknameRequest()), 'nickname-unbind': nickname.unbind,
+        play: () => runtime.play(playRequest()), 'live-play': () => runtime.playWithLiveProfile(playRequest()), dispose: runtime.dispose,
+        router: () => h.route({ type: 'keydown', code: 'ArrowLeft' }),
+        reload: () => h.route({ type: 'click', target: h.f.document.getElementById('slither-client-reload') }) };
+      const reenter = () => {
+        if (entered) return; entered = true; first = caught(actions[action]); assert(first.thrown);
+        assert.equal(h.wasm.counts().sceneFrees, 0); assert.equal(runtime.diagnostics().captureHeld, false);
+      };
+      if (stage === 'current') h.hudHooks.current = reenter;
+      else h.hudHooks.dom = name => { if (name === stage) reenter(); };
+      h.failures.set('quality.free', new Error('secondary cleanup'));
+      h.inspect(current => { if (current === 'scene.free') assert.equal(runtime.diagnostics().captureHeld, false); });
+      const result = caught(() => h.f.frame());
+      assert(entered, `${stage}/${action}`); assert(result.thrown); assert.equal(result.error, first.error);
+      assert.equal(runtime.diagnostics().disposed, true); assert.equal(h.wasm.counts().sceneFrees, 1);
+      assert.equal(h.wasm.counts().qualityFrees, 1); assert.equal(h.f.reloads, 0);
+      assert.equal(hud.unbind(), undefined); assert.equal(nickname.unbind(), undefined);
+    }
+  }
+});
+
+test('held packet/native controller operations reject caught bind/unbind/disposal reentry until release', async () => {
+  for (const stage of ['packet', 'render', 'control']) for (const action of ['hud-bind', 'hud-unbind', 'nickname-bind', 'nickname-unbind', 'dispose']) {
+    const h = hudOwnerHarness(), runtime = await h.start(), hud = runtime.bindHudReadout(h.request());
+    const nickname = runtime.bindNicknameField(h.nicknameRequest()); connect(h.f, runtime);
+    let first, entered = false;
+    const actions = { 'hud-bind': () => runtime.bindHudReadout(h.request()), 'hud-unbind': hud.unbind,
+      'nickname-bind': () => runtime.bindNicknameField(h.nicknameRequest()), 'nickname-unbind': nickname.unbind, dispose: runtime.dispose };
+    const reenter = () => {
+      if (entered) return; entered = true; first = caught(actions[action]); assert(first.thrown);
+      assert.equal(h.wasm.counts().sceneFrees, 0);
+      if (stage !== 'control') assert.equal(runtime.diagnostics().captureHeld, true);
+    };
+    if (stage === 'packet') h.hudHooks.packet = reenter;
+    else h.f.faults[stage === 'render' ? 'renderOperation' : 'control'] = reenter;
+    if (stage === 'packet') { h.f.socket.message([104]); assert.equal(h.wasm.counts().sceneFrees, 0); h.f.flush(); }
+    else h.f.frame();
+    assert(entered); assert.equal(runtime.diagnostics().disposed, true); assert.equal(runtime.diagnostics().captureHeld, false);
+    assert.equal(h.wasm.counts().sceneFrees, 1); assert.equal(h.wasm.counts().qualityFrees, 1);
+    assert.equal(hud.unbind(), undefined); assert.equal(nickname.unbind(), undefined);
+  }
+});
+
+test('late HUD publication failure preserves exact primaries after partial writes and exhausts nickname-first cleanup', async () => {
+  for (const seam of ['bind', 'frame', 'defer']) for (const primary of cleanupPrimaries) {
+    const h = hudOwnerHarness(), runtime = await h.start(); connect(h.f, runtime);
+    h.f.socket.message([108, 7, 23]); h.f.flush(); h.f.frame();
+    let hud;
+    if (seam !== 'bind') hud = runtime.bindHudReadout(h.request());
+    const nickname = runtime.bindNicknameField(h.nicknameRequest()), order = [];
+    h.resetTrace(); let setters = 0;
+    h.hudHooks.dom = name => { if (name === 'setText' && ++setters === 2) throw primary; };
+    h.hooks.unregister = () => { order.push('nickname'); throw new Error('secondary nickname'); };
+    h.hudHooks.detach = () => { order.push('hud'); assert.equal(hud?.unbind(), undefined); };
+    h.inspect(stage => {
+      order.push(stage);
+      if (stage === 'scene.free') { assert.equal(runtime.diagnostics().captureHeld, false); assert.equal(runtime.diagnostics().stopped, true); }
+    });
+    for (const stage of ['cancel', 'scene.free', 'quality.free', 'status:client-failed']) h.failures.set(stage, new Error(`secondary ${stage}`));
+    const before = h.writes.length;
+    let result;
+    if (seam === 'bind') result = caught(() => runtime.bindHudReadout(h.request()));
+    else if (seam === 'frame') result = caught(() => h.f.frame());
+    else { h.f.socket.message([108, 3, 29]); result = caught(() => h.f.flush()); }
+    assert(result.thrown); assert(Object.is(result.error, primary)); assert.equal(h.writes.length, before + 1);
+    assert.deepEqual(order, [...(seam === 'defer' ? ['status:connected'] : []), 'nickname', 'hud',
+      ...(seam === 'frame' ? cleanupStages.filter(stage => stage !== 'cancel') : cleanupStages), 'status:client-failed']);
+    assert.equal(runtime.diagnostics().disposed, true); assert.equal(h.wasm.counts().sceneFrees, 1); assert.equal(h.wasm.counts().qualityFrees, 1);
+    const after = h.writes.length; nickname.unbind(); hud?.unbind(); runtime.dispose(); h.f.flush(); assert.equal(h.writes.length, after);
+  }
+});
+
+test('throwing existing deferred callback runs once, takes no after snapshot and preserves its primary through fail', async () => {
+  for (const primary of cleanupPrimaries) {
+    const h = hudOwnerHarness(), runtime = await h.start(); runtime.bindHudReadout(h.request());
+    let callbacks = 0; const reads = h.snapshotReads, calls = h.domCalls.length;
+    h.failures.set('quality.free', new Error('secondary'));
+    h.gameplayOptions.defer(() => { callbacks++; throw primary; });
+    const result = caught(() => h.f.flush()); assert(result.thrown); assert(Object.is(result.error, primary));
+    assert.equal(callbacks, 1); assert.equal(h.snapshotReads - reads, 1); assert.equal(h.domCalls.length, calls);
+    assert.equal(runtime.diagnostics().disposed, true); assert.equal(h.wasm.counts().sceneFrees, 1);
+  }
+});
+
+test('genuine lifecycle completion publishes raw minus-one requests while final and displayed histories persist', async () => {
+  const h = hudOwnerHarness(), runtime = await h.start(), views = []; h.hudHooks.view = view => views.push(view);
+  const ticket = runtime.bindHudReadout(h.request()); connect(h.f, runtime); h.f.socket.message([108, 7, 23]); h.f.flush(); h.f.frame();
+  h.f.interval(600); h.score.value = -41; h.f.socket.message([118, 1]); h.f.flush();
+  h.hudHooks.step = request => { request.delta = 5; };
+  for (let count = 0; h.gameplay.hudSnapshot().fade !== -1 && count < 55; count++) h.f.frame(2300 + count * 8);
+  assert.equal(h.gameplay.hudSnapshot().fade, -1); assert.equal(views.at(-1).requestedOpacity.readout, -1);
+  assert.equal(views.at(-1).requestedOpacity.header, -.85); assert.equal(h.style(h.readout.root).get('opacity'), '-1');
+  assert.equal(h.style(h.final.root).has('opacity'), false); assert.equal(h.text(h.final.value.text), '-41');
+  assert.equal(h.text(h.readout.lengthValue.text), '0');
+  const history = h.gameplay.hudSnapshot(), reads = h.scoreReads;
+  ticket.unbind(); runtime.bindHudReadout(h.request());
+  assert.deepEqual(h.gameplay.hudSnapshot().current, history.current); assert.deepEqual(h.gameplay.hudSnapshot().final, history.final);
+  assert.equal(h.scoreReads, reads); assert.equal(h.text(h.final.value.text), '-41'); runtime.dispose();
+});
+
+test('HUD owner accepts its ordinary current realm request and freezes only the ticket', async () => {
+  const h = hudOwnerHarness(), runtime = await h.start(), request = h.ownerRecord(); request.nodes = h.nodes();
+  const ticket = runtime.bindHudReadout(request);
+  assert(Object.isFrozen(runtime)); assert(Object.isFrozen(ticket)); assert(!Object.isFrozen(request));
+  assert(!Object.isFrozen(h.mount)); assert.equal(ticket.unbind.call({}), undefined); runtime.dispose();
+});
+
+test('each missing or accessor HUD capture fails selected startup without calling it or initializing', async () => {
+  const names = Object.keys(hudOwnerHarness().hudDom.dom);
+  for (const name of names) for (const getter of [false, true]) {
+    const h = hudOwnerHarness({ group(valid) {
+      const dom = { __proto__: null, ...valid.dom };
+      if (getter) Object.defineProperty(dom, name, { get() { assert.fail('capability getter'); } });
+      else delete dom[name];
+      return Object.freeze({ __proto__: null, ...valid, dom: Object.freeze(dom) });
+    } });
+    let initialized = false;
+    const result = await rejected(() => h.start({ initialize() { initialized = true; } }));
+    assert(result.thrown); assert.match(result.error.message, /HUD/); assert.equal(initialized, false);
+    assert.equal(h.tracking, 0); assert.equal(h.domCalls.length, 0);
+  }
+});
+
+test('only existing final history renders while current is pending; scope exclusion and wide scores stay exact', async () => {
+  const h = hudOwnerHarness(), runtime = await h.start(), views = []; h.hudHooks.view = view => views.push(view);
+  connect(h.f, runtime); h.score.value = 4294967305; h.f.socket.message([118, 1]); h.f.flush();
+  const ticket = runtime.bindHudReadout(h.request());
+  assert.equal(views.at(-1).readiness, 'pending'); assert.equal(views.at(-1).current.value, null);
+  assert.equal(views.at(-1).final.readiness, 'ready'); assert.equal(h.text(h.final.value.text), '4294967305!');
+  assert.equal(h.text(h.readout.lengthValue.text), 'keep-length'); ticket.unbind();
+  const writes = h.writes.length; runtime.bindHudReadout(h.request('readout'));
+  assert.equal(views.at(-1).final.reason, 'scope-excluded'); assert.equal(h.writes.length, writes); runtime.dispose();
+});
+
+test('native HUD freshness nonbooleans reject without then inspection or DOM observations', async () => {
+  for (const value of [undefined, null, 0, 1, Promise.resolve(), Object.defineProperty({}, 'then', {
+    get() { assert.fail('freshness then inspection'); } })]) {
+    const h = hudOwnerHarness(), runtime = await h.start(); h.current(value);
+    const result = caught(() => runtime.bindHudReadout(h.request()));
+    assert(result.thrown); assert.equal(h.domCalls.length, 0); assert.equal(h.writes.length, 0);
+    assert.equal(runtime.diagnostics().disposed, true); assert.equal(h.wasm.counts().sceneFrees, 1);
+  }
+});
+
+test('HUD disposal exhausts cleanup after HUD release failure and retains earlier nickname failure by presence', async () => {
+  for (const primary of cleanupPrimaries) for (const first of ['nickname', 'hud']) {
+    const h = hudOwnerHarness(), runtime = await h.start(), hud = runtime.bindHudReadout(h.request());
+    const nickname = runtime.bindNicknameField(h.nicknameRequest()); connect(h.f, runtime); h.resetTrace(); const order = [];
+    h.hooks.unregister = () => {
+      order.push('nickname'); assert.equal(nickname.unbind(), undefined);
+      if (first === 'nickname') throw primary;
+    };
+    h.hudHooks.detach = () => {
+      order.push('hud'); assert.equal(hud.unbind(), undefined);
+      throw first === 'hud' ? primary : new Error('secondary HUD');
+    };
+    h.inspect(stage => {
+      order.push(stage); assert.equal(hud.unbind(), undefined); assert.equal(nickname.unbind(), undefined);
+      assert.equal(runtime.dispose(), undefined);
+      assert(caught(() => runtime.bindHudReadout(h.request())).thrown);
+      assert(caught(() => runtime.bindNicknameField(h.nicknameRequest())).thrown);
+    });
+    h.failures.set('cancel', new Error('secondary cancel')); h.failures.set('status:client-failed', new Error('secondary status'));
+    const result = caught(runtime.dispose); assert(result.thrown); assert(Object.is(result.error, primary));
+    assert.deepEqual(order, ['nickname', 'hud', ...cleanupStages, 'status:client-failed']);
+    assert.equal(h.wasm.counts().sceneFrees, 1); assert.equal(h.wasm.counts().qualityFrees, 1);
+    const before = [...order]; runtime.dispose(); hud.unbind(); nickname.unbind(); assert.deepEqual(order, before);
+  }
+});
+
+test('caught final construction reentry disposes the unpublished HUD binding without active native cleanup', async () => {
+  const h = hudOwnerHarness(), runtime = await h.start(); let first, detaches = 0;
+  h.hudHooks.constructed = () => { first = caught(() => runtime.bindNicknameField(h.nicknameRequest())); assert(first.thrown); };
+  h.hudHooks.detach = () => { detaches++; };
+  const result = caught(() => runtime.bindHudReadout(h.request())); assert(result.thrown); assert.equal(result.error, first.error);
+  assert.equal(detaches, 1); assert.equal(h.domCalls.length, 0); assert.equal(h.wasm.counts().sceneFrees, 0);
+  assert.equal(runtime.diagnostics().disposed, false); delete h.hudHooks.constructed;
+  runtime.bindHudReadout(h.request()).unbind(); runtime.dispose();
+});
+
+test('selected startup requires scene score enable and score observation before exposing the runtime', async () => {
+  for (const name of ['enable_score_tracking', 'score_view']) {
+    const h = hudOwnerHarness(); delete h.wasm.api.AnimatedScene.prototype[name];
+    const result = await rejected(() => h.start()); assert(result.thrown);
+    assert.equal(h.wasm.counts().sceneFrees, 1); assert.equal(h.f.raf.size, 0); assert.equal(h.f.sockets, 0);
+    assert.equal(h.tracking, name === 'enable_score_tracking' ? 0 : 1);
+  }
+});
+
+test('caught HUD reentry during existing UI reconciliation status is deferred to cleanup without publication', async () => {
+  const h = hudOwnerHarness(), runtime = await h.start(), hud = runtime.bindHudReadout(h.request()); connect(h.f, runtime);
+  let first, entered = false; const calls = h.domCalls.length;
+  h.reenter(stage => {
+    if (stage !== 'status:connected' || entered) return;
+    entered = true; first = caught(hud.unbind); assert(first.thrown); assert.equal(h.wasm.counts().sceneFrees, 0);
+  });
+  h.f.interval(25); assert(entered); assert.equal(h.domCalls.length, calls);
+  assert.equal(runtime.diagnostics().disposed, false); h.f.flush();
+  assert.equal(runtime.diagnostics().disposed, true); assert.equal(h.wasm.counts().sceneFrees, 1);
+  assert.equal(h.domCalls.length, calls); hud.unbind();
+});
+
+// This positive composition runs with the separately integrated native-capture dependency.
+// The pinned old fixture lacks its opt-in HUD operation doubles; all local owner cases still run there.
+test('actual captured native HUD group composes with explicit bootstrap in the same document realm',
+  { skip: !createGateTestDom({ hud: true }).hud }, async () => {
+    const f = fixture({ hudNative: true }); f.host(); f.complete();
+    const nativeDom = f.edit.hud, wasm = wasmDouble(f), BaseScene = wasm.api.AnimatedScene;
+    let enabled = 0, opcode, reads = 0;
+    const scoreView = () => ({ schema: 1, enabled: true, tableMax: 17,
+      own: { token: 7n, id: 7, logicalSegments: 4, fractionalMass: .5, scoreAdjustment: 3, scoreIndex: 7 },
+      status: 'ready', score: -0, error: null });
+    wasm.api.AnimatedScene = class extends BaseScene {
+      enable_score_tracking() { enabled++; }
+      score_view() { this.outside(); reads++; return scoreView(); }
+      apply_frame_and_render_standard_with_face_presentation_and_prey_and_hud(...args) {
+        this.outside(); this.borrowed = true;
+        try {
+          super.apply_frame_and_render_standard_with_appearance_and_prey(...args);
+          const events = opcode === 97 ? [{ commandIndex: 0, kind: 'setup', tableMax: 17 },
+            { commandIndex: 0, kind: 'setup-draw', view: scoreView() }]
+            : opcode === 108 ? [{ commandIndex: 0, kind: 'leaderboard', localRow: 2, rank: 7, population: 23,
+              deathPending: args[15].guards[0].deathPending }] : [];
+          return { schema: 1, commandCount: 1, setupDraws: opcode === 97 ? 1 : 0, events };
+        } finally { this.borrowed = false; }
+      }
+    };
+    const decode = wasm.api.decode_frame;
+    wasm.api.decode_frame = bytes => { opcode = bytes[0]; return decode(bytes); };
+    Object.assign(f.context, { createStockHostSnapshot, createStockSkinAdapter, createStockClient, createStockEntityAssets,
+      desktopBackingSize, createStockGameplay, bindStockHudDom, projectHudView, init: async () => {}, wasm: {} });
+    // Keep the actual initializer in the gate's current realm; this explicitly selected path does not auto-enter.
+    const explicit = new Script(bootstrapSource.slice(0, bootstrapSource.indexOf('// Trusted MAIN modules'))
+      .replace(/^import .+;\r?$/gm, '').replace(/^export /gm, '') + '\nstartGamePage;').runInContext(f.context);
+    const runtime = await explicit({ wasmApi: wasm.api, hudReadout: true });
+    assert.equal(enabled, 1); assert.equal(f.sockets, 0);
+    const element = name => new nativeDom.HTMLElement(name);
+    const atom = (name, text) => {
+      const value = { element: element(name), text: new nativeDom.CharacterData(text) };
+      value.element.appendChild(value.text); return value;
+    };
+    const mount = element('section'); f.document.body.appendChild(mount);
+    const readout = { root: element('div'), lengthLine: element('div'), rankLine: element('div'),
+      lengthLabel: atom('span', 'AUTHORED LENGTH'), lengthValue: atom('b', 'keep-length'),
+      rankLabel: atom('span', 'AUTHORED RANK'), rankValue: atom('span', 'keep-rank'),
+      separator: atom('span', 'AUTHORED /'), populationValue: atom('span', 'keep-population') };
+    mount.appendChild(readout.root); readout.root.appendChild(readout.lengthLine); readout.root.appendChild(readout.rankLine);
+    for (const name of ['lengthLabel', 'lengthValue']) readout.lengthLine.appendChild(readout[name].element);
+    for (const name of ['rankLabel', 'rankValue', 'separator', 'populationValue']) readout.rankLine.appendChild(readout[name].element);
+    const request = { __proto__: null, schema: 1, scope: 'readout', nodes: { __proto__: null, schema: 1,
+      document: f.document, mount, textPolicy: 'authored', readout, final: null } };
+    const ticket = runtime.bindHudReadout(request); assert.equal(reads, 0);
+    assert(nativeDom.trace.some(([name]) => name === 'nodeType'));
+    connect(f, runtime); f.socket.message([108, 7, 23]); f.flush(); f.frame();
+    assert.equal(nativeDom.character(readout.lengthValue.text).data, '0');
+    assert.equal(nativeDom.character(readout.rankValue.text).data, '7');
+    assert.equal(nativeDom.character(readout.populationValue.text).data, '23');
+    assert.equal(nativeDom.character(readout.lengthLabel.text).data, 'AUTHORED LENGTH');
+    const styles = nativeDom.style(Object.getOwnPropertyDescriptor(nativeDom.HTMLElement.prototype, 'style').get.call(readout.root));
+    assert.equal(styles.get('font-size'), '12px');
+    const nativeCalls = nativeDom.trace.length; f.realm.location.href = 'https://slither.io/#synthetic-stale';
+    f.frame(); assert.equal(nativeDom.trace.length, nativeCalls, 'captured freshness blocks every later DOM operation');
+    assert.throws(() => runtime.bindHudReadout(request), /already bound/);
+    ticket.unbind(); runtime.dispose(); assert.equal(wasm.counts().sceneFrees, 1);
+    assert.equal(wasm.counts().qualityFrees, 1); assert.equal(f.original, 0);
+  });

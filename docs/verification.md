@@ -38,6 +38,34 @@ pull requests, and manual dispatch. Normal tests and CI require no external
 reference and do not connect to game servers. Dependency and toolchain setup may
 access package sources. Release-plz remains dormant.
 
+## Explicit bootstrap HUD owner
+
+The integrated optional native HUD capture and bootstrap owner pass 997 Node
+tests with zero skips. The focused integrated run passes 379 cases: 101 bootstrap,
+60 native-capability capture and 218 existing HUD cases. All 71 original literal
+bootstrap cases and the automatic-entry code remain unchanged. Independent
+capture review reruns 104 focused synthetic cases and three syntax checks.
+
+The positive composition case executes the actual gate capture and bootstrap in
+one VM document realm. Actual reducer/view/DOM modules verify numeric text and
+local styles through branded operation doubles, then block further observations
+when captured freshness becomes false. Other cases cover default-off keys and
+scheduling, closed requests, missing histories, negative zero/wide/negative
+scores, unchanged deferred identities, exact getter/draw seams, caught reentry,
+stale tickets, partial writes and first-presence cleanup including falsy throws.
+The captured group is independent of editing, nickname and profile acquisition.
+
+Missing-capability baselines, a corrected armed-URL regression, setup/expectation
+mistakes and all attempted runs remain retained outside Git. A worktree run with
+one dependency-absent skip is excluded from integrated proof; the private frozen
+composition run has zero skips.
+
+These results use authored Node/VM and native-operation doubles. They do not
+establish native DOM/CSS, pixels, installed-host/UI, profile HTTP, gameplay or
+server acceptance for this owner. Earlier native renderer checks do not transfer
+that acceptance. Default startup remains unbound; no nodes, labels, final
+visibility or automatic activation are selected. See [the owner contract](hud-view.md#explicit-bootstrap-owner).
+
 ## Static head accessories
 
 The integrated generic accessory change passes 907 Node tests and 535 native

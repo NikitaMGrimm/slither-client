@@ -85,6 +85,33 @@
   }
   // Value support is optional independently of the reviewed native-default group.
   const nicknameValue = captureNicknameValue();
+  function captureHudDom() {
+    // HUD support is optional independently of editing and profile acquisition.
+    try {
+      const node = realm.Node.prototype, element = realm.Element.prototype;
+      const document = getter(realm, 'document'), top = getter(realm, 'top'), location = getter(realm, 'location');
+      const initialDocument = document(realm), initialLocation = location(realm);
+      const href = getter(initialLocation, 'href'), initialURL = url.href;
+      const text = descriptor(realm.CharacterData.prototype, 'data')?.set;
+      if (typeof text !== 'function') return;
+      const setStyle = method(realm.CSSStyleDeclaration.prototype, 'setProperty');
+      const dom = freeze({
+        nodeType: getter(node, 'nodeType'), ownerDocument: getter(node, 'ownerDocument'),
+        parentNode: getter(node, 'parentNode'), firstChild: getter(node, 'firstChild'),
+        nextSibling: getter(node, 'nextSibling'), isConnected: getter(node, 'isConnected'),
+        localName: getter(element, 'localName'), namespaceURI: getter(element, 'namespaceURI'),
+        style: getter(realm.HTMLElement.prototype, 'style'),
+        setText: (receiver, value) => apply(text, receiver, [value]),
+        setStyle: (receiver, name, value) => setStyle(receiver, name, value),
+      });
+      return freeze({ schema: 1, document: initialDocument, dom,
+        isCurrentDocument: () => !ended && claimed && realm[slot] === gateRecord && top(realm) === realm
+          && document(realm) === initialDocument && location(realm) === initialLocation
+          && href(initialLocation) === initialURL,
+      });
+    } catch { return; }
+  }
+  const hudDom = captureHudDom();
   function current(generation) {
     return !ended && claimed && input !== undefined && generation === routerGeneration
       && realm[slot] === gateRecord && editing.top(realm) === realm
@@ -386,6 +413,7 @@
     for (const name of ['requestAnimationFrame', 'cancelAnimationFrame', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'queueMicrotask']) native[name] = bind(name);
     native.now = realm.performance.now.bind(realm.performance);
     native.random = realm.Math.random.bind(realm.Math);
+    if (hudDom !== undefined) native.hudDom = hudDom;
     const liveProfile = captureLiveProfile();
     if (liveProfile !== undefined) native.liveProfile = liveProfile;
     const storage = realm.localStorage;
