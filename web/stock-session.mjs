@@ -286,6 +286,32 @@ export function createStockSession({ wasm, createSocket, now, maxBufferedBytes =
     socket.onerror = event => { if (active()) fail(event instanceof Error ? event : new Error('Stock socket error'), 'socket-error'); };
     socket.onclose = () => { if (active()) stop('disconnected', 'socket-closed'); };
   }
+  function foldAfterStep(request, requireHud = false) {
+    outsideIngress();
+    if (requireHud && !withHud) throw new Error('HUD subscription required');
+    if (stepRevision !== undefined) throw new Error('Previous control step is not committed');
+    finite(request?.nowMs, 'step time');
+    const delta = finite(request?.delta, 'lagged step');
+    integer(request?.wholeSteps, 5, 'whole steps');
+    if (delta < 0 || delta > 5) throw new RangeError('Invalid lagged step');
+    let returnActive = false, returnCompleted = false;
+    if (deathMs !== null && request.nowMs - deathMs > 1600) {
+      if (uiPhase === 'idle') uiPhase = 'out';
+      if (uiPhase === 'out') {
+        returnActive = true;
+        returnFraction -= 0.004 * delta;
+        if (returnFraction <= 0) {
+          returnCompleted = true;
+          returnFraction = 0; deathMs = null; playing = false; uiPhase = 'idle';
+        }
+      }
+    }
+    if (closeRequested && deathMs === null && !terminal()) stop('disconnected', 'life-returned');
+    stepRevision = actionRevision;
+    if (launch && !socket && Object.hasOwn(actions, 'resetWorld')) launchCommitted = true;
+    return freeze({ actions: freeze({ ...actions }), lifecycle: freeze({ schema: 1,
+      deathPending: deathMs !== null, returnActive, returnCompleted, returnFraction }) });
+  }
   return freeze({
     snapshot,
     subscribe(value) {
@@ -351,25 +377,10 @@ export function createStockSession({ wasm, createSocket, now, maxBufferedBytes =
       actions = remaining; actionRevision++; offeredActions = undefined;
     },
     afterStep(request) {
-      outsideIngress();
-      if (stepRevision !== undefined) throw new Error('Previous control step is not committed');
-      finite(request?.nowMs, 'step time');
-      const delta = finite(request?.delta, 'lagged step');
-      integer(request?.wholeSteps, 5, 'whole steps');
-      if (delta < 0 || delta > 5) throw new RangeError('Invalid lagged step');
-      if (deathMs !== null && request.nowMs - deathMs > 1600) {
-        if (uiPhase === 'idle') uiPhase = 'out';
-        if (uiPhase === 'out') {
-          returnFraction -= 0.004 * delta;
-          if (returnFraction <= 0) {
-            returnFraction = 0; deathMs = null; playing = false; uiPhase = 'idle';
-          }
-        }
-      }
-      if (closeRequested && deathMs === null && !terminal()) stop('disconnected', 'life-returned');
-      stepRevision = actionRevision;
-      if (launch && !socket && Object.hasOwn(actions, 'resetWorld')) launchCommitted = true;
-      return freeze({ ...actions });
+      return foldAfterStep(request).actions;
+    },
+    afterStepWithHud(request) {
+      return foldAfterStep(request, true);
     },
     commitControl() {
       outsideIngress();

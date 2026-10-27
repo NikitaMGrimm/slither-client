@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Expose opt-in same-step HUD lifecycle observations beside the existing native
+  control actions, sharing the sole session fold and preserving legacy behavior.
+  Fade/readout reduction and visible UI remain separate.
+
 - Add an opt-in indexed HUD journal with event-time Setup/final scores,
   retained-own scheduling and leaderboard headers through native, Wasm and
   controller/gameplay boundaries. Package its verified shared validator;
