@@ -3,11 +3,11 @@
 use std::{collections::BTreeSet, error::Error, fmt};
 
 use super::{
-    AnchorView, BodyPaintGeometry, BodyPaintSample, BodyPaintView, BoundaryRadius, CurveOutput,
-    FollowCamera, FoodConsume, FoodCullBounds, FoodEaterPose, FoodError, FoodFactory, FoodSpawn,
-    FoodWorld, FrameClock, FrameStep, MAX_CURVE_SAMPLES, PairedFaceGeometry, PairedSideGeometry,
-    PresentationError, PreyError, PreyFactory, PreyWorld, SnakeMetrics, SnakeObjectToken,
-    SnakePresentation, StandardEyeGeometry, finite,
+    AnchorView, ArenaEdgeView, BodyPaintGeometry, BodyPaintSample, BodyPaintView, BoundaryRadius,
+    CurveOutput, FollowCamera, FoodConsume, FoodCullBounds, FoodEaterPose, FoodError, FoodFactory,
+    FoodSpawn, FoodWorld, FrameClock, FrameStep, MAX_CURVE_SAMPLES, PairedFaceGeometry,
+    PairedSideGeometry, PresentationError, PreyError, PreyFactory, PreyWorld, SnakeMetrics,
+    SnakeObjectToken, SnakePresentation, StandardEyeGeometry, finite,
 };
 use crate::{
     protocol::ElapsedHeader,
@@ -199,6 +199,7 @@ pub struct AnimatedClient {
     clock: FrameClock,
     camera: FollowCamera,
     boundary: Option<BoundaryRadius>,
+    arena_edge_view: ArenaEdgeView,
     connected: bool,
     entries: Vec<Entry>,
     body_paint_flags: Vec<u8>,
@@ -230,6 +231,7 @@ impl AnimatedClient {
             clock: FrameClock::new(start_ms)?,
             camera: FollowCamera::default(),
             boundary: None,
+            arena_edge_view: ArenaEdgeView::default(),
             connected: false,
             entries: Vec::new(),
             body_paint_flags: vec![0; MAX_CURVE_SAMPLES],
@@ -243,7 +245,7 @@ impl AnimatedClient {
     }
 
     /// Clear the world and draw corrections, and restore the lag multiplier to one.
-    /// Preserve the clock's timestamp and both accumulated phases, boundary state,
+    /// Preserve the clock's timestamp and both accumulated phases, boundary and arena-edge view state,
     /// camera position, caller follow preference and shared body-painter flag history. Use `new`
     /// to start a fresh timeline.
     pub fn reset(&mut self) {
@@ -530,6 +532,10 @@ impl AnimatedClient {
                             .apply_setup(&value)
                             .map_err(ClientPresentationError::from)?;
                     }
+                    // Received state commits after all callbacks; draws need this event's center.
+                    next.arena_edge_view
+                        .set_center(value.grid_center)
+                        .map_err(ClientPresentationError::from)?;
                     next.connected = true;
                     on_setup(&mut next, setup.insert(value))?;
                 }
@@ -802,6 +808,12 @@ impl AnimatedClient {
         self.boundary.as_ref()
     }
 
+    /// Copied event-time arena center and retained own-draw camera polar coordinates.
+    /// Reset and no-own draws preserve the angle and distance.
+    pub fn arena_edge_view(&self) -> ArenaEdgeView {
+        self.arena_edge_view
+    }
+
     /// Prepare a default-style numeric draw and discard its paint data.
     /// This commits the same camera, spacing and eye targets as a real draw;
     /// do not call immediately before another preparation for the same draw.
@@ -887,6 +899,9 @@ impl AnimatedClient {
             let metrics = own.metrics();
             next.camera
                 .prepare_draw(metrics.corrected_head, metrics.logical_segments as u32)
+                .map_err(ClientPresentationError::from)?;
+            next.arena_edge_view
+                .prepare_draw(next.camera.position())
                 .map_err(ClientPresentationError::from)?;
             next.food_bounds = Some(
                 FoodCullBounds::from_view(BodyPaintView {
@@ -1282,6 +1297,12 @@ mod resolved_draw_tests {
                     assert!(stage.connected());
                     assert_eq!(stage.boundary().unwrap().displayed(), setup.radius);
                     assert!(stage.received().setup.is_none());
+                    assert_eq!(stage.arena_edge_view().center(), setup.grid_center);
+                    assert_eq!(stage.arena_edge_view().angle().to_bits(), 0_f64.to_bits());
+                    assert_eq!(
+                        stage.arena_edge_view().distance().to_bits(),
+                        0_f64.to_bits()
+                    );
                     assert!(
                         stage
                             .prepare_draw_resolved_limited_staged::<ClientPresentationError, _>(
@@ -1349,7 +1370,19 @@ mod resolved_draw_tests {
                     order.borrow_mut().push("setup");
                     assert_eq!(stage.clock, control.clock);
                     assert_eq!(stage.boundary().unwrap().displayed(), setup.radius);
+                    assert_eq!(stage.arena_edge_view().center(), setup.grid_center);
                     let draw = stage.prepare_draw_with_style_staged(960, 540, 1.3, true)?;
+                    let camera = stage.camera().position();
+                    let dx = camera.x - setup.grid_center;
+                    let dy = camera.y - setup.grid_center;
+                    assert_eq!(
+                        stage.arena_edge_view().angle().to_bits(),
+                        dy.atan2(dx).to_bits()
+                    );
+                    assert_eq!(
+                        stage.arena_edge_view().distance().to_bits(),
+                        (dx * dx + dy * dy).sqrt().to_bits()
+                    );
                     draws.push((setup.clone(), draw, stage.clone()));
                     Ok::<_, ClientPresentationError>(())
                 },

@@ -11,6 +11,7 @@ use std::{
 
 use crate::{math, state::Point};
 
+mod arena_edge;
 mod body;
 mod body_painter;
 mod boundary;
@@ -28,6 +29,7 @@ mod prey_painter;
 mod quality;
 mod snake;
 
+pub use arena_edge::{ArenaEdgeInput, ArenaEdgePlan, ArenaEdgeView, plan_arena_edge};
 pub use body::{BODY_SAMPLES, BodyGeometry, BodyPoint, MAX_RETAINED_BODY_POINTS};
 pub use body_painter::{
     BodyAlpha, BodyAsset, BodyAssetStatus, BodyAssetUse, BodyBlend, BodyFade, BodyImageCommand,

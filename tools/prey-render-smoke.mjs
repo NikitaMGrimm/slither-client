@@ -1,4 +1,5 @@
 import { bundle, syntheticSetup } from '../web/synthetic-scene.mjs';
+import { assertArenaEdge } from './arena-edge-render-smoke.mjs';
 
 // Authored packet/update/draw integration using the production Wasm and shared
 // Canvas recorder. No reference runtime, artwork, sockets or raster oracle.
@@ -87,15 +88,17 @@ export function preyRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok
       const snakeIndex = trace.findIndex(c => c.op === 'image' && bodySources.includes(c.source));
       ok(index(foods[0].images[0]) < index(created[1].images[1]));
       ok(last(created[0].images[1]) < snakeIndex);
-      ok(trace.findLastIndex(c => c.op === 'fill') < index(foods[0].images[2]));
+      ok(trace.findLastIndex(c => c.op === 'fill' && c.commands[0]?.op === 'arc') < index(foods[0].images[2]));
       ok(last(foods[0].images[2]) < index(created[1].images[4]),
         'food early < prey early < snakes/eyes < food late < prey late');
+      assertArenaEdge(f, { eq, ok });
       eq(f.target.context.stack.length, 0);
 
       f.scene.advance(now, false).free();
       eq(f.scene.prey_state().preys.map(p => p.scale), [0, 0]);
       f.quality.set_requested_mode(0); f.quality.begin_connection();
       eq(draw().length, 12, 'prey calls survive LQ/blend-zero food suppression');
+      assertArenaEdge(f, { eq, ok });
       f.quality.set_requested_mode(1); f.quality.begin_connection();
       while (now < 1280) f.scene.advance(now += 40, false).free();
       state = f.scene.prey_state();
@@ -140,6 +143,14 @@ export function preyRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok
         remove(51), syntheticSetup())), 3);
       eq(preyImages().length, 6, 'earlier Setup plan pins removed prey sources until submission ends');
       eq(f.scene.prey_state().preys.length, 0); eq(f.scene.prey_state().sourceCount, 0);
+      const lastReset = f.target.context.trace.findLastIndex(c => c.op === 'reset');
+      const emptyFrame = f.target.context.trace.slice(lastReset);
+      eq(emptyFrame.filter(c => c.op === 'blend' && c.value === 'lighter').length, 2,
+        'enabled empty prey keeps both early and late additive scopes');
+      const emptyFill = emptyFrame.findIndex(c => c.op === 'fill' && c.commands[0]?.op === 'moveTo');
+      const emptyPrey = emptyFrame.findLastIndex(c => c.op === 'blend' && c.value === 'lighter');
+      ok(emptyPrey < emptyFill && emptyFrame.slice(emptyPrey, emptyFill).some(c => c.op === 'restore'),
+        'empty late prey scope restores before the source-over edge');
 
       f.scene.reset(); created.length = 0; f.target.context.trace = [];
       const prior = allState(), priorPaint = f.target.context.trace.slice();

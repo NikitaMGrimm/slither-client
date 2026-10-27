@@ -13,12 +13,13 @@ use crate::{
     canvas_browser::{CanvasFrame, CanvasPreflight, draw_sprite},
     food_browser::FoodSources,
     presentation::{
-        AnimatedClient, BodyPaintError, BodyPaintInput, BodyPaintPlan, BodyPaintQuality,
-        BodyPaintView, BodyPaintVisual, CurveInput, CurveOutput, EyeLayoutInput, FoodImageCommand,
-        FoodPaintInput, FoodPaintPlan, MAX_BODY_PAINT_COMMANDS, MAX_DRAW_SAMPLES,
-        MAX_RETAINED_SNAKES, PairedSideLayout, PreparedSnake, PreyEaterPose, PreyImageCommand,
-        PreyPaintInput, PreyPaintPlan, QualitySnapshot, SnakePresentation, StandardEyeLayout, Turn,
-        plan_food, plan_prey, plan_standard_body, sample_curve_with_heading,
+        AnimatedClient, ArenaEdgeInput, ArenaEdgePlan, BodyPaintError, BodyPaintInput,
+        BodyPaintPlan, BodyPaintQuality, BodyPaintView, BodyPaintVisual, CurveInput, CurveOutput,
+        EyeLayoutInput, FoodImageCommand, FoodPaintInput, FoodPaintPlan, MAX_BODY_PAINT_COMMANDS,
+        MAX_DRAW_SAMPLES, MAX_RETAINED_SNAKES, PairedSideLayout, PreparedSnake, PreyEaterPose,
+        PreyImageCommand, PreyPaintInput, PreyPaintPlan, QualitySnapshot, SnakePresentation,
+        StandardEyeLayout, Turn, plan_arena_edge, plan_food, plan_prey, plan_standard_body,
+        sample_curve_with_heading,
     },
     presentation_browser::AnimationStep,
     prey_browser::PreySources,
@@ -729,6 +730,12 @@ impl AnimatedScene {
             },
             "own": own.map_or_else(|| "null".into(), snake_snapshot)
         }
+    }
+
+    /// Copied center, camera angle and distance, preserving signed zeros.
+    pub fn arena_edge_view(&self) -> Vec<f64> {
+        let view = self.client.arena_edge_view();
+        vec![view.center(), view.angle(), view.distance()]
     }
 
     /// Copied retained-food diagnostics with lossless BigInt identities and native
@@ -1508,6 +1515,7 @@ impl AnimatedScene {
             zoom,
             food,
             prey,
+            arena_edge: arena_edge_plan(&prepared, context)?,
             fallback,
             paint,
         };
@@ -1700,8 +1708,61 @@ struct PlannedScene {
     zoom: f64,
     food: Option<FoodPaintPlan>,
     prey: Option<PreyPaintPlan>,
+    arena_edge: Option<ArenaEdgePlan>,
     fallback: Vec<Food>,
     paint: PlannedSnakePaint,
+}
+
+fn arena_edge_plan(
+    prepared: &AnimatedClient,
+    context: SceneDrawContext,
+) -> Result<Option<ArenaEdgePlan>, JsValue> {
+    context
+        .boundary
+        .map(|radius| {
+            plan_arena_edge(ArenaEdgeInput {
+                view: prepared.arena_edge_view(),
+                camera: prepared.camera().position(),
+                zoom: prepared.camera().zoom(),
+                width: context.size.width,
+                height: context.size.height,
+                radius,
+            })
+            .map_err(error)
+        })
+        .transpose()
+        .map(Option::flatten)
+}
+
+fn submit_arena_edge(
+    context: &CanvasRenderingContext2d,
+    plan: &ArenaEdgePlan,
+) -> Result<(), JsValue> {
+    context.save();
+    let result = (|| {
+        context.set_transform(1., 0., 0., 1., 0., 0.)?;
+        context.set_global_composite_operation("source-over")?;
+        context.set_global_alpha(0.8);
+        context.set_line_width(plan.line_width);
+        context.set_fill_style_str("#300000");
+        context.set_stroke_style_str("#800000");
+        context.begin_path();
+        context.move_to(plan.fill[0].x, plan.fill[0].y);
+        for point in &plan.fill[1..] {
+            context.line_to(point.x, point.y);
+        }
+        context.close_path();
+        context.fill();
+        context.begin_path();
+        context.move_to(plan.stroke[0].x, plan.stroke[0].y);
+        for point in &plan.stroke[1..] {
+            context.line_to(point.x, point.y);
+        }
+        context.stroke();
+        Ok(())
+    })();
+    context.restore();
+    result
 }
 
 fn view(size: DrawSize, camera: Point, zoom: f64) -> BodyPaintView {
@@ -2270,6 +2331,7 @@ impl PlannedScene {
             zoom,
             food,
             prey,
+            arena_edge: arena_edge_plan(prepared, context)?,
             fallback,
             paint,
         })
@@ -2287,13 +2349,6 @@ impl PlannedScene {
         let camera = self.camera;
         let zoom = self.zoom;
         let viewport_half = self.context.size.half();
-        if let Some(boundary) = self.context.boundary {
-            context.begin_path();
-            context.arc(0., 0., boundary, 0., TAU)?;
-            context.set_stroke_style_str("#647481");
-            context.set_line_width(1. / zoom);
-            context.stroke();
-        }
         if let Some(plan) = &self.food {
             submit_food(food_sources, context, &plan.early[..plan.outline_barrier])?;
             submit_food(food_sources, context, &plan.early[plan.outline_barrier..])?;
@@ -2403,6 +2458,9 @@ impl PlannedScene {
         }
         if let Some(plan) = &self.prey {
             submit_prey(prey_sources, context, &plan.late)?;
+        }
+        if let Some(plan) = &self.arena_edge {
+            submit_arena_edge(context, plan)?;
         }
         Ok(())
     }

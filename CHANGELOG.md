@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Replace the animated gray arena circle with a late red vector band and open
+  inner stroke in both renderers and ordered Setup draws. Retain the own-draw
+  camera angle/distance through reset and no-own draws; use the eased radius
+  without advancing another update.
+
 - Retain canonical prey appearances, motion corrections and captured eater objects
   through additive factory APIs, both animated paint paths and ordered Setup draws.
   Share food/prey source and image budgets, expose copied diagnostics, and add

@@ -32,7 +32,7 @@ export function faceRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok
     for (const f of [a, b]) stage(f);
     a.render(); basic(b);
     eq(a.state(), b.state(), 'basic/standard prepare the same numeric face exactly once');
-    const face = f => f.target.context.trace.filter(v => v.op === 'fill' || (v.op === 'image' && v.source === f.faceSource))
+    const face = f => f.target.context.trace.filter(v => (v.op === 'fill' && v.commands[0]?.op === 'arc') || (v.op === 'image' && v.source === f.faceSource))
       .map(v => v.source ? { ...v, source: 'face', alphaWrites: undefined } : v);
     eq(face(a), face(b), 'both actual render APIs compose identical complete face lanes');
     eq(images(a).length, 6);
@@ -412,7 +412,9 @@ export function faceRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok
   const noEyes = fixture({ eyes: false });
   try {
     noEyes.render(); const calls = noEyes.target.context.trace;
-    eq(calls.filter(v => v.op === 'fill').length, 0);
-    eq(calls.at(-2), { op: 'alpha', requested: 1, effective: 1 }, 'eye-less nondecorated face also finishes at root alpha one');
+    eq(calls.filter(v => v.op === 'fill' && v.commands[0]?.op === 'arc').length, 0);
+    const edgeStart = calls.findIndex(v => v.op === 'alpha' && v.requested === 0.8);
+    eq(calls.slice(0, edgeStart).filter(v => v.op === 'alpha').at(-1), { op: 'alpha', requested: 1, effective: 1 },
+      'eye-less nondecorated face finishes at root alpha one before the scoped edge');
   } finally { noEyes.close(); }
 }

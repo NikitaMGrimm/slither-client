@@ -1,5 +1,6 @@
 import { bundle, syntheticSetup, syntheticStep } from '../web/synthetic-scene.mjs';
 import { denseScene } from '../web/dense-scene.mjs';
+import { arenaEdgePoints } from './arena-edge-render-smoke.mjs';
 
 // Original synthetic packets and native-call doubles through the actual Wasm ABI.
 // No reference/runtime inputs, raster-pixel oracle, browser, network or clocks.
@@ -110,9 +111,23 @@ export function setupRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, o
       const q = f.quality.snapshot();
       eq(f.apply(bundle(setup(), appearance(), x, syntheticStep(1), setup(32551, 1200), y,
         removeX, [115, 0, 0, 0], appearance(), setup(32552, 1400))), 3);
+      const expectedEdges = [];
+      const captureEdge = radius => {
+        const snapshot = JSON.parse(control.scene.snapshot());
+        const [center, angle, distance] = control.scene.arena_edge_view();
+        eq(snapshot.boundary.displayed, radius, 'control retains this Setup radius');
+        ok(Math.abs(radius - distance) < 4000);
+        const points = arenaEdgePoints({ center, angle, radius, camera: snapshot.camera, width: 960, height: 540 });
+        expectedEdges.push(points.fill, points.stroke);
+      };
       control.legacyApply(setup()); control.resize();
+      captureEdge(1000);
       control.legacyApply(bundle(appearance(), x, syntheticStep(1), setup(32551, 1200))); control.resize();
+      captureEdge(1200);
       control.legacyApply(bundle(y, removeX, [115, 0, 0, 0], appearance(), setup(32552, 1400))); control.resize();
+      captureEdge(1400);
+      eq(f.target.context.trace.filter(v => (v.op === 'fill' || v.op === 'stroke') && v.commands[0]?.op === 'moveTo').map(v => v.path),
+        expectedEdges, 'ordered Setup plans retain exact event-time center/radius/polar/camera screen coordinates');
       eq(f.order, ['appearance', 'food:9', 'draw', 'food:18', 'appearance', 'draw'], 'callbacks occupy event positions');
       eq(normalized(f.target.context.trace), normalized(control.target.context.trace),
         'each Setup freezes its own camera, center, boundary, bodies, eyes and food');
@@ -125,7 +140,8 @@ export function setupRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, o
       eq(actualState.slice(1), controlState.slice(1), 'bundled staged draws equal explicit ordered control state');
       eq(f.quality.snapshot(), q, 'Setup never advances applied quality or statistics');
       eq(clears(f), 3, 'empty initial Setup and both later Setups each submit once');
-      eq(f.target.context.trace.filter(v => v.op === 'stroke').map(v => v.path[0][2]), [1000, 1200, 1400]);
+      eq(f.target.context.trace.filter(v => v.op === 'stroke' && v.commands[0]?.op === 'moveTo').map(v => v.path.length), [42, 42, 42],
+        'each ordered Setup freezes a complete inner edge, including its event-time radius');
       const resets = f.target.context.trace.flatMap((v, i) => v.op === 'reset' ? [i] : []);
       const earlierFood = f.created[0].images;
       ok(f.target.context.trace.slice(resets[1], resets[2]).some(v => earlierFood.includes(v.source)),
@@ -234,12 +250,11 @@ export function setupRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, o
     const late = harness(path);
     try {
       late.start(); const before = late.state();
-      const originalArc = late.target.context.arc;
-      let boundaries = 0;
       const fault = { synthetic: 'late Canvas fault' };
-      late.target.context.arc = function(...args) {
-        if (args[2] === 1300 && ++boundaries === 1) throw fault;
-        return originalArc.apply(this, args);
+      late.target.context.beforeCanvasCall = (method, context) => {
+        if (method === 'setTransform' && context.stack.length === 2
+          && context.trace.filter(c => c.op === 'fill' && c.commands[0]?.op === 'arc').length === 8
+          && context.trace.filter(c => c.op === 'fill' && c.commands[0]?.op === 'moveTo').length === 1) throw fault;
       };
       let caught;
       rejects(() => { try { late.apply(bundle(setup(32550, 1200), y, setup(32550, 1300))); }
@@ -248,7 +263,7 @@ export function setupRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, o
       eq(late.state(), before, 'late native fault rolls back model, source tokens and GC');
       eq(clears(late), 2, 'native failure can leave earlier draws and a later clear visible');
       eq(late.target.context.stack.length, 0);
-      late.target.context.arc = originalArc;
+      late.target.context.beforeCanvasCall = null;
       late.target.context.trace = [];
       eq(late.apply(bundle(setup(32550, 1200), y, setup(32550, 1300))), 2, 'a separate explicit retry can succeed');
       eq(late.scene.food_state().sourceCount, 6);
@@ -387,12 +402,15 @@ export function setupRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, o
         eq([count.target.width, count.target.height], [960, 540], 'entry size differs from charged desired size');
         eq(count.apply(bundle(...setups(accepted)), { width: size, height: size }), accepted);
         eq(observed.calls, { getContext: accepted, createPattern: accepted, reset: accepted + 1,
-          fillRect: accepted * 2, fill: 0, stroke: accepted, drawImage: 0 });
+          fillRect: accepted * 2, fill: accepted, stroke: accepted, drawImage: 0 });
         eq(observed.assignments, [['width', size], ['height', size],
           ...Array.from({ length: accepted - 1 }, () => ['width', size])],
         'first changed-size draw assigns both sizes, then every draw isolates once');
-        eq(count.target.context.trace.filter(row => row.op === 'stroke').map(row => row.path[0][2]),
-          Array.from({ length: accepted }, (_, index) => 1000 + index), 'every accepted empty Setup submits in order');
+        const camera = JSON.parse(count.scene.snapshot()).camera;
+        eq(count.target.context.trace.filter(row => row.op === 'stroke').map(row => row.path),
+          Array.from({ length: accepted }, (_, index) => arenaEdgePoints({ center: 32550, angle: 0,
+            radius: 1000 + index, camera, width: size, height: size }).stroke),
+          'every accepted empty Setup submits exact screen vectors in event order');
         eq(count.order, [], 'empty scenes invoke no artificial draw callbacks');
         const beforeNoSetup = observed.snapshot(), quality = count.quality.snapshot();
         eq(count.apply(bundle([112]), { width: size, height: size, draw: () => { throw new Error('no Setup resolver'); } }), 0);

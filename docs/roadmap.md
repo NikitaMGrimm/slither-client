@@ -50,7 +50,9 @@ event/update/Setup transactions and both animated renderers, with independent
 appearances, captured eaters, source selections and early/late paint passes.
 Synthetic native/Wasm/page checks cover this path; source-runtime, original
 artwork/loading and stock-browser prey acceptance remain unverified. The
-existing stand-in boundary remains separate rendering work.
+animated arena edge now uses a late vector band and open inner stroke with
+retained camera selection and displayed-radius easing. Original browser pixels
+and full host cadence remain separate evidence requirements.
 
 ## 3. Measure dense scenes
 
