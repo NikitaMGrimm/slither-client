@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { loadWasm } from './reference-context.mjs';
 import { syntheticChallenge } from './reference-parity.mjs';
@@ -24,6 +25,14 @@ import { endScreenSmoke } from './end-screen-smoke.mjs';
 
 // Entirely synthetic ABI integration; no reference files or network are used.
 const wasm = await loadWasm();
+// Replay existing authored reducer/view/DOM requirements against real Rust history.
+const hudHistoryTests = ['stock-hud-state', 'stock-hud-view', 'stock-hud-dom',
+  'stock-leaderboard-state', 'stock-leaderboard-view', 'game-owned-hud-ui'];
+const hudHistoryResult = execFileSync(process.execPath,
+  ['--test', '--test-reporter=tap', ...hudHistoryTests.map(name => `tools/${name}.test.mjs`)],
+  { encoding: 'utf8', env: { ...process.env, SLITHER_HUD_HISTORY_WASM: '1' }, maxBuffer: 4 * 1024 * 1024 });
+console.log('Synthetic real-Wasm HUD history requirements passed:',
+  hudHistoryResult.split(/\r?\n/).filter(line => /^# (tests|pass|fail|skipped) /.test(line)).join(', '));
 console.log('Synthetic start-page view ABI passed:', startPageSmoke(wasm));
 endScreenSmoke(wasm);
 console.log('Synthetic Rust skin policy ABI passed:', skinPolicySmoke(wasm));

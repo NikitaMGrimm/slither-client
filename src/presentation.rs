@@ -28,6 +28,7 @@ mod follow_camera;
 mod food;
 mod food_painter;
 mod hud;
+mod hud_history;
 mod leaderboard_score;
 mod length;
 mod minimap;
@@ -95,6 +96,10 @@ pub(crate) use hud::HudLeaderboardRowsBudget;
 pub use hud::{
     HudCommandGuard, HudIngressError, HudIngressEvent, HudIngressEventKind, HudIngressPlan,
     HudIngressReport, HudLeaderboardRow, HudLeaderboardRows,
+};
+pub use hud_history::{
+    HudCurrent, HudFinal, HudHistory, HudHistoryEvent, HudLifecycle, HudOpacity, HudSample,
+    hud_score_text,
 };
 pub use leaderboard_score::{
     LeaderboardRowScore, LeaderboardScoreError, LeaderboardScoreInput, LeaderboardScoreProjector,

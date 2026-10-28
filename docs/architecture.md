@@ -14,8 +14,7 @@ the following exceptions:
 | `web/stock-client.mjs` | Mixed borrowed-source/Canvas/Wasm glue and update/draw/quality ordering with successful-draw statistics counters. |
 | `web/client-input.mjs` | Retained key/pointer/boost state, turn debt, timing gates, heading quantization and packet intents. |
 | `web/handshake-session.mjs` | Challenge/login/setup state machine and frame limits; Rust already owns encoding, decoding and challenge arithmetic. |
-| `web/stock-hud-state.mjs` | Semantic HUD history, dirty/readout eligibility, rank/population history, final capture and fade policy. |
-| `web/stock-hud-view.mjs` | HUD text formatting and display/readiness projection, alongside binding validation. |
+| `web/stock-hud-view.mjs` | Binding/readiness composition around Rust-formatted current/final HUD values. |
 | `web/stock-skin-rules.mjs` | Appearance selection and numeric recipe policy; borrowed DOM source capture remains separate. |
 | `web/desktop-layout.mjs` | Numeric viewport-to-backing-size policy. |
 | `extension/game-runtime.mjs` | Mixed entry/DOM/capability plumbing and Play admission/availability state. |
@@ -186,9 +185,11 @@ Setup samples, retained-own scheduling, leaderboard headers and required
 command-time final captures through additive Wasm/controller/session APIs.
 It adds no clock or visible UI by itself; the default bootstrap selects the
 gameplay HUD and row consumers.
-The separate [semantic reducer](hud-state.md) retains bounded dirty/header/final
-history and requested opacities. Explicit gameplay readout mode stages it through
-packet, same-step lifecycle and successful draw boundaries, with required score
+The browser-free Rust [semantic reducer](hud-state.md) retains bounded
+dirty/header/final history and requested opacities. Its immutable Wasm histories
+produce copied JS snapshots and formatted current/final values; JS retains
+identity, copied-input admission and DOM binding/readiness composition. Explicit
+gameplay readout mode stages it through packet, same-step lifecycle and successful draw boundaries, with required score
 reads outside the native borrow and after held-source release.
 
 The separate [HUD view and passive renderer](hud-view.md) project committed

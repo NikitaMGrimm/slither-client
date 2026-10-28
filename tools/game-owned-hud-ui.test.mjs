@@ -1,3 +1,4 @@
+import { HudHistoryDouble } from './hud-history-double.mjs';
 // Authored synthetic native-operation doubles. No browser, CSS or pixel acceptance.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -227,7 +228,7 @@ test('default stylesheet omits the empty owned final row until genuine final tex
   assert.deepEqual(nodes.mount.children, [nodes.readout.root, nodes.final.root]);
   assert.deepEqual(nodes.final.root.children, [nodes.final.label.element, nodes.final.value.element]);
   assert.equal(f.text(nodes.final.value.text), '');
-  let state = displayed(createHudState(b.sceneIdentity), 21, 65, 65);
+  let state = displayed(createHudState(b.sceneIdentity, HudHistoryDouble), 21, 65, 65);
   const current = b.render(state);
   assert.equal(current.readoutWritten, true); assert.equal(current.finalWritten, false);
   assert.equal(f.text(nodes.final.value.text), '', 'current history cannot expose an empty final row');
@@ -245,7 +246,7 @@ test('default stylesheet omits the empty owned final row until genuine final tex
 
 test('real histories publish safe integer domains, negative zero, ranks/populations and retained final suffix', () => {
   const f = fixture(), lease = f.lease(), nodes = lease.mount(), b = bind(f, nodes);
-  let state = createHudState(b.sceneIdentity);
+  let state = createHudState(b.sceneIdentity, HudHistoryDouble);
   let receipt = b.render(state);
   assert.equal(receipt.readiness, 'pending');
   assert.equal(receipt.readoutWritten, false); assert.equal(receipt.finalWritten, false);

@@ -1,9 +1,7 @@
 // Authored pure HUD projection. Binding readiness is a trusted observation only.
-import { hudReadoutRequired } from './stock-hud-state.mjs';
+import { hudReadoutRequired, hudSemanticValues } from './stock-hud-state.mjs';
 
 const freeze = Object.freeze;
-const safeInteger = Number.isSafeInteger;
-const decimal = Function.prototype.call.bind(Number.prototype.toString);
 const issued = new WeakSet();
 const bindingFields = ['schema', 'bindingIdentity', 'documentIdentity', 'sceneIdentity',
   'scope', 'state', 'reason'];
@@ -64,16 +62,6 @@ function copyBinding(value) {
   return copy;
 }
 
-function scoreText(score) {
-  if (!safeInteger(score)) invalid();
-  return decimal(score, 10);
-}
-
-function u16Text(value) {
-  if (!safeInteger(value) || value < 1 || value > 65535) invalid();
-  return decimal(value, 10);
-}
-
 function role(value, binding, disabled, absentReason) {
   if (disabled) return freeze({ data: 'unavailable', readiness: 'unavailable',
     reason: 'hud-disabled-or-disposed', value: null });
@@ -97,22 +85,10 @@ export function projectHudView(snapshot, binding) {
     hudReadoutRequired(snapshot, false);
     if (snapshot.sceneIdentity !== observed.sceneIdentity) invalid();
   }
-  let currentValue = null;
-  let finalValue = null;
-  if (!disabled && snapshot.current !== null) {
-    const current = snapshot.current;
-    currentValue = freeze({ score: current.score, scoreText: scoreText(current.score),
-      rank: current.rank, rankText: u16Text(current.rank),
-      population: current.population, populationText: u16Text(current.population),
-      ownToken: current.ownToken });
-  }
   const includesFinal = observed.scope === 'readout-and-final';
-  if (!disabled && includesFinal && snapshot.final !== null) {
-    const final = snapshot.final;
-    finalValue = freeze({ score: final.score, scoreText: scoreText(final.score),
-      exclamation: final.exclamation, suffix: final.exclamation ? '!' : '',
-      ownToken: final.ownToken });
-  }
+  const values = disabled ? { current: null, final: null } : hudSemanticValues(snapshot, includesFinal);
+  const currentValue = values.current;
+  const finalValue = values.final;
   const current = role(currentValue, observed, disabled, 'no-displayed-current');
   const final = includesFinal ? role(finalValue, observed, disabled, 'no-captured-final')
     : freeze({ data: 'unavailable', readiness: 'unavailable', reason: 'scope-excluded', value: null });

@@ -9,8 +9,9 @@ verification remains in progress, and installed-host acceptance is separate.
 `projectHudView(snapshot, binding)` projects a genuine committed
 [HUD reducer](hud-state.md) snapshot and a closed binding-readiness observation
 into a copied, frozen view. `requireHudView(value)` admits only views issued by
-that same module graph. Neither function reads a native scene, source, clock or
-transport. Views contain no DOM capability, profile, endpoint or packet data.
+that same module graph. The projection copies formatted values from its private
+Rust history; neither function reads a native scene, source, clock or transport.
+Views contain no DOM capability, profile, endpoint or packet data.
 
 ## History, formatting and readiness
 
@@ -25,7 +26,7 @@ own data fields and current-realm Object/null prototypes.
 Current values come from stored displayed history, never the newest packet
 header. Final values and exclamation come from already captured final history.
 Reset/live-token changes do not erase these histories or replace their tokens.
-Scores are primitive safe integers printed in plain decimal without grouping,
+Rust formats primitive safe integer scores in plain decimal without grouping,
 units or locale. Numeric negative zero remains negative zero as data and prints
 `0`; negative and above-u32 scores remain valid. Fade and all four raw opacity
 requests are copied without recomputation or clamping.
