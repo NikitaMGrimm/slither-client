@@ -8,6 +8,7 @@ import os from 'node:os';
 import { freshOutput, syntheticServer, hash, json, fence, temporaryProfile, root } from './browser-common.mjs';
 import { installProbe } from './browser-probe.mjs';
 import { startTrace } from './browser-trace.mjs';
+import { observeWorldLayers } from './browser-layers.mjs';
 
 const { values } = parseArgs({ options: { output: { type: 'string' }, mode: { type: 'string', default: 'regression' },
   candidate: { type: 'boolean', default: false } } });
@@ -27,7 +28,7 @@ try {
   const expected = values.mode === 'regression' && !values.candidate
     ? JSON.parse(await readFile(new URL('./browser-baselines.json', import.meta.url))) : null;
   for (const name of values.mode === 'performance' ? ['chrome'] : ['chromium', 'firefox']) {
-    let browser, context, profile, trace;
+    let browser, context, profile, trace, layers;
     const result = { name, screenshots: [], status: 'running' }; manifest.browsers.push(result);
     try {
       const headed = name === 'chrome';
@@ -58,6 +59,7 @@ try {
       if (nativeDelta < 10) throw new Error('Native timing capture was replaced by fake clock');
       result.nativeClockDeltaDuringFrozenClock = nativeDelta;
       if (headed) trace = await startTrace(browser);
+      if (headed) layers = await observeWorldLayers(context, page, '#world');
       if (trace) result.traceMetadata = trace.metadata;
       await page.evaluate(() => { browserProbe.transitions.length = 0; browserProbe.observe('before-arm'); browserFixture.arm(); });
       for (let frame = 1; frame <= manifest.frames; frame++) {
@@ -67,6 +69,7 @@ try {
         await page.clock.runFor(16);
         await page.evaluate(() => browserProbe.observe('after-frame'));
         if (headed) await page.evaluate(() => browserProbe.present());
+        if (layers && (frame === 1 || manifest.keyframes.includes(frame))) await layers.sample(`frame-${frame}`);
         if (manifest.keyframes.includes(frame)) {
           const file = path.join(output, `${name}-frame-${frame}.png`);
           const png = await page.locator('#world').screenshot({ path: file, animations: 'allow' });
@@ -91,7 +94,8 @@ try {
       result.actualDpr = data.observations[0].dpr;
       result.foreground = [...data.observations, ...data.transitions].every(x => x.visibility === 'visible'
         && x.focus && x.width === 640 && x.height === 480 && x.dpr === result.actualDpr);
-      if (trace) { result.trace = await trace.stop(path.join(output, 'chrome-trace.json')); trace = null; }
+      if (layers) { result.worldLayers = await layers.stop(); layers = null; await json(path.join(output, 'chrome-layers.json'), result.worldLayers); }
+      if (trace) { result.trace = await trace.stop(path.join(output, 'chrome-trace.json'), result.worldLayers); trace = null; }
       if (headed && (!result.trace.hasGpuRasterPresentation || result.trace.completion.dataLossOccurred)) throw new Error('GPU/raster/presentation trace evidence missing or truncated');
       if (errors.length || blocked.length || data.dropped || data.fixture.frame !== 24 || !data.fixture.wasmExecuted) throw new Error('Synthetic execution gate failed');
       if (headed && !result.foreground) throw new Error('Continuous foreground/dimensions gate failed');
@@ -101,6 +105,7 @@ try {
       result.status = 'passed';
     } catch (error) { result.status = 'failed'; result.error = error.message; }
     finally {
+      if (layers) { try { result.partialLayers = await layers.stop(); } catch { result.layerStopFailed = true; } }
       if (trace) { try { result.partialTrace = await trace.stop(path.join(output, 'chrome-trace-partial.json')); } catch (e) { result.traceCleanupError = e.message; } }
       try { if (context) await context.close(); } finally { if (browser) await browser.close(); }
       if (profile) await profile.remove();

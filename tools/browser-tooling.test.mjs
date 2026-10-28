@@ -9,6 +9,7 @@ import { summarizeTrace, assessGraphics } from './browser-trace.mjs';
 import { syntheticPeer } from './browser-session-fixture.mjs';
 import { WebSocket } from 'ws';
 import { once } from 'node:events';
+import { safeLayer, correlateWorldTrace } from './browser-layers.mjs';
 
 // Authored synthetic infrastructure checks. No browser process or external source.
 test('output directories are create-only and must stay outside the checkout', async () => {
@@ -80,6 +81,25 @@ test('an advertised software adapter does not label the active hardware renderer
   assert.equal(assessGraphics(gpu).softwareRendererDetected, false);
   assert.equal(assessGraphics({ ...gpu, auxAttributes: { glRenderer: 'SwiftShader' } }).softwareRendererDetected, true);
   assert.equal(assessGraphics({ ...gpu, auxAttributes: {} }).softwareRendererDetected, null);
+});
+
+test('layer observations retain only safe DOM/compositing metadata', () => {
+  assert.deepEqual(safeLayer({ layerId: '12', backendNodeId: 42, width: 640, height: 480,
+    drawsContent: true, picture: 'synthetic excluded payload', attributes: ['src', 'excluded'], extra: {} }),
+  { layerId: '12', backendNodeId: 42, width: 640, height: 480, drawsContent: true });
+});
+
+test('world trace correlation requires explicit matching identifiers, never generic GPU activity', () => {
+  const world = { backendNodeId: 42, layerIds: ['12'] };
+  const result = correlateWorldTrace([
+    { name: 'RasterTask', cat: 'gpu,cc', args: { data: { layerId: 99, frameId: 4 } } },
+    { name: 'DrawFrame', cat: 'gpu', args: { data: { layerId: 12, frameId: 5 } } },
+    { name: 'Paint', cat: 'devtools.timeline', args: { data: { backendNodeId: 42 } } },
+  ], world);
+  assert.equal(result.directIdentifierMatches, 2);
+  assert.equal(result.matchingGpuEvents, 1); assert.equal(result.matchingRasterEvents, 0);
+  assert.equal(result.observedFrameIdentifierCount, 2);
+  assert.equal(correlateWorldTrace([{ name: 'RasterTask', cat: 'gpu', args: {} }], world).directIdentifierMatches, 0);
 });
 
 test('page capability fence admits only selected local HTTP and selected /slither socket', async () => {

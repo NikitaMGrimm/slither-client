@@ -1,4 +1,5 @@
 import { writeFile } from 'node:fs/promises';
+import { correlateWorldTrace } from './browser-layers.mjs';
 
 export const traceCategories = ['toplevel', 'devtools.timeline', 'disabled-by-default-devtools.timeline',
   'cc', 'viz', 'gpu', 'benchmark', 'disabled-by-default-gpu.service', 'disabled-by-default-cc.debug'];
@@ -47,7 +48,7 @@ export async function startTrace(browser) {
   return { metadata: { version, commandLine, requestedCategories: traceCategories,
     graphicsAssessment: assessGraphics(graphics.gpu),
     availableRelevantCategories: available.categories.filter(x => /gpu|raster|viz|^cc$/.test(x)), graphics },
-  async stop(file) {
+  async stop(file, world) {
     if (stopped) throw new Error('Trace already stopped'); stopped = true;
     const complete = new Promise((resolve, reject) => {
       const timeout = setTimeout(() => reject(new Error('CDP trace completion deadline')), 20000);
@@ -56,6 +57,7 @@ export async function startTrace(browser) {
     await cdp.send('Tracing.end'); const completion = await complete;
     await writeFile(file, JSON.stringify({ traceEvents: events }), { flag: 'wx' });
     await cdp.detach();
-    return { ...summarizeTrace(events), completion };
+    return { ...summarizeTrace(events), completion,
+      ...(world ? { worldCorrelation: correlateWorldTrace(events, world) } : {}) };
   } };
 }

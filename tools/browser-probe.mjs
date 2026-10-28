@@ -5,8 +5,21 @@ export function installProbe() {
   const timer = setTimeout.bind(globalThis);
   const clearTimer = clearTimeout.bind(globalThis);
   const ids = new WeakMap(); let next = 0;
+  let world;
   const probe = globalThis.browserProbe = { now, raf, timer, frame: 0, recording: false,
-    commands: [], timings: [], observations: [], transitions: [], dropped: 0 };
+    commands: [], timings: [], observations: [], transitions: [], dropped: 0,
+    phase: 'startup', callDiagnostics: { startup: {}, play: {}, driver: {}, after: {} } };
+  probe.selectWorld = canvas => { world = canvas; };
+  function count(name, receiver, args) {
+    const bucket = probe.callDiagnostics[probe.phase];
+    bucket[name] = (bucket[name] ?? 0) + 1;
+    const target = receiver instanceof HTMLCanvasElement ? receiver
+      : receiver instanceof CanvasRenderingContext2D ? receiver.canvas : null;
+    if (world && target === world) {
+      bucket[`world.${name}`] = (bucket[`world.${name}`] ?? 0) + 1;
+      if (name === 'drawImage' && args[0] === world) bucket.worldSelfDraws = (bucket.worldSelfDraws ?? 0) + 1;
+    }
+  }
   function value(x) {
     if (typeof x === 'number') return Number.isFinite(x) ? (Object.is(x, -0) ? '-0' : x) : String(x);
     if (x === null || ['string', 'boolean', 'undefined'].includes(typeof x)) return x ?? null;
@@ -28,6 +41,7 @@ export function installProbe() {
         const original = d.value;
         Object.defineProperty(Type.prototype, name, { ...d, value: function (...args) {
           const result = Reflect.apply(original, this, args);
+          count(name, this, args);
           record(['call', value(this), name, args.map(value), value(result)]);
           return result;
         } });
