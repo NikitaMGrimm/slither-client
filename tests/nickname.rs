@@ -1,7 +1,9 @@
 //! Authored synthetic nickname inputs; no original source, assets or runtime oracle.
 
 use presentation::{
-    NicknameAlignment, NicknameBaseline, NicknameCullBounds, NicknameInput, NicknameState,
+    AccessoryPresentation, AnimatedClient, AppearanceContext, ClientPresentationError, FoodFactory,
+    NEUTRAL_NICKNAME_COLOR, NicknameAlignment, NicknameBaseline, NicknameCullBounds, NicknameInput,
+    NicknameState, NicknameTint, PresentationError, PreyFactory, TintedPresentation,
 };
 use slither_client::{presentation, state};
 use state::Point;
@@ -290,8 +292,8 @@ fn appearance(id: u16, name: &[u8], head_x: u32, body: bool) -> Vec<u8> {
     packet
 }
 
-fn apply(client: &mut presentation::AnimatedClient, packets: &[Vec<u8>]) {
-    let bytes: Vec<u8> = packets
+fn frame(packets: &[Vec<u8>]) -> Vec<u8> {
+    packets
         .iter()
         .flat_map(|packet| {
             (packet.len() as u16)
@@ -299,9 +301,15 @@ fn apply(client: &mut presentation::AnimatedClient, packets: &[Vec<u8>]) {
                 .into_iter()
                 .chain(packet.iter().copied())
         })
-        .collect();
+        .collect()
+}
+
+fn apply(client: &mut presentation::AnimatedClient, packets: &[Vec<u8>]) {
     client
-        .apply_frame(&bytes, slither_client::protocol::ElapsedHeader::Absent)
+        .apply_frame(
+            &frame(packets),
+            slither_client::protocol::ElapsedHeader::Absent,
+        )
         .unwrap();
 }
 
@@ -448,4 +456,281 @@ fn enabling_before_ingress_preserves_legacy_geometry_and_reset_selection() {
     );
     legacy.reset();
     legacy.enable_nicknames().unwrap();
+}
+
+const BELOW_ONE: f64 = 0.999_999_999_999_999_9;
+
+fn tint(base_rgb: [u8; 3], random_units: [f64; 3]) -> NicknameTint {
+    NicknameTint {
+        base_rgb,
+        random_units,
+    }
+}
+
+#[test]
+fn tint_adds_independent_floored_jitter_saturates_then_rounds_half_up() {
+    assert_eq!(BELOW_ONE, f64::from_bits(1_f64.to_bits() - 1));
+    assert_eq!(
+        tint([8, 99, 250], [0., 0.5, BELOW_ONE]).light_color(),
+        Ok([132, 182, 255])
+    );
+    // An intermediate channel of 2 rounds up to 129, not to the even 128.
+    assert_eq!(
+        tint([1, 0, 255], [0.0625, -0., 0.]).light_color(),
+        Ok([129, 128, 255])
+    );
+    for base in 0..=255_u8 {
+        for jitter in 0..20_u8 {
+            let unit = (f64::from(jitter) + 0.5) / 20.;
+            // Reference: the mean with 255 rounded half up, after saturation.
+            let channel = (u16::from(base) + u16::from(jitter)).min(255);
+            let expected = ((255. + f64::from(channel)) * 0.5 + 0.5).floor() as u8;
+            let light = tint([base; 3], [unit, 0., BELOW_ONE])
+                .light_color()
+                .unwrap();
+            assert_eq!(light[0], expected, "base {base}, jitter {jitter}");
+            assert_eq!(light[1], ((256 + u16::from(base)) / 2) as u8);
+            assert_eq!(
+                light[2],
+                ((256 + (u16::from(base) + 19).min(255)) / 2) as u8
+            );
+        }
+    }
+    for invalid in [
+        -f64::MIN_POSITIVE,
+        1.,
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+    ] {
+        for channel in 0..3 {
+            let mut units = [0.5; 3];
+            units[channel] = invalid;
+            assert_eq!(tint([1, 2, 3], units).light_color(), Err(PresentationError));
+        }
+    }
+}
+
+fn tinted(nickname_tint: Option<NicknameTint>) -> TintedPresentation {
+    TintedPresentation {
+        presentation: AccessoryPresentation::default(),
+        nickname_tint,
+    }
+}
+
+fn apply_tinted(
+    client: &mut AnimatedClient,
+    packets: &[Vec<u8>],
+    calls: &mut Vec<u16>,
+    resolve: impl Fn(u16) -> Option<NicknameTint>,
+) -> Result<(), ClientPresentationError> {
+    client
+        .apply_frame_with_tinted_presentation(
+            &frame(packets),
+            slither_client::protocol::ElapsedHeader::Absent,
+            |appearance, _: AppearanceContext| {
+                calls.push(appearance.id);
+                Ok::<_, ClientPresentationError>(tinted(resolve(appearance.id)))
+            },
+        )
+        .map(|_| ())
+}
+
+fn colors(client: &AnimatedClient) -> Vec<(String, [u8; 3])> {
+    client
+        .nickname_draws()
+        .iter()
+        .map(|name| (name.text.clone(), name.color))
+        .collect()
+}
+
+fn named(text: &str, color: [u8; 3]) -> (String, [u8; 3]) {
+    (text.to_owned(), color)
+}
+
+fn by_id(id: u16) -> Option<NicknameTint> {
+    match id {
+        0 => Some(tint([8, 99, 250], [0., 0.5, BELOW_ONE])),
+        7 => Some(tint([200, 10, 0], [0.25, 0.75, 0.0625])),
+        _ => None,
+    }
+}
+
+#[test]
+fn tinted_appearances_retain_one_color_through_culling_death_duplicates_and_reuse() {
+    let mut client = AnimatedClient::new(0.).unwrap();
+    client.enable_nicknames().unwrap();
+    let mut calls = Vec::new();
+    apply_tinted(
+        &mut client,
+        &[
+            setup(),
+            appearance(0, b"Synthetic own", 2000, true),
+            appearance(7, b"Synthetic old", 2020, true),
+            appearance(9, b"Synthetic plain", 1980, true),
+        ],
+        &mut calls,
+        by_id,
+    )
+    .unwrap();
+    assert_eq!(calls, [0, 7, 9]);
+    client.advance(40., false).unwrap();
+    let first = [
+        named("Synthetic own", [132, 182, 255]),
+        named("Synthetic old", [230, 140, 128]),
+        named("Synthetic plain", NEUTRAL_NICKNAME_COLOR),
+    ];
+    for _ in 0..3 {
+        client.prepare_draw(960, 540).unwrap();
+        assert_eq!(colors(&client), first);
+    }
+    // Culling submits and resolves nothing; returning restores the same colors.
+    client.set_follows(false);
+    client
+        .set_camera_position(Point {
+            x: 40000.,
+            y: 40000.,
+        })
+        .unwrap();
+    client.prepare_draw(960, 540).unwrap();
+    assert!(client.nickname_draws().is_empty());
+    client.set_follows(true);
+    client.prepare_draw(960, 540).unwrap();
+    assert_eq!(colors(&client), first);
+
+    // A dying appearance keeps its color while a reused ID resolves a new one.
+    // A duplicate without removal is another appearance with its own color.
+    apply_tinted(
+        &mut client,
+        &[
+            vec![b's', 0, 7, 1],
+            appearance(7, b"Synthetic new", 2040, true),
+            appearance(0, b"Synthetic twin", 1960, true),
+        ],
+        &mut calls,
+        |id| match id {
+            7 => Some(tint([0, 0, 0], [0.; 3])),
+            _ => Some(tint([255, 255, 255], [BELOW_ONE; 3])),
+        },
+    )
+    .unwrap();
+    assert_eq!(calls, [0, 7, 9, 7, 0]);
+    client.advance(80., false).unwrap();
+    client.prepare_draw(960, 540).unwrap();
+    let new = named("Synthetic new", [128, 128, 128]);
+    let twin = named("Synthetic twin", [255, 255, 255]);
+    assert_eq!(
+        colors(&client),
+        [
+            first[0].clone(),
+            first[1].clone(),
+            first[2].clone(),
+            new.clone(),
+            twin.clone(),
+        ]
+    );
+    for index in 3..=13 {
+        client.advance(f64::from(index) * 40., false).unwrap();
+    }
+    client.prepare_draw(960, 540).unwrap();
+    assert_eq!(
+        colors(&client),
+        [first[0].clone(), first[2].clone(), new, twin]
+    );
+    assert_eq!(
+        calls.len(),
+        5,
+        "draws never resolve appearance metadata again"
+    );
+}
+
+#[test]
+fn legacy_and_untinted_resolvers_keep_the_neutral_color() {
+    assert_eq!(NEUTRAL_NICKNAME_COLOR, [238, 238, 238]);
+    let mut legacy = AnimatedClient::new(0.).unwrap();
+    legacy.enable_nicknames().unwrap();
+    let mut untinted = legacy.clone();
+    let mut accessory = legacy.clone();
+    let packets = [setup(), appearance(0, b"Synthetic", 2000, true)];
+    apply(&mut legacy, &packets);
+    apply_tinted(&mut untinted, &packets, &mut Vec::new(), |_| None).unwrap();
+    accessory
+        .apply_frame_with_accessory_presentation(
+            &frame(&packets),
+            slither_client::protocol::ElapsedHeader::Absent,
+            |_, _| Ok::<_, ClientPresentationError>(AccessoryPresentation::default()),
+        )
+        .unwrap();
+    for client in [&mut legacy, &mut untinted, &mut accessory] {
+        client.advance(40., false).unwrap();
+        client.prepare_draw(960, 540).unwrap();
+        assert_eq!(colors(client), [named("Synthetic", NEUTRAL_NICKNAME_COLOR)]);
+    }
+}
+
+#[test]
+fn invalid_tint_rejects_the_whole_frame_even_without_nicknames() {
+    for enabled in [true, false] {
+        let mut client = AnimatedClient::new(0.).unwrap();
+        if enabled {
+            client.enable_nicknames().unwrap();
+        }
+        apply_tinted(&mut client, &[setup()], &mut Vec::new(), |_| None).unwrap();
+        let before = client.clone();
+        let mut calls = Vec::new();
+        let result = apply_tinted(
+            &mut client,
+            &[
+                appearance(0, b"Synthetic valid", 2000, true),
+                appearance(7, b"Synthetic invalid", 2020, true),
+            ],
+            &mut calls,
+            |id| Some(tint([1, 2, 3], [0.5, if id == 7 { 1. } else { 0. }, 0.])),
+        );
+        assert_eq!(
+            result,
+            Err(ClientPresentationError::Presentation(PresentationError))
+        );
+        assert_eq!(calls, [0, 7]);
+        assert_eq!(client, before, "rollback restores every retained channel");
+    }
+}
+
+#[test]
+fn ordered_setup_draws_freeze_each_event_time_tint() {
+    let mut client = AnimatedClient::new(0.).unwrap();
+    client.enable_nicknames().unwrap();
+    let mut setups = Vec::new();
+    let mut calls = 0;
+    client
+        .apply_frame_with_tinted_presentation_and_all_factories_and_setup(
+            &frame(&[
+                setup(),
+                appearance(0, b"Synthetic own", 2000, true),
+                setup(),
+                appearance(7, b"Synthetic old", 2020, true),
+                setup(),
+            ]),
+            slither_client::protocol::ElapsedHeader::Absent,
+            |appearance, _| {
+                calls += 1;
+                Ok(tinted(by_id(appearance.id)))
+            },
+            |_, _| -> Result<FoodFactory, ClientPresentationError> {
+                panic!("no synthetic food expected")
+            },
+            |_, _| -> Result<PreyFactory, ClientPresentationError> {
+                panic!("no synthetic prey expected")
+            },
+            |client, _| {
+                client.prepare_draw(960, 540)?;
+                setups.push(colors(client));
+                Ok(())
+            },
+        )
+        .unwrap();
+    let own = named("Synthetic own", [132, 182, 255]);
+    let old = named("Synthetic old", [230, 140, 128]);
+    assert_eq!(setups, [vec![], vec![own.clone()], vec![own, old]]);
+    assert_eq!(calls, 2);
 }

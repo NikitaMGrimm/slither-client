@@ -246,6 +246,10 @@ test('bound Rust policy resolves only inside the existing source operation with 
   assert.equal(appearance.face.eyes, rule.eyes);
   assert.equal(appearance.face.eyes.radius, 7);
   assert.deepEqual(appearance.face.decoration, { kind: 'none' });
+  // The selected authored family supplies the base; three units are drawn once here.
+  assert.deepEqual(appearance.nicknameTint, { baseRgb: [0x76, 0xb9, 0xed], randomUnits: [0.25, 0.25, 0.25] });
+  assert(Object.isFrozen(appearance.nicknameTint) && Object.isFrozen(appearance.nicknameTint.randomUnits));
+  assert.deepEqual(f.calls, ['decode', 'decode', 'random', 'random', 'random']);
   assert.deepEqual(calls, [{ skin: 255, bytes: customBytes }]);
   assert.equal(calls[0].bytes, customBytes);
   const result = adapter.resolveRecipe(request);
@@ -267,7 +271,7 @@ test('bound Rust policy resolves only inside the existing source operation with 
   assert(palettes.every(source => source.width === 32 && source.height === 32));
   assert.throws(() => adapter.resolveRecipe({ skin: 256 }), /skin/);
   assert.equal(calls.length, 2);
-  assert.deepEqual(f.calls, ['decode', 'decode']);
+  assert.deepEqual(f.calls, ['decode', 'decode', 'random', 'random', 'random'], 'recipes draw no tint units');
   const food = hostAssets.resolveFood({ palette: 9 }, active), prey = hostAssets.resolvePrey({ palette: 8 }, active);
   assert.equal(food.palette.color, 9); assert.equal(prey.palette.color, 8);
   assert(food.palette.bodies[0].asset.source instanceof f.realm.HTMLCanvasElement);

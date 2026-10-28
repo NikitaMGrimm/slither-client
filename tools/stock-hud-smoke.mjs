@@ -83,6 +83,7 @@ export function stockHudSmoke(wasm) {
     lineTo(...args) { this.throwIf('lineTo'); this.path.push(args); this.pathCommands.push({ op: 'lineTo', args }); this.trace.push({ op: 'lineTo', args }); }
     closePath() { this.throwIf('closePath'); this.pathCommands.push({ op: 'closePath' }); this.trace.push({ op: 'closePath' }); }
     fillRect(...args) { this.trace.push({ op: 'fillRect', args }); }
+    fillText(text) { this.throwIf('fillText'); this.trace.push({ op: 'text', text, fillStyle: this.fillStyle }); }
     stroke() { this.throwIf('stroke'); this.trace.push({ op: 'stroke', path: this.path.slice(), commands: this.pathCommands.slice(), color: this.strokeStyle,
       width: this.lineWidth, alpha: this.alpha, blend: this.blend, transforms: this.transforms.slice(),
       lineCap: this.lineCap, lineJoin: this.lineJoin }); }
@@ -500,6 +501,22 @@ export function stockHudSmoke(wasm) {
       ? { ...event, view: { ...event.view, score: -0 } } : event) };
     ok(Object.is(copyHudIngressReport(signedDouble, 3).events.at(-1).view.score, -0));
     cases.push('negative/above-u32 integer scores, BigInt own token, exact established score shape and signed-zero preservation');
+
+    {
+      // Authored synthetic tint inputs; Rust resolves [132,182,255] once at appearance.
+      const g = fixture(); g.scene.enable_nicknames();
+      const nicknameTint = { baseRgb: [8, 99, 250], randomUnits: [0, 0.5, 1 - 2 ** -53] };
+      const appearance = () => ({ ...g.callbacks.appearance(), nicknameTint });
+      const commands = [setup(17), spawn(0), setup(29)];
+      g.target.context.trace = [];
+      eq(g.hud(commands, plan(commands), { appearance }).setupDraws, 2);
+      eq(g.target.context.trace.filter(c => c.op === 'text').map(c => c.fillStyle), ['#84b6ff']);
+      eq(g.calls.appearance, 1);
+      const invalid = [setup(31), spawn(1)];
+      g.atomic(() => g.hud(invalid, plan(invalid), { appearance: () => ({ ...g.callbacks.appearance(),
+        nicknameTint: { ...nicknameTint, randomUnits: [0, 1, 0] } }) }));
+      cases.push('default HUD lane retains appearance nickname tint for ordered Setup text and rejects invalid units');
+    }
     eq(networkAttempts, 0);
     return { assertions, cases: cases.length, checks: cases, owners: owners.length,
       networkAttempts, evidence: 'authored real-Wasm/Canvas recorder only; no browser/pixels/host/server acceptance' };

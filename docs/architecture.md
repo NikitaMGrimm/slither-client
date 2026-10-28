@@ -40,10 +40,17 @@ binding are still needed before that policy can replace the local stand-ins.
 The default runtime enables Rust-owned nickname presentation before ingress.
 Each retained snake appearance owns its text and fade state, independently of
 wire-ID reuse. Rust prepares screen-space text commands; a scoped Canvas pass
-submits them before bodies for ordinary, Setup and resize draws. The current
-authored policy uses initial opacity 1, neutral light RGB `[238,238,238]` and
-plain admitted Latin1 text. Skin-specific light colors, text policy and browser
-font equivalence remain incomplete.
+submits them before bodies for ordinary, Setup and resize draws. Names start at
+opacity 1 with plain admitted Latin1 text. An appearance resolver may return
+numeric `nicknameTint: {baseRgb, randomUnits}`: the selected skin's first palette
+channels and three units in `0..1`. Rust adds `floor(unit * 20)` to each channel,
+saturates at 255 and stores `(256 + channel) / 2`. The color is resolved once per
+appearance, in both ordinary and target-aware ordered Setup ingress, and retained
+through culling, death and wire-ID reuse. An absent field keeps neutral
+`[238,238,238]`; invalid metadata rejects the frame. Native callers use
+`TintedPresentation` with the additive `apply_frame_with_tinted_presentation*`
+methods; existing methods remain neutral. Text policy and browser font
+equivalence remain incomplete.
 
 The default minimap also keeps state in Rust: decoding the five `U/L/M/V/u`
 formats, retaining image/toggle planes, fade and transition state, and projecting

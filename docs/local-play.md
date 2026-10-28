@@ -33,6 +33,10 @@ in `ws://127.0.0.1:8766/slither` and accepts only that configured endpoint. Open
 the page constructs no game socket. Play supplies authored zero credentials to
 the existing challenge/login/setup session; no direct-login bypass is used.
 
+Each authored appearance supplies its selected stand-in family's base channels
+and three `random()` units as nickname tint inputs, so name colors vary per
+appearance. These draws share the page random stream with food, prey and antennas.
+
 Move the pointer to steer. Outside text fields, Space/ArrowUp or mouse press
 requests boost; ArrowLeft/ArrowRight use the existing keyboard turn path. Editing
 fields retains native editing behavior. After a normal session disconnect, Play

@@ -2,7 +2,7 @@ import { bundle, syntheticScene, syntheticSetup } from '../web/synthetic-scene.m
 
 // Authored synthetic packets and Canvas recorder observations through real Wasm.
 // No original runtime, artwork, browser, raster oracle or network is used.
-export function nicknameRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok }) {
+export function nicknameRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok, rejects }) {
   const names = f => f.target.context.trace.filter(call => call.op === 'text');
   const face = () => ({ eyes: vanillaEyes(), decoration: { kind: 'none' } });
   const tagged = () => ({ face: { kind: 'paired', eyes: vanillaEyes(), decoration: null }, antenna: null });
@@ -14,21 +14,26 @@ export function nicknameRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq
     f.target.context.trace = [];
     if (lane === 'basic') f.scene.render(f.target, ...f.foods, f.background, 1, false);
     else if (lane === 'standard') f.render();
+    else if (lane === 'antenna') f.scene.render_standard_with_antenna_at_size(
+      f.target, ...f.foods, f.background, width, height, f.resolve, random, f.quality);
     else if (lane === 'default') f.scene.render_standard_with_face_presentation_at_size(
       f.target, ...f.foods, f.background, width, height, f.resolve, random, f.quality);
     else f.scene.render_standard_with_accessory_presentation_at_size(
       f.target, ...f.foods, f.background, width, height, f.resolve, random, f.quality);
     return names(f);
   };
-  const checkName = (f, call, metric, opacity = 1) => {
+  const checkName = (f, call, metric, opacity = 1, color = '#eeeeee') => {
     const camera = JSON.parse(f.scene.snapshot()).camera;
     eq(call.x, f.target.width / 2 + (metric.correctedX - camera.absoluteX) * camera.zoom);
     eq(call.y, f.target.height / 2 + (metric.correctedY - camera.absoluteY) * camera.zoom + 32 + 11 * metric.scale * camera.zoom);
     eq(call.alpha, 0.5 * opacity * metric.spawnProgress * (1 - metric.deathProgress));
     eq(call.font, '15px Arial, Helvetica Neue, Helvetica, sans-serif');
-    eq([call.textAlign, call.textBaseline, call.fillStyle, call.blend], ['center', 'middle', '#eeeeee', 'source-over']);
+    eq([call.textAlign, call.textBaseline, call.fillStyle, call.blend], ['center', 'middle', color, 'source-over']);
     eq(call.transforms, [['setTransform', 1, 0, 0, 1, 0, 0]]);
   };
+  // Authored synthetic bases and units: [132,182,255], [230,140,128] and [128,128,128].
+  const setupTints = [{ baseRgb: [8, 99, 250], randomUnits: [0, 0.5, 1 - 2 ** -53] },
+    { baseRgb: [200, 10, 0], randomUnits: [0.25, 0.75, 0.0625] }, { baseRgb: [0, 0, 0], randomUnits: [0, 0, 0] }];
   const renamed = (id, text) => {
     const raw = appearance(), bytes = Array.from(text, c => c.charCodeAt(0));
     const packet = Uint8Array.from([...raw.slice(0, 22), bytes.length, ...bytes, ...raw.slice(23 + raw[22])]);
@@ -79,8 +84,11 @@ export function nicknameRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq
     const f = fixture({ nicknames: true });
     try {
       f.scene.reset();
-      const selected = lane === 'default' ? tagged : lane === 'accessory'
+      const shape = lane === 'default' ? tagged : lane === 'accessory'
         ? () => ({ ...tagged(), accessory: null }) : face;
+      let resolved = 0;
+      // Synthetic tints in appearance order: own, old 7 and reused 7.
+      const selected = () => ({ ...shape(), nicknameTint: setupTints[resolved++] });
       const unused = () => { throw Error('No synthetic food/prey/random callback expected'); };
       const args = [bundle(syntheticSetup(), renamed(0, 'Synthetic own'), renamed(7, 'Synthetic old'), syntheticSetup(),
         [115, 0, 7, 0], renamed(7, 'Synthetic new'), syntheticSetup()), false, selected, unused,
@@ -95,6 +103,9 @@ export function nicknameRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq
       eq(f.scene[method](...args), 3);
       eq(names(f).map(c => c.text), ['Synthetic own', 'Synthetic old', 'Synthetic own', 'Synthetic new'],
         'each Setup freezes its event-time appearance text');
+      eq(names(f).map(c => c.fillStyle), ['#84b6ff', '#e68c80', '#84b6ff', '#808080'],
+        'each Setup freezes its event-time appearance tint');
+      eq(resolved, 3);
       ok(names(f).every(c => c.alpha === 0), 'initial zero-spawn names still submit');
       const quality = f.quality.snapshot();
       f.scene.advance(80, false).free();
@@ -107,14 +118,17 @@ export function nicknameRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq
         else render(f, lane, width, height);
         return names(f);
       };
-      eq(resize(960, 540).map(c => c.text), ['Synthetic own', 'Synthetic new'], 'unchanged-size resize draws once');
-      eq(resize(801, 603).map(c => c.text), ['Synthetic own', 'Synthetic new'], 'changed-size resize draws once');
+      eq(resize(960, 540).map(c => [c.text, c.fillStyle]), [['Synthetic own', '#84b6ff'], ['Synthetic new', '#808080']],
+        'unchanged-size resize draws once with retained tints');
+      eq(resize(801, 603).map(c => [c.text, c.fillStyle]), [['Synthetic own', '#84b6ff'], ['Synthetic new', '#808080']],
+        'changed-size resize draws once with retained tints');
       const metric = JSON.parse(f.scene.drawn_snakes())[0].snake;
-      checkName(f, names(f)[0], metric);
+      checkName(f, names(f)[0], metric, 1, '#84b6ff');
       for (let count = 5; count <= 200; count++) resize(801, 603);
-      checkName(f, names(f)[0], metric);
+      checkName(f, names(f)[0], metric, 1, '#84b6ff');
       resize(801, 603);
-      checkName(f, names(f)[0], metric, 0.996);
+      checkName(f, names(f)[0], metric, 0.996, '#84b6ff');
+      eq(resolved, 3, 'draws and resizes never resolve appearance tint again');
       eq(f.quality.snapshot(), quality, 'Setup/resize names add no update or quality step');
       eq(f.target.context.stack.length, 0);
     } finally { f.close(); }
@@ -152,5 +166,47 @@ export function nicknameRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq
       }
       eq(f.target.context.stack.length, 0);
     } finally { f.close(); legacy.close(); }
+  }
+  // Ordinary resolver families retain one tint per appearance for every matching renderer.
+  const ordinary = [['apply_frame_with_appearance', () => ({ face: face(), antenna: null }), 'antenna'],
+    ['apply_frame_with_face_presentation', tagged, 'default'],
+    ['apply_frame_with_accessory_presentation', () => ({ ...tagged(), accessory: null }), 'accessory']];
+  for (const [method, shape, lane] of ordinary) {
+    const f = fixture({ nicknames: true });
+    try {
+      f.scene.reset();
+      let resolved = 0;
+      const tints = { 0: setupTints[0], 7: setupTints[1] };
+      f.scene[method](syntheticScene(), false, request => {
+        resolved++;
+        return request.id in tints ? { ...shape(), nicknameTint: tints[request.id] } : shape();
+      });
+      eq(resolved, 3);
+      f.scene.advance(40, false).free();
+      const expected = [['Synthetic 0', '#84b6ff'], ['Synthetic 7', '#e68c80'], ['Synthetic 8', '#eeeeee']];
+      for (let count = 0; count < 3; count++) {
+        eq(render(f, lane).map(c => [c.text, c.fillStyle]), expected, `${method} retains tinted text color`);
+      }
+      eq(resolved, 3, 'rendering never resolves appearance tint again');
+      // Invalid explicit tint metadata rejects the whole frame and keeps prior names.
+      const before = f.state();
+      const invalid = [null, 7, {}, { baseRgb: [1, 2, 3] }, { baseRgb: [1, 2], randomUnits: [0, 0, 0] },
+        { baseRgb: [1, 2, 256], randomUnits: [0, 0, 0] }, { baseRgb: [1, 2, 3.5], randomUnits: [0, 0, 0] },
+        { baseRgb: [1, 2, 3], randomUnits: [0, 0] }, { baseRgb: [1, 2, 3], randomUnits: [0, '0.5', 0] },
+        { baseRgb: [1, 2, 3], randomUnits: [0, 1, 0] }, { baseRgb: [1, 2, 3], randomUnits: [-1e-300, 0, 0] },
+        { baseRgb: [1, 2, 3], randomUnits: [0, 0, NaN] }, { baseRgb: [1, 2, 3], randomUnits: [0, 0, Infinity] }];
+      for (const nicknameTint of invalid) {
+        rejects(() => f.scene[method](bundle(renamed(9, 'Synthetic rejected')), false,
+          () => ({ ...shape(), nicknameTint })));
+        eq(f.state(), before, 'invalid tint rolls back every retained channel');
+      }
+      let getters = 0;
+      const accessor = { baseRgb: [1, 2, 3] };
+      Object.defineProperty(accessor, 'randomUnits', { enumerable: true, get() { getters++; return [0, 0, 0]; } });
+      rejects(() => f.scene[method](bundle(renamed(9, 'Synthetic rejected')), false,
+        () => ({ ...shape(), nicknameTint: accessor })), /accessor/);
+      eq(getters, 0);
+      eq(render(f, lane).map(c => [c.text, c.fillStyle]), expected, 'rejected frames leave retained names unchanged');
+    } finally { f.close(); }
   }
 }
