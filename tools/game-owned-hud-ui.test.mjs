@@ -220,6 +220,47 @@ test('fresh 21-node tree, exact frozen wrappers and authored lower-left layout a
   lease.dispose(); lease.dispose(); assert.deepEqual(f.parent.children, []);
 });
 
+test('default stylesheet hides unpopulated current readout until existing history writes its values', async () => {
+  // Authored selector/tree/text contract, not execution of a browser CSS engine.
+  const css = await readFile(new URL('../extension/game-host.css', import.meta.url), 'utf8');
+  assert.match(css, /#slither-client-root > div > div:has\(> div > span \+ b\):has\(> div > :empty\)\s*\{\s*display:\s*none\s*!important;\s*\}/);
+  const f = fixture(), lease = f.lease(), nodes = lease.mount(), b = bind(f, nodes);
+  const values = [nodes.readout.lengthValue, nodes.readout.rankValue, nodes.readout.populationValue];
+  const emptyChildren = () => nodes.readout.root.children.flatMap(line => line.children)
+    .filter(element => element.children.every(text => f.text(text) === ''));
+  assert.deepEqual(nodes.mount.children, [nodes.readout.root, nodes.final.root]);
+  assert.deepEqual(nodes.readout.lengthLine.children, [nodes.readout.lengthLabel.element, nodes.readout.lengthValue.element]);
+  assert.deepEqual(nodes.readout.rankLine.children, [nodes.readout.rankLabel.element, nodes.readout.rankValue.element,
+    nodes.readout.separator.element, nodes.readout.populationValue.element]);
+  assert.deepEqual(emptyChildren(), values.map(value => value.element));
+  let state = createHudState(b.sceneIdentity, HudHistoryDouble);
+  assert.equal(b.render(state).readoutWritten, false);
+  assert.deepEqual(emptyChildren(), values.map(value => value.element));
+  assert.equal(f.style(nodes.readout.root).has('opacity'), false, 'missing history cannot write opacity');
+  state = packet(state, [{ kind: 'final-score', commandIndex: 0, view: scoreView(0) }]);
+  const finalOnly = b.render(state);
+  assert.equal(finalOnly.readoutWritten, false); assert.equal(finalOnly.finalWritten, true);
+  assert.deepEqual(emptyChildren(), values.map(value => value.element), 'final history cannot reveal empty current labels');
+  assert.equal(f.text(nodes.final.value.text), '0');
+  for (const score of [-9007199254740991, -1, -0, 0, 4294967296, 9007199254740991]) {
+    state = displayed(state, score, 1, 65535);
+    assert.equal(b.render(state).readoutWritten, true);
+    assert.deepEqual(values.map(value => f.text(value.text)), [String(score), '1', '65535']);
+    assert.deepEqual(emptyChildren(), [], 'zero, signed, and wide numbers are populated text');
+    assert.equal(Object.is(state.current.score, score), true);
+  }
+  state = reduce(state, { kind: 'step', delta: 0, lifecycle: { schema: 1, deathPending: false,
+    returnActive: true, returnCompleted: true, returnFraction: 0 } });
+  b.render(state);
+  assert.equal(f.style(nodes.readout.root).get('opacity'), '-1', 'CSS does not replace raw renderer opacity');
+  state = reduce(state, { kind: 'world-reset' });
+  b.render(state);
+  assert.deepEqual(values.map(value => f.text(value.text)), ['9007199254740991', '1', '65535']);
+  assert.deepEqual(emptyChildren(), [], 'reset retains displayed current history');
+  assert.equal(f.text(nodes.final.value.text), '0', 'final history remains independent');
+  b.binding.dispose(); lease.dispose();
+});
+
 test('default stylesheet omits the empty owned final row until genuine final text exists', async () => {
   // Selector/tree/text contract only; this fixture does not execute a CSS engine.
   const css = await readFile(new URL('../extension/game-host.css', import.meta.url), 'utf8');
