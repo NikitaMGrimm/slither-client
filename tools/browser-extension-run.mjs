@@ -33,7 +33,6 @@ export async function runExtension(options) {
       : await backend.installedFirefox(audit, profile, fixture, options);
     receipt.installed = true; receipt.version = driver.version; receipt.installation = driver.installation;
     receipt.observation = await bounded(() => checkInstalledPreview(driver, audit, fixture, output), 90000, 'Installed preview');
-    receipt.pageErrors = driver.errors; receipt.blockedPageRequests = driver.blocked;
     if (driver.errors.length || driver.blocked.length) throw new Error('Installed page errors or external resource attempts');
     if ((await auditExtension(options.package, options.browser)).inventorySha256 !== audit.inventorySha256) throw new Error('Installed package bytes changed');
     receipt.status = 'installed-preview-passed';
@@ -44,6 +43,7 @@ export async function runExtension(options) {
       ['deny-only fixture/proxy', async () => { if (fixture) await bounded(() => fixture.close(), 15000, 'Fixture close'); }],
       ['owned profile', async () => { if (profile) await profile.remove(); }],
     ]);
+    receipt.pageErrors = driver?.errors ?? []; receipt.blockedPageRequests = driver?.blocked ?? [];
     receipt.deniedProxyRequests = fixture?.denied ?? [];
     receipt.profileRemoved = profile ? !(await fs.stat(profile.path).then(() => true, error => { if (error.code === 'ENOENT') return false; throw error; })) : null;
     if (receipt.cleanupErrors.length) receipt.status = 'failed';

@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import path from 'node:path';
+import vm from 'node:vm';
+import { fileURLToPath } from 'node:url';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { cleanupResources, hash } from './browser-common.mjs';
 import { extensionPolicy, installedIdentity } from './browser-extension-policy.mjs';
 import { checkInstalledPreview } from './browser-extension-checks.mjs';
 import { bounded } from './browser-extension-run.mjs';
@@ -56,6 +62,56 @@ test('installed checks reject registration changes and external preview resource
 });
 test('operation deadline rejects a stalled owned operation', async () => {
   await assert.rejects(bounded(() => new Promise(() => {}), 5, 'Authored stalled operation'), /deadline/);
+});
+test('failed installed preview retains diagnostics after cleanup without browser execution', async () => {
+  if (typeof vm.SourceTextModule !== 'function') {
+    await promisify(execFile)(process.execPath, ['--experimental-vm-modules', '--test',
+      '--test-name-pattern=^failed installed preview retains diagnostics after cleanup without browser execution$',
+      fileURLToPath(import.meta.url)], { timeout: 15000 });
+    return;
+  }
+  const source = await fs.readFile(new URL('./browser-extension-run.mjs', import.meta.url), 'utf8');
+  for (const setupFails of [false, true]) {
+    const closed = [], receipts = [];
+    const driver = { errors: ['Authored page failure'], blocked: [{ kind: 'http', scheme: 'https:' }],
+      async close() { closed.push('browser'); this.errors.push('Authored late page failure'); } };
+    const context = vm.createContext({ URL, process: { argv: [], version: process.version }, setTimeout, clearTimeout });
+    const module = values => new vm.SyntheticModule(Object.keys(values), function() {
+      for (const [name, value] of Object.entries(values)) this.setExport(name, value);
+    }, { context });
+    const backend = module({ async installedChrome() { if (setupFails) throw new Error('Authored setup failure'); return driver; } });
+    await backend.link(() => { throw new Error('Unexpected backend import'); }); await backend.evaluate();
+    const dependencies = new Map([
+      ['node:util', module({ parseArgs() { throw new Error('Unexpected CLI execution'); } })],
+      ['node:path', module({ default: path })],
+      ['node:url', module({ fileURLToPath })],
+      ['node:fs/promises', module({ default: { async readFile() { return 'authored source'; },
+        async stat() { throw Object.assign(new Error('Authored absent profile'), { code: 'ENOENT' }); } } })],
+      ['./browser-common.mjs', module({ cleanupResources, hash, async freshOutput() { return '/authored-output'; },
+        async json(_file, receipt) { receipts.push(structuredClone(receipt)); },
+        async temporaryProfile() { return { path: '/authored-profile', async remove() { closed.push('profile'); } }; } })],
+      ['./browser-extension-policy.mjs', module({ async auditExtension() { return { root: '/authored-package' }; } })],
+      ['./browser-extension-fixture.mjs', module({ async extensionFixture() {
+        return { denied: ['Authored proxy denial'], async close() { closed.push('fixture'); } };
+      } })],
+      ['./browser-extension-checks.mjs', module({ async checkInstalledPreview() { throw new Error('Authored preview failure'); } })],
+    ]);
+    const subject = new vm.SourceTextModule(source, { context,
+      initializeImportMeta(meta) { meta.url = new URL('./browser-extension-run.mjs', import.meta.url).href; },
+      importModuleDynamically(specifier) { assert.equal(specifier, './browser-extension-chrome.mjs'); return backend; } });
+    await subject.link(specifier => { assert.ok(dependencies.has(specifier), specifier); return dependencies.get(specifier); });
+    await subject.evaluate();
+    await subject.namespace.runExtension({ run: true, browser: 'chrome', package: '/authored-package', output: '/authored-output' });
+    assert.equal(receipts.length, 1);
+    const receipt = receipts[0];
+    assert.equal(receipt.status, 'failed'); assert.equal(receipt.installed, !setupFails);
+    assert.match(receipt.error.message, setupFails ? /Authored setup failure/ : /Authored preview failure/);
+    assert.deepEqual(receipt.pageErrors, setupFails ? [] : driver.errors);
+    assert.deepEqual(receipt.blockedPageRequests, setupFails ? [] : driver.blocked);
+    assert.deepEqual(receipt.deniedProxyRequests, ['Authored proxy denial']);
+    assert.deepEqual(receipt.cleanupErrors, []); assert.equal(receipt.profileRemoved, true);
+    assert.deepEqual(closed, setupFails ? ['fixture', 'profile'] : ['browser', 'fixture', 'profile']);
+  }
 });
 test('Firefox transport preserves explicit temporary-addon parameters and rejects native errors', async () => {
   const original = globalThis.fetch; const calls = [];
