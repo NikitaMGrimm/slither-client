@@ -205,6 +205,27 @@ test('consumer presentation hides only the configured endpoint row and preserves
   }
 });
 
+test('consumer endpoint validation reveals the same editable row without admission or replacement', () => {
+  for (const status of ['empty-endpoint', 'invalid-endpoint']) {
+    const f = fixture(), lease = createOwnedPlayUi(f.input, false), nodes = lease.mount();
+    assert.equal(f.style(nodes.endpointParent).get('display'), 'none');
+    lease.setStatus(status);
+    for (const [property, value] of startPageLayout.label) assert.equal(f.style(nodes.endpointParent).get(property), value);
+    assert.equal(f.native.state(nodes.endpoint).parent, nodes.endpointParent);
+    assert.equal(f.button(nodes.button).disabled, false);
+    assert.equal(f.field(nodes.endpoint).value, '');
+    lease.setStatus('ready');
+    assert.equal(f.style(nodes.endpointParent).get('display'), 'block');
+    lease.dispose();
+  }
+  const f = fixture(), lease = createOwnedPlayUi(f.input, false), nodes = lease.mount();
+  f.reparent(nodes.endpointParent);
+  const before = f.calls.length;
+  assert.throws(() => lease.setStatus('empty-endpoint'), /Invalid/);
+  assert.equal(f.calls.slice(before).some(call => call.name === 'setStyle' || call.name === 'setText'), false);
+  lease.dispose();
+});
+
 test('fixed Rust-projected statuses never read fields, change focus, or release the admission lock', () => {
   const f = fixture(), lease = f.lease(), nodes = lease.mount(), status = nodes.mount.children[3].children[0];
   f.field(nodes.endpoint).value = 'synthetic private endpoint'; f.field(nodes.nickname).value = 'private nickname';

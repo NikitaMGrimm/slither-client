@@ -67,7 +67,7 @@ export function createOwnedPlayUi(input, showEndpoint = true) {
   synchronous(project);
   options = undefined;
   let attempted = false, disposed = false, active = false, mounted = false, locked = false;
-  let ownedMount, button, buttonText, status, statusText;
+  let ownedMount, endpointRow, button, buttonText, status, statusText;
   let state = 'ready', playing = false, appliedDisabled = false;
 
   const view = (nextState = state, nextLocked = locked, nextPlaying = playing) => {
@@ -153,6 +153,7 @@ export function createOwnedPlayUi(input, showEndpoint = true) {
       const append = (target, child) => apply(construct.appendChild, undefined, [target, child]);
       ownedMount = element('div');
       const endpointParent = element('label'), endpointLabel = text('Server address'), endpoint = element('input');
+      endpointRow = endpointParent;
       const nicknameParent = element('label'), nicknameLabel = text('Nickname'), nickname = element('input');
       button = element('button');
       buttonText = text('Play');
@@ -212,6 +213,11 @@ export function createOwnedPlayUi(input, showEndpoint = true) {
     try {
       const projection = view(nextState);
       requireMounted();
+      if (nextState === 'empty-endpoint' || nextState === 'invalid-endpoint') {
+        if (!connectedHere(endpointRow) || call('parentNode', endpointRow) !== ownedMount) invalid();
+        const style = call('style', endpointRow);
+        for (const [property, value] of startPageLayout.label) call('setStyle', style, property, value);
+      }
       render(projection);
       requireCurrent();
       state = nextState;
@@ -274,7 +280,7 @@ export function createOwnedPlayUi(input, showEndpoint = true) {
         apply(construct.removeChild, undefined, [parent, ownedMount]);
       }
     } finally {
-      ownedMount = button = buttonText = status = statusText = document = parent = dom = construct = controls = checker = project = undefined;
+      ownedMount = endpointRow = button = buttonText = status = statusText = document = parent = dom = construct = controls = checker = project = undefined;
       active = false;
     }
   }
