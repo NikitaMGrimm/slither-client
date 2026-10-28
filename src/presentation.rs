@@ -13,6 +13,7 @@ use crate::{math, state::Point};
 
 mod antenna;
 mod arena_edge;
+mod background;
 mod body;
 mod body_painter;
 mod boundary;
@@ -42,6 +43,10 @@ pub use antenna::{
     AntennaStroke, MAX_ANTENNA_NODES, OrdinaryAntennaGeometry, PreparedAntenna,
 };
 pub use arena_edge::{ArenaEdgeInput, ArenaEdgePlan, ArenaEdgeView, plan_arena_edge};
+pub use background::{
+    BackgroundImageLayer, BackgroundInput, BackgroundPatternLayer, BackgroundPlan,
+    BackgroundSolidLayer, BackgroundState,
+};
 pub use body::{BODY_SAMPLES, BodyGeometry, BodyPoint, MAX_RETAINED_BODY_POINTS};
 pub use body_painter::{
     BodyAlpha, BodyAsset, BodyAssetStatus, BodyAssetUse, BodyBlend, BodyFade, BodyImageCommand,

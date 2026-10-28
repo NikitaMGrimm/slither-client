@@ -514,6 +514,16 @@ Wasm, validates numeric modes/counts before narrowing, and borrows an owned
 animation step. The animated page owns the shared-step cadence and draw counter;
 the renderer borrows its applied snapshot.
 
+`BackgroundState` retains camera-driven tile phase in Rust and emits backend-neutral
+clear, screen-image and repeating-pattern layers. Canvas2D consumes those layers
+before entities and restores the world transform. The optional screen image is
+gated by applied quality; its alpha is 0.3. A new scene establishes its camera
+baseline on the first draw, and reset preserves that baseline and phase. This is
+an authored initialization policy; visual comparison with the original remains
+unverified. `web/client-asset-map.mjs` creates the local client's replacement
+palettes, repeating tile and separate backdrop. An external comparison may map
+private images without committing them.
+
 `web/asset-bridge.mjs` borrows the exact existing canvas and loaded image objects
 from a supplied trusted page realm. It validates their types and readiness
 without copying or loading assets. The wasm32 bindings in `src/browser.rs` expose

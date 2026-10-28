@@ -233,8 +233,8 @@ export function antennaRenderSmoke(wasm, { fixture, vanillaEyes, eq, ok, rejects
         rejects(() => lane === 'standard' ? legacy.render() :
           legacy.scene.render(legacy.target, ...legacy.foods, legacy.background, 1, false));
         eq(legacy.state(), oldBefore, 'legacy pattern failure still preserves numeric model');
-        eq(observed, [['reset', 'fillRect']], 'legacy no-antenna pattern acquisition still follows its one reset and background fill');
-        eq(old.trace.map(c => c.op), ['reset', 'fillRect'], 'legacy no-antenna ordering remains exact on pattern failure');
+        eq(observed, [[]], 'shared background preflight acquires the pattern before clearing');
+        eq(old.trace, [], 'failed pattern preflight leaves the target untouched');
         eq(old.stack.length, 0);
       } finally { f.close(); legacy.close(); }
     }
