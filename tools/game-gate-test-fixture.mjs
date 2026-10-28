@@ -1,5 +1,5 @@
 // Authored native-receiver and explicit propagation doubles. No browser semantics.
-export function createGateTestDom({ hud = false } = {}) {
+export function createGateTestDom({ hud = false, ownedHud = false } = {}) {
   const nodes = new WeakMap(), eventData = new WeakMap();
   const state = value => {
     if (!nodes.has(value)) throw new TypeError('Synthetic native Node receiver');
@@ -139,6 +139,43 @@ export function createGateTestDom({ hud = false } = {}) {
   class Document extends Node {
     constructor() { super('#document', true); documents.add(this); }
     get activeElement() { if (!documents.has(this)) throw new TypeError('Synthetic Document receiver'); return state(this).active; }
+  }
+  if (hud && ownedHud) {
+    const apply = Reflect.apply;
+    const append = Object.getOwnPropertyDescriptor(Node.prototype, 'appendChild').value;
+    const remove = Object.getOwnPropertyDescriptor(Node.prototype, 'removeChild').value;
+    const operation = (owner, name, body) => Object.defineProperty(owner.prototype, name, {
+      configurable: true, writable: true, value: function (value) {
+        hudFixture.trace.push([name, this, value]);
+        const control = hudFixture.controls.get(name);
+        control?.hook?.(this, value);
+        if (control && Object.hasOwn(control, 'failure')) throw control.failure;
+        const result = body(this, value);
+        control?.afterHook?.(this, value);
+        if (control && Object.hasOwn(control, 'afterFailure')) throw control.afterFailure;
+        return result;
+      },
+    });
+    const documentState = receiver => {
+      if (!documents.has(receiver)) throw new TypeError('Synthetic Document receiver');
+      return state(receiver);
+    };
+    operation(Document, 'createElement', (receiver, tag) => {
+      documentState(receiver);
+      const element = new hudFixture.HTMLElement(tag); state(element).owner = receiver; return element;
+    });
+    operation(Document, 'createTextNode', (receiver, text) => {
+      documentState(receiver);
+      const node = new hudFixture.CharacterData(text); state(node).owner = receiver; return node;
+    });
+    operation(Node, 'appendChild', (receiver, child) => {
+      state(receiver); state(child); return apply(append, receiver, [child]);
+    });
+    operation(Node, 'removeChild', (receiver, child) => {
+      state(receiver);
+      if (state(child).parent !== receiver) throw new Error('Synthetic child not at parent');
+      return apply(remove, receiver, [child]);
+    });
   }
   const nativeType = Object.getOwnPropertyDescriptor(Event.prototype, 'type').get;
   const nativeTarget = Object.getOwnPropertyDescriptor(Event.prototype, 'target').get;

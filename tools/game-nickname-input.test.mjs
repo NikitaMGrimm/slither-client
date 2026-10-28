@@ -462,10 +462,10 @@ test('unregister, setInput, pagehide and reload share lifetime with no synthetic
 });
 
 test('actual bootstrap/gameplay router can call the selected lease before its filter with no added observations', async () => {
-  const bootstrapSource = readFileSync(new URL('../extension/game-bootstrap.mjs', import.meta.url), 'utf8');
+  const bootstrapSource = readFileSync(new URL('../extension/game-runtime.mjs', import.meta.url), 'utf8');
   const makeBootstrap = new Script(`(function(init,wasm,createStockHostSnapshot,createStockSkinAdapter,
     createStockClient,createStockEntityAssets,desktopBackingSize,createStockGameplay){
-    ${bootstrapSource.replace(/^import .+;\r?$/gm, '').replace(/^export /gm, '')}\nreturn startGamePage;})`).runInThisContext();
+    ${bootstrapSource.replace(/^import .+;\r?$/gm, '').replace(/^export /gm, '')}\nreturn (options = {}) => startGamePage({initialize:init,wasmApi:wasm,...options});})`).runInThisContext();
   const startGamePage = makeBootstrap(async () => {}, {}, createStockHostSnapshot, createStockSkinAdapter,
     createStockClient, createStockEntityAssets, desktopBackingSize, createStockGameplay);
   const f = fixtureFactory(); f.host(); f.complete(); const wasm = wasmDouble(f);

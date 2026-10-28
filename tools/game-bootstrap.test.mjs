@@ -26,8 +26,8 @@ after(() => {
 
 // Original synthetic DOM/native API and Wasm doubles; no original code/artwork/socket.
 const gateSource = readFileSync(new URL('../extension/game-gate.js', import.meta.url), 'utf8');
-const bootstrapSource = readFileSync(new URL('../extension/game-bootstrap.mjs', import.meta.url), 'utf8');
-const bootstrap = new Script(bootstrapSource.replace(/^import .+;\r?$/gm, '').replace(/^export /gm, '') + '\nstartGamePage;');
+const bootstrapSource = readFileSync(new URL('../extension/game-runtime.mjs', import.meta.url), 'utf8');
+const bootstrap = new Script('(() => {\n' + bootstrapSource.replace(/^import .+;\r?$/gm, '').replace(/^export /gm, '') + '\nreturn (options = {}) => startGamePage({ initialize: init, wasmApi: wasm, ...options });\n})();');
 const startGamePage = bootstrap.runInNewContext({ createStockHostSnapshot, createStockSkinAdapter,
   createStockClient, createStockEntityAssets, desktopBackingSize, createStockGameplay, bindStockHudDom, projectHudView,
   init: async () => {}, wasm: {} });
@@ -457,7 +457,9 @@ test('single auto-entry exposes only a local module runtime promise and never im
   const f = fixture(); f.host(); f.complete(); const wasm = wasmDouble(f);
   Object.assign(f.realm, { createStockHostSnapshot, createStockSkinAdapter, createStockClient,
     createStockEntityAssets, desktopBackingSize, createStockGameplay, init: async () => {}, wasm: wasm.api });
-  const source = bootstrapSource.replace(/^import .+;\r?$/gm, '').replace(/^export /gm, '');
+  f.realm.startRuntime = bootstrap.runInContext(f.context);
+  const source = readFileSync(new URL('../extension/game-bootstrap.mjs', import.meta.url), 'utf8')
+    .replace(/^import .+;\r?$/gm, '').replace(/^export /gm, '');
   const module = new Script(`${source}\n({gamePageRuntime,startGamePage});`).runInContext(f.context);
   const runtime = await module.gamePageRuntime;
   assert.equal(typeof runtime.play, 'function'); assert.equal(typeof runtime.playWithLiveProfile, 'function');
@@ -926,7 +928,9 @@ test('nickname owner accepts its actual current realm record and has no auto-ent
   const f = fixture(); f.host(); f.complete(); const wasm = wasmDouble(f);
   Object.assign(f.realm, { createStockHostSnapshot, createStockSkinAdapter, createStockClient,
     createStockEntityAssets, desktopBackingSize, createStockGameplay, init: async () => {}, wasm: wasm.api });
-  const source = bootstrapSource.replace(/^import .+;\r?$/gm, '').replace(/^export /gm, '');
+  f.realm.startRuntime = bootstrap.runInContext(f.context);
+  const source = readFileSync(new URL('../extension/game-bootstrap.mjs', import.meta.url), 'utf8')
+    .replace(/^import .+;\r?$/gm, '').replace(/^export /gm, '');
   const module = new Script(`${source}\n({gamePageRuntime});`).runInContext(f.context);
   const runtime = await module.gamePageRuntime;
   const parent = f.document.createElement('div'), field = f.document.createElement('input');
@@ -1834,10 +1838,10 @@ test('caught HUD reentry during existing UI reconciliation status is deferred to
   assert.equal(h.domCalls.length, calls); hud.unbind();
 });
 
-// This positive composition runs with the separately integrated native-capture dependency.
-// The pinned old fixture lacks its opt-in HUD operation doubles; all local owner cases still run there.
+// Isolated owner composition with the actual gate and authored native-operation doubles.
+// Full unchanged ESM graph coverage is in game-entry.test.mjs.
 test('actual captured native HUD group composes with explicit bootstrap in the same document realm',
-  { skip: !createGateTestDom({ hud: true }).hud }, async () => {
+  async () => {
     const f = fixture({ hudNative: true }); f.host(); f.complete();
     const nativeDom = f.edit.hud, wasm = wasmDouble(f), BaseScene = wasm.api.AnimatedScene;
     let enabled = 0, opcode, reads = 0;
@@ -1864,8 +1868,7 @@ test('actual captured native HUD group composes with explicit bootstrap in the s
     Object.assign(f.context, { createStockHostSnapshot, createStockSkinAdapter, createStockClient, createStockEntityAssets,
       desktopBackingSize, createStockGameplay, bindStockHudDom, projectHudView, init: async () => {}, wasm: {} });
     // Keep the actual initializer in the gate's current realm; this explicitly selected path does not auto-enter.
-    const explicit = new Script(bootstrapSource.slice(0, bootstrapSource.indexOf('// Trusted MAIN modules'))
-      .replace(/^import .+;\r?$/gm, '').replace(/^export /gm, '') + '\nstartGamePage;').runInContext(f.context);
+    const explicit = bootstrap.runInContext(f.context);
     const runtime = await explicit({ wasmApi: wasm.api, hudReadout: true });
     assert.equal(enabled, 1); assert.equal(f.sockets, 0);
     const element = name => new nativeDom.HTMLElement(name);

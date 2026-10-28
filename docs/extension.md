@@ -12,7 +12,7 @@ The local trusted runtime also composes the authored session and desktop input
 through the native pre-motion control seam. Play requires a selected endpoint
 and either an explicit external profile or an explicit request for bounded
 pinned profile acquisition on canonical HTTPS. Activation supplies neither and
-starts no acquisition. A Play UI, HUD/minimap, unsupported appearances/modes,
+starts no acquisition. A Play UI, minimap, unsupported appearances/modes,
 live acquisition/host/CSP and server acceptance remain separate.
 
 ## Build
@@ -42,13 +42,23 @@ The default produces both ignored directories:
 - `dist/extension/chrome`
 - `dist/extension/firefox`
 
-Each contains exactly 44 files: the original preview package, fixed game
-activation/gate/link/bootstrap/CSS, eighteen authored game modules and a generated
+Each contains exactly 46 files: the original preview package, fixed game
+activation/gate/link/bootstrap/runtime/owned-HUD-UI/CSS, eighteen authored game modules and a generated
 JS/Wasm/validator module graph for each renderer. Preview HTML/modules are copied unchanged
 under `scene/`; null simulator configuration disables its local connection.
 
 The [semantic HUD view and passive renderer](hud-view.md) are fixed local
-resources. The bootstrap does not activate or attach them.
+resources. The default bootstrap does not attach them. An explicit package
+selection installs the owned-HUD entry at the same `game/bootstrap.mjs` path:
+
+```sh
+node tools/build-extension.mjs --game-entry owned-hud --output-dir dist/extension/owned-hud
+```
+
+This entry starts one runtime with both `hudReadout` and `ownedHudUi` true.
+The default selection is `--game-entry default`; neither selection adds a
+runtime switch or second entry alias. Use a fresh output directory when
+changing selection.
 The game entry imports no synthetic resolver or fixture.
 
 Source manifests declare the fixed resource list. Packaging adds the verified
@@ -72,7 +82,8 @@ node tools/build-extension.mjs --output-dir dist/extension/candidate-2
 
 `--web-dir <trusted directory>` explicitly selects a different build pair; no
 search or fallback occurs. API:
-`buildExtension({ projectRoot?, webDir?, outputDir? })` returns
+`buildExtension({ projectRoot?, webDir?, outputDir?, gameEntry? })` accepts exactly
+`default` or `owned-hud` for `gameEntry` and returns
 `{ outputDir, files: [{ path, bytes, sha256 }] }` with sorted relative paths.
 Output stays under ignored `dist/extension`, separate from input. Input/output
 symlinks are rejected. See [provenance](provenance.md) and [releases](releases.md).
@@ -170,7 +181,12 @@ precedence. These paths add no field registration or native editing behavior.
 Trusted initialization can select `startGamePage({ hudReadout: true })` and then
 bind caller-owned nodes through `runtime.bindHudReadout({ schema: 1, scope,
 nodes })`. The default and automatic entry stay false and expose no HUD binding
-method. This option adds no UI, labels, mount, field registration or Play action.
+method. The side-effect-free `game/runtime.mjs` factory accepts explicit
+`initialize` and `wasmApi` dependencies so an entry can choose its options before
+claiming. Importing the default bootstrap in an armed realm still starts its
+default runtime immediately; a later call cannot reconfigure that claim.
+Semantic readout selection alone adds no UI, labels, mount, field registration
+or Play action.
 See [the fixed-node contract and publication seams](hud-view.md#explicit-bootstrap-owner).
 
 The gate optionally supplies frozen `native.hudDom` in the existing one-shot
@@ -187,8 +203,33 @@ bind, successful frame/resize and changed deferred publication. No new queue or
 timer is added. Native/source/owner reentry stays guarded; cleanup releases the
 nickname field before the HUD and native owners. Stale bindings require explicit
 unbind; old tickets are inert. Native writes may partially complete before a
-failure and are not restored. Default startup remains unbound. Installed host,
-full UI and native owner composition remain unverified.
+failure and are not restored. Default startup remains unbound. Installed-host
+behavior and native owner composition remain unverified.
+
+### Package-selected owned HUD
+
+The explicit owned entry selects `hudReadout:true, ownedHudUi:true` before the
+same one-shot claim. Visible mode requires both complete captured groups and
+the same captured Document before initialization. Missing construction support
+fails startup. Default startup does not consume the optional `native.ownedHudDom`
+sibling. Its four exact captured operations create Elements/Text and append or
+remove one child; existing renderer operations and freshness stay separate.
+
+The builder returns an inert frozen `{mount, dispose}` lease. Runtime stores it
+before guarded construction, exits that guard, and binds the existing readout
+owner once. It creates 13 Elements and 8 Text nodes under the existing root,
+with fixed lines for `Length: `, `Place: ` and `Last length: `. Numbers begin
+empty; the existing renderer supplies committed history. Numeric widths stay
+fixed, and the final line remains present independently of current-readout
+opacity. This is original UI policy without an artwork or layout-parity claim.
+
+Cleanup detaches nickname and HUD references before removing the owned mount.
+Failed construction performs no internal cleanup while the runtime guard is
+active; outer cleanup consumes the retained lease after the guard unwinds.
+Removal is attempted only while the document is current and the mount remains
+at its exact parent. Stale, reparented or throwing cleanup is not retried.
+Partial native effects cannot be rolled back. No public UI command, input
+listener, timer, profile acquisition, Play action or game socket is added.
 
 ## Session and input boundary
 
