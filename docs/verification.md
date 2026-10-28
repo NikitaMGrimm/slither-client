@@ -398,7 +398,8 @@ digit policy, actual profile HTTP, browser or server acceptance.
 
 ## Appearance nickname tint
 
-The tint seam passes 637 native all-target tests and 1335 Node tests. Formatting,
+Tint and controller integration passes 637 native all-target and 1337 Node tests.
+Formatting,
 doctests and strict native/Wasm Clippy pass. Native tests check the authored
 example `[8,99,250]` with units `[0,0.5,largest below 1]`, producing
 `[132,182,255]`. They also cover all 256 base bytes with each of the 20 jitters
