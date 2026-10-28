@@ -36,6 +36,21 @@ authored policy uses initial opacity 1, neutral light RGB `[238,238,238]` and
 plain admitted Latin1 text. Skin-specific light colors, text policy and browser
 font equivalence remain incomplete.
 
+The default minimap also keeps state in Rust: decoding the five `U/L/M/V/u`
+formats, retaining image/toggle planes, fade and transition state, and projecting
+the retained original-own marker before prediction. Its updates borrow the
+existing world step and session UI-fraction observations. A copied Wasm view
+provides final CSS-pixel geometry, layer opacities and plain server-label text.
+Image buffers are copied only when their Rust revision changes. The owned DOM
+and Canvas widget submits that data outside world drawing and quality statistics;
+it adds no timer or JavaScript lifecycle state. Legacy received-only APIs keep
+minimap commands opaque when tracking is unselected.
+Frame admission bounds cumulative minimap work to sixteen 512-square layers,
+charging reachable payload layers and at least one surface per command. It
+validates retained-size toggle runs before source or Setup draw callbacks. This
+prevents small packets from causing thousands of large resizes; excess work
+rejects the frame through the existing transaction.
+
 ## Protocol boundary
 
 The extension's optional [private nickname-edit gate](extension.md#private-nickname-edit-defaults)
@@ -170,7 +185,7 @@ leaderboard construction together. It binds fixed current score/rank and final
 score nodes, endpoint/nickname controls and visible leaderboard rows. Former
 owned-HUD/owned-Play entry files are removed; their UI builders remain shared
 runtime components. Activation alone starts no acquisition or game connection.
-Minimap state/display and announcement retention/display remain missing.
+Announcement retention/display remains missing.
 See [HUD views](hud-view.md), [stock adapters](stock-client.md) and
 [extension integration](extension.md).
 

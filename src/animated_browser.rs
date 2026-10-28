@@ -26,13 +26,14 @@ use crate::{
         FacePresentation, FoodImageCommand, FoodPaintInput, FoodPaintPlan, HudCommandGuard,
         HudIngressEventKind, HudIngressPlan, HudIngressReport, LeaderboardRowScore,
         LeaderboardScoreInput, LeaderboardScoreProjector as NativeLeaderboardScoreProjector,
-        MAX_BODY_PAINT_COMMANDS, MAX_DRAW_SAMPLES, MAX_RETAINED_SNAKES, MouthFaceLayout,
-        NicknameAlignment, NicknameBaseline, NicknameDraw, OrdinaryAntennaGeometry,
-        PairedSideLayout, PreparedAccessorySnake, PreparedAntenna, PreparedSnake, PreyEaterPose,
-        PreyImageCommand, PreyPaintInput, PreyPaintPlan, QualityMode, QualitySnapshot, ScoreError,
-        ScoreStatus, SingleEyeLayout, SnakePresentation, StandardEyeLayout,
-        StaticHeadAccessoryGeometry, StaticHeadAccessoryLayout, Turn, plan_arena_edge, plan_food,
-        plan_prey, plan_standard_body, plan_standard_body_with_antenna, sample_curve_with_heading,
+        MAX_BODY_PAINT_COMMANDS, MAX_DRAW_SAMPLES, MAX_RETAINED_SNAKES, MinimapLayout,
+        MinimapWidgetPlan, MouthFaceLayout, NicknameAlignment, NicknameBaseline, NicknameDraw,
+        OrdinaryAntennaGeometry, PairedSideLayout, PreparedAccessorySnake, PreparedAntenna,
+        PreparedSnake, PreyEaterPose, PreyImageCommand, PreyPaintInput, PreyPaintPlan, QualityMode,
+        QualitySnapshot, ScoreError, ScoreStatus, SingleEyeLayout, SnakePresentation,
+        StandardEyeLayout, StaticHeadAccessoryGeometry, StaticHeadAccessoryLayout, Turn,
+        plan_arena_edge, plan_food, plan_prey, plan_standard_body, plan_standard_body_with_antenna,
+        sample_curve_with_heading,
     },
     presentation_browser::AnimationStep,
     prey_browser::PreySources,
@@ -67,6 +68,108 @@ fn record<const N: usize>(fields: [(&str, JsValue); N]) -> Result<JsValue, JsVal
 
 fn serial(value: u64) -> JsValue {
     js_sys::BigInt::from(value).into()
+}
+
+fn minimap_point(point: Point) -> Result<JsValue, JsValue> {
+    record([("x", point.x.into()), ("y", point.y.into())])
+}
+
+fn minimap_rgb(rgb: [u8; 3]) -> JsValue {
+    rgb.into_iter()
+        .map(JsValue::from)
+        .collect::<js_sys::Array>()
+        .into()
+}
+
+fn minimap_widget_record(widget: MinimapWidgetPlan<'_>) -> Result<JsValue, JsValue> {
+    let background = widget.background;
+    let quadrants = js_sys::Array::new();
+    for angles in background.quadrant_angles {
+        quadrants.push(
+            &angles
+                .into_iter()
+                .map(JsValue::from)
+                .collect::<js_sys::Array>(),
+        );
+    }
+    let diameters = js_sys::Array::new();
+    for endpoints in background.diameters {
+        let points = js_sys::Array::new();
+        for point in endpoints {
+            points.push(&minimap_point(point)?);
+        }
+        diameters.push(&points);
+    }
+    let images = js_sys::Array::new();
+    for image in widget.images {
+        images.push(&record([
+            ("dimension", image.dimension.into()),
+            ("left", image.top_left.x.into()),
+            ("top", image.top_left.y.into()),
+            ("opacity", image.opacity.into()),
+            ("zIndex", image.z_index.into()),
+        ])?);
+    }
+    let marker = widget.marker;
+    let label = widget.label;
+    record([
+        ("side", widget.side.into()),
+        ("right", widget.right_bottom.x.into()),
+        ("bottom", widget.right_bottom.y.into()),
+        ("zIndex", widget.z_index.into()),
+        ("opacity", widget.opacity.into()),
+        (
+            "background",
+            record([
+                ("center", minimap_point(background.center)?),
+                ("radius", background.radius.into()),
+                ("fill", minimap_rgb(background.fill)),
+                ("quadrantFill", minimap_rgb(background.quadrant_fill)),
+                ("quadrantAngles", quadrants.into()),
+                ("diameters", diameters.into()),
+                ("stroke", minimap_rgb(background.stroke)),
+                ("strokeWidth", background.stroke_width.into()),
+                ("shadowBlur", background.shadow_blur.into()),
+                ("shadowOffset", minimap_point(background.shadow_offset)?),
+                ("opacity", background.opacity.into()),
+                ("zIndex", background.z_index.into()),
+            ])?,
+        ),
+        ("images", images.into()),
+        (
+            "marker",
+            record([
+                ("left", marker.top_left.x.into()),
+                ("top", marker.top_left.y.into()),
+                ("side", marker.side.into()),
+                ("center", minimap_point(marker.center)?),
+                ("radius", marker.radius.into()),
+                ("stroke", minimap_rgb(marker.stroke)),
+                ("strokeWidth", marker.stroke_width.into()),
+                ("fill", minimap_rgb(marker.fill)),
+                ("opacity", marker.opacity.into()),
+                ("zIndex", marker.z_index.into()),
+            ])?,
+        ),
+        (
+            "label",
+            record([
+                ("text", label.text.into()),
+                ("left", label.top_left.x.into()),
+                ("top", label.top_left.y.into()),
+                ("width", label.size.x.into()),
+                ("height", label.size.y.into()),
+                ("fontSize", label.font_size.into()),
+                ("fontFamily", label.font_family.into()),
+                ("textAlign", label.text_align.into()),
+                ("overflowHidden", label.overflow_hidden.into()),
+                ("fill", minimap_rgb(label.fill)),
+                ("opacity", label.opacity.into()),
+                ("shadowOffset", minimap_point(label.shadow_offset)?),
+                ("shadowBlur", label.shadow_blur.into()),
+            ])?,
+        ),
+    ])
 }
 
 fn control_view_record(view: ClientControlView) -> Result<JsValue, JsValue> {
@@ -381,7 +484,7 @@ fn control_actions(value: &JsValue) -> Result<ClientControlActions, JsValue> {
             .ok_or_else(|| error("unknown control action"))?;
         if !matches!(
             name.as_str(),
-            "gazeHeading" | "resetWorld" | "resetLag" | "connected"
+            "gazeHeading" | "resetWorld" | "resetLag" | "connected" | "minimapUiFraction"
         ) {
             return Err(error("unknown control action"));
         }
@@ -414,6 +517,14 @@ fn control_actions(value: &JsValue) -> Result<ClientControlActions, JsValue> {
             "resetWorld" => actions.reset_world = crate::body_browser::flag(field)?,
             "resetLag" => actions.reset_lag = crate::body_browser::flag(field)?,
             "connected" => actions.connected = Some(crate::body_browser::flag(field)?),
+            "minimapUiFraction" => {
+                actions.minimap_ui_fraction = Some(
+                    field
+                        .as_f64()
+                        .filter(|fraction| fraction.is_finite())
+                        .ok_or_else(|| error("minimap UI fraction must be finite"))?,
+                );
+            }
             _ => unreachable!(),
         }
     }
@@ -876,7 +987,70 @@ impl AnimatedScene {
         self.client.enable_nicknames().map_err(error)
     }
 
-    /// Gate boundary updates only; setup activates this gate and reset clears it.
+    /// Enable native minimap tracking before ingress or after a world reset.
+    /// Selection survives resets and adds no timer, connection or scene update.
+    pub fn enable_minimap_tracking(&mut self) -> Result<(), JsValue> {
+        self.client.enable_minimap_tracking().map_err(error)
+    }
+
+    /// Apply an observation from the caller's existing session UI lifecycle.
+    pub fn observe_minimap_ui_fraction(&mut self, fraction: f64) -> Result<(), JsValue> {
+        self.client
+            .observe_minimap_ui_fraction(fraction)
+            .map_err(error)
+    }
+
+    /// Copy native widget data and, only when its revision differs, both RGBA
+    /// images. Omitting known_image_revision requests a complete pixel copy.
+    /// Output contains no Wasm-memory aliases, clocks or browser source objects.
+    pub fn minimap_view(
+        &self,
+        right_ui_inset: f64,
+        bottom_ui_offset: f64,
+        known_image_revision: Option<u64>,
+    ) -> Result<JsValue, JsValue> {
+        let view = self.client.minimap_view();
+        let plan = self
+            .client
+            .minimap_render_plan(MinimapLayout {
+                right_ui_inset,
+                bottom_ui_offset,
+            })
+            .map_err(error)?;
+        let copy_pixels = known_image_revision != Some(view.image_revision);
+        let widget = match plan.widget {
+            Some(widget) => minimap_widget_record(widget)?,
+            None => JsValue::NULL,
+        };
+        record([
+            ("schema", 1.into()),
+            ("enabled", self.client.minimap_tracking_enabled().into()),
+            ("imageRevision", serial(view.image_revision)),
+            (
+                "dimension",
+                view.dimension.map(JsValue::from).unwrap_or(JsValue::NULL),
+            ),
+            (
+                "baseRgba",
+                if copy_pixels {
+                    js_sys::Uint8Array::from(view.base_rgba).into()
+                } else {
+                    JsValue::NULL
+                },
+            ),
+            (
+                "alternateRgba",
+                if copy_pixels {
+                    js_sys::Uint8Array::from(view.alternate_rgba).into()
+                } else {
+                    JsValue::NULL
+                },
+            ),
+            ("widget", widget),
+        ])
+    }
+
+    /// Gate connected boundary/minimap updates; Setup activates this gate and reset clears it.
     pub fn set_connected(&mut self, connected: bool) {
         self.client.set_connected(connected);
     }
@@ -2342,7 +2516,8 @@ impl AnimatedScene {
 
     /// Compute one step and synchronously obtain closed actions before motion.
     /// The callback must not reenter this borrowed scene. Return an own-data
-    /// record with optional gazeHeading, resetWorld, resetLag and connected fields;
+    /// record with optional gazeHeading, resetWorld, resetLag, connected and
+    /// minimapUiFraction fields;
     /// return {} for no actions. No raw Wasm step escapes into the callback.
     /// All numeric/source state rolls back on failure; external sends and host
     /// attempt state cannot. Do not automatically retry a failed callback/update.

@@ -2,7 +2,7 @@ import init, * as wasm from './pkg/slither_client.js';
 import { startGamePage as startRuntime } from './runtime.mjs';
 import { createLocalGameHost } from './local-game-host.mjs';
 
-/** One package entry supplies the authored HUD, Play controls and leaderboard. */
+/** One package entry supplies the authored HUD, Play controls, leaderboard and minimap. */
 export async function startGamePage({ realm = globalThis, initialize = init, wasmApi = wasm, localHost } = {}) {
   if (localHost === undefined && /^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}(?:[/?#]|$)/.test(realm.location?.href ?? '')) {
     try {
@@ -20,7 +20,8 @@ export async function startGamePage({ realm = globalThis, initialize = init, was
     }
   }
   return startRuntime({ realm, initialize, wasmApi, hudReadout: true,
-    ownedHudUi: true, ownedPlayUi: true, ownedLeaderboardUi: true, ...(localHost ? { localHost } : {}) });
+    ownedHudUi: true, ownedPlayUi: true, ownedLeaderboardUi: true, ownedMinimapUi: true,
+    ...(localHost ? { localHost } : {}) });
 }
 
 // Trusted MAIN modules share the default entry's single local startup promise.

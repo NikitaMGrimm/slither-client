@@ -1,7 +1,8 @@
 // Authored native-receiver and explicit propagation doubles. No browser semantics.
-export function createGateTestDom({ hud = false, ownedHud = false, ownedPlay = false, leaderboard = false } = {}) {
+export function createGateTestDom({ hud = false, ownedHud = false, ownedPlay = false, leaderboard = false, minimap = false } = {}) {
   ownedPlay = hud && ownedHud && ownedPlay;
   leaderboard = hud && ownedHud && leaderboard;
+  minimap = hud && ownedHud && minimap;
   const nodes = new WeakMap(), eventData = new WeakMap();
   const state = value => {
     if (!nodes.has(value)) throw new TypeError('Synthetic native Node receiver');
@@ -183,6 +184,48 @@ export function createGateTestDom({ hud = false, ownedHud = false, ownedPlay = f
     }
     playFixture = { trace, controls, buttonState };
   }
+  // Explicit opt-in Canvas/ImageData recorder; it does not rasterize pixels.
+  let minimapFixture;
+  if (minimap) {
+    const trace = [], canvases = new WeakMap(), contexts = new WeakMap();
+    class Context {
+      constructor(canvas) { contexts.set(this, { canvas, properties: {} }); }
+      get canvas() { return contexts.get(this).canvas; }
+    }
+    for (const name of ['save', 'restore', 'setTransform', 'clearRect', 'beginPath', 'arc',
+      'moveTo', 'lineTo', 'closePath', 'fill', 'stroke', 'putImageData', 'drawImage', 'fillRect', 'strokeRect', 'reset']) {
+      Context.prototype[name] = function (...args) {
+        if (!contexts.has(this)) throw new TypeError('Synthetic minimap Context receiver');
+        trace.push([name, this, ...args]);
+      };
+    }
+    for (const name of ['fillStyle', 'strokeStyle', 'lineWidth', 'shadowColor', 'shadowBlur',
+      'shadowOffsetX', 'shadowOffsetY']) Object.defineProperty(Context.prototype, name, {
+      configurable: true,
+      get() { return contexts.get(this).properties[name]; },
+      set(value) { contexts.get(this).properties[name] = value; trace.push(['set', this, name, value]); },
+    });
+    class Canvas extends hudFixture.HTMLElement {
+      constructor() { super('canvas'); canvases.set(this, { width: 0, height: 0, context: new Context(this) }); }
+      getContext(kind) {
+        if (kind !== '2d') throw new TypeError('Synthetic minimap 2d required');
+        trace.push(['context', this]); return canvases.get(this).context;
+      }
+    }
+    for (const name of ['width', 'height']) Object.defineProperty(Canvas.prototype, name, {
+      configurable: true,
+      get() { return canvases.get(this)[name]; },
+      set(value) { canvases.get(this)[name] = value; trace.push(['resize', this, name, value]); },
+    });
+    class ImageData {
+      constructor(data, width, height) {
+        this.data = data; this.width = width; this.height = height;
+        trace.push(['ImageData', this]);
+      }
+    }
+    minimapFixture = { Canvas, Context, ImageData, trace,
+      canvas: value => canvases.get(value), context: value => contexts.get(value) };
+  }
   const documents = new WeakSet();
   class Document extends Node {
     constructor() { super('#document', true); documents.add(this); }
@@ -210,7 +253,8 @@ export function createGateTestDom({ hud = false, ownedHud = false, ownedPlay = f
     };
     operation(Document, 'createElement', (receiver, tag) => {
       documentState(receiver);
-      const element = ownedPlay && tag === 'input' ? new Input()
+      const element = minimap && tag === 'canvas' ? new minimapFixture.Canvas()
+        : ownedPlay && tag === 'input' ? new Input()
         : ownedPlay && tag === 'button' ? new Button() : new hudFixture.HTMLElement(tag);
       state(element).owner = receiver; return element;
     });
@@ -315,6 +359,7 @@ export function createGateTestDom({ hud = false, ownedHud = false, ownedPlay = f
   eventBrands.set(Pointer, new WeakSet());
   eventGetter(Pointer, 'pointerId', 1); eventGetter(Pointer, 'pointerType', 'mouse'); eventGetter(Pointer, 'isPrimary', true);
   return { Node, Element, Input, Document, FenceEvent, Keyboard, InputEvent, Mouse, Pointer, state, eventData, inputValue,
+    ...(minimapFixture ? { minimap: minimapFixture } : {}),
     ...(hudFixture ? { hud: hudFixture } : {}), ...(playFixture ? { Button, ownedPlay: playFixture } : {}) };
 }
 
@@ -325,6 +370,9 @@ export function attachGateTestRealm(dom, realm, document, actualRealm) {
   if (dom.hud) Object.assign(realm, { HTMLElement: dom.hud.HTMLElement, CharacterData: dom.hud.CharacterData,
     CSSStyleDeclaration: dom.hud.CSSStyleDeclaration });
   if (dom.ownedPlay) realm.HTMLButtonElement = dom.Button;
+  if (dom.minimap) Object.assign(realm, { HTMLCanvasElement: dom.minimap.Canvas,
+    CanvasRenderingContext2D: dom.minimap.Context, ImageData: dom.minimap.ImageData,
+    Uint8Array, Uint8ClampedArray });
   const location = realm.location;
   let href = location.href;
   Object.defineProperty(location, 'href', { configurable: true, get() {
@@ -367,4 +415,28 @@ export function attachGateTestRealm(dom, realm, document, actualRealm) {
   }
   return { ...dom, listeners, documentListeners, make, deliver, originals,
     dispatch: (type, properties) => deliver(make(type, properties)) };
+}
+
+// Labelled issued Rust-view double, authored from the public Wasm record shape.
+// This is not real-Wasm composition or a pixel/raster oracle.
+export function issuedMinimapViewDouble(dimension = 2, imageRevision = 1n) {
+  const side = dimension + 24, center = side / 2;
+  return { schema: 1, enabled: true, imageRevision, dimension,
+    baseRgba: Uint8Array.from({ length: dimension * dimension * 4 }, (_, i) => i % 256),
+    alternateRgba: Uint8Array.from({ length: dimension * dimension * 4 }, (_, i) => 255 - i % 256),
+    widget: { side, right: 16, bottom: 16, zIndex: 10, opacity: 0.25,
+      background: { center: { x: center, y: center }, radius: dimension / 2,
+        fill: [32, 38, 48], quadrantFill: [64, 70, 80],
+        quadrantAngles: [[0, Math.PI / 2], [Math.PI, Math.PI * 1.5]],
+        diameters: [[{ x: 12, y: center }, { x: side - 12, y: center }],
+          [{ x: center, y: 12 }, { x: center, y: side - 12 }]],
+        stroke: [0, 0, 0], strokeWidth: 1, shadowBlur: 12, shadowOffset: { x: 0, y: 0 },
+        opacity: 0.4, zIndex: 11 },
+      images: [0, 1].map(index => ({ dimension, left: 12, top: 12, opacity: 0.3 + index * 0.1, zIndex: 12 + index })),
+      marker: { left: 3.2, top: 5.6, side: 14, center: { x: 7, y: 7 }, radius: 2.5,
+        stroke: [0, 0, 0], strokeWidth: 2, fill: [255, 255, 255], opacity: 0.8, zIndex: 13 },
+      label: { text: 'server 1', left: 0, top: side, width: side, height: 20,
+        fontSize: 14, fontFamily: 'Arial', textAlign: 'center', overflowHidden: true,
+        fill: [255, 255, 255], opacity: 0.7, shadowOffset: { x: 1, y: 2 }, shadowBlur: 3 },
+    } };
 }

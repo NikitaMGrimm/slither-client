@@ -8,10 +8,12 @@ use super::{
     BodyPaintSample, BodyPaintView, BoundaryRadius, CurveOutput, FaceGeometry, FollowCamera,
     FoodConsume, FoodCullBounds, FoodEaterPose, FoodError, FoodFactory, FoodSpawn, FoodWorld,
     FrameClock, FrameStep, HudIngressEventKind, HudIngressPlan, HudIngressReport,
-    MAX_CURVE_SAMPLES, NicknameCullBounds, NicknameDraw, NicknameInput, NicknameState,
-    OrdinaryAntennaGeometry, PairedFaceGeometry, PairedSideGeometry, PreparedAntenna,
-    PresentationError, PreyError, PreyFactory, PreyWorld, ScoreError, ScoreTables, SnakeMetrics,
-    SnakeObjectToken, SnakePresentation, StandardEyeGeometry, StaticHeadAccessoryGeometry, finite,
+    MAX_CURVE_SAMPLES, MinimapError, MinimapLayout, MinimapRenderPlan, MinimapState,
+    MinimapUpdateInput, MinimapView, NicknameCullBounds, NicknameDraw, NicknameInput,
+    NicknameState, OrdinaryAntennaGeometry, PairedFaceGeometry, PairedSideGeometry,
+    PreparedAntenna, PresentationError, PreyError, PreyFactory, PreyWorld, ScoreError, ScoreTables,
+    SnakeMetrics, SnakeObjectToken, SnakePresentation, StandardEyeGeometry,
+    StaticHeadAccessoryGeometry, finite, plan_minimap,
 };
 use crate::{
     protocol::ElapsedHeader,
@@ -21,6 +23,38 @@ use crate::{
         PresentationEvent, PreySpawnInput, Setup, SnakeTarget, StateError,
     },
 };
+
+// Bound server-controlled resize/clear work before source or Setup draw
+// callbacks run; short map bodies can still request large pixel surfaces.
+fn validate_minimap_work(
+    events: &[PresentationEvent],
+    mut dimension: Option<u16>,
+) -> Result<(), ClientPresentationError> {
+    let mut remaining = 16 * 512_usize * 512;
+    for event in events {
+        let layers = match event {
+            PresentationEvent::Setup(_) => {
+                dimension = Some(24);
+                1
+            }
+            PresentationEvent::Minimap(command) => {
+                let packet = crate::protocol::minimap::parse_minimap(command)
+                    .map_err(|error| ClientPresentationError::Minimap(error.into()))?;
+                dimension = packet.dimension().or(dimension);
+                packet
+                    .visit_selected(dimension.unwrap_or(0), |_, _| {})
+                    .map_err(|error| ClientPresentationError::Minimap(error.into()))?
+                    .max(1)
+            }
+            _ => continue,
+        };
+        let side = usize::from(dimension.unwrap_or(0));
+        remaining = remaining
+            .checked_sub(side * side * layers)
+            .ok_or(ClientPresentationError::MinimapFrameWorkLimit)?;
+    }
+    Ok(())
+}
 
 /// Retained objects, including duplicate appearances, deaths, and an undrawn own object.
 pub const MAX_RETAINED_SNAKES: usize = MAX_SNAKES * 2;
@@ -123,6 +157,8 @@ pub struct ClientControlActions {
     pub reset_lag: bool,
     /// Override the connection gate after any reset.
     pub connected: Option<bool>,
+    /// Existing session return-fade observation, before the connected map update.
+    pub minimap_ui_fraction: Option<f64>,
 }
 
 /// Appearance-owned numeric style; borrowed images are resolved only during drawing.
@@ -343,6 +379,12 @@ pub enum ClientPresentationError {
     ScoreModeRequiresReset,
     /// Nickname retention must start before packets or after reset.
     NicknameModeRequiresReset,
+    /// Minimap retention must start before packets or after reset.
+    MinimapModeRequiresReset,
+    /// A minimap command or used numeric input is invalid.
+    Minimap(MinimapError),
+    /// One frame requests more than sixteen maximum-size map layers of work.
+    MinimapFrameWorkLimit,
     /// Canonical R requires an original own object at its event position.
     ScoreOwnRequired,
     /// Score-table construction failed without changing the cache or world.
@@ -404,6 +446,11 @@ impl fmt::Display for ClientPresentationError {
             Self::NicknameModeRequiresReset => {
                 f.write_str("enable nicknames before packets or after reset")
             }
+            Self::MinimapModeRequiresReset => {
+                f.write_str("enable minimap tracking before packets or after reset")
+            }
+            Self::Minimap(error) => error.fmt(f),
+            Self::MinimapFrameWorkLimit => f.write_str("minimap frame work limit exceeded"),
             Self::ScoreOwnRequired => {
                 f.write_str("score adjustment requires retained original own")
             }
@@ -463,11 +510,14 @@ impl Error for ClientPresentationError {
             Self::Presentation(error) => Some(error),
             Self::Food(error) => Some(error),
             Self::Prey(error) => Some(error),
+            Self::Minimap(error) => Some(error),
             Self::ScoreTrackingRequired
             | Self::FinalScoreUnavailable(_)
             | Self::Limit
             | Self::ScoreModeRequiresReset
             | Self::NicknameModeRequiresReset
+            | Self::MinimapModeRequiresReset
+            | Self::MinimapFrameWorkLimit
             | Self::ScoreOwnRequired
             | Self::AppearanceModeRequiresReset
             | Self::AppearanceResolverRequired
@@ -571,6 +621,8 @@ impl Entry {
 #[derive(Clone, Debug, PartialEq)]
 pub struct AnimatedClient {
     received: ClientState,
+    minimap_enabled: bool,
+    minimap: MinimapState,
     nicknames_enabled: bool,
     nickname_draws: Vec<NicknameDraw>,
     score_enabled: bool,
@@ -616,6 +668,8 @@ impl AnimatedClient {
     pub fn new(start_ms: f64) -> Result<Self, ClientPresentationError> {
         Ok(Self {
             received: ClientState::default(),
+            minimap_enabled: false,
+            minimap: MinimapState::default(),
             nicknames_enabled: false,
             nickname_draws: Vec::new(),
             score_enabled: false,
@@ -654,6 +708,7 @@ impl AnimatedClient {
         self.reset_camera();
         self.connected = false;
         self.entries.clear();
+        self.minimap.reset_world();
         self.nickname_draws.clear();
         self.own_score_adjustment = 0;
         self.foods.clear();
@@ -675,6 +730,44 @@ impl AnimatedClient {
     /// Reading these commands advances no fade, camera or update clock.
     pub fn nickname_draws(&self) -> &[NicknameDraw] {
         &self.nickname_draws
+    }
+
+    /// Enable minimap admission before ingress; reset preserves this selection.
+    pub fn enable_minimap_tracking(&mut self) -> Result<(), ClientPresentationError> {
+        if !self.minimap_enabled && self.received.frames_applied != 0 {
+            return Err(ClientPresentationError::MinimapModeRequiresReset);
+        }
+        self.minimap_enabled = true;
+        Ok(())
+    }
+
+    /// Whether the caller selected native minimap tracking.
+    pub fn minimap_tracking_enabled(&self) -> bool {
+        self.minimap_enabled
+    }
+
+    /// Borrow native minimap images and metadata without advancing presentation.
+    pub fn minimap_view(&self) -> MinimapView<'_> {
+        self.minimap.view()
+    }
+
+    /// Build backend-neutral widget geometry and styles with borrowed pixels.
+    pub fn minimap_render_plan(
+        &self,
+        layout: MinimapLayout,
+    ) -> Result<MinimapRenderPlan<'_>, ClientPresentationError> {
+        plan_minimap(self.minimap.view(), layout).map_err(ClientPresentationError::Minimap)
+    }
+
+    /// Forward an observation from the existing session UI lifecycle. No clock
+    /// or independent fraction progression is introduced here.
+    pub fn observe_minimap_ui_fraction(
+        &mut self,
+        fraction: f64,
+    ) -> Result<(), ClientPresentationError> {
+        self.minimap
+            .observe_ui_fraction(fraction)
+            .map_err(ClientPresentationError::Minimap)
     }
 
     /// Opt into canonical R and ordered Setup score tables before packets or after reset.
@@ -1713,7 +1806,14 @@ impl AnimatedClient {
             boundaries: Vec::new(),
         });
         let mut received = self.received.clone();
-        let applied = if let Some(collector) = &mut collector {
+        let applied = if self.minimap_enabled {
+            received.apply_frame_with_minimap_events(
+                bytes,
+                header,
+                self.score_enabled,
+                collector.as_mut(),
+            )
+        } else if let Some(collector) = &mut collector {
             received.apply_frame_with_hud_events(bytes, header, collector)
         } else if self.score_enabled {
             received.apply_frame_with_score_events(bytes, header)
@@ -1721,6 +1821,9 @@ impl AnimatedClient {
             received.apply_frame_with_events(bytes, header)
         }
         .map_err(ClientPresentationError::from)?;
+        if self.minimap_enabled {
+            validate_minimap_work(&applied.events, self.minimap.view().dimension)?;
+        }
         if enable_accessory_presentation
             && !self.accessory_presentation_enabled
             && self.received.frames_applied != 0
@@ -1791,6 +1894,11 @@ impl AnimatedClient {
                         if value.game_mode == Some(2) {
                             return Err(ClientPresentationError::UnsupportedMode(2).into());
                         }
+                        if next.minimap_enabled {
+                            next.minimap
+                                .apply_setup(&value)
+                                .map_err(ClientPresentationError::Minimap)?;
+                        }
                         if next.score_enabled
                             && next.score_tables.as_ref().map(|tables| tables.table_max())
                                 != Some(value.max_segments)
@@ -1833,6 +1941,13 @@ impl AnimatedClient {
                         if let Some(journal) = &mut journal {
                             journal.setup_draw(command_index, next.score_view());
                         }
+                    }
+                    PresentationEvent::Minimap(command) => {
+                        let packet = crate::protocol::minimap::parse_minimap(&command)
+                            .map_err(|error| ClientPresentationError::Minimap(error.into()))?;
+                        next.minimap
+                            .apply_packet(packet)
+                            .map_err(ClientPresentationError::Minimap)?;
                     }
                     PresentationEvent::OwnScoreAdjustment(adjustment) => {
                         if next.own_snake().is_none() {
@@ -2190,6 +2305,9 @@ impl AnimatedClient {
         if let Some(heading) = actions.gaze_heading {
             finite(&[heading]).map_err(ClientPresentationError::from)?;
         }
+        if let Some(fraction) = actions.minimap_ui_fraction {
+            finite(&[fraction]).map_err(ClientPresentationError::from)?;
+        }
         if let Some(heading) = actions.gaze_heading {
             next.set_own_gaze_heading(heading)?;
         }
@@ -2202,14 +2320,36 @@ impl AnimatedClient {
         if let Some(connected) = actions.connected {
             next.set_connected(connected);
         }
-        next.advance_entities(step)?;
+        if let Some(fraction) = actions.minimap_ui_fraction {
+            next.observe_minimap_ui_fraction(fraction)?;
+        }
+        next.advance_entities(step, now_ms)?;
         *self = next;
         Ok(step)
     }
 
-    fn advance_entities(&mut self, step: FrameStep) -> Result<(), ClientPresentationError> {
+    fn advance_entities(
+        &mut self,
+        step: FrameStep,
+        now_ms: f64,
+    ) -> Result<(), ClientPresentationError> {
         if let Some(boundary) = &mut self.boundary {
             boundary.advance(step.whole_steps, self.connected);
+        }
+        if self.minimap_enabled {
+            self.minimap
+                .advance(
+                    MinimapUpdateInput {
+                        now_ms,
+                        step,
+                        connected: self.connected,
+                        center: self.received.setup.as_ref().map(|setup| setup.grid_center),
+                        displayed_radius: self.boundary.as_ref().map(BoundaryRadius::displayed),
+                        own_raw_head: self.own_snake().map(|snake| snake.metrics().raw_head),
+                    },
+                    Some(now_ms),
+                )
+                .map_err(ClientPresentationError::Minimap)?;
         }
         for entry in &mut self.entries {
             if entry.drawn && !entry.snake.advance(step)? {
@@ -2236,7 +2376,8 @@ impl AnimatedClient {
         Ok(())
     }
 
-    /// Gate boundary consumption without changing clocks, samples or entity animation.
+    /// Gate boundary consumption and minimap fade/transition without advancing
+    /// clocks, consuming samples or changing entity-animation eligibility.
     pub fn set_connected(&mut self, connected: bool) {
         self.connected = connected;
     }

@@ -251,6 +251,9 @@ pub struct PreyMotionInput {
 pub enum PresentationEvent {
     /// Apply configuration while preserving entities, own identity, caches and camera state.
     Setup(Setup),
+    /// Complete authored-admitted minimap command, only in the enabled lane.
+    /// V run reachability is checked against retained size during presentation.
+    Minimap(Vec<u8>),
     /// Replace retained original-own R; emitted only by opted-in score ingestion.
     OwnScoreAdjustment(u8),
     /// Create or replace a snake with complete initial presentation inputs.
@@ -372,6 +375,8 @@ pub(crate) struct HudCommandCollector<'a> {
 /// A malformed or out-of-policy frame never changes the scene or counters.
 #[derive(Clone, Debug, PartialEq)]
 pub enum StateError {
+    /// An enabled minimap command has invalid fixed or reachable wire syntax.
+    Minimap(protocol::minimap::MinimapDecodeError),
     /// Explicit HUD ingress plan, canonical controls or complete leaderboard failed.
     Hud(HudIngressError),
     /// Existing framing or setup-boundary validation failed.
@@ -395,6 +400,7 @@ pub enum StateError {
 impl fmt::Display for StateError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Minimap(error) => error.fmt(f),
             Self::Hud(error) => error.fmt(f),
             Self::Protocol(error) => error.fmt(f),
             Self::InvalidPacket(code) => {
@@ -457,7 +463,7 @@ impl ClientState {
         bytes: &[u8],
         header: ElapsedHeader,
     ) -> Result<FrameReport, StateError> {
-        self.apply_transaction(bytes, header, None, false, None)
+        self.apply_transaction(bytes, header, None, false, false, None)
     }
 
     /// Atomically apply a frame and return every supported presentation change.
@@ -478,7 +484,8 @@ impl ClientState {
         header: ElapsedHeader,
     ) -> Result<AppliedFrame, StateError> {
         let mut events = Vec::new();
-        let report = self.apply_transaction(bytes, header, Some(&mut events), false, None)?;
+        let report =
+            self.apply_transaction(bytes, header, Some(&mut events), false, false, None)?;
         Ok(AppliedFrame { report, events })
     }
 
@@ -489,7 +496,7 @@ impl ClientState {
         header: ElapsedHeader,
     ) -> Result<AppliedFrame, StateError> {
         let mut events = Vec::new();
-        let report = self.apply_transaction(bytes, header, Some(&mut events), true, None)?;
+        let report = self.apply_transaction(bytes, header, Some(&mut events), true, false, None)?;
         Ok(AppliedFrame { report, events })
     }
 
@@ -500,8 +507,35 @@ impl ClientState {
         collector: &mut HudCommandCollector<'_>,
     ) -> Result<AppliedFrame, StateError> {
         let mut events = Vec::new();
-        let report =
-            self.apply_transaction(bytes, header, Some(&mut events), true, Some(collector))?;
+        let report = self.apply_transaction(
+            bytes,
+            header,
+            Some(&mut events),
+            true,
+            false,
+            Some(collector),
+        )?;
+        Ok(AppliedFrame { report, events })
+    }
+
+    /// Minimap admission shares ordinary/score/HUD staging and event positions.
+    /// Selecting minimaps never implicitly admits score-adjustment commands.
+    pub(crate) fn apply_frame_with_minimap_events(
+        &mut self,
+        bytes: &[u8],
+        header: ElapsedHeader,
+        score_enabled: bool,
+        collector: Option<&mut HudCommandCollector<'_>>,
+    ) -> Result<AppliedFrame, StateError> {
+        let mut events = Vec::new();
+        let report = self.apply_transaction(
+            bytes,
+            header,
+            Some(&mut events),
+            score_enabled,
+            true,
+            collector,
+        )?;
         Ok(AppliedFrame { report, events })
     }
 
@@ -511,6 +545,7 @@ impl ClientState {
         header: ElapsedHeader,
         mut events: Option<&mut Vec<PresentationEvent>>,
         score_enabled: bool,
+        minimap_enabled: bool,
         mut hud: Option<&mut HudCommandCollector<'_>>,
     ) -> Result<FrameReport, StateError> {
         let decoded = protocol::decode_frame(bytes, header)?;
@@ -561,7 +596,15 @@ impl ClientState {
                     captures += 1;
                 }
             }
-            if !hud_leaderboard
+            if minimap_enabled && matches!(command[0], b'U' | b'L' | b'M' | b'V' | b'u') {
+                if staged.setup.is_none() {
+                    return Err(StateError::MissingSetup);
+                }
+                protocol::minimap::parse_minimap(command).map_err(StateError::Minimap)?;
+                if let Some(events) = events.as_deref_mut() {
+                    events.push(PresentationEvent::Minimap(command.to_vec()));
+                }
+            } else if !hud_leaderboard
                 && !staged.apply_command(command, events.as_deref_mut(), score_enabled)?
             {
                 ignored += 1;

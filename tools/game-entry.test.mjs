@@ -27,7 +27,7 @@ test('actual default graph mounts HUD, Play and leaderboard with one claim, scen
     let release;
     const projector = { created: 0, freed: 0 };
     const graph = createGraph({ hudNative: true, ownedHudNative: true, ownedPlayNative: true,
-      leaderboardNative: true, initialize: () => new Promise(resolve => { release = resolve; }),
+      leaderboardNative: true, minimapNative: true, initialize: () => new Promise(resolve => { release = resolve; }),
       prepareWasm(api, run) {
         api.LeaderboardScoreProjector = run('(counts => class { constructor() { counts.created++; } project() { throw Error("No startup score projection expected"); } free() { counts.freed++; } })')(projector);
       } });
@@ -48,10 +48,12 @@ test('actual default graph mounts HUD, Play and leaderboard with one claim, scen
     assert.equal(graph.f.sockets, 0); assert.equal(graph.f.original, 0);
     assert.equal(hud.tracking, 1); assert.equal(hud.scoreReads, 0); assert.equal(projector.created, 1);
     const root = graph.f.document.getElementById('slither-client-root');
-    assert.equal(root.children.length, 6, 'existing scene nodes plus HUD, Play and leaderboard mounts');
-    const [hudMount, playMount, leaderboardMount] = root.children.slice(3);
+    assert.equal(root.children.length, 7, 'existing scene nodes plus HUD, Play, leaderboard and minimap mounts');
+    const [hudMount, playMount, leaderboardMount, minimapMount] = root.children.slice(3);
     assert.equal(hudMount.children.length, 2); assert.equal(playMount.children.length, 4);
     assert.equal(leaderboardMount.children.length, 4);
+    assert.equal(minimapMount.children.length, 5);
+    assert.equal(graph.minimap.enabled, 1); assert.equal(graph.minimap.reads.length, 1);
     assert.equal(graph.f.edit.ownedPlay.buttonState(playMount.children[2]).disabled, true);
     assert.equal(graph.f.edit.hud.character(playMount.children[3].children[0]).data, 'Play unavailable on this page.');
     const repeated = await graph.load('bootstrap.mjs');
@@ -125,7 +127,7 @@ test('unarmed default entry exports undefined and keeps initialization quiet', a
 test('default wrapper honors explicit dependencies and always selects all owned UI options', async () => {
   await runGameModuleTest(async ({ assert, createGraph }) => {
     const graph = createGraph({ armed: false, hudNative: true, ownedHudNative: true,
-      ownedPlayNative: true, leaderboardNative: true });
+      ownedPlayNative: true, leaderboardNative: true, minimapNative: true });
     const entry = await graph.load('bootstrap.mjs'); graph.arm();
     const hud = graph.hudWasm(); let initialized = 0, projectors = 0;
     graph.wasm.api.LeaderboardScoreProjector = graph.run('(created => class { constructor() { created(); } project() { throw Error("Unexpected projection"); } free() {} })')(() => { projectors++; });
@@ -134,7 +136,7 @@ test('default wrapper honors explicit dependencies and always selects all owned 
     assert.equal(initialized, 1); assert.equal(graph.counts.initialize, 0);
     assert.equal(hud.tracking, 1); assert.equal(projectors, 1);
     assert.equal(typeof runtime.bindHudReadout, 'function');
-    assert.equal(graph.f.document.getElementById('slither-client-root').children.length, 6);
+    assert.equal(graph.f.document.getElementById('slither-client-root').children.length, 7);
     assert.equal(graph.f.raf.size, 1); assert.equal(graph.f.sockets, 0); runtime.dispose();
   });
 });

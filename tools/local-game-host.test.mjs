@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createLocalGameHost } from '../web/local-game-host.mjs';
-import { createGateTestDom } from './game-gate-test-fixture.mjs';
+import { createGateTestDom, issuedMinimapViewDouble } from './game-gate-test-fixture.mjs';
+import { createOwnedMinimapUi } from '../extension/game-owned-minimap-ui.mjs';
 import { createClientInput } from '../web/client-input.mjs';
 
 // Explicit DOM, generated-source and browser-capability doubles; no real sockets.
-function fixture({ href = 'http://127.0.0.1:18884/game', decode } = {}) {
-  const dom = createGateTestDom({ hud: true, ownedHud: true, ownedPlay: true, leaderboard: true });
+function fixture({ href = 'http://127.0.0.1:18884/game', decode, minimap = false } = {}) {
+  const dom = createGateTestDom({ hud: true, ownedHud: true, ownedPlay: true, leaderboard: true, minimap });
   const document = new dom.Document();
   const listeners = new Map(), sockets = [], calls = [];
   class Events {
@@ -25,7 +26,7 @@ function fixture({ href = 'http://127.0.0.1:18884/game', decode } = {}) {
     constructor(type, properties) { Object.assign(this, { type, isTrusted: true, defaultPrevented: false }, properties); }
     preventDefault() { this.defaultPrevented = true; }
   }
-  class Canvas extends dom.hud.HTMLElement {
+  const Canvas = minimap ? dom.minimap.Canvas : class Canvas extends dom.hud.HTMLElement {
     width = 0; height = 0;
     constructor() { super('canvas'); }
     getContext(kind) {
@@ -33,7 +34,10 @@ function fixture({ href = 'http://127.0.0.1:18884/game', decode } = {}) {
       return { beginPath() {}, arc() {}, moveTo() {}, lineTo() {}, closePath() {}, fill() {}, fillRect() {} };
     }
     toDataURL() { return `data:image/png;base64,synthetic-local-${this.width}x${this.height}`; }
-  }
+  };
+  if (minimap) Canvas.prototype.toDataURL = function () {
+    return `data:image/png;base64,synthetic-local-${this.width}x${this.height}`;
+  };
   class Image extends dom.hud.HTMLElement {
     constructor() { super('img'); }
     get naturalWidth() { return this.complete ? Number(this.src.match(/-(\d+)x/)[1]) : 0; }
@@ -43,7 +47,9 @@ function fixture({ href = 'http://127.0.0.1:18884/game', decode } = {}) {
   }
   const originalCreate = dom.Document.prototype.createElement;
   dom.Document.prototype.createElement = function (tag) {
-    if (tag === 'canvas') return new Canvas();
+    if (tag === 'canvas') {
+      const canvas = new Canvas(); dom.state(canvas).owner = this; return canvas;
+    }
     return Reflect.apply(originalCreate, this, [tag]);
   };
   class Socket { constructor(url) { this.url = url; sockets.push(this); } }
@@ -56,6 +62,8 @@ function fixture({ href = 'http://127.0.0.1:18884/game', decode } = {}) {
     Math: { random() { assert.equal(this, realm.Math); calls.push('random'); return 0.25; } },
   };
   realm.top = realm;
+  if (minimap) Object.assign(realm, { CanvasRenderingContext2D: dom.minimap.Context,
+    ImageData: dom.minimap.ImageData, Uint8ClampedArray });
   for (const name of ['requestAnimationFrame', 'cancelAnimationFrame', 'setTimeout', 'clearTimeout',
     'setInterval', 'clearInterval', 'queueMicrotask']) {
     realm[name] = function (...args) { assert.equal(this, realm); calls.push([name, ...args]); return 7; };
@@ -77,6 +85,44 @@ function fixture({ href = 'http://127.0.0.1:18884/game', decode } = {}) {
 const endpoint = 'ws://127.0.0.1:8766/slither';
 const create = f => createLocalGameHost({ realm: f.realm, endpoint });
 const claim = host => host.gate.claim(host.gate.metadata().id);
+
+test('local native minimap capture composes with the builder using issued Rust-view doubles', async () => {
+  const f = fixture({ minimap: true }), host = await create(f), native = claim(host);
+  const cap = native.minimapDom, { dom } = native.hudDom, construct = native.ownedHudDom.dom;
+  assert.deepEqual(Object.keys(cap), ['schema', 'document', 'canvas']);
+  assert.deepEqual(Object.keys(cap.canvas), ['context', 'resize', 'set', 'call', 'upload']);
+  assert.equal(cap.document, f.document); assert.equal(cap.schema, 1);
+  assert(Object.isFrozen(cap)); assert(Object.isFrozen(cap.canvas));
+  const parent = construct.createElement(f.document, 'main'); construct.appendChild(f.document, parent);
+  const { Context, Canvas } = f.dom.minimap, fail = () => { throw new Error('Uncaptured minimap capability'); };
+  for (const name of ['save', 'restore', 'setTransform', 'clearRect', 'beginPath', 'arc',
+    'moveTo', 'lineTo', 'closePath', 'fill', 'stroke', 'putImageData']) Context.prototype[name] = fail;
+  for (const name of ['fillStyle', 'strokeStyle', 'lineWidth', 'shadowColor', 'shadowBlur',
+    'shadowOffsetX', 'shadowOffsetY']) Object.defineProperty(Context.prototype, name, { configurable: true, set: fail });
+  for (const name of ['width', 'height']) Object.defineProperty(Canvas.prototype, name, { configurable: true, set: fail });
+  Object.defineProperty(Context.prototype, 'canvas', { configurable: true, get: fail });
+  Canvas.prototype.getContext = fail; f.realm.ImageData = fail; f.realm.Uint8ClampedArray = fail;
+  const ui = createOwnedMinimapUi({ document: f.document, parent, dom, construct,
+    canvas: cap.canvas, isCurrentDocument: native.hudDom.isCurrentDocument });
+  const root = ui.mount(), view = issuedMinimapViewDouble(); ui.render(view);
+  const uploads = () => f.dom.minimap.trace.filter(call => call[0] === 'putImageData');
+  assert.equal(uploads().length, 2); assert.equal(ui.imageRevision(), 1n);
+  const first = uploads()[0][2]; view.baseRgba.fill(42);
+  assert.equal(first.data[0], 0);
+  ui.render({ ...view, baseRgba: null, alternateRgba: null }); assert.equal(uploads().length, 2);
+  ui.render(issuedMinimapViewDouble(0, 2n)); assert.equal(uploads().length, 2);
+  const context = f.dom.minimap.canvas(root.children[1]).context;
+  assert.throws(() => cap.canvas.call(context, 'drawImage'), /Unsupported/);
+  assert.throws(() => cap.canvas.set(context, 'globalAlpha', 1), /Unsupported/);
+  assert.throws(() => cap.canvas.resize(root.children[1], 537, 0), /dimension/);
+  const foreign = new f.dom.Document(); foreign.appendChild(root.children[1]);
+  assert.throws(() => cap.canvas.call(context, 'fill'), /HTML minimap/);
+  const before = f.dom.minimap.trace.length;
+  host.dispose();
+  assert.throws(() => ui.render(view), /Stale/);
+  assert.throws(() => cap.canvas.upload(context, 0, new Uint8Array()), /Current minimap/);
+  assert.equal(f.dom.minimap.trace.length, before); ui.dispose();
+});
 
 test('local host supplies authored sources/profile and one claim without starting browser work', async () => {
   const f = fixture(), host = await create(f);
