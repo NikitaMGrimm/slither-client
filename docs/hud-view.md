@@ -147,7 +147,12 @@ with tabular numbers. Its labels are `Your length: ` and `Your rank: `, with
 ` of ` between rank and population. Current values flow directly after their
 labels without reserved column gaps. The final line retains its 18ch numeric
 width, monospace family and `Last length: ` label. Numeric text stays empty until
-the corresponding history exists. The default stylesheet hides the final line
+the corresponding history exists. The default stylesheet hides the current
+readout while any of its numeric elements is empty, so ready-state labels do not
+appear without values. The existing renderer's first current publication,
+including zero, reveals it under the unchanged requested opacity. Retained
+current history remains populated through reset; no extra readiness or lifecycle
+state is introduced. The default stylesheet hides the final line
 while its numeric value is empty; the existing renderer's first final write,
 including zero, reveals it. Retained final history remains visible independently
 of readout opacity. Publications change only the existing renderer-owned
