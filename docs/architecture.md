@@ -46,7 +46,8 @@ and Canvas widget submits that data outside world drawing and quality statistics
 it adds no timer or JavaScript lifecycle state. Legacy received-only APIs keep
 minimap commands opaque when tracking is unselected.
 Frame admission bounds cumulative minimap work to sixteen 512-square layers,
-including Setup planes, before invoking source or Setup draw callbacks. This
+charging reachable payload layers and at least one surface per command. It
+validates retained-size toggle runs before source or Setup draw callbacks. This
 prevents small packets from causing thousands of large resizes; excess work
 rejects the frame through the existing transaction.
 

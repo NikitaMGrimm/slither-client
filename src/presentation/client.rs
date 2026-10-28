@@ -41,7 +41,10 @@ fn validate_minimap_work(
                 let packet = crate::protocol::minimap::parse_minimap(command)
                     .map_err(|error| ClientPresentationError::Minimap(error.into()))?;
                 dimension = packet.dimension().or(dimension);
-                usize::from(packet.layer_count().max(1))
+                packet
+                    .visit_selected(dimension.unwrap_or(0), |_, _| {})
+                    .map_err(|error| ClientPresentationError::Minimap(error.into()))?
+                    .max(1)
             }
             _ => continue,
         };

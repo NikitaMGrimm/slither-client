@@ -97,22 +97,24 @@ impl<'a> MinimapPacket<'a> {
         }
     }
 
-    // One traversal supplies validation and painting, so ignored tails and layer
-    // boundaries cannot acquire different meanings in those two paths.
+    // Return the number of layers with a reachable payload byte. Validation,
+    // painting and frame work accounting share the same run boundaries.
     pub(crate) fn visit_selected(
         self,
         dimension: u16,
         mut selected: impl FnMut(u8, usize),
-    ) -> Result<(), MinimapDecodeError> {
+    ) -> Result<usize, MinimapDecodeError> {
         let cells = usize::from(dimension) * usize::from(dimension);
         let extended = !matches!(self.format, MinimapFormat::UpperU | MinimapFormat::LegacyU);
         let mut tail = self.command[self.header_len..].iter().copied();
+        let mut visited_layers = 0;
         for layer in 0..self.layer_count() {
             let mut cursor = 0;
             while cursor < cells {
                 let Some(byte) = tail.next() else {
-                    return Ok(());
+                    return Ok(visited_layers);
                 };
+                visited_layers = usize::from(layer) + 1;
                 if byte < 128 {
                     for mask in [64, 32, 16, 8, 4, 2, 1] {
                         if cursor == cells {
@@ -140,7 +142,7 @@ impl<'a> MinimapPacket<'a> {
                 }
             }
         }
-        Ok(())
+        Ok(visited_layers)
     }
 }
 

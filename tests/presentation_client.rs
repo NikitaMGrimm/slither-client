@@ -1389,3 +1389,39 @@ fn minimap_resize_burst_is_rejected_before_setup_draw_callbacks() {
     assert_eq!(client.minimap_view().toggles[512 * 512 - 1], 1);
     apply(&mut client, &ordinary);
 }
+
+#[test]
+fn minimap_toggle_validation_precedes_setup_draw_callbacks() {
+    let mut client = AnimatedClient::new(0.).unwrap();
+    client.enable_minimap_tracking().unwrap();
+    let before = client.clone();
+    let mut setup_draws = 0;
+    let result = client.apply_frame_with_face_presentation_and_all_factories_and_setup(
+        &bundle(&[setup(), vec![b'V', 255]]),
+        ElapsedHeader::Absent,
+        |_| Ok(FacePresentation::default()),
+        |_, _| panic!("no synthetic food"),
+        |_, _| panic!("no synthetic prey"),
+        |_, _| {
+            setup_draws += 1;
+            Ok::<_, ClientPresentationError>(())
+        },
+    );
+    assert!(result.is_err());
+    assert_eq!(setup_draws, 0);
+    assert_eq!(client, before);
+}
+
+#[test]
+fn minimap_short_layered_map_charges_only_reachable_layers() {
+    let mut client = AnimatedClient::new(0.).unwrap();
+    client.enable_minimap_tracking().unwrap();
+    apply(&mut client, &[setup(), vec![b'L', 255, 2, 0]]);
+    assert_eq!(client.minimap_view().dimension, Some(512));
+    assert!(client.minimap_view().alternate_rgba.iter().all(|&v| v == 0));
+    apply(&mut client, &[vec![b'L', 255, 2, 0, 64]]);
+    assert_eq!(
+        client.minimap_view().alternate_rgba[4 * (512 * 512 - 1)],
+        255
+    );
+}
