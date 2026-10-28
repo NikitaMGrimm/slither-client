@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createClientAssetMap } from '../web/client-asset-map.mjs';
+import { authoredPaletteRgb, createClientAssetMap } from '../web/client-asset-map.mjs';
 
 test('comparison asset map awaits the explicit factory and preserves its source identities', async () => {
   const realm = {}, random = () => 0.25;
@@ -86,7 +86,10 @@ test('asset map preserves the authored palettes and returns ready tile and 512-s
     assert(canvas instanceof f.realm.HTMLCanvasElement);
     assert.deepEqual([canvas.width, canvas.height], [32, 32]);
     assert.deepEqual(canvas.commands, [['beginPath'], ['arc', 16, 16, 16, 0, Math.PI * 2], ['fill', color]]);
+    assert.equal(`#${authoredPaletteRgb[index].map(n => n.toString(16).padStart(2, '0')).join('')}`, color,
+      'local nickname tint bases are the same authored family channels');
   }
+  assert(Object.isFrozen(authoredPaletteRgb) && authoredPaletteRgb.every(Object.isFrozen));
   assert.notEqual(assets.background, assets.backgroundImage);
   assert.notEqual(assets.background.src, assets.backgroundImage.src);
   for (const [image, width, height] of [[assets.background, 324, 192], [assets.backgroundImage, 512, 512]]) {
