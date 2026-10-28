@@ -58,7 +58,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
   if (!gate || gate.metadata().code !== 'held') throw new Error('Armed document-start gate required');
   const armed = gate.metadata(), document = realm.document, pageUrl = realm.location.href;
   const native = gate.claim(armed.id);
-  let scene, quality, controller, gameplay, held, frame, waiting, wakeWaiting, reload;
+  let scene, quality, controller, gameplay, held, frame, waiting, wakeWaiting, reload, output;
   let disposed = false;
   let nickname, bindingOperation, handlingNickname, routing = 0;
   let hud, ownedUi, constructCapabilities, hudOperation, nativeOperation, sourceOperation, hudCapabilities, cleanupActive = false;
@@ -411,6 +411,13 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     if (owner !== undefined) cleanup(() => apply(release, owner, []));
     for (const action of [() => scene?.free(), () => quality?.free()]) cleanup(action);
     held = undefined;
+    cleanup(() => {
+      // Local hosts have no isolated loader to publish a terminal fallback.
+      if (displayStatus(true)) {
+        output.textContent = statusText(code);
+        checkHudOperation();
+      }
+    });
     cleanup(() => native.status(code));
     if (localHost) {
       const host = localHost; localHost = undefined;
@@ -431,20 +438,35 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
   let root = realm.document.getElementById('slither-client-root');
   if (!root) { root = realm.document.createElement('section'); root.id = 'slither-client-root';
     (realm.document.body ?? realm.document.documentElement).appendChild(root); }
-  let output = realm.document.getElementById('slither-client-status');
+  output = realm.document.getElementById('slither-client-status');
   if (!output) { output = realm.document.createElement('p'); output.id = 'slither-client-status'; root.appendChild(output); }
   reload = realm.document.getElementById('slither-client-reload');
   if (!reload) { reload = realm.document.createElement('button'); reload.id = 'slither-client-reload';
     reload.textContent = 'Reload ordinary page'; root.appendChild(reload); }
   reload.hidden = !diagnosticUi;
   const target = realm.document.createElement('canvas'); target.tabIndex = 0; root.appendChild(target);
-  const report = code => {
-    if (!ownedPlayUi) { output.textContent = `SlitherClient: ${code}`; native.status(code); return; }
+  function statusText(code) {
+    if (!ownedPlayUi) return `SlitherClient: ${code}`;
     const labels = { __proto__: null, loading: 'Loading', 'waiting-assets': 'Loading',
       'ready-not-connected': 'Ready', connected: 'Connected', disconnected: 'Not connected',
       'host-unavailable': 'Unavailable', 'csp-or-module-unavailable': 'Unavailable',
       'client-failed': 'Failed', disposed: 'Not connected' };
-    output.textContent = `SlitherClient: ${code === 'ready-not-connected' && !playAvailable ? 'Unavailable' : labels[code] ?? 'Unavailable'}`;
+    return `SlitherClient: ${code === 'ready-not-connected' && !playAvailable ? 'Unavailable' : labels[code] ?? 'Unavailable'}`;
+  }
+  function displayStatus(visible) {
+    if (diagnosticUi || !ownedPlayUi || !hudCapabilities || !output) return false;
+    const { dom, isCurrentDocument } = hudCapabilities;
+    const current = () => isCurrentDocument() && dom.ownerDocument(root) === document && dom.isConnected(root)
+      && dom.ownerDocument(output) === document && dom.parentNode(output) === root && dom.isConnected(output);
+    if (!current()) return false;
+    const style = dom.style(output);
+    if (!current()) return false;
+    dom.setStyle(style, 'display', visible ? '' : 'none');
+    return current();
+  }
+  const report = code => {
+    if (!ownedPlayUi) { output.textContent = statusText(code); native.status(code); return; }
+    output.textContent = statusText(code);
     checkHudOperation();
     if (playUi && !disposed) {
       const states = { __proto__: null, 'ready-not-connected': 'ready', connected: 'connected',
@@ -938,7 +960,8 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
       } catch (error) { throw operation.failed ? operation.primary : error; }
       finally { hudOperation = undefined; operation.primary = undefined; }
     }
-    if (ownedPlayUi) runPlay(() => report('ready-not-connected'));
+    // Retire the startup fallback only after every selected owner has mounted.
+    if (ownedPlayUi) runPlay(() => { report('ready-not-connected'); displayStatus(false); });
     else report('ready-not-connected');
     frame = native.requestAnimationFrame(tick);
     return runtime ?? createRuntime();

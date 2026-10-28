@@ -313,6 +313,7 @@ test('accepted genuine action keeps staged reset, source release and one socket 
       const mount = graph.f.document.getElementById('slither-client-root').children.at(-1);
       const endpoint = mount.children[0].children[1], nickname = mount.children[1].children[1], button = mount.children[2];
       assert.equal(graph.f.document.getElementById('slither-client-reload').hidden, !diagnosticUi);
+      assert.equal(graph.f.edit.hud.style(graph.f.document.getElementById('slither-client-status').style).get('display') === 'none', !diagnosticUi);
       assert.equal(graph.f.edit.hud.style(mount.children[0].style).get('display'), diagnosticUi ? 'block' : 'none');
       graph.f.edit.state(endpoint).visible = diagnosticUi;
       graph.f.edit.state(mount.children[0]).visible = diagnosticUi;
@@ -342,6 +343,7 @@ test('accepted genuine action keeps staged reset, source release and one socket 
       assert.equal(readout(), 'Connected.'); assert.equal(graph.f.edit.ownedPlay.buttonState(button).disabled, true);
       assert.equal(graph.f.edit.hud.style(mount.style).get('display'), 'none', 'accepted Setup hides the entire start panel');
       assert.equal(graph.f.document.getElementById('slither-client-status').textContent, 'SlitherClient: Connected');
+      assert.equal(graph.f.edit.hud.style(graph.f.document.getElementById('slither-client-status').style).get('display') === 'none', !diagnosticUi);
       assert.equal(graph.f.messages.at(-1).code, 'connected');
       graph.f.socket.onclose(); graph.f.flush();
       assert.equal(graph.f.edit.hud.style(mount.style).get('display'), 'block');

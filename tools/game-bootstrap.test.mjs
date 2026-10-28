@@ -562,10 +562,34 @@ test('actual isolated link loads exactly one fixed MAIN module and accepts bound
   assert.equal(f.document.head.children.length, 1);
   f.realm.postMessage({ type: 'slither-client-status', schema: 1, id: 'a'.repeat(32), code: 'connected', command: 'fetch' });
   assert.equal(f.document.getElementById('slither-client-status').textContent, 'SlitherClient: held');
+  const output = f.document.getElementById('slither-client-status'), writes = [];
+  // The isolated loader's plain DOM double has no native CSS class.
+  output.style = { setProperty(name, value) { writes.push([name, value]); } };
+  f.realm.postMessage({ type: 'slither-client-status', schema: 1, id: 'a'.repeat(32), code: 'connected' });
+  assert.equal(output.textContent, 'SlitherClient: connected');
+  assert.deepEqual(writes, [], 'healthy loader notifications preserve the runtime-owned hidden status');
   module.dispatchEvent(new Event('error'));
+  assert.deepEqual(writes, [['display', '']], 'module failure reveals the outer fallback');
   assert.equal(f.document.getElementById('slither-client-status').textContent, 'SlitherClient: csp-or-module-unavailable');
   assert.equal(f.document.getElementById('slither-client-reload').hidden, true);
   assert.equal(f.sockets, 0);
+});
+
+test('isolated module deadline reveals an existing hidden fallback without loading a second module', () => {
+  const f = fixture(), timers = new Map(); let serial = 0;
+  f.realm.chrome = { runtime: { getURL: name => `chrome-extension://synthetic/${name}` } };
+  const context = createContext({ document: f.document, location: f.realm.location, URL,
+    chrome: f.realm.chrome, window: f.realm, globalThis: { chrome: f.realm.chrome },
+    setTimeout(callback, delay) { timers.set(++serial, { callback, delay }); return serial; },
+    clearTimeout(id) { timers.delete(id); }, Set });
+  new Script(readFileSync(new URL('../extension/game-link.js', import.meta.url), 'utf8')).runInContext(context);
+  const output = f.document.getElementById('slither-client-status'), writes = [];
+  output.style = { setProperty(name, value) { writes.push([name, value]); } };
+  const deadline = [...timers.values()].find(timer => timer.delay === 15000);
+  assert(deadline); deadline.callback();
+  assert.equal(output.textContent, 'SlitherClient: csp-or-module-unavailable');
+  assert.deepEqual(writes, [['display', '']]);
+  assert.equal(f.document.head.children.length, 1); assert.equal(f.sockets, 0);
 });
 
 test('deadline failure for blank host sources constructs no Wasm owner and offers ordinary reload', async () => {
