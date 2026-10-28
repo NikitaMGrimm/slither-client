@@ -60,10 +60,13 @@ function synchronousHudCallback(callback, name = 'onHudPacket', foreignKinds = f
 /** Trusted local composition; transports, native time and the scene remain caller-owned. */
 export function createStockGameplay({ scene, quality, controller, wasm, createSocket, now,
   defer, setInterval, clearInterval, onStatus, onFatal, liveProfile, onHudPacket, hudReadout = false,
-  leaderboardRows = false, leaderboardProjector, localSession = false, minimapTracking = false }) {
+  leaderboardRows = false, leaderboardProjector, localSession = false, minimapTracking = false, announcementTracking = false }) {
   if (typeof hudReadout !== 'boolean') throw new TypeError('Explicit hudReadout boolean required');
   if (typeof leaderboardRows !== 'boolean') throw new TypeError('Explicit leaderboardRows boolean required');
   if (typeof localSession !== 'boolean') throw new TypeError('Explicit localSession boolean required');
+  if (typeof announcementTracking !== 'boolean' || (announcementTracking && !hudReadout)) {
+    throw new TypeError('Explicit announcementTracking boolean requires hudReadout');
+  }
   if (typeof minimapTracking !== 'boolean' || (minimapTracking && !hudReadout)) {
     throw new TypeError('Explicit minimapTracking boolean requires hudReadout');
   }
@@ -473,6 +476,7 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
             if (hudReadout) {
               const observed = session.afterStepWithHud(request);
               actions = observed.actions;
+              if (announcementTracking) actions = { ...actions, announcementLifecycle: observed.lifecycle };
               if (minimapTracking && observed.lifecycle.returnActive) {
                 actions = { ...actions, minimapUiFraction: observed.lifecycle.returnFraction };
               }

@@ -689,7 +689,12 @@ fn control_actions(value: &JsValue) -> Result<ClientControlActions, JsValue> {
             .ok_or_else(|| error("unknown control action"))?;
         if !matches!(
             name.as_str(),
-            "gazeHeading" | "resetWorld" | "resetLag" | "connected" | "minimapUiFraction"
+            "gazeHeading"
+                | "resetWorld"
+                | "resetLag"
+                | "connected"
+                | "minimapUiFraction"
+                | "announcementLifecycle"
         ) {
             return Err(error("unknown control action"));
         }
@@ -722,6 +727,10 @@ fn control_actions(value: &JsValue) -> Result<ClientControlActions, JsValue> {
             "resetWorld" => actions.reset_world = crate::body_browser::flag(field)?,
             "resetLag" => actions.reset_lag = crate::body_browser::flag(field)?,
             "connected" => actions.connected = Some(crate::body_browser::flag(field)?),
+            "announcementLifecycle" => {
+                actions.announcement_lifecycle =
+                    Some(crate::announcement_browser::lifecycle(&field)?);
+            }
             "minimapUiFraction" => {
                 actions.minimap_ui_fraction = Some(
                     field
@@ -1187,6 +1196,16 @@ impl AnimatedScene {
     /// The default runtime enables this authored neutral-color slice unconditionally.
     pub fn enable_nicknames(&mut self) -> Result<(), JsValue> {
         self.client.enable_nicknames().map_err(error)
+    }
+
+    /// Select announcement admission on the existing HUD packet path.
+    pub fn enable_announcement_tracking(&mut self) -> Result<(), JsValue> {
+        self.client.enable_announcement_tracking().map_err(error)
+    }
+
+    /// Copy the current Rust text/layout/opacity projection without an update.
+    pub fn announcement_view(&self) -> Result<JsValue, JsValue> {
+        crate::announcement_browser::view(self.client.announcement_view())
     }
 
     /// Enable native minimap tracking before ingress or after a world reset.

@@ -48,6 +48,8 @@ pub enum HudIngressError {
     InvalidControl(u8),
     /// Full leaderboard validation failed, including an ignored-playing tail.
     Leaderboard(HudPacketError),
+    /// Selected announcement admission or command-time scoring failed.
+    Announcement(super::AnnouncementError),
     /// Aggregate leaderboard bounds or fallible owned-buffer reservation failed.
     LeaderboardRowsResource,
 }
@@ -60,6 +62,7 @@ impl fmt::Display for HudIngressError {
             Self::InvalidCaptureIndices => f.write_str("HUD final capture indices mismatch"),
             Self::InvalidControl(code) => write!(f, "invalid HUD control opcode {code}"),
             Self::Leaderboard(error) => error.fmt(f),
+            Self::Announcement(error) => error.fmt(f),
             Self::LeaderboardRowsResource => {
                 f.write_str("HUD leaderboard row resource limit exceeded")
             }
@@ -71,6 +74,7 @@ impl Error for HudIngressError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Leaderboard(error) => Some(error),
+            Self::Announcement(error) => Some(error),
             _ => None,
         }
     }
