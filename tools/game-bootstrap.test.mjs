@@ -453,23 +453,7 @@ test('actual bootstrap binds actual stock skin/entity/controller paths, counts S
   assert.equal(f.intervals.size, 0);
 });
 
-test('single auto-entry exposes only a local module runtime promise and never implicitly Plays', async () => {
-  const f = fixture(); f.host(); f.complete(); const wasm = wasmDouble(f);
-  Object.assign(f.realm, { createStockHostSnapshot, createStockSkinAdapter, createStockClient,
-    createStockEntityAssets, desktopBackingSize, createStockGameplay, init: async () => {}, wasm: wasm.api });
-  f.realm.startRuntime = bootstrap.runInContext(f.context);
-  const source = readFileSync(new URL('../extension/game-bootstrap.mjs', import.meta.url), 'utf8')
-    .replace(/^import .+;\r?$/gm, '').replace(/^export /gm, '');
-  const module = new Script(`${source}\n({gamePageRuntime,startGamePage});`).runInContext(f.context);
-  const runtime = await module.gamePageRuntime;
-  assert.equal(typeof runtime.play, 'function'); assert.equal(typeof runtime.playWithLiveProfile, 'function');
-  assert.equal(runtime.bindSession, undefined);
-  assert.equal(f.sockets, 0); assert.equal(f.original, 0);
-  assert.equal(f.realm.gamePageRuntime, undefined, 'capability is module-local');
-  await assert.rejects(module.startGamePage(), /Armed document-start gate/);
-  runtime.dispose();
-  assert.equal(f.raf.size, 0); assert.equal(f.intervals.size, 0);
-});
+// Default auto-entry ownership is exercised by the actual ESM graph in game-entry.test.mjs.
 
 test('HTTP/www external-profile bootstrap remains usable when optional profile capture is absent', async () => {
   for (const href of ['http://slither.io/', 'https://www.slither.io/']) {
@@ -924,15 +908,12 @@ test('nickname owner rejects closed-grammar violations without getters, then, co
   const ticket = runtime.bindNicknameField(h.request()); ticket.unbind(); runtime.dispose();
 });
 
-test('nickname owner accepts its actual current realm record and has no auto-entry binding', async () => {
+test('nickname owner accepts its actual current realm record through the unbound factory', async () => {
   const f = fixture(); f.host(); f.complete(); const wasm = wasmDouble(f);
   Object.assign(f.realm, { createStockHostSnapshot, createStockSkinAdapter, createStockClient,
     createStockEntityAssets, desktopBackingSize, createStockGameplay, init: async () => {}, wasm: wasm.api });
   f.realm.startRuntime = bootstrap.runInContext(f.context);
-  const source = readFileSync(new URL('../extension/game-bootstrap.mjs', import.meta.url), 'utf8')
-    .replace(/^import .+;\r?$/gm, '').replace(/^export /gm, '');
-  const module = new Script(`${source}\n({gamePageRuntime});`).runInContext(f.context);
-  const runtime = await module.gamePageRuntime;
+  const runtime = await f.realm.startRuntime({ realm: f.realm, wasmApi: wasm.api });
   const parent = f.document.createElement('div'), field = f.document.createElement('input');
   f.document.body.appendChild(parent); parent.appendChild(field); f.edit.state(f.document).active = field;
   const request = runInContext('({schema:1,element:null,parent:null})', f.context); request.element = field; request.parent = parent;

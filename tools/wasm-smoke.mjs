@@ -16,9 +16,11 @@ import { stockSessionSmoke } from './stock-session-smoke.mjs';
 import { stockProfileSmoke } from './stock-profile-smoke.mjs';
 import { stockScoreSmoke } from './stock-score-smoke.mjs';
 import { stockHudSmoke } from './stock-hud-smoke.mjs';
+import { leaderboardScoreSmoke } from './leaderboard-score-smoke.mjs';
 
 // Entirely synthetic ABI integration; no reference files or network are used.
 const wasm = await loadWasm();
+leaderboardScoreSmoke(wasm);
 const profile = { clientVersion: 1, password: Uint8Array.from({ length: 20 }, (_, index) => index), protocolVersion: 19 };
 const session = new HandshakeSession(wasm, profile, 'Synthetic');
 const challenge = Uint8Array.from([54, ...syntheticChallenge('A'.repeat(27))]);

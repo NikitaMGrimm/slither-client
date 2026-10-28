@@ -20,12 +20,13 @@ the following exceptions:
 | `web/desktop-layout.mjs` | Numeric viewport-to-backing-size policy. |
 | `extension/game-runtime.mjs` | Mixed entry/DOM/capability plumbing and Play admission/availability state. |
 
-The in-progress `web/stock-leaderboard-state.mjs` and
+`web/stock-leaderboard-state.mjs` and
 `web/stock-leaderboard-view.mjs` also retain board/setup history, name filtering,
-row formatting/color/opacity policy and display projection in JavaScript. These
-authored modules are under development; visible UI integration remains planned.
-Their state and policy share the Rust ownership target. See the
-[roadmap](roadmap.md) for planned unification.
+row formatting/color/opacity policy and display projection in JavaScript. The
+selected default integrates these modules with visible rows. Their state and
+policy remain migration debt under the Rust ownership target. New local-host
+work is browser/DOM/capability glue; it must not introduce new game-domain logic.
+See the [roadmap](roadmap.md) for remaining work.
 
 ## Protocol boundary
 
@@ -33,10 +34,9 @@ The extension's optional [private nickname-edit gate](extension.md#private-nickn
 permits bounded native defaults for one exact registered text field while
 fencing original handlers. A private runtime can explicitly bind a caller-owned
 field through [its local owner API](extension.md#local-nickname-field-owner).
-The default entry leaves the field unbound. The explicit owned-Play entry
-constructs and binds its own nickname field and Play controls. These owner
-compositions have synthetic VM coverage; broader native editing and host/UI
-acceptance remain separate.
+The default bootstrap constructs and binds its own nickname field and Play
+controls alongside HUD and leaderboard owners. Native editing and installed
+host/UI acceptance remain separate from implementation.
 
 The Rust library builds as `rlib` and `cdylib`. It opens no sockets and fetches no
 assets. Native code has no runtime dependencies; browser bindings use wasm32-only
@@ -63,9 +63,10 @@ exposing their fields and iterates rows without allocation. Raw text bytes,
 score calculations and lifecycle policy remain separate. Generic framing and
 state admission do not invoke these decoders automatically. Explicit schema-2
 HUD ingress copies raw leaderboard rows through the transactional Wasm report
-and a synchronous session callback; the existing runtime entries retain their
-header-only schema-1 selection. No leaderboard-row renderer or text policy is
-selected by this API. See [HUD ingress](hud-ingress.md) and
+and a synchronous session callback. The default runtime selects schema 2 and
+connects it to retained board state, safe Text-node rendering and a Rust/Wasm
+`LeaderboardScoreProjector`. Schema 1 remains available for header-only callers;
+row delivery alone does not choose a view. See [HUD ingress](hud-ingress.md) and
 [HUD packet projections](hud-packets.md).
 
 `ClientState::apply_frame` validates framing, applies supported commands to a
@@ -139,12 +140,13 @@ tests do not establish browser bit equality.
 An explicit [score-tracking mode](score-state.md) in `AnimatedClient` caches
 those tables at ordered Setup events and retains the original own object's
 replacement R byte. Pure native/Wasm observations use latest logical count and
-mass, including after death or ID reuse. Default ingestion remains legacy;
-rank/readout presentation remains separate. An optional
+mass, including after death or ID reuse. Legacy ingestion remains available;
+the default runtime enables score tracking before ingress. An optional
 [HUD journal](hud-ingress.md) shares the native transaction and supplies indexed
 Setup samples, retained-own scheduling, leaderboard headers and required
 command-time final captures through additive Wasm/controller/session APIs.
-It adds no clock or visible UI; gameplay must opt in explicitly.
+It adds no clock or visible UI by itself; the default bootstrap selects the
+gameplay HUD and row consumers.
 The separate [semantic reducer](hud-state.md) retains bounded dirty/header/final
 history and requested opacities. Explicit gameplay readout mode stages it through
 packet, same-step lifecycle and successful draw boundaries, with required score
@@ -155,19 +157,13 @@ history and consume exact owner-supplied DOM capabilities/nodes. An explicit
 runtime `hudReadout: true` option binds fixed caller-owned nodes through the
 gate's optional captured DOM capability and publishes after committed gameplay
 operations. The side-effect-free runtime factory lets an entry select this mode
-before the one-shot claim. Default HUD startup stays unbound. A separately selected
-owned-HUD package entry supplies an original fixed 21-node UI through four
-additional captured construction operations. This composition has synthetic coverage; native acceptance is
-separate from the earlier isolated renderer checks.
-
-The owned-Play entry adds endpoint/nickname fields and an admitted Play click on
-the same runtime. Activation alone starts no acquisition or game connection.
-The default entry exposes local Play APIs but mounts neither these controls nor
-the readout. Runtime HUD selections currently use schema 1; raw schema-2 rows
-remain an explicit session API without a selected visible leaderboard. Minimap
-state/display and announcement retention/display are also missing. Default-path
-and visible-leaderboard unification remain planned work. See
-[stock adapters](stock-client.md) and
+before the one-shot claim. The sole default package entry enables HUD, Play and
+leaderboard construction together. It binds fixed current score/rank and final
+score nodes, endpoint/nickname controls and visible leaderboard rows. Former
+owned-HUD/owned-Play entry files are removed; their UI builders remain shared
+runtime components. Activation alone starts no acquisition or game connection.
+Minimap state/display and announcement retention/display remain missing.
+See [HUD views](hud-view.md), [stock adapters](stock-client.md) and
 [extension integration](extension.md).
 
 `presentation` provides explicit-time arithmetic separately from received state.
@@ -557,8 +553,20 @@ See [verification](verification.md) for procedures and evidence limits.
 
 ## Local scene and transport
 
-`npm run scene` serves an original synthetic page and generated stand-in sprites
-on literal loopback, without a reference. The page supports deterministic reset
+`npm run scene -- --simulator-port 8766` serves `web/game.html` at `/` on literal
+loopback. It imports the same default bootstrap as the extension. The
+`web/local-game-host.mjs` adapter captures browser/DOM/input capabilities,
+generates authored flat sources and supplies only the configured loopback
+endpoint and authored zero credentials. The same runtime, stock controller,
+gameplay and session perform the existing challenge handshake, not a separate
+gameplay implementation or direct-login bypass. A normally disconnected local
+session can be replaced only on the next explicit Play; no automatic retry is
+introduced and the remote profile-attempt limit is unchanged. See
+[local Play](local-play.md) for commands and current evidence limits.
+
+The received-only diagnostic now lives at `/anchors`; `/animated` remains the
+separate animated diagnostic. They use generated stand-ins without a reference.
+The received preview supports deterministic reset
 and anchor steps, palette/zoom selection and a follow camera. Optional
 `--simulator-port` enables one explicit `ws://127.0.0.1:<port>/slither` destination.
 The transport requests header-free framing and uses the simulator's direct-login

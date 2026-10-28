@@ -12,9 +12,10 @@ The local trusted runtime also composes the authored session and desktop input
 through the native pre-motion control seam. Play requires a selected endpoint
 and either an explicit external profile or an explicit request for bounded
 pinned profile acquisition on canonical HTTPS. Activation supplies neither and
-starts no acquisition. The optional `owned-play` package adds explicit local
-controls described below. Minimap, unsupported appearances/modes, native Play
-interaction, live acquisition/host/CSP and server acceptance remain separate.
+starts no acquisition. The sole default bootstrap mounts Play controls, score
+readouts and leaderboard rows as described below. Minimap, unsupported
+appearances/modes, native Play interaction, live acquisition/host/CSP and server
+acceptance remain separate.
 
 ## Build
 
@@ -43,24 +44,20 @@ The default produces both ignored directories:
 - `dist/extension/chrome`
 - `dist/extension/firefox`
 
-Each contains exactly 47 files: the original preview package, fixed game
-activation/gate/link/bootstrap/runtime/owned-HUD-UI/owned-Play-UI/CSS, eighteen authored game modules and a generated
-JS/Wasm/validator module graph for each renderer. Preview HTML/modules are copied unchanged
+Each contains the original preview package, fixed game
+activation/gate/link/bootstrap/runtime/HUD/Play/leaderboard UI/CSS, authored game
+and local-host modules, and a generated JS/Wasm/validator graph for each renderer.
+Preview HTML/modules are copied unchanged
 under `scene/`; null simulator configuration disables its local connection.
 
 The [semantic HUD view and passive renderer](hud-view.md) are fixed local
-resources. The default bootstrap does not attach them. An explicit package
-selection installs the owned-HUD entry at the same `game/bootstrap.mjs` path:
-
-```sh
-node tools/build-extension.mjs --game-entry owned-hud --output-dir dist/extension/owned-hud
-```
-
-This entry starts one runtime with both `hudReadout` and `ownedHudUi` true.
-The default selection is `--game-entry default`. The third selection below uses
-the same fixed entry path; none adds a runtime switch or second entry alias. Use a fresh output directory when
-changing selection.
-The game entry imports no synthetic resolver or fixture.
+resources. The default `game/bootstrap.mjs` starts one runtime with HUD, Play and
+leaderboard owners enabled, including schema-2 rows and Rust score projection.
+Only `--game-entry default` is accepted; the former owned-HUD/owned-Play entry
+files and package choices are removed. UI builders remain shared modules.
+The module graph includes the authored local-host stand-in helpers, used by
+the [standalone loopback page](local-play.md). Remote game-page integration
+continues to use ready borrowed host sources.
 
 Source manifests declare the fixed resource list. Packaging adds the verified
 generated validator's exact game-local path to each output manifest. Other
@@ -84,24 +81,19 @@ node tools/build-extension.mjs --output-dir dist/extension/candidate-2
 `--web-dir <trusted directory>` explicitly selects a different build pair; no
 search or fallback occurs. API:
 `buildExtension({ projectRoot?, webDir?, outputDir?, gameEntry? })` accepts exactly
-`default`, `owned-hud` or `owned-play` for `gameEntry` and returns
+`default` for `gameEntry` and returns
 `{ outputDir, files: [{ path, bytes, sha256 }] }` with sorted relative paths.
 Output stays under ignored `dist/extension`, separate from input. Input/output
 symlinks are rejected. See [provenance](provenance.md) and [releases](releases.md).
 
 ## Explicit owned Play controls
 
-Select a fresh package directory:
-
-```sh
-node tools/build-extension.mjs --game-entry owned-play --output-dir dist/extension/owned-play
-```
-
-This entry enables the semantic HUD, owned HUD and owned Play panel in one
-claimed runtime. The address and nickname start empty. Enter a supported
+The default entry enables the semantic HUD, owned readout, Play panel and
+leaderboard in one claimed runtime. On the remote game page, address and
+nickname start empty. Enter a supported
 literal-IP `ws://` or `wss://` endpoint with an explicit port and `/slither`
 path, then click **Play**. There is no server discovery or preselected endpoint.
-Nickname input uses the existing 24-byte ASCII policy; the final proposal allows
+Nickname input uses the existing 24-byte ASCII policy; the wire domain allows
 bytes `0x20..=0x7f`, including DEL, without trimming.
 
 The separate captured control lease permits native editing only for the exact
@@ -113,18 +105,22 @@ it queues a private callback; the callback checks the same lease, document and
 idle owners again. No second event listener or public Play binding is added.
 
 Invalid local strings show fixed status text and leave correction available.
-An accepted proposal locks Play before invoking the existing bounded
+An accepted remote proposal locks Play before invoking the existing bounded
 `playWithLiveProfile` path. Acquisition is supported only on canonical HTTPS
 with the complete captured profile capabilities; otherwise the panel is locked
 and reports unavailable. Activation alone starts no acquisition or socket.
-The accepted attempt has no automatic retry or unlock. Status contains fixed
+The accepted remote attempt has no automatic retry or unlock. The standalone
+local page instead presets its selected loopback endpoint and uses authored zero
+credentials. Only a normal local disconnect makes Play available again; the next
+explicit Play replaces that disconnected session. This does not renew a remote
+profile attempt. See [local Play](local-play.md). Status contains fixed
 labels, never the address, nickname, profile values or error details.
 
 Disposal invalidates pending actions and late settlement, releases nickname and
 controls before removing their panel, and preserves the first failure even when
 cleanup also throws. Cleanup attempts do not certify successful native release.
-Synthetic full-module-graph tests cover these boundaries. Actual browser
-click/edit/default behavior, installed-host/CSP compatibility, profile HTTP and
+Retained synthetic full-module-graph checks cover their tested revisions. Actual
+browser click/edit/default behavior, installed-host/CSP compatibility, profile HTTP and
 game/server acceptance remain unverified.
 
 ## Activation and ownership
@@ -217,10 +213,11 @@ precedence. These paths add no field registration or native editing behavior.
 
 ## Explicit local HUD owner
 
-Trusted initialization can select `startGamePage({ hudReadout: true })` and then
-bind caller-owned nodes through `runtime.bindHudReadout({ schema: 1, scope,
-nodes })`. The default and automatic entry stay false and expose no HUD binding
-method. The side-effect-free `game/runtime.mjs` factory accepts explicit
+Custom trusted composition can select readout mode in the side-effect-free
+`game/runtime.mjs` factory and bind caller-owned nodes through
+`runtime.bindHudReadout({ schema: 1, scope, nodes })`. The default bootstrap
+already enables this mode and occupies its binding with owned nodes; a second
+binding rejects. The runtime factory accepts explicit
 `initialize` and `wasmApi` dependencies so an entry can choose its options before
 claiming. Importing the default bootstrap in an armed realm still starts its
 default runtime immediately; a later call cannot reconfigure that claim.
@@ -242,15 +239,16 @@ bind, successful frame/resize and changed deferred publication. No new queue or
 timer is added. Native/source/owner reentry stays guarded; cleanup releases the
 nickname field before the HUD and native owners. Stale bindings require explicit
 unbind; old tickets are inert. Native writes may partially complete before a
-failure and are not restored. Default startup remains unbound. Installed-host
+failure and are not restored. Default startup binds its owned readout. Installed-host
 behavior and native owner composition remain unverified.
 
 ### Package-selected owned HUD
 
-The explicit owned entry selects `hudReadout:true, ownedHudUi:true` before the
+The sole default entry selects `hudReadout:true, ownedHudUi:true`, Play and
+leaderboard ownership before the
 same one-shot claim. Visible mode requires both complete captured groups and
 the same captured Document before initialization. Missing construction support
-fails startup. Default startup does not consume the optional `native.ownedHudDom`
+fails startup. Default startup requires the captured `native.ownedHudDom`
 sibling. Its four exact captured operations create Elements/Text and append or
 remove one child; existing renderer operations and freshness stay separate.
 
@@ -267,14 +265,17 @@ Failed construction performs no internal cleanup while the runtime guard is
 active; outer cleanup consumes the retained lease after the guard unwinds.
 Removal is attempted only while the document is current and the mount remains
 at its exact parent. Stale, reparented or throwing cleanup is not retried.
-Partial native effects cannot be rolled back. No public UI command, input
-listener, timer, profile acquisition, Play action or game socket is added.
+Partial native effects cannot be rolled back. The HUD builder itself adds no
+profile acquisition or game socket; Play and leaderboard construction are
+separate owners selected by the same default bootstrap.
 
 ## Session and input boundary
 
 ### Local nickname-field owner
 
-A successfully initialized private runtime exposes an opt-in owner capability:
+A successfully initialized private runtime exposes a field-owner capability.
+The default entry already occupies it with its own nickname field. For a custom
+composition with no registered field:
 
 ```js
 const runtime = await gamePageRuntime;
@@ -286,7 +287,8 @@ The closed request accepts exactly those own data fields with an ordinary
 current-realm or null prototype. The runtime fixes the gate policy to
 `nickname-ascii-24`, holds its single lease privately, and returns a frozen
 `{unbind()}` ticket. It performs no initial value read, correction or focus.
-Startup discovers, creates and registers no field. Early dispose-only startup
+The default constructs and registers its own field without discovering a host
+login field. Early dispose-only startup
 results do not expose this method; no capability is installed on the window or
 message bridge.
 
@@ -325,8 +327,8 @@ The single claimed native record additionally exposes
 with the current realm's ordinary or null prototype. Registration requires an
 installed input router and one exact connected native HTML `INPUT` of normalized
 type `text`, its exact direct HTML parent, and the captured light-DOM Document.
-Bootstrap startup selects or registers no field; the explicit local owner API
-above can bind a caller-supplied field.
+The default bootstrap registers its owned nickname field through the owner API
+above; custom compositions may bind a caller-supplied field.
 
 Without registration, fenced events retain cancellation. A registered field
 can receive the following native-default permissions; original propagation is
@@ -453,8 +455,8 @@ policy, value export, extra scene/source/clock/send or gameplay key filtering.
 Failures preserve the exact first thrown value and clear the active delivery
 and operation references. Native effects already completed cannot be rolled
 back. Actual native descriptor, caret, undo, IME and selection consequences
-remain unverified; later production binding requires its own selected ownership
-and native-browser acceptance.
+remain unverified for the current composition; the default's production binding
+still requires native-browser acceptance.
 
 ### Session composition
 
@@ -464,10 +466,11 @@ capabilities. External-profile Play requires
 `{endpoint,profile:{clientVersion,password,protocolVersion:19},nickname,skin,customSkin}`;
 the password is a caller-supplied 20-byte Uint8Array. Endpoint is one selected
 literal IP with explicit port and `/slither`, using ws/wss. No discovery, DNS
-selection, stored profile, defaults, automatic Play or retry exists.
+selection, stored remote profile, automatic Play or retry exists. The standalone
+local page uses its explicitly configured loopback endpoint and authored profile.
 No credential, packet or socket command is accepted through the status bridge.
-The default and owned-HUD entries offer no Play UI. The explicit `owned-play`
-entry adds [owned Play controls](#explicit-owned-play-controls). This local API is
+The default entry supplies [owned Play controls](#explicit-owned-play-controls).
+This local API is
 for explicit trusted composition. An importing MAIN module can await exported
 `gamePageRuntime`, the single auto-entry promise, to obtain this runtime without
 claiming the gate again; nothing is installed on `window` for this purpose.
@@ -498,9 +501,13 @@ constructing a socket. The next native control callback returns resetWorld and
 disconnected actions. Only after the complete controller operation, including
 render and held-capture release, succeeds does `commitControl()` construct one
 socket. Cancellation/failure opens none. A session supports one manual attempt.
+For local-host composition only, the next explicit Play may replace a normally
+disconnected session; it does not automatically reconnect, retry failures or
+reset the remote profile budget.
 The page's own constructor and scheduling callbacks remain held.
 
-Incoming world/control bundles feed `controller.packet` exactly once. Rejection
+Incoming world/control bundles feed the selected `controller.packetWithHud`
+path exactly once for the default schema-2 HUD/leaderboard composition. Rejection
 propagates before session controls commit. State/error callbacks only latch and
 schedule captured native microtasks; scene connection/lag changes and terminal
 cleanup wait for both session ingress and Rust borrow to unwind. Setup is
@@ -548,9 +555,11 @@ CSP denial, pending deadlines, exact package imports/WAR/CSP and output preserva
 Labelled synthetic Wasm fixtures prove neither native pixels nor live compatibility;
 the real ABI smoke is separate.
 
-Separately authorized Windows browser checks should use an authored offline HTTP
-host fixture with representative CSP and real DOM sources. Localhost matches belong
-only in an explicit test package. Exercise the actual action, armed reload, module
+Separately authorized installed-extension checks should use an authored offline
+HTTP host fixture with representative CSP and real DOM sources. Testing the
+extension on localhost requires an explicit test package; the standalone
+[local game page](local-play.md) needs no extension installation. Exercise the
+actual action, armed reload, module
 load, native Wasm, readiness and cleanup in both browsers, without game sockets or
 archived code execution. Automation navigation restrictions do not establish CSP
 success/failure. Earlier installed 17-file preview evidence does not establish

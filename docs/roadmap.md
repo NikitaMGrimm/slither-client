@@ -76,21 +76,23 @@ capabilities and ready borrowed assets, holds original scheduling/socket paths,
 and composes authored input, session, update and rendering. Explicit Play APIs
 exist; activation alone starts neither profile acquisition nor a game connection.
 
-The current default entry mounts no Play controls or HUD and leaves score
-tracking disabled. Explicit owned-HUD and owned-Play selections provide fixed
-current/final readouts and, for owned-Play, endpoint/nickname controls. These are
-bounded compositions, not complete login/HUD equivalence. Raw leaderboard rows
-are delivered through an explicit schema-2 API; runtime readout entries still
-select schema 1 and have no visible row renderer.
+One default bootstrap now selects Play controls, score tracking, current/final
+readouts and a visible schema-2 leaderboard with Rust score projection. The
+packager accepts only the default entry; the former owned entry variants are
+removed. The [local game page](local-play.md) uses that same runtime and session
+with generated stand-ins, a selected loopback endpoint and the challenge
+handshake. Local browser verification remains in progress; implementation does
+not establish complete login/HUD equivalence or verified restart/input behavior.
 
-Planned work includes default-path and visible-leaderboard unification, minimap
+Planned work includes minimap
 state/display, announcement retention/display, nickname drawing, full background
 layers, viewport/login layout, menu transitions, preferences and
-victory/save/replay flows. Unification is in progress; it does not yet establish
-a delivered entry or complete UI. Follow the
+victory/save/replay flows. Follow the
 [Rust ownership decision](architecture.md#ownership-decision) when moving the
 remaining JavaScript game/HUD/presentation state and policy; keep browser/DOM
-glue, extension plumbing and host capability capture in JavaScript.
+glue, extension plumbing and host capability capture in JavaScript. Existing
+JavaScript lifecycle, input, HUD and board policy remains migration debt;
+local-host work must not add game-domain logic there.
 
 Installed Chrome/Firefox/CSP behavior, native input/layout/pixels, loading
 lifecycle and end-to-end gameplay need separate evidence. Existing APIs,

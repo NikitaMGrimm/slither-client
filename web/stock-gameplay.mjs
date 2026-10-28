@@ -2,6 +2,11 @@ import { createStockSession, stockEndpoint } from './stock-session.mjs';
 import { createClientInput } from './client-input.mjs';
 import { createStockLiveProfileAcquirer } from './stock-live-profile.mjs';
 import { createHudState, hudReadoutRequired, reduceHudState } from './stock-hud-state.mjs';
+import { createLeaderboardState, prepareLeaderboardPacket, completeLeaderboardPacket,
+  resetLeaderboardWorld } from './stock-leaderboard-state.mjs';
+
+const typedArrayLength = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Float64Array.prototype), 'length').get;
+const typedArrayValues = Float64Array.prototype.values;
 
 function ownRecord(value, names) {
   if (!value || typeof value !== 'object' || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) {
@@ -26,8 +31,9 @@ function profileError(code) {
 }
 
 const nonSynchronousPrototypes = [async function () {}, function* () {}, async function* () {}].map(Object.getPrototypeOf);
-function synchronousHudCallback(callback) {
-  if (typeof callback !== 'function') throw new TypeError('Synchronous onHudPacket callback required');
+function synchronousHudCallback(callback, name = 'onHudPacket', foreignKinds = false) {
+  const invalid = () => { throw new TypeError(`Synchronous ${name} callback required`); };
+  if (typeof callback !== 'function') invalid();
   const seen = new Set();
   let prototype = callback;
   for (let calls = 0; calls < 64; calls++) {
@@ -35,21 +41,35 @@ function synchronousHudCallback(callback) {
     if (prototype === null) break;
     // Bound even a Proxy returning a fresh prototype on every inspection.
     if (seen.has(prototype) || nonSynchronousPrototypes.includes(prototype)) {
-      throw new TypeError('Synchronous onHudPacket callback required');
+      invalid();
+    }
+    if (foreignKinds) {
+      const kind = Object.getOwnPropertyDescriptor(prototype, Symbol.toStringTag);
+      if (kind && Object.hasOwn(kind, 'value')
+        && ['AsyncFunction', 'GeneratorFunction', 'AsyncGeneratorFunction'].includes(kind.value)) invalid();
     }
     seen.add(prototype);
   }
-  if (prototype !== null) throw new TypeError('Synchronous onHudPacket callback required');
+  if (prototype !== null) invalid();
   const source = Function.prototype.toString.call(callback);
   if (/^(?:\*|function\s*\*|async(?:\s+function\b|\s+[$\w]+|\s*\([^]*?\)\s*=>))/.test(source)) {
-    throw new TypeError('Synchronous onHudPacket callback required');
+    invalid();
   }
 }
 
 /** Trusted local composition; transports, native time and the scene remain caller-owned. */
 export function createStockGameplay({ scene, quality, controller, wasm, createSocket, now,
-  defer, setInterval, clearInterval, onStatus, onFatal, liveProfile, onHudPacket, hudReadout = false }) {
+  defer, setInterval, clearInterval, onStatus, onFatal, liveProfile, onHudPacket, hudReadout = false,
+  leaderboardRows = false, leaderboardProjector, localSession = false }) {
   if (typeof hudReadout !== 'boolean') throw new TypeError('Explicit hudReadout boolean required');
+  if (typeof leaderboardRows !== 'boolean') throw new TypeError('Explicit leaderboardRows boolean required');
+  if (typeof localSession !== 'boolean') throw new TypeError('Explicit localSession boolean required');
+  let project;
+  if (leaderboardRows) {
+    if (!hudReadout) throw new TypeError('leaderboardRows requires hudReadout');
+    ({ project } = ownRecord(leaderboardProjector, ['project']));
+    synchronousHudCallback(project, 'leaderboardProjector.project', true);
+  }
   for (const [record, names] of [[scene, ['control_view', 'set_connected', 'reset_lag']],
     [quality, ['begin_connection']], [controller, ['packet', 'frame']]]) {
     for (const name of names) if (typeof record?.[name] !== 'function') throw new TypeError(`Gameplay capability required: ${name}`);
@@ -58,7 +78,7 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
     if (typeof callback !== 'function') throw new TypeError('Gameplay scheduling/notification capability required');
   }
   if (onHudPacket !== undefined) {
-    synchronousHudCallback(onHudPacket);
+    synchronousHudCallback(onHudPacket, 'onHudPacket', leaderboardRows);
   }
   if (hudReadout || onHudPacket !== undefined) {
     if (typeof controller.packetWithHud !== 'function') throw new TypeError('Gameplay capability required: packetWithHud');
@@ -68,7 +88,7 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
     : ownRecord(liveProfile, ['capabilities', 'isCurrentDocument']);
   if (profileOptions && typeof profileOptions.isCurrentDocument !== 'function') throw new TypeError('Current-document checker required');
   const input = createClientInput({ protocolVersion: 19 });
-  const session = createStockSession({ wasm, createSocket, now });
+  let session = createStockSession({ wasm, createSocket, now });
   let disposed = false, active = false, queued = false, dirty = true, hasFatal = false, fatal, uiTimer;
   let fatalNotified = false;
   let reconciling = false;
@@ -76,6 +96,8 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
   const hudIdentity = hudReadout ? Symbol('gameplay scene') : null;
   let hudState = hudReadout ? createHudState(hudIdentity) : null;
   let pendingHudState = null;
+  let leaderboardState = leaderboardRows ? createLeaderboardState(hudIdentity) : null;
+  let pendingLeaderboardState = null, leaderboardCompanion = null, ownNickname = '';
   let profilePhase = profileOptions ? 'idle' : 'unavailable';
   let profileIntent, checkingCurrent = false;
   const acquiring = () => profilePhase === 'acquiring';
@@ -109,6 +131,7 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
   const retainError = error => {
     if (!hasFatal) { fatal = error; hasFatal = true; }
     pendingHudState = null;
+    pendingLeaderboardState = leaderboardCompanion = null;
     dirty = true;
   };
   const latchError = error => {
@@ -128,31 +151,80 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
     state() { dirty = true; schedule(); },
     error: latchError,
   };
-  const unsubscribe = !hudReadout && onHudPacket === undefined ? session.subscribe(observer) : session.subscribeWithHud({
+  const hudObserver = {
     ...observer,
     packet(bytes, elapsedHeader, plan) {
-      return hudOperation(() => controller.packetWithHud(bytes, elapsedHeader, plan));
+      return hudOperation(() => {
+        leaderboardCompanion = null;
+        const report = controller.packetWithHud(bytes, elapsedHeader, plan);
+        if (leaderboardRows && hasFatal) throw fatal;
+        if (leaderboardRows) {
+          // Native conversion and held-source release have both returned. Admit the
+          // complete report before calling the caller-owned numeric projector.
+          const state = pendingLeaderboardState ?? leaderboardState;
+          const prepared = prepareLeaderboardPacket(state, report);
+          const scores = [];
+          for (const request of prepared.requests) {
+            const result = Reflect.apply(project, leaderboardProjector, [request.tableMax,
+              Float64Array.from(request.counts), Float64Array.from(request.fractionalMasses)]);
+            if (hasFatal) throw fatal;
+            if (!(result instanceof Float64Array)) throw new TypeError('Leaderboard Float64Array scores required');
+            // Brand/detachment checks avoid caller iterators and length getters.
+            Reflect.apply(typedArrayValues, result, []);
+            const length = Reflect.apply(typedArrayLength, result, []);
+            if (length !== request.counts.length) throw new TypeError('Leaderboard score count mismatch');
+            const copied = [];
+            for (let index = 0; index < length; index++) copied.push(result[index]);
+            scores.push(copied);
+          }
+          leaderboardCompanion = { state, prepared, scores };
+        }
+        return report;
+      });
     },
     hud(report) {
       return hudOperation(() => {
+        const companion = leaderboardCompanion;
+        leaderboardCompanion = null;
+        if (leaderboardRows && companion === null) throw new Error('Missing leaderboard packet companion');
         const candidate = hudReadout
           ? reduceHudState(pendingHudState ?? hudState, hudIdentity, { kind: 'packet', report }) : null;
+        const rowCandidate = leaderboardRows ? completeLeaderboardPacket(companion.state,
+          companion.prepared, companion.scores, ownNickname) : null;
         if (onHudPacket !== undefined && onHudPacket(report) !== undefined) {
           throw new TypeError('Synchronous onHudPacket must return undefined');
         }
-        if (hudReadout && !hasFatal && !disposed) pendingHudState = candidate;
+        if (hudReadout && !hasFatal && !disposed) {
+          pendingHudState = candidate;
+          pendingLeaderboardState = rowCandidate;
+        }
       });
     },
-  });
+  };
+  function subscribeSession() {
+    if (!hudReadout && onHudPacket === undefined) return session.subscribe(observer);
+    return (leaderboardRows ? session.subscribeWithLeaderboardRows : session.subscribeWithHud)(hudObserver);
+  }
+  let unsubscribe = subscribeSession();
   function hudOperation(callback) {
     if (hasFatal) throw fatal;
-    if (disposed || active) throw new Error('Gameplay HUD reentry');
+    if (disposed || active) throw rejectedOperation('Gameplay HUD reentry');
     active = true;
-    try { return callback(); }
-    catch (error) {
+    try {
+      const result = callback();
+      if ((leaderboardRows || localSession) && hasFatal) throw fatal;
+      return result;
+    } catch (error) {
       try { latchError(error); } catch { /* Scheduling cannot replace the primary failure. */ }
       throw error;
     } finally { active = false; }
+  }
+  function rejectedOperation(message) {
+    const error = new Error(message);
+    // Preserve legacy callback behavior; selected publication must not succeed
+    // when a projector/observer catches its own attempted owner reentry.
+    if ((leaderboardRows || localSession) && (active || reconciling || checkingCurrent)) latchError(error);
+    return error;
   }
   function clearUiTimer() {
     if (uiTimer !== undefined) {
@@ -163,9 +235,11 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
   }
   function dispose() {
     if (disposed) return;
-    if (active) throw new Error('Gameplay disposal reentry');
+    if (active) throw rejectedOperation('Gameplay disposal reentry');
     disposed = true;
     hudState = pendingHudState = null;
+    leaderboardState = pendingLeaderboardState = leaderboardCompanion = null;
+    ownNickname = '';
     profilePhase = 'disposed';
     let cleanupFailed = false;
     const cleanup = callback => {
@@ -210,9 +284,10 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
         nativeConnected = state.connected;
       }
       if (state.uiTimerNeeded && uiTimer === undefined) {
+        const timerSession = session;
         uiTimer = setInterval(() => {
-          if (disposed) return;
-          try { session.uiTick(now()); dirty = true; reconcile(); }
+          if (disposed || session !== timerSession) return;
+          try { timerSession.uiTick(now()); dirty = true; reconcile(); }
           catch (error) { latchError(error); }
         }, 25);
       } else if (!state.uiTimerNeeded) clearUiTimer();
@@ -223,7 +298,9 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
       // Ingress and source release have unwound; all reconciliation must succeed.
       if (!hasFatal && !disposed && pendingHudState !== null) {
         hudState = pendingHudState;
+        leaderboardState = pendingLeaderboardState;
         pendingHudState = null;
+        pendingLeaderboardState = null;
       }
     } catch (error) { latchError(error); }
     finally { reconciling = false; }
@@ -231,13 +308,16 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
   function run(callback) {
     // A nested draw cannot bypass an unfinished packet reconciliation barrier.
     if (disposed || active || hasFatal || checkingCurrent || (hudReadout && reconciling)) {
-      throw new Error('Gameplay stopped or reentrant');
+      throw rejectedOperation('Gameplay stopped or reentrant');
     }
     reconcile();
     if (disposed || hasFatal) throw new Error('Gameplay stopped');
     active = true;
-    try { return callback(); }
-    catch (error) { latchError(error); throw error; }
+    try {
+      const result = callback();
+      if ((leaderboardRows || localSession) && hasFatal) throw fatal;
+      return result;
+    } catch (error) { latchError(error); throw error; }
     finally {
       active = false;
       if (dirty) {
@@ -271,6 +351,30 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
       cancelProfile(profileIntent); profilePhase = 'failed'; throw profileError('stale-intent');
     }
   }
+  function admitPlay(request) {
+    if (!leaderboardRows && !localSession) { session.play(request); return; }
+    active = true;
+    try {
+      const admitted = leaderboardRows ? ownRecord(request, ['endpoint', 'profile', 'nickname', 'skin', 'customSkin']) : request;
+      const status = localSession ? session.snapshot() : null;
+      if (localSession && (status.phase === 'disconnected'
+        || (status.phase === 'victory' && status.playing === false))) {
+        try {
+          clearUiTimer();
+          session.close('local-session-replaced');
+          unsubscribe();
+          leaderboardCompanion = null;
+          if (hasFatal) throw fatal;
+          session = createStockSession({ wasm, createSocket, now });
+          unsubscribe = subscribeSession();
+        } catch (error) { latchError(error); throw error; }
+      }
+      session.play(admitted);
+      if (hasFatal) throw fatal;
+      // Retain the admitted copy, never reread a caller's mutable login field.
+      if (leaderboardRows) ownNickname = admitted.nickname;
+    } finally { active = false; }
+  }
   function draw(method, args) {
     if (acquiring() && !disposed) return undefined;
     return run(() => {
@@ -287,14 +391,16 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
   }
   return Object.freeze({
     play(request) {
-      if (disposed || active || hasFatal || checkingCurrent) throw new Error('Gameplay stopped or reentrant');
+      if (disposed || active || hasFatal || checkingCurrent || (localSession && reconciling)) {
+        throw rejectedOperation('Gameplay stopped or reentrant');
+      }
       if (acquiring()) throw profileError('acquiring');
       // Invalid profiles are correctable caller errors, with no connection/quality effects.
-      session.play(request);
+      admitPlay(request);
       try { quality.begin_connection(); } catch (error) { latchError(error); throw error; }
     },
     async playWithLiveProfile(request) {
-      if (disposed || active || hasFatal || checkingCurrent) throw new Error('Gameplay stopped or reentrant');
+      if (disposed || active || hasFatal || checkingCurrent) throw rejectedOperation('Gameplay stopped or reentrant');
       if (!profileOptions) throw profileError('unavailable');
       if (profilePhase !== 'idle' || session.snapshot().phase !== 'ready') throw profileError('already-attempted');
       const intent = { cancelled: false, started: false };
@@ -316,7 +422,7 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
           isCurrentDocument: () => current(intent) });
         await intent.acquirer.acquireForPlay(profile => {
           if (!current(intent)) throw profileError('stale-intent');
-          session.play({ ...intent.request, profile });
+          admitPlay({ ...intent.request, profile });
         });
         if (!current(intent)) throw profileError('stale-intent');
         quality.begin_connection();
@@ -343,6 +449,7 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
         if (acquiring()) return undefined;
         checkProfile();
         let candidate = hudState;
+        let rowCandidate = leaderboardState;
         const flags = session.beforeUpdate(nowMs);
         const result = controller.frame(nowMs, { lagging: flags.lagging, playing: flags.playing,
           readPlaying: () => session.snapshot().playing,
@@ -356,7 +463,10 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
               actions = observed.actions;
               candidate = reduceHudState(candidate, hudIdentity,
                 { kind: 'step', delta: request.delta, lifecycle: observed.lifecycle });
-              if (actions.resetWorld) candidate = reduceHudState(candidate, hudIdentity, { kind: 'world-reset' });
+              if (actions.resetWorld) {
+                candidate = reduceHudState(candidate, hudIdentity, { kind: 'world-reset' });
+                if (leaderboardRows) rowCandidate = resetLeaderboardWorld(rowCandidate);
+              }
             } else actions = session.afterStep(request);
             if (actions.resetWorld) { input.reset(); return { ...actions }; }
             input.setConnected(session.snapshot().connected);
@@ -375,13 +485,17 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
           profilePhase = 'committed'; profileIntent = undefined;
         }
         nativeConnected = state.connected;
-        if (hudReadout && !hasFatal && !disposed) hudState = candidate;
+        if (hudReadout && !hasFatal && !disposed) {
+          hudState = candidate;
+          leaderboardState = rowCandidate;
+        }
         return result;
       });
     },
     render() { return draw('render', []); },
     resize(width, height) { return draw('resize', [width, height]); },
     hudSnapshot: () => hudState,
+    leaderboardSnapshot: () => leaderboardState,
     event(event, viewport) {
       return run(() => {
         const view = observeInput();

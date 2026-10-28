@@ -8,6 +8,8 @@ import { bindStockHudDom } from './stock-hud-dom.mjs';
 import { projectHudView } from './stock-hud-view.mjs';
 import { createOwnedHudUi } from './owned-hud-ui.mjs';
 import { createOwnedPlayUi } from './owned-play-ui.mjs';
+import { createOwnedLeaderboardUi } from './owned-leaderboard-ui.mjs';
+import { projectLeaderboardView } from './stock-leaderboard-view.mjs';
 import { stockEndpoint } from './stock-session.mjs';
 
 // Gate-only notifications must not add gameplay control/source observations.
@@ -18,7 +20,7 @@ const editNotifications = new Set(['keypress', 'beforeinput', 'input', 'composit
   'dragstart', 'drag', 'dragenter', 'dragleave', 'dragover', 'drop', 'dragend']);
 
 /** Local runtime factory. Importing this module performs no page ownership work. */
-export async function startGamePage({ realm = globalThis, initialize, wasmApi, hudReadout = false, ownedHudUi = false, ownedPlayUi = false } = {}) {
+export async function startGamePage({ realm = globalThis, initialize, wasmApi, hudReadout = false, ownedHudUi = false, ownedPlayUi = false, ownedLeaderboardUi = false, localHost } = {}) {
   if (typeof hudReadout !== 'boolean') throw new TypeError('Explicit hudReadout boolean required');
   if (typeof initialize !== 'function' || wasmApi === null || typeof wasmApi !== 'object') {
     throw new TypeError('Explicit initialize function and wasmApi object required');
@@ -29,7 +31,17 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
   if (typeof ownedPlayUi !== 'boolean' || (ownedPlayUi && (!hudReadout || !ownedHudUi))) {
     throw new TypeError('Explicit ownedPlayUi boolean requires hudReadout and ownedHudUi');
   }
-  const gate = realm[Symbol.for('slither.client.gate.v1')];
+  if (typeof ownedLeaderboardUi !== 'boolean' || (ownedLeaderboardUi && (!hudReadout || !ownedHudUi || !ownedPlayUi))) {
+    throw new TypeError('Explicit ownedLeaderboardUi boolean requires hudReadout, ownedHudUi and ownedPlayUi');
+  }
+  if (localHost !== undefined) {
+    const href = realm.location?.href;
+    const match = typeof href === 'string' && /^http:\/\/127\.0\.0\.1:([1-9][0-9]{0,4})(?:[/?#]|$)/.exec(href);
+    if (localHost === null || typeof localHost !== 'object' || realm.top !== realm || !match || Number(match[1]) > 65535) {
+      throw new TypeError('Local host requires a literal top-level http://127.0.0.1:<port> document');
+    }
+  }
+  const gate = localHost ? localHost.gate : realm[Symbol.for('slither.client.gate.v1')];
   if (!gate || gate.metadata().code !== 'held') throw new Error('Armed document-start gate required');
   const armed = gate.metadata(), document = realm.document, pageUrl = realm.location.href;
   const native = gate.claim(armed.id);
@@ -38,6 +50,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
   let nickname, bindingOperation, handlingNickname, routing = 0;
   let hud, ownedUi, constructCapabilities, hudOperation, nativeOperation, sourceOperation, hudCapabilities, cleanupActive = false;
   let playUi, controlsLease, playCapabilities, playOperation, playNodes;
+  let leaderboardUi, leaderboardProperties, projector, Projector, projectScores, freeProjector;
   let playAccepted = false, playAvailable = false, playGeneration = 0;
   const documentIdentity = hudReadout ? Symbol('HUD document') : undefined;
   const ownKeys = Reflect.ownKeys, apply = Reflect.apply, prototype = Object.getPrototypeOf;
@@ -139,13 +152,32 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     checkHudOperation();
   }
   function publishHud(...snapshots) {
-    if (!hud || disposed || cleanupActive) return;
+    if ((!hud && !leaderboardUi && !(localHost && playUi)) || disposed || cleanupActive) return;
     // This is a post-operation seam, never a held-source or native callback.
     guardNicknameOperation();
     if (held) nicknameBusy();
     const operation = { failed: false, primary: undefined };
     hudOperation = operation;
-    try { renderHud(hud, snapshots.length ? snapshots[0] : gameplay.hudSnapshot()); }
+    try {
+      const snapshot = snapshots.length ? snapshots[0] : gameplay.hudSnapshot();
+      if (hud) renderHud(hud, snapshot);
+      if (leaderboardUi) {
+        const ready = leaderboardUi.readiness();
+        checkHudOperation();
+        const view = projectLeaderboardView(gameplay.leaderboardSnapshot(), snapshot, ready);
+        checkHudOperation();
+        leaderboardUi.render(view);
+        checkHudOperation();
+      }
+      if (localHost && playUi && playAccepted) {
+        const session = gameplay.diagnostics().session;
+        if (session.phase === 'disconnected' || session.phase === 'victory' && session.playing === false) {
+          playUi.unlock();
+          checkHudOperation();
+          playAccepted = false;
+        }
+      }
+    }
     catch (error) { throw operation.failed ? operation.primary : error; }
     finally { hudOperation = undefined; operation.primary = undefined; }
   }
@@ -291,6 +323,11 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
       cleanup(() => apply(lease.unregister, undefined, []));
     }
     cleanup(() => detachHud(hud));
+    if (leaderboardUi !== undefined) {
+      const lease = leaderboardUi; leaderboardUi = undefined;
+      cleanup(() => lease.dispose());
+    }
+    leaderboardProperties = undefined;
     if (playUi !== undefined) {
       const lease = playUi; playUi = undefined;
       cleanup(() => lease.dispose());
@@ -311,10 +348,17 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     cleanup(() => wake?.());
     for (const remove of listeners.splice(0)) cleanup(remove);
     cleanup(() => native.setInput(event => { if (event.type === 'click' && event.target === reload) native.ordinaryReload(); }));
-    for (const action of [() => gameplay?.dispose(), () => controller?.dispose(),
-      () => scene?.free(), () => quality?.free()]) cleanup(action);
+    for (const action of [() => gameplay?.dispose(), () => controller?.dispose()]) cleanup(action);
+    const owner = projector, release = freeProjector;
+    projector = projectScores = freeProjector = Projector = undefined;
+    if (owner !== undefined) cleanup(() => apply(release, owner, []));
+    for (const action of [() => scene?.free(), () => quality?.free()]) cleanup(action);
     held = undefined;
     cleanup(() => native.status(code));
+    if (localHost) {
+      const host = localHost; localHost = undefined;
+      cleanup(() => host.dispose());
+    }
     cleanupActive = false;
     if (failed) throw primary;
   }
@@ -324,6 +368,8 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     try { dispose(code); } catch { failed = true; }
     if (failed) throw error;
   };
+  // The selected composition admits raw capabilities before any DOM/listener/input effects.
+  if (ownedLeaderboardUi) captureHudCapabilities();
   listen(realm, 'pagehide', () => dispose());
   let root = realm.document.getElementById('slither-client-root');
   if (!root) { root = realm.document.createElement('section'); root.id = 'slither-client-root';
@@ -390,7 +436,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
       catch (error) { fail(error); }
     } finally { routing--; }
   });
-  try {
+  function captureHudCapabilities() {
     if (hudReadout) {
       const group = copyRecord(descriptor(native, 'hudDom')?.value, ['schema', 'document', 'dom', 'isCurrentDocument']);
       const names = ['nodeType', 'ownerDocument', 'parentNode', 'firstChild', 'nextSibling',
@@ -435,23 +481,49 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
         }
         for (const name of names) controls[name] = guarded(controls[name]);
         playCapabilities = { controls: freeze(controls), createControlsLease: guarded(group.createControlsLease) };
-        playAvailable = native.liveProfile !== undefined;
+        playAvailable = Boolean(localHost) || native.liveProfile !== undefined;
+      }
+      if (ownedLeaderboardUi) {
+        const captured = descriptor(native, 'leaderboardDom')?.value;
+        const group = copyRecord(captured, ['schema', 'document', 'properties']);
+        const properties = copyRecord(group.properties, ['setTranslate']);
+        if (group.schema !== 1 || group.document !== document || !Object.isFrozen(captured)
+          || !Object.isFrozen(group.properties) || !synchronous(properties.setTranslate)) {
+          throw new TypeError('Complete synchronous native leaderboard DOM group required');
+        }
+        const constructor = descriptor(wasmApi, 'LeaderboardScoreProjector');
+        const base = constructor && hasOwn(constructor, 'value') ? constructor.value : undefined;
+        const shape = typeof base === 'function' ? descriptor(base, 'prototype') : undefined;
+        const methods = shape && hasOwn(shape, 'value') && shape.value !== null && typeof shape.value === 'object'
+          ? shape.value : undefined;
+        const project = methods && descriptor(methods, 'project'), release = methods && descriptor(methods, 'free');
+        if (!synchronous(base) || !project || !hasOwn(project, 'value') || !synchronous(project.value)
+          || !release || !hasOwn(release, 'value') || !synchronous(release.value)) {
+          throw new TypeError('Synchronous own-data leaderboard score projector required');
+        }
+        Projector = base; projectScores = project.value; freeProjector = release.value;
+        leaderboardProperties = freeze({ setTranslate: guarded(properties.setTranslate) });
       }
     }
+  }
+  try {
+    if (!ownedLeaderboardUi) captureHudCapabilities();
     report('loading');
     await initialize();
     if (disposed) return Object.freeze({ dispose });
-    const reader = createStockHostSnapshot({ realm, observer: native,
+    if (ownedLeaderboardUi) runNative(() => { projector = new Projector(); });
+    const reader = localHost ? undefined : createStockHostSnapshot({ realm, observer: native,
       readAccessory: () => native.readAccessory() });
     const started = native.now();
     let context;
     const captureReady = () => {
-      const capture = reader.capture();
+      if (localHost && !localHost.isCurrentDocument()) throw new Error('Current local game document required');
+      const capture = localHost ? localHost.sources : reader.capture();
       if (context && (capture.background !== context.background
         || capture.palettes.some((source, index) => source !== context.palettes[index]))) {
         const error = new Error('Renderer context sources changed; reload required'); error.status = 'unsupported'; throw error;
       }
-      if (capture.readiness.some(entry => entry.state !== 'ready')) {
+      if (!localHost && capture.readiness.some(entry => entry.state !== 'ready')) {
         const error = new Error('Waiting for committed host sources'); error.status = 'pending'; throw error;
       }
       return capture;
@@ -467,7 +539,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
       }
     }
     if (disposed) return Object.freeze({ dispose });
-    const adapter = createStockSkinAdapter({ realm, random: native.random, readSnapshot() {
+    const adapter = localHost ? localHost.sources.adapter : createStockSkinAdapter({ realm, random: native.random, readSnapshot() {
       if (held) throw new Error('Stock capture already held');
       held = captureReady();
       return held;
@@ -475,7 +547,13 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     const wrapped = { ...adapter,
       beginOperation() {
         if (hudReadout) sourceOperation = { failed: false, primary: undefined };
-        try { return adapter.beginOperation(); }
+        try {
+          if (localHost) {
+            if (held) throw new Error('Local capture already held');
+            held = captureReady();
+          }
+          return adapter.beginOperation();
+        }
         catch (error) {
           if (sourceOperation?.failed) error = sourceOperation.primary;
           sourceOperation = held = undefined; throw error;
@@ -489,7 +567,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
         finally { held = sourceOperation = undefined; }
       },
     };
-    const hostAssets = createStockEntityAssets({ realm, random: native.random,
+    const hostAssets = localHost ? localHost.sources.hostAssets : createStockEntityAssets({ realm, random: native.random,
       snapshotForOperation(operation) {
         if (!held || !Object.is(held.revision, operation.revision)) throw new Error('Stock operation capture unavailable');
         return held;
@@ -506,6 +584,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     // The captured context objects cannot silently switch while the scene retains their uses.
     const isCurrentDocument = () => {
       try {
+        if (localHost) return !disposed && localHost.isCurrentDocument();
         const current = gate.metadata();
         if (disposed || realm !== realm.top || realm.document !== document || realm.location.href !== pageUrl
           || realm[Symbol.for('slither.client.gate.v1')] !== gate || current.schema !== armed.schema || current.id !== armed.id) return false;
@@ -519,9 +598,11 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
         if (disposed) return;
         try {
           const before = gameplay.hudSnapshot();
+          const beforeRows = ownedLeaderboardUi ? gameplay.leaderboardSnapshot() : undefined;
           runNative(callback);
           const after = gameplay.hudSnapshot();
-          if (after !== null && after !== before) publishHud(after);
+          const rowsChanged = ownedLeaderboardUi && gameplay.leaderboardSnapshot() !== beforeRows;
+          if (after !== null && (after !== before || rowsChanged || localHost)) publishHud(after);
         } catch (error) { fail(error); }
       }) : native.queueMicrotask,
       setInterval: native.setInterval, clearInterval: native.clearInterval,
@@ -531,7 +612,14 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
         if (!nativeOperation.failed) { nativeOperation.failed = true; nativeOperation.primary = error; }
       } : fail,
       ...(hudReadout ? { hudReadout: true } : {}),
-      ...(native.liveProfile === undefined ? {} : { liveProfile: { capabilities: native.liveProfile, isCurrentDocument } }) });
+      ...(localHost ? { localSession: true } : {}),
+      ...(ownedLeaderboardUi ? { leaderboardRows: true, leaderboardProjector: freeze({
+        project(tableMax, counts, fractionalMasses) {
+          if (disposed || cleanupActive) return;
+          return runNative(() => apply(projectScores, projector, [tableMax, counts, fractionalMasses]));
+        },
+      }) } : {}),
+      ...(localHost || native.liveProfile === undefined ? {} : { liveProfile: { capabilities: native.liveProfile, isCurrentDocument } }) });
     const tick = now => {
       frame = undefined;
       if (disposed) return;
@@ -544,7 +632,6 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     const createRuntime = () => Object.freeze({
       diagnostics: () => Object.freeze({ ...controller.diagnostics(),
         connected: gameplay.diagnostics().session.connected, gameplay: gameplay.diagnostics(), disposed, captureHeld: Boolean(held) }),
-      // Local capability only. The auto-entry supplies no profile and never calls Play.
       play(request) {
         guardNicknameOperation();
         if (disposed) throw new Error('Client disposed');
@@ -600,19 +687,24 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
               if (typeof endpoint !== 'string' || endpoint.length > 128) { playUi.setStatus('invalid-endpoint'); return; }
               try { endpoint = stockEndpoint(endpoint); }
               catch { playUi.setStatus('invalid-endpoint'); return; }
+              if (localHost && endpoint !== localHost.endpoint) { playUi.setStatus('invalid-endpoint'); return; }
               if (typeof nickname !== 'string' || nickname.length > 24 || /[^\x20-\x7f]/.test(nickname)) {
                 playUi.setStatus('invalid-nickname'); return;
               }
               playAccepted = true;
               playUi.lock();
               playUi.setStatus('preparing');
-              request = { endpoint, nickname, skin: 0, customSkin: new Uint8Array() };
+              request = { endpoint, nickname, skin: 0, customSkin: new Uint8Array(),
+                ...(localHost ? { profile: localHost.profile } : {}) };
             } finally { endpoint = nickname = undefined; }
           });
           // The existing native/profile owner may run only after the Play guard unwinds.
           if (request !== undefined) {
-            promise = runtime.playWithLiveProfile(request);
-            promise.then(() => settle('connecting'), () => settle('failed')).catch(() => {});
+            if (localHost) { runtime.play(request); settle('connecting'); }
+            else {
+              promise = runtime.playWithLiveProfile(request);
+              promise.then(() => settle('connecting'), () => settle('failed')).catch(() => {});
+            }
           }
         } catch (error) { fail(error); }
         finally { request = promise = undefined; }
@@ -639,6 +731,10 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
         }
         checkHudOperation();
         playNodes = nodes;
+        if (localHost) {
+          localHost.presetEndpoint(nodes.endpoint);
+          checkHudOperation();
+        }
       });
       runtime.bindNicknameField({ schema: 1, element: playNodes.nickname, parent: playNodes.nicknameParent });
       runPlay(() => {
@@ -655,6 +751,23 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
         checkHudOperation();
       });
       if (!playAvailable) runPlay(() => { playAccepted = true; playUi.lock(); });
+    }
+    if (ownedLeaderboardUi) {
+      hudIdle();
+      const operation = { failed: false, primary: undefined };
+      hudOperation = operation;
+      try {
+        const snapshot = gameplay.hudSnapshot();
+        leaderboardUi = createOwnedLeaderboardUi({ sceneIdentity: snapshot.sceneIdentity, documentIdentity,
+          document: hudCapabilities.document, parent: root, dom: hudCapabilities.dom,
+          construct: constructCapabilities, properties: leaderboardProperties,
+          isCurrentDocument: hudCapabilities.isCurrentDocument });
+        checkHudOperation();
+        leaderboardUi.mount();
+        checkHudOperation();
+      } catch (error) { throw operation.failed ? operation.primary : error; }
+      finally { hudOperation = undefined; operation.primary = undefined; }
+      publishHud();
     }
     if (ownedPlayUi) runPlay(() => report('ready-not-connected'));
     else report('ready-not-connected');

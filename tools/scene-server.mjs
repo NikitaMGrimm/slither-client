@@ -5,13 +5,28 @@ import { fileURLToPath } from 'node:url';
 
 const projectRoot = fileURLToPath(new URL('..', import.meta.url));
 const routes = new Map([
-  ['/', ['web/scene.html', 'text/html; charset=utf-8']],
+  ['/', ['web/game.html', 'text/html; charset=utf-8']],
+  ['/anchors', ['web/scene.html', 'text/html; charset=utf-8']],
   ['/animated', ['web/animated.html', 'text/html; charset=utf-8']],
   ['/benchmark', ['web/benchmark.html', 'text/html; charset=utf-8']],
   ['/scene/scene.css', ['web/scene.css', 'text/css; charset=utf-8']],
   ...['scene', 'animated', 'desktop-layout', 'synthetic-scene', 'synthetic-body', 'synthetic-food', 'synthetic-prey', 'skin-provider', 'loopback-session', 'dense-scene', 'benchmark'].map(name => [`/scene/${name}.mjs`, [`web/${name}.mjs`, 'text/javascript; charset=utf-8']]),
   ['/scene/pkg/slither_client.js', ['dist/web/slither_client.js', 'text/javascript; charset=utf-8']],
   ['/scene/pkg/slither_client_bg.wasm', ['dist/web/slither_client_bg.wasm', 'application/wasm']],
+  ['/game/host.css', ['extension/game-host.css', 'text/css; charset=utf-8']],
+  ...[['bootstrap', 'game-bootstrap'], ['runtime', 'game-runtime'],
+    ['owned-hud-ui', 'game-owned-hud-ui'], ['owned-play-ui', 'game-owned-play-ui'],
+    ['owned-leaderboard-ui', 'game-owned-leaderboard-ui']]
+    .map(([route, name]) => [`/game/${route}.mjs`, [`extension/${name}.mjs`, 'text/javascript; charset=utf-8']]),
+  ...['stock-client', 'stock-skin-provider', 'stock-skin-rules', 'stock-host-snapshot',
+    'stock-food-provider', 'stock-prey-provider', 'stock-asset-sources', 'skin-provider',
+    'desktop-layout', 'client-input', 'stock-gameplay', 'stock-session', 'stock-hud-contract',
+    'stock-hud-state', 'stock-hud-view', 'stock-hud-dom', 'handshake-session', 'stock-live-profile',
+    'stock-leaderboard-state', 'stock-leaderboard-view', 'local-game-host',
+    'synthetic-body', 'synthetic-food', 'synthetic-prey', 'loopback-session']
+    .map(name => [`/game/${name}.mjs`, [`web/${name}.mjs`, 'text/javascript; charset=utf-8']]),
+  ['/game/pkg/slither_client.js', ['dist/web/slither_client.js', 'text/javascript; charset=utf-8']],
+  ['/game/pkg/slither_client_bg.wasm', ['dist/web/slither_client_bg.wasm', 'application/wasm']],
 ]);
 
 function portNumber(value, allowZero = false) {
@@ -63,7 +78,9 @@ export function createSceneServer({ simulatorPort, root = projectRoot } = {}) {
     if (resource === '/scene/config.json') {
       send(200, 'application/json', JSON.stringify({ simulatorUrl })); return;
     }
-    const route = routes.get(resource);
+    const snippet = /^\/(?:scene|game)\/pkg\/(snippets\/slither-client-[a-f0-9]{16}\/web\/stock-hud-contract\.mjs)$/.exec(resource);
+    const route = routes.get(resource) ?? (snippet
+      ? [`dist/web/${snippet[1]}`, 'text/javascript; charset=utf-8'] : undefined);
     if (!route) { send(404, 'text/plain', 'Resource not found'); return; }
     try {
       const canonicalRoot = await realpath(root);

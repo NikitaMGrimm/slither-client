@@ -1,4 +1,10 @@
-# Semantic HUD views and passive DOM rendering
+# HUD views and DOM rendering
+
+The default bootstrap selects current/final score readouts, Play controls and
+visible leaderboard rows in one runtime. The readout projection and fixed-node
+renderer below remain separate from the leaderboard state/view and dynamic row
+owner. Integration is implemented in the selected default code; local browser
+verification remains in progress, and installed-host acceptance is separate.
 
 `projectHudView(snapshot, binding)` projects a genuine committed
 [HUD reducer](hud-state.md) snapshot and a closed binding-readiness observation
@@ -77,16 +83,21 @@ a claim of measured garbage collection. Actual owner cleanup remains separate.
 
 ## Explicit bootstrap owner
 
-Trusted local initialization may select `startGamePage({ hudReadout: true })`.
-Use the side-effect-free runtime factory with explicit initialization/Wasm
-dependencies when an entry must select options before the claim. Importing the
-default bootstrap in an armed realm immediately starts its default runtime.
-The default and automatic entry remain false and expose no HUD binding method.
-The option must be a boolean. True requires the gate's complete optional frozen
-`native.hudDom` capability, enables score tracking before gameplay starts and
-selects the existing gameplay readout mode. It does not create a visible HUD.
+The default bootstrap selects readout, Play and leaderboard owners before its
+single claim, enables score tracking and binds its constructed readout nodes.
+Importing it in an armed realm immediately starts that runtime; the standalone
+loopback page uses the same entry with its local host adapter.
 
-Only the completed opt-in runtime exposes:
+Custom compositions use the side-effect-free runtime factory with explicit
+initialization/Wasm dependencies. Its `hudReadout` option must be a boolean.
+True requires the gate's complete optional frozen
+`native.hudDom` capability, enables score tracking before gameplay starts and
+selects the existing gameplay readout mode. The semantic option alone does not
+construct nodes; default construction is selected alongside it.
+
+The completed readout runtime exposes the binding method below. The default
+entry's owned readout already occupies its single slot; this example applies
+to a custom composition with no binding:
 
 ```js
 const ticket = runtime.bindHudReadout({ schema: 1, scope, nodes });
@@ -101,8 +112,9 @@ binding. The owner supplies labels, mount, layout and final visibility.
 
 Binding projects genuine committed history at an idle boundary. Later publication
 follows a successful frame or selected gameplay resize, after source/native work
-returns. The existing deferred callback publishes only when its committed
-snapshot identity changes to a nonnull value; there is no extra queue or timer.
+returns. The deferred callback publishes changed nonnull HUD/board history;
+local-host composition also uses this safe boundary to update Play availability
+after a normal disconnect. There is no extra queue or timer.
 Packet, source, control and status callbacks do not render the HUD. Freshness
 uses the captured document predicate without checking asset readiness or profile
 acquisition.
@@ -116,10 +128,11 @@ no nodes and restores no DOM values.
 
 ## Original owned HUD composition
 
-An explicit [package selection](extension.md#package-selected-owned-hud) starts
-the same runtime with `hudReadout:true, ownedHudUi:true`. Visible mode requires
-semantic readout mode; invalid combinations reject before gate access. The
-entry does not import the default bootstrap or claim twice.
+The [default package entry](extension.md#package-selected-owned-hud) starts
+the runtime with `hudReadout:true, ownedHudUi:true`, Play and leaderboard
+construction enabled. Visible mode requires semantic readout mode; invalid
+combinations reject before gate access. There is one default bootstrap and one
+claim; former owned entry variants are removed.
 
 The import-free UI builder validates and copies closed inputs, then returns an
 inert frozen `{mount,dispose}` lease. Its once-only mount creates exactly 13
@@ -146,15 +159,34 @@ attempts to remove only its own mount at the original parent while the document
 is current. Removal may fail or leave nodes behind; there is no retry or DOM
 restoration. The passive renderer's own unbind/dispose still removes no nodes.
 
+## Visible leaderboard composition
+
+The default gameplay subscription uses schema-2 HUD reports, retaining raw rows
+in the same command-time transaction. `LeaderboardScoreProjector` supplies Rust
+score arithmetic after ingress and held-source release. Separate JavaScript
+board state and copied views retain ordered board/setup history and text,
+color and opacity policy. These are existing
+[Rust migration debt](architecture.md#ownership-decision), not a model for new
+JavaScript game logic.
+
+`createOwnedLeaderboardUi` constructs and renders the heading and row columns
+through captured DOM operations. Names are written through Text nodes; markup
+is not evaluated. Publication follows committed gameplay at the shared safe
+boundary, with the readout's requested header/row opacity. Cleanup owns only
+its constructed nodes. This integrates visible rows in the selected default;
+it does not add minimap or announcement display.
+
 ## Activation and evidence limits
 
-The passive APIs and explicit owner add no Play route, input listener, timer,
+The passive readout APIs alone add no Play route, input listener, timer,
 source acquisition, game socket, message/global command, CSP change or permission.
-Default startup remains unbound and supplies no HUD nodes or text policy.
-The owned entry chooses original labels/layout explicitly at package time.
+The default entry chooses original labels/layout and constructs/binds its
+readout, Play and leaderboard owners. Opening or activating it starts neither
+remote profile acquisition nor a game socket. Local Play uses the same
+composition with authored sources; see [local Play](local-play.md).
 
 Authored Node capability doubles and real-Wasm/Canvas-recorder composition cover
 the documented checks in [verification](verification.md). They do not establish
-the opt-in bootstrap's actual DOM/CSS, installed-browser, pixels, wording, login
+the current default's actual DOM/CSS, installed-browser, pixels, wording, login
 or server acceptance. Earlier isolated native renderer evidence does not prove
 this new owner composition.

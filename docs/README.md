@@ -1,9 +1,12 @@
 # Documentation
 
 The current client covers bounded protocol primitives, atomic scene state,
-Canvas2D rendering and an optional local simulator connection.
+Canvas2D rendering, a default Play/HUD/leaderboard runtime and a local simulator
+path with authored stand-ins. Runtime integration and acceptance evidence remain
+separate.
 
 - [Architecture](architecture.md): modules, supported inputs, and browser scope.
+- [Local Play](local-play.md): run the default client with a challenge-capable loopback simulator.
 - [Trusted skin provider](skin-provider.md): caller-owned recipes and borrowed-asset readiness.
 - [Stock asset and input adapters](stock-client.md): held captures, source revisions and same-clock control.
 - [Caller-owned stock session](stock-session.md): explicit profiles, handshake, ping and lifecycle ownership.
@@ -11,7 +14,7 @@ Canvas2D rendering and an optional local simulator connection.
 - [HUD packet projections](hud-packets.md): bounded borrowed leaderboard and announcement decoding.
 - [HUD packet journal](hud-ingress.md): explicit command-time scores, lifecycle guards and session/controller routing.
 - [Semantic HUD state](hud-state.md): bounded packet/step/draw reduction, retained identity and readout eligibility.
-- [HUD views and passive rendering](hud-view.md): copied history, truthful readiness and supplied fixed-node DOM capabilities.
+- [HUD views and rendering](hud-view.md): default readout/leaderboard composition, copied history and DOM ownership.
 - [Retained desktop food](food-presentation.md): factories, source ownership and ordered paint passes.
 - [Retained prey](prey-presentation.md): independent appearances, motion, capture and borrowed sources.
 - [Ordinary antennas](antenna-presentation.md): appearance state, draw cadence, supplied randomness and borrowed bulbs.

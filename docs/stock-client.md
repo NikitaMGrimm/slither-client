@@ -73,18 +73,22 @@ rather than resetting that multiplier.
 ## Entry composition and remaining gaps
 
 The extension runtime composes the host snapshot, skin/entity adapters,
-controller, gameplay and session. Its default entry provides explicit local Play
-APIs without bound Play controls, score tracking or a visible HUD. The separately
-selected owned-HUD entry enables score tracking and fixed current score/rank
-and final-score readouts; owned-Play adds endpoint/nickname controls and an admitted Play
-click. Activation alone starts neither profile acquisition nor a game socket.
+controller, gameplay and session. One default bootstrap enables score tracking,
+fixed current score/rank and final-score readouts, endpoint/nickname Play
+controls and visible schema-2 leaderboard rows. The packager no longer offers
+owned entry variants. Activation alone starts neither profile acquisition nor
+a game socket.
 
-These entries do not yet provide a visible leaderboard, minimap or announcement
-display. Raw leaderboard row delivery is an explicit API, separate from the
-schema-1 readout selection below. Full viewport/login layout, menu transitions,
+The [local host adapter](local-play.md) supplies generated flat sources and
+captured browser capabilities to this same composition. It restricts Play to the
+configured loopback endpoint and supplies authored zero credentials through the
+existing challenge session, with no profile acquisition. A normally disconnected
+local session is replaced only on the next explicit Play. Remote profile
+acquisition remains one-shot; neither path gains automatic retries.
+
+Minimap and announcement display remain missing. Full viewport/login layout, menu transitions,
 nickname drawing, background layers, preference controls and victory/save/replay
-flows remain incomplete. Default-path and visible-leaderboard unification are
-planned on the [roadmap](roadmap.md).
+flows remain incomplete. See the [roadmap](roadmap.md).
 
 Game/HUD/presentation policy still held in JavaScript is listed in the
 [architecture ownership decision](architecture.md#ownership-decision). Browser
@@ -118,16 +122,19 @@ responsible for score arithmetic and retained-own target resolution.
 
 `packetWithHud` and the optional gameplay `onHudPacket` callback connect this
 session seam to the native command-time journal and real Setup renderer.
-Score tracking requires explicit caller enablement before ingress. Default
-gameplay uses the legacy subscription. `subscribeWithLeaderboardRows` selects
-schema 2 through the same controller seam and adds copied raw rows; gameplay's
-HUD mode currently selects the header-only schema-1 subscription. Row delivery
-alone supplies no visible row state, text policy or renderer. See the
+Score tracking requires enablement before ingress; the default runtime performs
+it and selects `subscribeWithLeaderboardRows` for schema-2 copied raw rows.
+Header-only `subscribeWithHud` and legacy subscriptions remain available to
+other explicit callers. The selected gameplay path stages board history and
+projects row scores through the Rust/Wasm `LeaderboardScoreProjector` after
+native ingress and source release, then publishes the visible board through
+its DOM owner. Row history/text/display policy still held in JavaScript remains
+Rust migration debt. See the
 [journal API](hud-ingress.md).
 The optional [semantic readout mode](hud-state.md) stages lifecycle fade and
-required draw samples after source release. The owned entries bind its
-[view/DOM renderer](hud-view.md) to fixed readout/final nodes; a visible
-leaderboard remains separate.
+required draw samples after source release. The default entry binds its
+[view/DOM renderer](hud-view.md) to fixed readout/final nodes alongside the
+leaderboard owner.
 An error after a future native commit or observer effect cannot roll those
 effects back; the session terminates and never replays the packet.
 

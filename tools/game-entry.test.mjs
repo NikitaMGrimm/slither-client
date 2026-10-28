@@ -1,28 +1,62 @@
 // Actual authored ESM graphs; generated Wasm exports and native hosts are labelled doubles.
 import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { extensionArguments } from './build-extension.mjs';
 import { runGameModuleTest } from './game-module-test-fixture.mjs';
 
-test('actual armed default graph claims once during evaluation and later true cannot claim again', async () => {
+test('local setup failures are visible and retain their original rejection', async () => {
+  await runGameModuleTest(async ({ assert, createGraph }) => {
+    const graph = createGraph({ armed: false });
+    const entry = await graph.load('bootstrap.mjs');
+    const primary = Error('Local configuration fetch failed');
+    for (const fetch of [async () => { throw primary; },
+      async () => ({ ok: false }), async () => ({ ok: true, json: async () => ({ simulatorUrl: null }) })]) {
+      const status = { textContent: 'Loading local client…' };
+      const realm = { location: { href: 'http://127.0.0.1:18884/' }, fetch,
+        document: { getElementById: () => status } };
+      await assert.rejects(entry.startGamePage({ realm }), /configuration|simulator-port/);
+      assert.notEqual(status.textContent, 'Loading local client…');
+    }
+    const realm = { location: { href: 'http://127.0.0.1:18884/' },
+      fetch: async () => { throw primary; }, document: { getElementById: () => null } };
+    await assert.rejects(entry.startGamePage({ realm }), error => error === primary);
+    assert.equal(graph.counts.initialize, 0);
+  });
+});
+
+test('actual default graph mounts HUD, Play and leaderboard with one claim, scene and RAF', async () => {
   await runGameModuleTest(async ({ assert, createGraph }) => {
     let release;
-    const graph = createGraph({ initialize: () => new Promise(resolve => { release = resolve; }) });
+    const projector = { created: 0, freed: 0 };
+    const graph = createGraph({ hudNative: true, ownedHudNative: true, ownedPlayNative: true,
+      leaderboardNative: true, initialize: () => new Promise(resolve => { release = resolve; }),
+      prepareWasm(api, run) {
+        api.LeaderboardScoreProjector = run('(counts => class { constructor() { counts.created++; } project() { throw Error("No startup score projection expected"); } free() { counts.freed++; } })')(projector);
+      } });
+    const hud = graph.hudWasm();
     const entry = await graph.load('bootstrap.mjs');
     assert.notEqual(graph.f.gate.metadata().code, 'held'); assert.equal(graph.counts.initialize, 1);
     assert.equal(graph.wasm.calls.includes('scene'), false);
-    await assert.rejects(entry.startGamePage({ hudReadout: true }), /Armed document-start gate/);
+    await assert.rejects(entry.startGamePage(), /Armed document-start gate/);
     assert.notEqual(graph.f.gate.metadata().code, 'held');
     release(); const runtime = await entry.gamePageRuntime;
-    assert.deepEqual(Object.keys(runtime).sort(), ['diagnostics', 'play', 'playWithLiveProfile', 'bindNicknameField', 'dispose'].sort());
+    assert.deepEqual(Object.keys(runtime).sort(), ['diagnostics', 'play', 'playWithLiveProfile', 'bindNicknameField', 'bindHudReadout', 'dispose'].sort());
     assert.equal(graph.wasm.calls.filter(value => value === 'scene').length, 1);
     assert.equal(graph.wasm.calls.filter(value => value === 'quality').length, 1);
     assert.equal(graph.f.raf.size, 1); assert.equal(graph.f.intervals.size, 0);
     assert.equal(graph.f.sockets, 0); assert.equal(graph.f.original, 0);
+    assert.equal(hud.tracking, 1); assert.equal(hud.scoreReads, 0); assert.equal(projector.created, 1);
+    const root = graph.f.document.getElementById('slither-client-root');
+    assert.equal(root.children.length, 6, 'existing scene nodes plus HUD, Play and leaderboard mounts');
+    const [hudMount, playMount, leaderboardMount] = root.children.slice(3);
+    assert.equal(hudMount.children.length, 2); assert.equal(playMount.children.length, 4);
+    assert.equal(leaderboardMount.children.length, 4);
+    assert.equal(graph.f.edit.ownedPlay.buttonState(playMount.children[2]).disabled, true);
+    assert.equal(graph.f.edit.hud.character(playMount.children[3].children[0]).data, 'Play unavailable on this page.');
     const repeated = await graph.load('bootstrap.mjs');
     assert.equal(repeated.gamePageRuntime, entry.gamePageRuntime);
     assert.equal(await repeated.gamePageRuntime, runtime); assert.notEqual(graph.f.gate.metadata().code, 'held');
-    runtime.dispose(); assert.equal(graph.f.raf.size, 0);
+    runtime.dispose(); runtime.dispose(); assert.equal(graph.f.raf.size, 0);
+    assert.equal(root.children.length, 3); assert.equal(projector.freed, 1);
+    assert.equal(graph.wasm.counts().sceneFrees, 1); assert.equal(graph.wasm.counts().qualityFrees, 1);
   });
 });
 
@@ -34,11 +68,6 @@ test('legacy native fixture retains eleven renderer operations without opting in
     assert.equal(Object.keys(native.hudDom.dom).length, 11);
     assert.equal(graph.counts.initialize, 0); assert.equal(graph.f.raf.size, 0);
   });
-});
-
-test('CLI selects the explicit entry only by its exact closed package option', () => {
-  assert.deepEqual(extensionArguments(['--game-entry', 'owned-hud']), { gameEntry: 'owned-hud' });
-  assert.deepEqual(extensionArguments(['--game-entry', 'owned-play']), { gameEntry: 'owned-play' });
 });
 
 test('factory graph evaluation is inert in armed and unarmed realms', async () => {
@@ -55,7 +84,7 @@ test('factory graph evaluation is inert in armed and unarmed realms', async () =
       assert.equal(graph.wasm.calls.length, 0); assert.equal(graph.f.raf.size, 0);
       assert.equal(graph.f.sockets, 0);
       const source = graph.sources.get('https://authored-package.invalid/game/runtime.mjs');
-      assert.doesNotMatch(source, /from ['"].*(?:pkg\/|bootstrap|owned-entry)/);
+      assert.doesNotMatch(source, /from ['"].*(?:pkg\/|bootstrap)/);
     }
   });
 });
@@ -79,43 +108,41 @@ test('factory validates explicit dependencies and primitive options before any g
   });
 });
 
-test('unarmed actual entry graphs export undefined and keep initialization quiet', async () => {
+test('unarmed default entry exports undefined and keeps initialization quiet', async () => {
   await runGameModuleTest(async ({ assert, createGraph }) => {
     const graph = createGraph({ armed: false });
-    for (const name of ['bootstrap.mjs', 'owned-entry.mjs', 'play-entry.mjs']) {
-      const entry = await graph.load(name);
-      assert.equal(entry.gamePageRuntime, undefined);
-      assert.equal((await graph.load(name)).gamePageRuntime, undefined);
-    }
+    const entry = await graph.load('bootstrap.mjs');
+    assert.equal(entry.gamePageRuntime, undefined);
+    assert.equal((await graph.load('bootstrap.mjs')).gamePageRuntime, undefined);
     assert.equal(graph.counts.initialize, 0); assert.equal(graph.wasm.calls.length, 0);
     assert.equal(graph.f.raf.size, 0); assert.equal(graph.f.sockets, 0);
   });
 });
 
-test('default wrapper honors fresh explicit dependency overrides and true without UI never consumes construction', async () => {
+test('default wrapper honors explicit dependencies and always selects all owned UI options', async () => {
   await runGameModuleTest(async ({ assert, createGraph }) => {
-    for (const hudReadout of [false, true]) {
-      const graph = createGraph({ armed: false, hudNative: true, ownedHudNative: true });
-      const entry = await graph.load('bootstrap.mjs'); graph.arm();
-      const hud = graph.hudWasm(); let initialized = 0;
-      const nativeCalls = graph.f.edit.hud.trace.length;
-      const runtime = await entry.startGamePage({ realm: graph.f.realm, initialize() { initialized++; },
-        wasmApi: graph.wasm.api, hudReadout, ownedHudUi: true });
-      assert.equal(initialized, 1); assert.equal(graph.counts.initialize, 0);
-      assert.equal(hud.tracking, Number(hudReadout));
-      assert.equal(typeof runtime.bindHudReadout, hudReadout ? 'function' : 'undefined');
-      assert.equal(graph.f.edit.hud.trace.slice(nativeCalls).some(([name]) => ['createElement','createTextNode','setStyle','setText'].includes(name)), false, 'default wrapper forces owned UI false');
-      assert.equal(graph.f.raf.size, 1); runtime.dispose();
-    }
+    const graph = createGraph({ armed: false, hudNative: true, ownedHudNative: true,
+      ownedPlayNative: true, leaderboardNative: true });
+    const entry = await graph.load('bootstrap.mjs'); graph.arm();
+    const hud = graph.hudWasm(); let initialized = 0, projectors = 0;
+    graph.wasm.api.LeaderboardScoreProjector = graph.run('(created => class { constructor() { created(); } project() { throw Error("Unexpected projection"); } free() {} })')(() => { projectors++; });
+    const runtime = await entry.startGamePage({ realm: graph.f.realm, initialize() { initialized++; },
+      wasmApi: graph.wasm.api, hudReadout: false, ownedHudUi: false, ownedPlayUi: false, ownedLeaderboardUi: false });
+    assert.equal(initialized, 1); assert.equal(graph.counts.initialize, 0);
+    assert.equal(hud.tracking, 1); assert.equal(projectors, 1);
+    assert.equal(typeof runtime.bindHudReadout, 'function');
+    assert.equal(graph.f.document.getElementById('slither-client-root').children.length, 6);
+    assert.equal(graph.f.raf.size, 1); assert.equal(graph.f.sockets, 0); runtime.dispose();
   });
 });
 
-test('actual explicit graph builds one owned tree, binds pending histories and reimports the same runtime', async () => {
+test('HUD factory option builds one owned tree and binds pending histories', async () => {
   await runGameModuleTest(async ({ assert, createGraph }) => {
     const graph = createGraph({ hudNative: true, ownedHudNative: true }), hud = graph.hudWasm();
     const beforeTrace = graph.f.edit.hud.trace.length;
-    const entry = await graph.load('owned-entry.mjs'), runtime = await entry.gamePageRuntime;
-    assert.equal(graph.counts.initialize, 1); assert.equal(hud.tracking, 1); assert.equal(hud.scoreReads, 0);
+    const factory = await graph.load('runtime.mjs');
+    const runtime = await factory.startGamePage({ initialize() {}, wasmApi: graph.wasm.api, hudReadout: true, ownedHudUi: true });
+    assert.equal(graph.counts.initialize, 0); assert.equal(hud.tracking, 1); assert.equal(hud.scoreReads, 0);
     assert.deepEqual(Object.keys(runtime).sort(), ['diagnostics','play','playWithLiveProfile','bindNicknameField','bindHudReadout','dispose'].sort());
     const native = graph.f.edit.hud, trace = native.trace.slice(beforeTrace);
     const elements = trace.filter(([name]) => name === 'createElement');
@@ -127,12 +154,11 @@ test('actual explicit graph builds one owned tree, binds pending histories and r
     const mount = root.children.at(-1); assert.equal(mount.localName, 'div');
     assert.equal(mount.children.length, 2); assert.equal(root.children.length, 4);
     const count = native.trace.length;
-    assert.equal((await graph.load('owned-entry.mjs')).gamePageRuntime, entry.gamePageRuntime);
-    assert.equal(native.trace.length, count); assert.equal(graph.counts.initialize, 1);
+    assert.equal((await graph.load('runtime.mjs')).startGamePage, factory.startGamePage);
+    assert.equal(native.trace.length, count); assert.equal(graph.counts.initialize, 0);
     assert.throws(() => runtime.bindHudReadout({}), /already bound/);
-    const otherEntry = await graph.load('bootstrap.mjs');
-    await assert.rejects(otherEntry.gamePageRuntime, /Armed document-start gate/);
-    assert.equal(graph.counts.initialize, 1); assert.equal(graph.f.raf.size, 1);
+    await assert.rejects(factory.startGamePage({ initialize() {}, wasmApi: graph.wasm.api, hudReadout: true, ownedHudUi: true }), /Armed document-start gate/);
+    assert.equal(graph.counts.initialize, 0); assert.equal(graph.f.raf.size, 1);
     assert.equal(graph.f.sockets, 0); assert.equal(graph.f.original, 0);
     runtime.dispose(); runtime.dispose();
     assert.equal(root.children.length, 3); assert.equal(native.trace.filter(([name]) => name === 'removeChild').length, 1);
@@ -140,7 +166,7 @@ test('actual explicit graph builds one owned tree, binds pending histories and r
   });
 });
 
-test('selected visible entry refuses each missing construction operation before initialization', async () => {
+test('HUD factory refuses each missing construction operation before initialization', async () => {
   await runGameModuleTest(async ({ assert, createGraph }) => {
     for (const [owner, name] of [['Document','createElement'],['Document','createTextNode'],['Node','appendChild'],['Node','removeChild']]) {
       const graph = createGraph({ hudNative: true, ownedHudNative: true, prepare(dom) {
@@ -149,15 +175,16 @@ test('selected visible entry refuses each missing construction operation before 
         delete target[name]; Object.setPrototypeOf(target, Object.assign(Object.create(Object.getPrototypeOf(target)), { [name]: method }));
       } });
       graph.hudWasm();
-      const entry = await graph.load('owned-entry.mjs');
-      await assert.rejects(entry.gamePageRuntime, /HUD owner record|required/);
+      const factory = await graph.load('runtime.mjs');
+      const pending = factory.startGamePage({ initialize() {}, wasmApi: graph.wasm.api, hudReadout: true, ownedHudUi: true });
+      await assert.rejects(pending, /HUD owner record|required/);
       assert.equal(graph.counts.initialize, 0); assert.equal(graph.wasm.calls.length, 0);
       assert.equal(graph.f.raf.size, 0); assert.equal(graph.f.sockets, 0);
     }
   });
 });
 
-test('semantic-only actual factory works without construction while visible selection fails without renderer capture', async () => {
+test('semantic-only factory works without construction while owned HUD fails without renderer capture', async () => {
   await runGameModuleTest(async ({ assert, createGraph }) => {
     const semantic = createGraph({ hudNative: true });
     const hud = semantic.hudWasm(), factory = await semantic.load('runtime.mjs');
@@ -167,8 +194,8 @@ test('semantic-only actual factory works without construction while visible sele
     assert.equal(semantic.f.document.getElementById('slither-client-root').children.length, 3);
     runtime.dispose();
     const visible = createGraph({ ownedHudNative: true });
-    const entry = await visible.load('owned-entry.mjs');
-    await assert.rejects(entry.gamePageRuntime, /Closed HUD owner record/);
+    const factoryVisible = await visible.load('runtime.mjs');
+    await assert.rejects(factoryVisible.startGamePage({ initialize() {}, wasmApi: visible.wasm.api, hudReadout: true, ownedHudUi: true }), /Closed HUD owner record/);
     assert.equal(visible.counts.initialize, 0); assert.equal(visible.wasm.calls.length, 0);
   });
 });
@@ -243,10 +270,11 @@ test('visible factory rejects asynchronous or generator native substitutes befor
   });
 });
 
-test('actual owned graph publishes genuine current and final history after native/source release', async () => {
+test('actual HUD factory graph publishes genuine current and final history after native/source release', async () => {
   await runGameModuleTest(async ({ assert, createGraph }) => {
     const graph = createGraph({ hudNative: true, ownedHudNative: true }), hud = graph.hudWasm();
-    const { gamePageRuntime } = await graph.load('owned-entry.mjs'), runtime = await gamePageRuntime;
+    const factory = await graph.load('runtime.mjs');
+    const runtime = await factory.startGamePage({ initialize() {}, wasmApi: graph.wasm.api, hudReadout: true, ownedHudUi: true });
     const native = graph.f.edit.hud, root = graph.f.document.getElementById('slither-client-root'), mount = root.children.at(-1);
     const [readout, final] = mount.children, currentText = readout.children[0].children[1].children[0];
     const rankText = readout.children[1].children[1].children[0], populationText = readout.children[1].children[3].children[0];
@@ -285,9 +313,10 @@ test('construction failures preserve each exact primary and cleanup after partia
       native.controls.set(operation, operation === 'appendChild' ? {
         afterHook(receiver, child) { if (receiver.id === 'slither-client-root' && child.localName === 'div') throw primary; },
       } : { failure: primary });
-      const entry = await graph.load('owned-entry.mjs');
+      const factory = await graph.load('runtime.mjs');
+      const pending = factory.startGamePage({ initialize() {}, wasmApi: graph.wasm.api, hudReadout: true, ownedHudUi: true });
       let thrown = false, actual;
-      try { await entry.gamePageRuntime; } catch (error) { thrown = true; actual = error; }
+      try { await pending; } catch (error) { thrown = true; actual = error; }
       assert(thrown); assert.equal(actual, primary);
       const root = graph.f.document.getElementById('slither-client-root');
       assert.equal(root.children.length, 3);
@@ -313,8 +342,9 @@ test('caught construction callback reentry stays sticky and removal happens afte
         removed++; graph.f.edit.dispatch('resize');
         assert.equal(graph.wasm.counts().sceneFrees, 0, 'UI removal precedes native owner free');
       } });
-      const entry = await graph.load('owned-entry.mjs');
-      await assert.rejects(entry.gamePageRuntime, error => error === refusal && /owner operation active/.test(error.message));
+      const factory = await graph.load('runtime.mjs');
+      const pending = factory.startGamePage({ initialize() {}, wasmApi: graph.wasm.api, hudReadout: true, ownedHudUi: true });
+      await assert.rejects(pending, error => error === refusal && /owner operation active/.test(error.message));
       assert.equal(graph.f.document.getElementById('slither-client-root').children.length, 3);
       assert.equal(removed, Number(operation === 'appendChild'));
       assert.equal(graph.wasm.counts().sceneFrees, 1); assert.equal(graph.f.raf.size, 0);
@@ -326,7 +356,8 @@ test('owned removal failure consumes lease once and exhausts remaining owners wi
   await runGameModuleTest(async ({ assert, createGraph }) => {
     for (const primary of [undefined,null,false,0,'',Symbol('remove'),new Error('remove')]) {
       const graph = createGraph({ hudNative: true, ownedHudNative: true }); graph.hudWasm();
-      const runtime = await (await graph.load('owned-entry.mjs')).gamePageRuntime;
+      const factory = await graph.load('runtime.mjs');
+      const runtime = await factory.startGamePage({ initialize() {}, wasmApi: graph.wasm.api, hudReadout: true, ownedHudUi: true });
       graph.f.edit.hud.controls.set('removeChild', { afterFailure: primary });
       graph.f.faults.cleanup = () => { throw new Error('secondary native cleanup'); };
       let threw = false, value;

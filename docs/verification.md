@@ -38,6 +38,33 @@ pull requests, and manual dispatch. Normal tests and CI require no external
 reference and do not connect to game servers. Dependency and toolchain setup may
 access package sources. Release-plz remains dormant.
 
+## Default runtime and local Play status
+
+The selected implementation uses one default bootstrap for HUD, Play and a
+visible schema-2 leaderboard. Packaging accepts only that default entry. The
+standalone `/` page uses the same runtime/controller/gameplay/session with
+authored flat sources, a configured loopback endpoint, authored zero credentials
+and the existing challenge handshake. See [local Play](local-play.md) for the
+runnable path. Simulation remains in the separate slither-sim repository.
+
+On 2026-10-28, a Chrome session through the default page completed the real
+Wasm/simulator challenge and login, displayed score/leaderboard rows, and sent
+heading, keyboard-turn and boost-on/off frames after trusted input. A normal
+death/return enabled Play again, and a second explicit Play connected through
+the same runtime. The observed scene included the authored snake, food and
+arena edge. These are bounded local observations, without a timing/performance
+or original-pixel parity claim. Installed Chrome/Firefox,
+stock pixels/loading, remote profile HTTP and official-server acceptance remain
+separate. A normal local disconnect permits a replacement session only on the
+next explicit Play; remote acquisition remains one-shot and official checks
+still require the [manual authorization and ledger](#manual-live-check-boundary).
+
+The incremental evidence reports below describe their tested revisions. Older
+default/owned-entry names, package selections/counts, schema-1 routing and unbound
+startup statements are historical evidence, not the current entry contract.
+Earlier preview or raw-ingress checks do not establish the new default/local
+composition.
+
 ## Raw leaderboard row ingress
 
 The explicit schema-2 row path passes 1,211 Node tests with zero skips and 545
@@ -58,12 +85,12 @@ callback admission also rejects natural foreign bound asynchronous/generator
 kinds without invoking callbacks or tag getters. Allocator exhaustion and
 engine memory overhead remain unmeasured.
 
-All three production package selections contain 94 files across Chrome and
-Firefox. All 282 files verify; the shared validator snippet is byte-exact, and
-only the two selected bootstrap copies differ between modes. Permissions,
-hosts and CSP remain unchanged. This adds raw row delivery through an explicit
-session API; it establishes no leaderboard UI, minimap, installed-browser,
-profile HTTP, game connection or server acceptance.
+At that revision, all three production package selections contained 94 files
+across Chrome and Firefox. All 282 files verified; the shared validator snippet
+was byte-exact, and only the two selected bootstrap copies differed between
+modes. Permissions, hosts and CSP stayed unchanged. That slice added raw row
+delivery through an explicit session API; those checks established no leaderboard
+UI, minimap, installed-browser, profile HTTP, game connection or server acceptance.
 
 ## Owned Play entry and controls
 
@@ -144,8 +171,9 @@ composition run has zero skips.
 These results use authored Node/VM and native-operation doubles. They do not
 establish native DOM/CSS, pixels, installed-host/UI, profile HTTP, gameplay or
 server acceptance for this owner. Earlier native renderer checks do not transfer
-that acceptance. Default startup remains unbound; no nodes, labels, final
-visibility or automatic activation are selected. See [the owner contract](hud-view.md#explicit-bootstrap-owner).
+that acceptance. At that revision, default startup remained unbound; no nodes,
+labels, final visibility or automatic activation were selected. See
+[the owner contract](hud-view.md#explicit-bootstrap-owner).
 
 ## Static head accessories
 
@@ -194,7 +222,7 @@ These are synthetic source-path checks. A throwing cleanup may leave its
 resource unreleased, and terminal status cannot report its own failure without
 another attempt. No installed-browser cleanup, native editing, real-Wasm cleanup,
 profile acquisition or server acceptance follows from these tests. The default
-startup still registers no nickname field.
+startup at that revision still registered no nickname field.
 
 ## Local nickname-field owner
 
@@ -219,7 +247,7 @@ Native Rust behavior is unchanged; this integration reuses its existing build.
 These tests execute the actual gate IIFE and bootstrap with authored VM/native
 receiver and Wasm doubles. They do not establish native browser execution of
 the owner composition, field attachment, caret, IME, clipboard, undo, Firefox,
-installed-host/UI or server acceptance. Startup remains unbound. See
+installed-host/UI or server acceptance. Startup at that revision remained unbound. See
 [the local owner API](extension.md#local-nickname-field-owner).
 
 ## Lease-bound nickname input policy
@@ -242,7 +270,7 @@ A test-only single-claim facade composes actual bootstrap/gameplay/input modules
 with the handler before the existing notification filter. It verifies no extra
 control/source/clock/send/socket effects and preserves input errors through gate
 finalization. The Wasm boundary there is a synthetic double; production startup
-still registers no field. The separate explicit local owner API above now
+at that revision still registered no field. The separate explicit local owner API above now
 installs its private handler when a caller supplies a field.
 
 A fresh web build and the unchanged full real-Wasm suite pass. Generated
@@ -301,7 +329,7 @@ see [DOM event dispatch](https://dom.spec.whatwg.org/#concept-event-dispatch).
 These are authored Node/default-decision and separate real-Wasm/package checks.
 Actual descriptor support, visibility options, native propagation/defaults,
 typing/IME/clipboard/selection, CSS, installed-host/CSP and server acceptance
-remain unverified. No field is bound or registered by production startup, and
+remain unverified. No field was bound or registered by that production startup, and
 no sanitizer, focus, value mutation or login UI is added. Noncancelable and
 postmutation notifications are not value rollback. See the
 [private API and bounds](extension.md#private-nickname-edit-defaults).
@@ -399,7 +427,7 @@ no additional source capture and exact `undefined` preservation.
 
 Native sources remain unchanged from the 489-test journal integration. These are
 authored Node/real-Wasm Canvas-recorder results, not DOM/CSS, raster pixels,
-installed-host, full login or server acceptance. Bootstrap does not enable the
+installed-host, full login or server acceptance. That bootstrap did not enable the
 mode. See [semantic state and publication limits](hud-state.md).
 
 ## Same-step HUD lifecycle observation
@@ -468,7 +496,7 @@ new shared validator, with 39 files per browser.
 
 These checks cover the session boundary and package graph. They do not exercise
 a native HUD report producer, controller/gameplay HUD routing, lifecycle fade,
-visible UI, browser or server acceptance. Existing default gameplay remains on
+visible UI, browser or server acceptance. Default gameplay at that revision remained on
 the legacy subscription. See the [planning contract](stock-client.md#opt-in-session-hud-planning).
 
 ## Borrowed HUD packet decoders
@@ -509,7 +537,7 @@ retained-own contract, with no product change for that fixture failure.
 
 These are native and Node/Wasm results, using the current Node host's Math.pow.
 Browser arithmetic, installed extension, HUD and server acceptance remain
-unverified. Gameplay does not automatically enable tracking. See
+unverified. Gameplay at that revision did not automatically enable tracking. See
 [score-state API](score-state.md).
 
 ## Native score arithmetic
@@ -742,34 +770,37 @@ checks establish the guarded file boundaries, not ownership of arbitrary code.
 
 ## Offline scene and local simulator
 
-Build the web bindings, then run:
+For the default game path, build the web bindings and start a current
+challenge-capable [slither-sim](https://github.com/NikitaMGrimm/slither-sim) host
+in a separate terminal:
 
 ```sh
-npm run scene
+npm run build:web
 ```
-
-Open `http://127.0.0.1:18884/`. The initial scene is entirely synthetic: three
-snakes, 28 food items, original generated sprites and a generated background.
-Step advances the own front anchor by eight units. Reset restores the fixture;
-palette selection resets it with the selected own skin. Zoom and Follow affect
-only the camera. `window.slitherSceneReport` exposes state counts and camera data.
-
-For manual local integration, start an existing
-[slither-sim](https://github.com/NikitaMGrimm/slither-sim) executable in a separate
-terminal, then enable that exact port on the scene server:
 
 ```sh
 slither-sim host --bind 127.0.0.1:8766
+```
+
+Then serve the client:
+
+```sh
 npm run scene -- --simulator-port 8766
 ```
 
-Use the simulator's **host**, not its JSON `serve` command. Click **Connect local
-simulator**, move the pointer over the canvas to aim, and hold **Space** while the
-canvas has focus to boost. Blur releases boost. Disconnect stops the socket and
-input timer; Reset returns to the synthetic fixture. A life ends on own removal;
-another connection requires a manual click. No game discovery or official
-endpoint is accepted. The local host accepts placeholder login credentials, so
-this route does not verify credentials against another service.
+Open `http://127.0.0.1:18884/`, enter a nickname and click **Play**. This serves
+`web/game.html` with the default bootstrap, HUD and leaderboard. Local authored
+credentials pass through the existing challenge handshake; no remote profile is
+acquired. See [local Play](local-play.md) for controls, explicit session
+replacement and pending browser verification. Use the simulator's **host**, not
+its JSON `serve` command; no simulator source change is part of this client path.
+
+The old received-only preview is now `/anchors`; the old `/animated` remains a
+diagnostic. They work with `npm run scene` without a simulator port. The received
+preview's **Step**, **Reset**, **Palette**, **Zoom** and **Follow** retain their
+synthetic fixture behavior and `window.slitherSceneReport` diagnostics. Their
+optional **Connect local simulator** transport remains a separate direct-login
+diagnostic, not the default game's challenge session or its acceptance evidence.
 
 Use a recent source build of the simulator and record its commit. Its package
 version can remain unchanged between releases; `--version` alone does not
