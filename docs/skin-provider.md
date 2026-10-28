@@ -16,6 +16,7 @@ type Request = {
   x?: number; y?: number;      // finite, optional factory initialization positions
   attachmentId?: number;      // exact integer 0..65535; adapter interprets selection
   cosmetic?: number;          // exact opaque wire marker 0..255; no ID mapping
+  own?: boolean;              // explicit retained-own context, never inferred
 };
 type CatalogEntry = {
   source: HTMLCanvasElement | HTMLImageElement | null;

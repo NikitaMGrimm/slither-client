@@ -1,4 +1,5 @@
 import { ownData, stockInteger } from './stock-skin-rules.mjs';
+import { readStockAccessorySelection, sameStockAccessorySelection } from './stock-accessory-selection.mjs';
 
 const freeze = Object.freeze;
 
@@ -25,7 +26,7 @@ function metric(value, half) {
   return value;
 }
 
-/** Shared synchronous borrower; no capture or DOM registry survives a resolve. */
+/** Shared synchronous borrower; only an explicit accessory binding survives a resolve. */
 export function createStockSourceAccess({ realm, snapshotForOperation, random }) {
   const Canvas = ownData(realm, 'HTMLCanvasElement');
   const Image = ownData(realm, 'HTMLImageElement');
@@ -33,6 +34,7 @@ export function createStockSourceAccess({ realm, snapshotForOperation, random })
     || typeof snapshotForOperation !== 'function' || typeof random !== 'function') {
     throw new TypeError('Trusted entity source capabilities required');
   }
+  const constructors = freeze({ HTMLCanvasElement: Canvas, HTMLImageElement: Image });
   function getter(Constructor, key) {
     const read = Object.getOwnPropertyDescriptor(Constructor.prototype, key)?.get;
     if (typeof read !== 'function') throw new TypeError(`Native entity scalar unavailable: ${key}`);
@@ -77,6 +79,8 @@ export function createStockSourceAccess({ realm, snapshotForOperation, random })
     return states;
   }
   let busy = false;
+  let selection;
+  let previousRevision;
   return function withSnapshot(operation, build) {
     if (busy) throw new Error('Stock entity adapter reentry');
     busy = true;
@@ -85,11 +89,19 @@ export function createStockSourceAccess({ realm, snapshotForOperation, random })
       const raw = snapshotForOperation(operation);
       if (!Object.is(revision(ownData(operation, 'revision')), version)
         || !Object.is(revision(ownData(raw, 'revision')), version)) throw new TypeError('Entity operation revision mismatch');
-      if (ownData(raw, 'normalGameplay') !== true || ownData(raw, 'ownAccessory') !== -1) {
+      if (ownData(raw, 'normalGameplay') !== true) {
         throw new TypeError('Ordinary desktop entity capture required');
       }
       const palettes = array(ownData(ownData(raw, 'host'), 'per_color_imgs'), 42, 42, 'stock palette');
       const states = readiness(raw);
+      const accessory = readStockAccessorySelection(raw, constructors, states);
+      if (selection !== undefined && !sameStockAccessorySelection(selection, accessory)) {
+        throw new TypeError('Accessory selection changed; reset with a new adapter');
+      }
+      if (accessory && selection && Object.is(previousRevision, version)
+        && !Object.is(selection.revision, accessory.revision)) {
+        throw new TypeError('Accessory content changed without a new revision');
+      }
       const assets = new Map();
       function borrow(source) {
         if (source === null || source === undefined) unavailable('pending');
@@ -109,6 +121,11 @@ export function createStockSourceAccess({ realm, snapshotForOperation, random })
         assets.set(source, asset);
         return asset;
       }
+      // Entity consumers admit the same complete ready selection even when the
+      // selected raster is not one of their own palette uses.
+      if (accessory) borrow(accessory.source);
+      selection = accessory;
+      previousRevision = version;
       const result = build(freeze({
         palette(color) { return ownData(palettes, String(color)); },
         count(record, key) {
@@ -132,6 +149,11 @@ export function createStockSourceAccess({ realm, snapshotForOperation, random })
       if (!Object.is(revision(ownData(operation, 'revision')), version)
         || !Object.is(revision(ownData(raw, 'revision')), version)) throw new TypeError('Entity revision changed during factory');
       const finalStates = readiness(raw);
+      const finalAccessory = readStockAccessorySelection(raw, constructors, finalStates);
+      if (!sameStockAccessorySelection(accessory, finalAccessory)
+        || (accessory && !Object.is(accessory.revision, finalAccessory.revision))) {
+        throw new TypeError('Accessory selection or content changed during factory');
+      }
       for (const [source, asset] of assets) {
         const commitment = finalStates.get(source);
         if (commitment?.state !== 'ready') unavailable(commitment?.state ?? 'pending');

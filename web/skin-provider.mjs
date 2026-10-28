@@ -78,7 +78,11 @@ function requestSnapshot(request) {
   if (attachmentId !== undefined) integer(attachmentId, 0, 65535, 'attachmentId');
   const cosmetic = field(request, 'cosmetic');
   if (cosmetic !== undefined) integer(cosmetic, 0, 255, 'cosmetic');
-  return freeze({ skin, customBytes, x, y, attachmentId, ...(cosmetic === undefined ? {} : { cosmetic }) });
+  const own = field(request, 'own');
+  const hasOwn = Object.hasOwn(request, 'own');
+  if (hasOwn) flag(own, 'own');
+  return freeze({ skin, customBytes, x, y, attachmentId, ...(cosmetic === undefined ? {} : { cosmetic }),
+    ...(hasOwn ? { own } : {}) });
 }
 
 function scalar(element, Constructor, key) {
