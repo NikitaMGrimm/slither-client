@@ -74,12 +74,50 @@ fn numeric_bits(plans: &[BodyPaintPlan]) -> Vec<u64> {
     bits
 }
 
+// Pin representative coordinates independently of same-version determinism.
+// Absolute tolerance covers native libm rounding, far below a rendered pixel.
+fn numeric_samples(plans: &[BodyPaintPlan]) -> Vec<f64> {
+    let commands: Vec<_> = plans.iter().flat_map(|plan| &plan.commands).collect();
+    let mut samples = Vec::new();
+    for index in [0, plans.len() / 2, plans.len() - 1] {
+        let cursor = plans[index].final_distance_cursor;
+        samples.extend([cursor.x, cursor.y]);
+    }
+    for index in [0, commands.len() / 2, commands.len() - 1] {
+        let command = commands[index];
+        samples.extend([
+            command.center.x,
+            command.center.y,
+            command.translation.x,
+            command.translation.y,
+            f64::from(command.rotation.is_some()),
+            command.rotation.unwrap_or(0.),
+            command.destination.x,
+            command.destination.y,
+            command.destination.width,
+            command.destination.height,
+            command.alpha.requested,
+            command.alpha.effective,
+        ]);
+    }
+    samples
+}
+
+fn numeric_samples_match(actual: &[f64], expected: &[f64]) -> bool {
+    actual.len() == expected.len()
+        && actual
+            .iter()
+            .zip(expected)
+            .all(|(actual, expected)| (actual - expected).abs() <= 0.000_001)
+}
+
 #[test]
 fn crowded_recording_replays_complete_ordered_plans_and_matches_snapshots() {
     let recording = Recording::crowded();
     let mut first = recording.client();
     let mut second = recording.client();
     let mut snapshots = String::new();
+    let mut expected_numeric = include_str!("support/draw_list_numeric.txt").lines();
     for (index, frame) in recording.frames.iter().enumerate() {
         ingest(&mut first, frame);
         ingest(&mut second, frame);
@@ -100,9 +138,49 @@ fn crowded_recording_replays_complete_ordered_plans_and_matches_snapshots() {
         );
         if [0, 24, 36, 42, 48, 71, 72, 95].contains(&index) {
             snapshots.push_str(&snapshot(index, &a));
+            let mut expected = expected_numeric.next().unwrap().split_whitespace();
+            assert_eq!(expected.next().unwrap().parse::<usize>().unwrap(), index);
+            let expected: Vec<f64> = expected.map(|value| value.parse().unwrap()).collect();
+            let actual = numeric_samples(&a);
+            assert!(
+                numeric_samples_match(&actual, &expected),
+                "pinned numeric draw samples frame {index}: {actual:?}"
+            );
         }
     }
+    assert!(expected_numeric.next().is_none());
     assert_eq!(snapshots, include_str!("support/draw_list_snapshots.txt"));
+}
+
+#[test]
+fn numeric_snapshot_detects_changes_without_command_topology_changes() {
+    let recording = Recording::crowded();
+    let mut client = recording.client();
+    let mut output = Vec::new();
+    for frame in &recording.frames[..=24] {
+        ingest(&mut client, frame);
+        client.advance(frame.now_ms, false).unwrap();
+        let snakes = prepare(&mut client, frame);
+        output = plans(&client, &snakes, frame.high_quality);
+    }
+    let expected = numeric_samples(&output);
+    let topology = snapshot(24, &output);
+    for field in 0..4 {
+        let mut changed = output.clone();
+        let command = &mut changed[0].commands[0];
+        match field {
+            0 => command.center.x += 1.,
+            1 => command.rotation = Some(command.rotation.unwrap_or(0.) + 0.125),
+            2 => command.destination.width += 1.,
+            3 => command.alpha.effective += 0.125,
+            _ => unreachable!(),
+        }
+        assert_eq!(snapshot(24, &changed), topology);
+        assert!(!numeric_samples_match(
+            &numeric_samples(&changed),
+            &expected
+        ));
+    }
 }
 
 #[test]

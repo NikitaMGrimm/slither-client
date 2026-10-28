@@ -22,8 +22,13 @@ fresh clients at every frame, including command floating-point bits and signed
 zero. Eight checked-in structural snapshots pin body counts, per-pass counts
 and an order-sensitive fingerprint of sequence, pass, ordinal and asset index.
 The fingerprint is a compact regression checksum, not a cryptographic proof.
-Floating-point values are compared within the same process, not pinned across
-native libm implementations or browser Math. A separate packet/quality witness
+At the same eight frames, numeric snapshots pin three final cursors and the
+first, middle and last image command's center, translation, rotation, destination
+and requested/effective alpha. The checked-in decimal expectations use an
+absolute tolerance of 0.000001 for native libm rounding; full bit comparisons
+remain within the same process. A numeric-only witness changes center, rotation,
+size and alpha independently and verifies rejection while topology stays equal.
+A separate packet/quality witness
 checks that removing the death event changes output and LQ removes quality passes.
 Snapshots describe the existing authored implementation; they are not a reference
 oracle or pixel acceptance.
