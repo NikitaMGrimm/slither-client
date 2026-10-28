@@ -11,8 +11,10 @@ pub fn resolve_skin(
     skin_record(native_resolve_skin(skin, custom_bytes, no_segment_rotation).map_err(error)?)
 }
 
-/// Pure interim local selection: three authored stand-ins, ordinary paired eyes,
-/// no antenna and bounded but undisplayed custom bytes. This is not stock artwork.
+/// Pure local selection: three authored stand-ins, ordinary paired eyes and no
+/// antenna. Admitted custom runs project palettes modulo three, preserving run
+/// counts/order with first-variant shading. Empty/rejected custom data keeps
+/// `skin % 3` and seven ping-pong variants. This is not stock artwork.
 #[wasm_bindgen]
 pub fn resolve_local_skin(skin: u8, custom_bytes: &[u8]) -> Result<JsValue, JsValue> {
     skin_record(resolve_authored_local_skin(skin, custom_bytes).map_err(error)?)
