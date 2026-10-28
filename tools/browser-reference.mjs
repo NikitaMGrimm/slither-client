@@ -133,8 +133,9 @@ try {
   if (data.dropped || pageErrors || blocked.length || !receipt.foreground || !receipt.gpuTraceVerified
     || receipt.adapterVerification.accepted !== true) throw new Error('Private capture gates rejected');
   if (reference) receipt.comparison = { reference: path.resolve(v.reference), metadataOnly: v['metadata-only'],
-    screenshots: screenshots.map(s => ({ frame: s.frame, exactPngMatch: reference.screenshots.find(r => r.frame === s.frame)?.sha256 === s.sha256 })),
-    canvasLogHashEqual: reference.canvasSha256 === receipt.canvasSha256,
+    screenshots: v['metadata-only'] || reference.metadataOnly ? [] : screenshots.map(s => ({ frame: s.frame,
+      exactPngMatch: reference.screenshots.find(r => r.frame === s.frame)?.sha256 === s.sha256 })),
+    canvasLogHashEqual: v['metadata-only'] || reference.metadataOnly ? null : reference.canvasSha256 === receipt.canvasSha256,
     limit: 'Ordered logs and PNG hashes are retained. Hash inequality identifies a difference, without an automatic visual-parity claim. Native object IDs are page-local.' };
   receipt.status = 'passed';
 } catch (error) {

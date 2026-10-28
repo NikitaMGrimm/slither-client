@@ -25,14 +25,32 @@ try {
   const scenarioPath = path.join(scratch, 'authored-scenario.json');
   await fs.writeFile(adapterPath, '// Authored inert test adapter identity.\n', { flag: 'wx' });
   await fs.writeFile(scenarioPath, '{"kind":"authored-synthetic-test"}\n', { flag: 'wx' });
-  for (const variant of ['missing-events', 'dropped-events', 'valid-trace']) {
+  for (const variant of ['missing-events', 'dropped-events', 'valid-trace',
+    'compare-full', 'compare-metadata-reference', 'compare-metadata-current', 'compare-metadata-both']) {
     const output = path.join(scratch, variant);
     const inputRoot = path.join(scratch, 'inputs-' + variant);
     await fs.mkdir(inputRoot);
     const observation = { width: 640, height: 480, dpr: 1, focus: true, visibility: 'visible' };
+    const comparing = variant.startsWith('compare-');
+    const currentMetadata = ['compare-metadata-current', 'compare-metadata-both'].includes(variant);
+    const referenceMetadata = ['compare-metadata-reference', 'compare-metadata-both'].includes(variant);
+    const pixelMarker = Buffer.from('Authored screenshot identity marker, not browser pixels');
+    const savedReference = path.join(inputRoot, 'saved-reference');
+    if (comparing) {
+      await fs.mkdir(savedReference);
+      await fs.writeFile(path.join(savedReference, 'capture.json'), JSON.stringify({
+        role: 'original', status: 'passed', metadataOnly: referenceMetadata,
+        scenarioSha256: common.hash(await fs.readFile(scenarioPath)), beforeArm: observation,
+        canvasSha256: common.hash(Buffer.alloc(0)),
+        screenshots: referenceMetadata ? [] : [{ frame: 1, sha256: common.hash(pixelMarker) }],
+      }), { flag: 'wx' });
+    }
     const cleanup = [];
     const page = {
       setDefaultTimeout() {}, on() {}, async goto() {}, async bringToFront() {},
+      locator() { return { async screenshot({ path: file }) {
+        await fs.writeFile(file, pixelMarker, { flag: 'wx' }); return pixelMarker;
+      } }; },
       async evaluate(fn) {
         const text = String(fn);
         if (text.includes("observe('before-arm')")) return observation;
@@ -55,7 +73,7 @@ try {
     server.listen = () => { queueMicrotask(() => server.emit('listening')); };
     server.address = () => ({ port: 12345 });
     const adapter = {
-      server, pagePath: '/', canvasSelector: '#world', frames: 1, keyframes: [],
+      server, pagePath: '/', canvasSelector: '#world', frames: 1, keyframes: comparing ? [1] : [],
       viewport: { width: 640, height: 480, dpr: 1 },
       async ready() {}, async arm() {},
       async step() { return { frame: 1, done: true, failed: false }; },
@@ -83,8 +101,9 @@ try {
     const mocks = new Map([
       ['playwright', { chromium: { async launchPersistentContext() { return context; } } }],
       ['node:util', { parseArgs: () => ({ values: {
-        mode: 'capture-original', adapter: adapterPath, 'reference-root': inputRoot,
-        pack: inputRoot, scenario: scenarioPath, output, 'exact-frame': false, 'metadata-only': false,
+        mode: comparing ? 'compare-ours' : 'capture-original', adapter: adapterPath, 'reference-root': inputRoot,
+        pack: inputRoot, scenario: scenarioPath, output, reference: comparing ? savedReference : undefined,
+        'exact-frame': false, 'metadata-only': currentMetadata,
       } }) }],
       ['./browser-common.mjs', {
         ...common,
@@ -99,6 +118,9 @@ try {
         },
       }) }],
       ['./browser-layers.mjs', { observeWorldLayers: async () => ({ async sample() {}, async stop() { return {}; } }) }],
+      ['node:fs/promises', { ...fs, readFile: async (file, ...args) =>
+        file === path.join(common.root, 'dist/web/slither_client_bg.wasm')
+          ? Buffer.from('Authored inert Wasm hash identity; never executed') : fs.readFile(file, ...args) }],
     ]);
     const plugin = await synthetic({ createAdapter: async () => adapter });
     const module = new vm.SourceTextModule(source, {
@@ -114,7 +136,7 @@ try {
     });
     await module.evaluate();
     const receipt = JSON.parse(await fs.readFile(path.join(output, 'capture.json'), 'utf8'));
-    const valid = variant === 'valid-trace';
+    const valid = !['missing-events', 'dropped-events'].includes(variant);
     const expected = valid ? 'passed' : 'failed';
     assert.equal(receipt.gpuTraceVerified, valid);
     assert.equal(receipt.status, expected, variant + ': actual runner acceptance');
@@ -123,12 +145,18 @@ try {
     assert.deepEqual(receipt.cleanupErrors, []);
     assert.equal(logs.length, 1);
     // Actual runner persistence and catch/finally stay active, including failures.
-    for (const name of ['private-canvas.jsonl', 'private-steps.json', 'private-foreground.json', 'private-chrome-trace.json']) {
+    for (const name of ['private-steps.json', 'private-foreground.json', 'private-chrome-trace.json',
+      ...(!currentMetadata ? ['private-canvas.jsonl'] : [])]) {
       await fs.access(path.join(output, name));
     }
     if (expected === 'failed') {
       const error = JSON.parse(await fs.readFile(path.join(output, 'private-error.json'), 'utf8'));
       assert.equal(error.message, 'Private capture gates rejected');
+    }
+    if (comparing) {
+      const comparable = !currentMetadata && !referenceMetadata;
+      assert.equal(receipt.comparison.canvasLogHashEqual, comparable ? true : null);
+      assert.equal(receipt.comparison.screenshots.length, comparable ? 1 : 0);
     }
     console.log(JSON.stringify({ variant, status: receipt.status, gpuTraceVerified: receipt.gpuTraceVerified,
       exitCode: testProcess.exitCode ?? 0, cleanup, retainedReceipt: true }));

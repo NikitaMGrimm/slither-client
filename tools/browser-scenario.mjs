@@ -20,7 +20,7 @@ if (scenario.kind !== 'authored-synthetic' || !Array.isArray(scenario.steps) || 
 const repo = path.resolve(v.repo), output = await freshOutput(v.output, [repo]);
 const result = { kind: 'authored-synthetic', scenarioSha256: hash(await readFile(v.scenario)),
   status: 'running', browser: v.browser, checkpoints: [], actions: [], cleanup: [] };
-let peer, server, browser, context, page;
+let peer, server, browser, context, page, blocked = [], errors = [];
 try {
   execFileSync(process.execPath, ['tools/build-web.mjs'], { cwd: repo, stdio: 'inherit' });
   result.wasmSha256 = hash(await readFile(path.join(repo, 'dist/web/slither_client_bg.wasm')));
@@ -39,9 +39,9 @@ try {
   const origin = `http://127.0.0.1:${server.address().port}`;
   browser = await ({ chromium, firefox })[v.browser].launch({ headless: true });
   context = await browser.newContext({ viewport: scenario.viewport, deviceScaleFactor: 1, serviceWorkers: 'block' });
-  const blocked = await fence(context, origin, { socketOrigin: `ws://127.0.0.1:${peer.port}` });
+  blocked = await fence(context, origin, { socketOrigin: `ws://127.0.0.1:${peer.port}` });
   await context.addInitScript(installProbe); page = await context.newPage();
-  const errors = []; page.on('pageerror', e => errors.push(e.message));
+  page.on('pageerror', e => errors.push(e.message));
   await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
   await page.goto(origin); await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
   await page.evaluate(() => { browserProbe.recording = true; });
@@ -90,6 +90,8 @@ try {
     || (scenario.expectedLogins !== undefined && scenario.expectedLogins !== peer.receipt.logins)) throw new Error('Scenario execution gate failed');
   result.status = 'passed';
 } catch (e) { result.status = 'failed'; result.error = e.message; process.exitCode = 1;
+  result.blockedRequests = blocked; result.pageErrors = errors;
+  if (peer) result.peer = peer.receipt;
   if (page) { try { await page.screenshot({ path: path.join(output, 'failure.png') }); } catch {} }
 } finally {
   result.cleanupErrors = await cleanupResources([

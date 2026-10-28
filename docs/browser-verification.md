@@ -163,6 +163,8 @@ npm run browser:reference -- --mode compare-ours --adapter /external/authored-ad
 These are explicit manual jobs. No reference is downloaded. Each role runs alone
 in a fresh installed headed Chrome process/context/profile. Compare reads the
 saved reference identity and PNG/log hashes; it does not open an original page.
+If either run is metadata-only, no PNG or Canvas-log comparison is made:
+`canvasLogHashEqual` is `null` and the compared screenshot list is empty.
 Actual viewport and DPR must equal the reference before Arm. Each output is
 create-only and separate from archive, pack and saved reference directories.
 Refresh requires an explicit new capture command and fresh directory when the

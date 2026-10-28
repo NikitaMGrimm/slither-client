@@ -5,10 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { root, freshOutput, within, syntheticServer, temporaryProfile, json, fence, cleanupResources, readConfinedFile } from './browser-common.mjs';
-import { summarizeTrace, assessGraphics } from './browser-trace.mjs';
+import { summarizeTrace, assessGraphics, startTrace } from './browser-trace.mjs';
 import { syntheticPeer } from './browser-session-fixture.mjs';
 import { WebSocket } from 'ws';
-import { once } from 'node:events';
+import { EventEmitter, once } from 'node:events';
 import { safeLayer, correlateWorldTrace } from './browser-layers.mjs';
 
 // Authored synthetic infrastructure checks. No browser process or external source.
@@ -106,6 +106,23 @@ test('GPU trace verification uses real event categories, raster work and present
   assert.equal(actual.hasGpuRasterPresentation, true);
   assert.equal(actual.gpuEvents, 1); assert.equal(actual.rasterEvents, 1);
   assert.deepEqual(actual.relevantTracks, [{ id: '7:9', thread: 'CrGpuMain', process: 'GPU Process' }]);
+});
+
+test('a rejected trace end releases its pending completion handler and deadline', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const cdp = new EventEmitter();
+  cdp.send = async method => {
+    if (method === 'SystemInfo.getInfo') return { gpu: { devices: [] } };
+    if (method === 'Browser.getBrowserCommandLine') return { arguments: [] };
+    if (method === 'Tracing.getCategories') return { categories: [] };
+    if (method === 'Tracing.end') throw new Error('Authored trace-end failure');
+    return {};
+  };
+  const trace = await startTrace({ newBrowserCDPSession: async () => cdp });
+  await assert.rejects(trace.stop('unwritten-trace.json'), /Authored trace-end failure/);
+  assert.equal(cdp.listenerCount('Tracing.tracingComplete'), 0);
+  t.mock.timers.tick(20001);
+  await new Promise(resolve => setImmediate(resolve));
 });
 
 test('an advertised software adapter does not label the active hardware renderer as software', () => {

@@ -50,14 +50,23 @@ export async function startTrace(browser) {
     availableRelevantCategories: available.categories.filter(x => /gpu|raster|viz|^cc$/.test(x)), graphics },
   async stop(file, world) {
     if (stopped) throw new Error('Trace already stopped'); stopped = true;
+    let timeout, completed;
     const complete = new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('CDP trace completion deadline')), 20000);
-      cdp.once('Tracing.tracingComplete', result => { clearTimeout(timeout); resolve(result); });
+      timeout = setTimeout(() => reject(new Error('CDP trace completion deadline')), 20000);
+      completed = result => { clearTimeout(timeout); resolve(result); };
+      cdp.once('Tracing.tracingComplete', completed);
     });
-    await cdp.send('Tracing.end'); const completion = await complete;
-    await writeFile(file, JSON.stringify({ traceEvents: events }), { flag: 'wx' });
-    await cdp.detach();
-    return { ...summarizeTrace(events), completion,
-      ...(world ? { worldCorrelation: correlateWorldTrace(events, world) } : {}) };
+    // The completion deadline can reject while Tracing.end is still pending.
+    complete.catch(() => {});
+    try {
+      await cdp.send('Tracing.end'); const completion = await complete;
+      await writeFile(file, JSON.stringify({ traceEvents: events }), { flag: 'wx' });
+      await cdp.detach();
+      return { ...summarizeTrace(events), completion,
+        ...(world ? { worldCorrelation: correlateWorldTrace(events, world) } : {}) };
+    } finally {
+      clearTimeout(timeout);
+      cdp.off('Tracing.tracingComplete', completed);
+    }
   } };
 }

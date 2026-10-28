@@ -13,5 +13,18 @@ test('private capture requires complete trace evidence and retains failed-run cl
   const cases = stdout.trim().split(/\r?\n/).map(line => JSON.parse(line));
   assert.deepEqual(cases.map(({ variant, status }) => [variant, status]), [
     ['missing-events', 'failed'], ['dropped-events', 'failed'], ['valid-trace', 'passed'],
+    ['compare-full', 'passed'], ['compare-metadata-reference', 'passed'],
+    ['compare-metadata-current', 'passed'], ['compare-metadata-both', 'passed'],
+  ]);
+});
+
+test('an early scenario failure retains fence, page and peer diagnostics through cleanup', async () => {
+  const fixture = fileURLToPath(new URL('./browser-scenario-test-fixture.mjs', import.meta.url));
+  const repo = fileURLToPath(new URL('../', import.meta.url));
+  const { stdout } = await promisify(execFile)(process.execPath,
+    ['--experimental-vm-modules', fixture, '--repo', repo], { timeout: 15000 });
+  const cases = stdout.trim().split(/\r?\n/).map(line => JSON.parse(line));
+  assert.deepEqual(cases.map(({ variant, status, diagnosticsRetained }) => [variant, status, diagnosticsRetained]), [
+    ['early-step-throw', 'failed', true], ['completed-control', 'passed', true],
   ]);
 });
