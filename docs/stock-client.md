@@ -86,7 +86,7 @@ existing challenge session, with no profile acquisition. A normally disconnected
 local session is replaced only on the next explicit Play. Remote profile
 acquisition remains one-shot; neither path gains automatic retries.
 
-Minimap and announcement display remain missing. Full viewport/login layout, menu transitions,
+Announcement display remains missing. Full viewport/login layout, menu transitions,
 nickname drawing, background layers, preference controls and victory/save/replay
 flows remain incomplete. See the [roadmap](roadmap.md).
 

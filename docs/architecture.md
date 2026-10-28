@@ -180,7 +180,7 @@ leaderboard construction together. It binds fixed current score/rank and final
 score nodes, endpoint/nickname controls and visible leaderboard rows. Former
 owned-HUD/owned-Play entry files are removed; their UI builders remain shared
 runtime components. Activation alone starts no acquisition or game connection.
-Minimap state/display and announcement retention/display remain missing.
+Announcement retention/display remains missing.
 See [HUD views](hud-view.md), [stock adapters](stock-client.md) and
 [extension integration](extension.md).
 
