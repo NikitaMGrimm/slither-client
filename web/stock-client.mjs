@@ -23,11 +23,16 @@ function synchronousCallback(value, name) {
     .includes(Object.prototype.toString.call(value))) throw new TypeError(`Synchronous ${name} callback required`);
 }
 
-export function createStockClient({ scene, quality, adapter, hostAssets, target, palettes, background, width, height }) {
+export function createStockClient({ scene, quality, adapter, hostAssets, target, palettes, background, width, height,
+  appearanceMode = 'face' }) {
+  if (appearanceMode !== 'face' && appearanceMode !== 'accessory') throw new TypeError('Invalid stock appearance mode');
+  const packetMethod = `apply_frame_and_render_standard_with_${appearanceMode}_presentation_and_prey`;
+  const renderMethod = `render_standard_with_${appearanceMode}_presentation_at_size`;
+  const hudMethod = `${packetMethod}_and_hud`;
   const requireMethod = (record, name) => {
     if (typeof record?.[name] !== 'function') throw new TypeError(`Stock capability required: ${name}`);
   };
-  for (const name of ['apply_frame_and_render_standard_with_face_presentation_and_prey', 'render_standard_with_face_presentation_at_size', 'advance', 'set_gaze_heading']) requireMethod(scene, name);
+  for (const name of [packetMethod, renderMethod, 'advance', 'set_gaze_heading']) requireMethod(scene, name);
   for (const name of ['advance', 'update_statistics']) requireMethod(quality, name);
   for (const name of ['beginOperation', 'resolveAppearance', 'resolveRecipe', 'resolveAntennaRandom', 'endOperation']) requireMethod(adapter, name);
   for (const name of ['resolveFood', 'resolvePrey']) requireMethod(hostAssets, name);
@@ -82,7 +87,7 @@ export function createStockClient({ scene, quality, adapter, hostAssets, target,
     if (!Number.isSafeInteger(draws) || drawsSinceStatistics > 0xffffffff) throw new RangeError('Stock draw counter exhausted');
   }
   function renderAt(w, h) {
-    scene.render_standard_with_face_presentation_at_size(target, ...contextPalettes, background, w, h,
+    scene[renderMethod](target, ...contextPalettes, background, w, h,
       resolveRecipe, resolveRandom, quality);
     countDraws(1);
   }
@@ -145,15 +150,15 @@ export function createStockClient({ scene, quality, adapter, hostAssets, target,
         Reflect.apply(byteLength, bytes, []);
         flag(elapsedHeader);
         copiedPlan = copyHudIngressPlan(plan);
-        apply = scene.apply_frame_and_render_standard_with_face_presentation_and_prey_and_hud;
-        if (typeof apply !== 'function') throw new TypeError('Stock capability required: apply_frame_and_render_standard_with_face_presentation_and_prey_and_hud');
+        apply = scene[hudMethod];
+        if (typeof apply !== 'function') throw new TypeError(`Stock capability required: ${hudMethod}`);
       });
     },
     packet(bytes, elapsedHeader = false) {
       if (!(bytes instanceof Uint8Array)) throw new TypeError('Packet Uint8Array required');
       flag(elapsedHeader);
       return run(() => {
-        const count = scene.apply_frame_and_render_standard_with_face_presentation_and_prey(bytes, elapsedHeader,
+        const count = scene[packetMethod](bytes, elapsedHeader,
           resolveAppearance, resolveFood, resolvePrey, target, ...contextPalettes, background, backingWidth,
           backingHeight, resolveRecipe, resolveRandom, quality);
         countDraws(count);

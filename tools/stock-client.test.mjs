@@ -529,3 +529,59 @@ test('active controller integrates stock resolver and exact borrowed sources thr
   }
   assert.equal(client.diagnostics().draws, 4);
 });
+
+test('fixed accessory mode routes packet, HUD, frame, resize and explicit draws without requiring face methods', () => {
+  const f = fixture(), selected = [];
+  const packet = f.scene.apply_frame_and_render_standard_with_face_presentation_and_prey;
+  const render = f.scene.render_standard_with_face_presentation_at_size;
+  f.scene.apply_frame_and_render_standard_with_accessory_presentation_and_prey = (...args) => {
+    selected.push('packet'); return packet(...args);
+  };
+  f.scene.render_standard_with_accessory_presentation_at_size = (...args) => {
+    selected.push('render'); return render(...args);
+  };
+  let hudArgs;
+  f.scene.apply_frame_and_render_standard_with_accessory_presentation_and_prey_and_hud = (...args) => {
+    selected.push('hud'); hudArgs = args;
+    const request = { own: true, skin: 40, cosmetic: 255 };
+    args[2](request);
+    assert.equal(f.events.findLast(event => event[0] === 'appearance')[1], request);
+    return { schema: 1, commandCount: 1, setupDraws: 0, events: [] };
+  };
+  for (const name of ['apply_frame_and_render_standard_with_face_presentation_and_prey',
+    'render_standard_with_face_presentation_at_size',
+    'apply_frame_and_render_standard_with_face_presentation_and_prey_and_hud']) {
+    Object.defineProperty(f.scene, name, { get() { assert.fail('face capability inspected in accessory mode'); } });
+  }
+  const input = { ...f.input, appearanceMode: 'accessory' }, client = createStockClient(input);
+  input.appearanceMode = 'face';
+  const bytes = Uint8Array.of(0), plan = { schema: 1, commandCount: 1,
+    guards: [{ playing: true, closeRequested: false, deathPending: false }], finalCaptureIndices: [] };
+  assert.equal(client.packet(bytes), 2);
+  assert.equal(client.packetWithHud(bytes, true, plan).setupDraws, 0);
+  assert.equal(hudArgs.length, 16); assert.equal(hudArgs[0], bytes); assert.equal(hudArgs[1], true);
+  assert.equal(hudArgs[5], f.target); assert.deepEqual(hudArgs.slice(6, 9), f.palettes);
+  assert.deepEqual(hudArgs.slice(10, 12), [960, 540]); assert.equal(hudArgs[14], f.quality);
+  assert.deepEqual(hudArgs[15], plan);
+  client.frame(8); client.resize(800, 600); client.render();
+  assert.deepEqual(selected, ['packet', 'hud', 'render', 'render', 'render']);
+  assert.equal(f.events.filter(event => event[0] === 'advance').length, 1);
+  assert.equal(f.events.filter(event => event === 'begin').length, 5);
+  assert.equal(f.events.filter(event => event === 'end').length, 5);
+  assert.deepEqual(client.diagnostics(), { draws: 5, drawsSinceStatistics: 5, width: 800, height: 600, stopped: false });
+});
+
+test('appearance mode is explicit and validates selected capabilities before source operations', () => {
+  const f = fixture();
+  for (const appearanceMode of [null, '', 'auto', 'FACE', false, {}]) {
+    assert.throws(() => createStockClient({ ...f.input, appearanceMode }), /appearance mode/);
+  }
+  assert.throws(() => createStockClient({ ...f.input, appearanceMode: 'accessory' }), /accessory_presentation/);
+  for (const name of ['apply_frame_and_render_standard_with_accessory_presentation_and_prey',
+    'render_standard_with_accessory_presentation_at_size',
+    'apply_frame_and_render_standard_with_accessory_presentation_and_prey_and_hud']) {
+    Object.defineProperty(f.scene, name, { get() { assert.fail('default face mode inspected accessory capability'); } });
+  }
+  createStockClient(f.input).render();
+  assert.deepEqual(f.events, ['begin', 'render', ['recipe', { skin: 41, id: 7, own: true, drawOrdinal: 0 }], 'end']);
+});

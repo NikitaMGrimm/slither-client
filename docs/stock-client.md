@@ -14,9 +14,9 @@ geometry; draw callbacks borrow the selected body, effect, face and bulb objects
 Accepted custom data takes precedence over built-in special features. Skin 27
 uses the single-image face family; skin 40 uses the mouth-face family. The stock
 rules also select ordinary/custom body recipes, paired side images and ordinary
-antennas from ready borrowed sources. Generic Rust/Wasm static accessory APIs
-exist, but stock selection and the accessory-aware controller path remain
-unintegrated; active host accessories are rejected. Ready-source support does
+antennas from ready borrowed sources. The controller can explicitly select the
+existing accessory APIs; stock accessory selection remains unintegrated and
+active host accessories are rejected. Ready-source support does
 not establish pending-source/loading equivalence.
 
 `createStockEntityAssets` in `web/stock-food-provider.mjs` supplies food and prey
@@ -50,6 +50,15 @@ factory API, preserving ordered Setup draws. A frame advances one animation
 step, passes it to quality, frees it, updates statistics and renders once.
 Explicit resize renders synchronously without another animation update. Backing
 dimensions are integers in `1..4096`.
+
+The fixed construction option `appearanceMode: 'accessory'` routes packet,
+HUD, frame, resize and explicit rendering through the existing accessory APIs.
+The default is `'face'`; it does not inspect or require accessory methods.
+An external local source bundle can supply the same `appearanceMode` before
+startup. Changing it while the runtime retains sources rejects the operation.
+Accessory mode requires an explicit accessory or null in every appearance
+result and coherent ready attachment sources in recipes. It does not select an
+accessory from skin IDs or packet cosmetics, load artwork or add updates.
 
 The optional `control` callback uses `scene.advance_with_control` to run between
 the existing clock step and entity motion. It receives copied step values and a
