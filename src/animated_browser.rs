@@ -830,7 +830,7 @@ impl AnimatedScene {
         self.prey_sources.clear();
     }
 
-    /// Supply the optional loaded screen-filling image from the asset map.
+    /// Supply the optional loaded 512x512 screen-filling image from the asset map.
     /// None clears it. Existing render arguments remain the repeating tile.
     /// Selection survives world reset and never loads or copies a source.
     pub fn set_background_backdrop(
@@ -839,6 +839,9 @@ impl AnimatedScene {
     ) -> Result<(), JsValue> {
         if let Some(image) = &image {
             validate_background_image(image)?;
+            if image.natural_width() != 512 || image.natural_height() != 512 {
+                return Err(error("scene backdrop must be a 512x512 image"));
+            }
         }
         self.background_backdrop = image;
         Ok(())

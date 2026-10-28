@@ -157,6 +157,9 @@ export function bodyRenderSmoke(wasm) {
       const f = backgroundLayers, backdrop = new HTMLImageElement('authored backdrop');
       backdrop.naturalWidth = backdrop.naturalHeight = 512;
       f.scene.set_background_backdrop(backdrop);
+      const wrongSize = new HTMLImageElement('authored wrong-size backdrop');
+      wrongSize.naturalWidth = 511; wrongSize.naturalHeight = 512;
+      rejects(() => f.scene.set_background_backdrop(wrongSize), /512x512/);
       f.render();
       const trace = f.target.context.trace;
       const image = trace.find(value => value.op === 'image' && value.source === backdrop);
