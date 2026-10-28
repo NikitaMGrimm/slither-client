@@ -9,7 +9,7 @@
 
 use crate::{
     math,
-    presentation::{HudIngressError, HudIngressPlan},
+    presentation::{HudIngressError, HudIngressPlan, HudLeaderboardRows, HudLeaderboardRowsBudget},
     protocol::{self, ElapsedHeader, ProtocolError},
 };
 use std::{
@@ -359,6 +359,7 @@ pub(crate) enum HudCommandMarker {
         rank: u16,
         population: u16,
         death_pending: bool,
+        rows: Option<HudLeaderboardRows>,
     },
     FinalCapture,
 }
@@ -519,9 +520,16 @@ impl ClientState {
                 .validate(&decoded.commands)
                 .map_err(StateError::Hud)?;
         }
+        if let Some(collector) = hud.as_deref_mut() {
+            collector
+                .boundaries
+                .try_reserve_exact(decoded.commands.len())
+                .map_err(|_| StateError::Hud(HudIngressError::LeaderboardRowsResource))?;
+        }
         let mut staged = self.clone();
         let mut ignored = 0;
         let mut captures = 0;
+        let mut row_budget = HudLeaderboardRowsBudget::default();
         for (index, command) in decoded.commands.iter().enumerate() {
             let mut marker = HudCommandMarker::Other;
             let hud_leaderboard = hud.is_some() && command[0] == b'l';
@@ -537,6 +545,15 @@ impl ClientState {
                             rank: header.rank(),
                             population: header.population(),
                             death_pending: guard.death_pending,
+                            rows: if collector.plan.schema == 2 {
+                                Some(
+                                    row_budget
+                                        .copy_board(index, header)
+                                        .map_err(StateError::Hud)?,
+                                )
+                            } else {
+                                None
+                            },
                         };
                     }
                 } else if collector.plan.final_capture_indices.get(captures) == Some(&index) {

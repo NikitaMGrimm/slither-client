@@ -105,7 +105,7 @@ test('legacy construction and packets do not inspect new native capability or en
 
 const invalidPlans = [
   ['missing', () => undefined], ['null', () => null], ['Promise', () => Promise.resolve(plan())],
-  ['schema', () => ({ ...plan(), schema: 2 })], ['zero', () => plan(0)],
+  ['schema', () => ({ ...plan(), schema: 3 })], ['zero', () => plan(0)],
   ['oversize', () => ({ ...plan(), commandCount: 4097 })],
   ['mismatched guards', () => ({ ...plan(), guards: [] })],
   ['guard hole', () => ({ ...plan(), guards: Array(1) })],
@@ -271,5 +271,86 @@ test('closed score/event consistency rejects incompatible native reports without
     };
     assert.throws(() => f.client.packetWithHud(new Uint8Array(1), false, plan()), TypeError);
     assert.deepEqual(f.trace, ['begin', 'native', 'end']); assert.equal(f.client.diagnostics().draws, 0);
+  }
+});
+
+const rowsReport = () => ({ ...richReport(), schema: 2, leaderboardRows: [{ commandIndex: 2,
+  rows: [{ ordinal: 1, count: 65535, fractionalMass: 1 / 16777215, rawColor: 255, paletteIndex: 3, name: [0, 65, 255] }] }] });
+const rowsPlan = (count = 6) => ({ ...plan(count), schema: 2 });
+
+test('schema2 uses the same ABI/held sources/draw and clock charges, copying raw rows before release', () => {
+  const f = fixture(), native = rowsReport();
+  f.hooks.native = args => { assert.equal(args[15].schema, 2); frozen(args[15]); return native; };
+  f.hooks.end = () => { native.leaderboardRows[0].rows[0].name[1] = 66; };
+  const copied = f.client.packetWithHud(Uint8Array.of(108), false, rowsPlan());
+  assert.deepEqual(copied.leaderboardRows[0].rows[0].name, [0, 65, 255]); frozen(copied);
+  assert.deepEqual(f.trace, ['begin', 'native', 'end']);
+  assert.equal(f.client.diagnostics().draws, 2);
+  f.client.update(8);
+  assert.deepEqual(f.trace.slice(3), ['advance', 'quality', 'free', ['statistics', 2]]);
+  const legacy = fixture(); legacy.hooks.native = richReport;
+  assert.equal(Object.hasOwn(legacy.client.packetWithHud(Uint8Array.of(108), false, plan(6)), 'leaderboardRows'), false);
+});
+
+test('valid reports must match the selected schema in either direction before draw counting', () => {
+  for (const schema of [1, 2]) {
+    const f = fixture(); f.hooks.native = () => schema === 1 ? rowsReport() : richReport();
+    assert.throws(() => f.client.packetWithHud(Uint8Array.of(108), false, { ...plan(6), schema }),
+      { name: 'TypeError', message: 'Invalid HUD data' });
+    assert.deepEqual(f.trace, ['begin', 'native', 'end']);
+    assert.equal(f.client.diagnostics().draws, 0); assert(!f.active); assert(f.client.diagnostics().stopped);
+  }
+});
+
+test('distinct authored row names survive schema2 and retain exact equal schema1 header compatibility', () => {
+  for (const schema of [1, 2]) {
+    const outputs = [65, 66].map(name => {
+      const f = fixture();
+      f.hooks.native = args => {
+        assert.equal(args[0].at(-1), name);
+        const native = schema === 2 ? rowsReport() : richReport();
+        if (schema === 2) native.leaderboardRows[0].rows[0].name = [name];
+        return native;
+      };
+      return f.client.packetWithHud(Uint8Array.of(108, name), false, { ...plan(6), schema });
+    });
+    if (schema === 1) assert.deepEqual(...outputs);
+    else {
+      assert.notDeepEqual(...outputs);
+      assert.deepEqual(outputs.map(r => r.leaderboardRows[0].rows[0].name), [[65], [66]]);
+      assert.deepEqual(outputs[0].events, outputs[1].events);
+    }
+  }
+});
+
+test('nested row/name reflection stays guarded and preserves first failures over source-release failure', () => {
+  for (const primary of [undefined, null, false, 0, Symbol('row primary')]) {
+    const f = fixture();
+    f.hooks.native = () => {
+      const native = rowsReport();
+      native.leaderboardRows[0].rows[0].name = new Proxy([65], { ownKeys() {
+        for (const call of [() => f.client.packetWithHud(Uint8Array.of(1), false, rowsPlan()),
+          () => f.client.render(), () => f.client.dispose()]) assert.throws(call, /reentry/);
+        assert(f.active); throw primary;
+      } });
+      return native;
+    };
+    f.hooks.end = () => { throw new Error('secondary release'); };
+    caught(() => f.client.packetWithHud(Uint8Array.of(108), false, rowsPlan()), primary);
+    assert.deepEqual(f.trace, ['begin', 'native', 'end']); assert(!f.active);
+    assert.equal(f.client.diagnostics().draws, 0);
+    assert.throws(() => f.client.packetWithHud(Uint8Array.of(108), false, rowsPlan()), /stopped/);
+  }
+});
+
+test('schema2 source-release failure withholds copied rows after one native commit and never replays', () => {
+  for (const primary of [undefined, false, new Error('release')]) {
+    const f = fixture(); let commits = 0;
+    f.hooks.native = () => { commits++; return rowsReport(); };
+    f.hooks.end = () => { throw primary; };
+    caught(() => f.client.packetWithHud(Uint8Array.of(108), false, rowsPlan()), primary);
+    assert.equal(f.client.diagnostics().draws, 2); assert.equal(commits, 1);
+    assert.throws(() => f.client.packetWithHud(Uint8Array.of(108), false, rowsPlan()), /stopped/);
+    assert.equal(commits, 1); assert(!f.active);
   }
 });

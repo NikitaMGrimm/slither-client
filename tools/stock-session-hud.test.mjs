@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import vm from 'node:vm';
 import { createStockSession } from '../web/stock-session.mjs';
+import { createStockClient } from '../web/stock-client.mjs';
 import { copyHudIngressPlan, copyHudIngressReport } from '../web/stock-hud-contract.mjs';
 
 const setup = [97, ...new Array(22).fill(0), 19, 42];
@@ -54,14 +55,16 @@ const reportFor = (commands, plan) => {
       events.push({ commandIndex, kind: 'final-score', view: ready() });
     }
   });
-  return { schema: 1, commandCount: commands.length, setupDraws, events };
+  return { schema: plan.schema, commandCount: commands.length, setupDraws, events,
+    ...(plan.schema === 2 ? { leaderboardRows: events.filter(e => e.kind === 'leaderboard')
+      .map(e => ({ commandIndex: e.commandIndex, rows: [] })) } : {}) };
 };
 function assertFrozen(value) {
   if (value === null || typeof value !== 'object') return;
   assert.equal(Object.isFrozen(value), true);
   for (const key of Reflect.ownKeys(value)) assertFrozen(value[key]);
 }
-function harness({ hud = true, subscribe = true } = {}) {
+function harness({ hud = true, rows = false, subscribe = true } = {}) {
   let clock = 1000, reads = 0, decodes = 0;
   const hooks = {}, sockets = [], calls = [], reports = [], states = [], errors = [], trace = [];
   const wasm = {
@@ -93,7 +96,8 @@ function harness({ hud = true, subscribe = true } = {}) {
   };
   let unsubscribe;
   if (subscribe) {
-    if (hud) unsubscribe = session.subscribeWithHud(subscriber);
+    if (rows) unsubscribe = session.subscribeWithLeaderboardRows(subscriber);
+    else if (hud) unsubscribe = session.subscribeWithHud(subscriber);
     else { const { hud: unused, ...legacy } = subscriber; void unused; unsubscribe = session.subscribe(legacy); }
   }
   const step = (nowMs = clock, delta = 1) => session.afterStep({ nowMs, delta, wholeSteps: 1 });
@@ -417,7 +421,7 @@ test('leaderboard requires playing and exactly the pre-command deathPending, inc
 
 const malformedReports = [
   ['undefined', () => undefined], ['numeric legacy result', () => 0], ['Promise', () => Promise.resolve({})],
-  ['wrong schema', r => ({ ...r, schema: 2 })], ['count mismatch', r => ({ ...r, commandCount: 1 })],
+  ['wrong schema', r => ({ ...r, schema: 3 })], ['count mismatch', r => ({ ...r, commandCount: 1 })],
   ['unknown field', r => ({ ...r, extra: true })], ['symbol', r => ({ ...r, [Symbol()]: true })],
   ['inherited record', r => Object.assign(Object.create({}), r)],
   ['missing first setup', r => ({ ...r, events: r.events.slice(2), setupDraws: 1 })],
@@ -511,7 +515,7 @@ test('closed plan copies validate bounds, current realm, dense own data and stri
   assert.equal(copy.guards[0].playing, true); assert.deepEqual(copy.finalCaptureIndices, [0, 1]);
   let getterReads = 0;
   for (const modify of [
-    p => { p.commandCount = 0; }, p => { p.commandCount = 4097; }, p => { p.schema = 2; },
+    p => { p.commandCount = 0; }, p => { p.commandCount = 4097; }, p => { p.schema = 3; },
     p => { p.guards.length = 0; }, p => { delete p.guards[0]; }, p => { p.guards.extra = 1; },
     p => { p.guards[Symbol()] = 1; }, p => { p.guards[0].playing = 1; },
     p => { p.guards[0] = Object.create(p.guards[0]); },
@@ -764,4 +768,283 @@ test('canonical controls/protocol/challenge reject before packet and preserve de
     const h = harness({ hud: false }); h.start(); h.hooks.packet = () => result;
     h.sockets[0].message(setup); assert.equal(h.session.snapshot().phase, 'failed');
   }
+});
+
+const rawRow = (ordinal = 1, name = [0, 65, 255]) => ({ ordinal, count: 65535,
+  fractionalMass: 8388608 / 16777215, rawColor: 255, paletteIndex: 3, name });
+const subscriptionMethods = ['subscribe', 'subscribeWithHud', 'subscribeWithLeaderboardRows'];
+const subscriberFor = (h, method) => {
+  if (method !== 'subscribe') return h.subscriber;
+  const { hud, ...legacy } = h.subscriber; void hud; return legacy;
+};
+
+test('three subscription choices compete for the same permanent owner before Play', () => {
+  for (const first of subscriptionMethods) {
+    const h = harness({ subscribe: false });
+    const unsubscribe = h.session[first](subscriberFor(h, first));
+    for (const next of subscriptionMethods) assert.throws(() => h.session[next](subscriberFor(h, next)), /subscriber/);
+    unsubscribe(); unsubscribe();
+    for (const next of subscriptionMethods) assert.throws(() => h.session[next](subscriberFor(h, next)), /subscriber/);
+    assert.throws(() => h.session.play(request()), /Play/); assert.equal(h.sockets.length, 0);
+  }
+});
+
+test('row subscription shares closed callback grammar, synchronous-kind checks and bounded prototype admission', () => {
+  let getters = 0;
+  const mutations = [
+    s => { delete s.hud; }, s => { s.extra = 1; }, s => { s[Symbol()] = true; },
+    s => { s.packet = 1; }, s => { s.hud = 1; }, s => { s.state = null; }, s => { s.error = null; },
+    s => { Object.setPrototypeOf(s, {}); },
+    s => { Object.defineProperty(s, 'hud', { get() { getters++; } }); },
+    s => { s.hud = async () => {}; }, s => { s.hud = function* () {}; },
+    s => { s.hud = async function* () {}; }, s => { s.hud = (async () => {}).bind(null); },
+    s => { const f = async () => {}; Object.setPrototypeOf(f, Function.prototype); s.hud = f; },
+    s => { const f = ({ *hud() {} }).hud; Object.setPrototypeOf(f, Function.prototype); s.hud = f; },
+  ];
+  for (const mutate of mutations) {
+    const h = harness({ subscribe: false }), s = { ...h.subscriber }; mutate(s);
+    assert.throws(() => h.session.subscribeWithLeaderboardRows(s));
+    h.session.subscribeWithLeaderboardRows(h.subscriber);
+  }
+  assert.equal(getters, 0);
+  for (const cycle of [false, true]) {
+    const h = harness({ subscribe: false }); let visits = 0, callback;
+    const make = () => new Proxy(() => assert.fail('must not invoke callback'), { getPrototypeOf() {
+      if (++visits > 128) throw new Error('test probe bound'); return cycle ? callback : make();
+    } });
+    callback = make();
+    assert.throws(() => h.session.subscribeWithLeaderboardRows({ ...h.subscriber, hud: callback }), /Synchronous HUD sink/);
+    assert(visits <= 64); h.session.subscribeWithLeaderboardRows(h.subscriber);
+  }
+  const h = harness({ subscribe: false });
+  h.session.subscribeWithLeaderboardRows(Object.assign(Object.create(null), { ...h.subscriber, hud: ({ async() {} }).async }));
+});
+
+test('row subscription rejects foreign direct and bound asynchronous kinds without invoking callbacks', () => {
+  let calls = 0;
+  for (const expression of ['async function(){}', 'function*(){}', 'async function*(){}']) {
+    for (const bound of [false, true]) {
+      const foreign = vm.runInNewContext(`(${expression})${bound ? '.bind(null)' : ''}`);
+      const callback = new Proxy(foreign, { apply() { calls++; assert.fail('must not invoke callback'); } });
+      const h = harness({ subscribe: false });
+      assert.throws(() => h.session.subscribeWithLeaderboardRows({ ...h.subscriber, hud: callback }), /Synchronous HUD sink/);
+      h.session.subscribeWithLeaderboardRows(h.subscriber);
+      assert.equal(h.sockets.length, 0);
+    }
+  }
+  assert.equal(calls, 0);
+});
+
+test('row callback kind descriptors avoid getters and admit foreign synchronous callbacks', () => {
+  for (const bound of [false, true]) {
+    const callback = vm.runInNewContext(`(function(){})${bound ? '.bind(null)' : ''}`);
+    const h = harness({ subscribe: false });
+    assert.doesNotThrow(() => h.session.subscribeWithLeaderboardRows({ ...h.subscriber, hud: callback }));
+    assert.equal(h.sockets.length, 0);
+  }
+  let reads = 0;
+  const callback = () => {};
+  const prototype = Object.create(Function.prototype);
+  Object.defineProperty(prototype, Symbol.toStringTag, { get() { reads++; throw new Error('must not read tag'); } });
+  Object.setPrototypeOf(callback, prototype);
+  const h = harness({ subscribe: false });
+  h.session.subscribeWithLeaderboardRows({ ...h.subscriber, hud: callback });
+  assert.equal(reads, 0);
+  // Schema1 keeps its pre-existing descriptor admission and reflection order.
+  const legacy = harness({ subscribe: false });
+  Object.setPrototypeOf(callback, new Proxy(Function.prototype, {
+    getOwnPropertyDescriptor() { throw new Error('row-only reflection'); },
+  }));
+  assert.doesNotThrow(() => legacy.session.subscribeWithHud({ ...legacy.subscriber, hud: callback }));
+});
+
+test('row subscription rechecks owner and readiness after record/callback reflection', () => {
+  for (const site of ['record', 'callback']) for (const nested of subscriptionMethods) {
+    const h = harness({ subscribe: false }); let entered = false;
+    const enter = () => { if (!entered) { entered = true; h.session[nested](subscriberFor(h, nested)); } };
+    const value = site === 'record' ? new Proxy(h.subscriber, { ownKeys(target) { enter(); return Reflect.ownKeys(target); } })
+      : { ...h.subscriber, hud: new Proxy(() => {}, { getPrototypeOf(target) { enter(); return Reflect.getPrototypeOf(target); } }) };
+    assert.throws(() => h.session.subscribeWithLeaderboardRows(value), /subscriber/);
+    assert(entered); assert.equal(h.sockets.length, 0);
+  }
+  const h = harness({ subscribe: false });
+  const value = new Proxy(h.subscriber, { ownKeys(target) { h.session.close('reflection-close'); return Reflect.ownKeys(target); } });
+  assert.throws(() => h.session.subscribeWithLeaderboardRows(value), /subscriber/);
+  assert.equal(h.session.snapshot().phase, 'disconnected'); assert.equal(h.sockets.length, 0);
+});
+
+test('schema2 session + actual controller release sources before control commit, HUD, then state', () => {
+  const h = harness({ rows: true }); h.start();
+  let active = false, commits = 0, native;
+  const controller = createStockClient({
+    scene: {
+      apply_frame_and_render_standard_with_face_presentation_and_prey() { assert.fail('legacy native'); },
+      render_standard_with_face_presentation_at_size() { assert.fail('no extra draw'); },
+      advance() { assert.fail('no animation step'); }, set_gaze_heading() { assert.fail('no gaze'); },
+      apply_frame_and_render_standard_with_face_presentation_and_prey_and_hud(...args) {
+        h.trace.push('native'); commits++; assert(active);
+        assert.equal(h.session.snapshot().playing, false);
+        const plan = args.at(-1); assert.equal(plan.schema, 2); assertFrozen(plan);
+        native = reportFor(decode(args[0]), plan);
+        native.leaderboardRows[0].rows = [rawRow()];
+        native.leaderboardRows[2].rows = [rawRow(), rawRow(2, [])];
+        return native;
+      },
+    },
+    adapter: {
+      beginOperation() { h.trace.push('begin'); assert(!active); active = true; return {}; },
+      endOperation() {
+        h.trace.push('release'); assert(active); active = false;
+        assert.equal(h.session.snapshot().playing, false);
+        native.leaderboardRows[0].rows[0].name[1] = 66;
+      },
+      resolveAppearance() {}, resolveRecipe() {}, resolveAntennaRandom() { assert.fail('no random'); },
+    },
+    hostAssets: { resolveFood() {}, resolvePrey() {} },
+    quality: { advance() { assert.fail('no quality step'); }, update_statistics() { assert.fail('no statistics'); } },
+    target: {}, palettes: [{}, {}, {}], background: {}, width: 1, height: 1,
+  });
+  h.hooks.packet = (...args) => controller.packetWithHud(...args);
+  h.hooks.hud = report => {
+    assert(!active); assert.equal(h.session.snapshot().playing, true); assert.equal(h.session.snapshot().lifeEnded, true);
+    assert.equal(h.session.snapshot().closeRequested, true);
+    assert.deepEqual(report.leaderboardRows.map(b => b.commandIndex), [1, 3, 6]);
+    assert.deepEqual(report.leaderboardRows[0].rows[0].name, [0, 65, 255]);
+    assert.deepEqual(report.leaderboardRows[1].rows, []); assertFrozen(report);
+  };
+  const before = h.counters(), sends = h.sockets[0].sent.length; h.trace.length = 0;
+  h.sockets[0].message(setup, leaderboard, [120], leaderboard, v(2), v(1), leaderboard);
+  assert.deepEqual(h.trace, ['packet', 'begin', 'native', 'release', 'hud', 'state']);
+  assert.equal(commits, 1); assert.equal(controller.diagnostics().draws, 1);
+  assert.deepEqual(h.counters(), { reads: before.reads + 1, decodes: before.decodes + 1 });
+  assert.equal(h.sockets[0].sent.length, sends); assert.equal(h.errors.length, 0);
+  const p = h.calls[0].plan;
+  assert.deepEqual(p.finalCaptureIndices, []);
+  assert.deepEqual(p.guards[6], { playing: true, closeRequested: true, deathPending: true });
+});
+
+test('all three modes preserve shared control folds, action revisions, lifecycle, sends, clock/decode counts', () => {
+  const modes = [harness({ hud: false }), harness(), harness({ rows: true })];
+  for (const h of modes) {
+    h.connect();
+    h.sockets[0].message(leaderboard, v(1), [112], v(1));
+    const offer = h.session.pendingActions(); h.session.acknowledgeActions(offer);
+    finishVictory(h);
+    h.sockets[0].message(leaderboard, v(1));
+    h.sockets[0].message(setup, leaderboard, v(2), v(1), leaderboard);
+    h.step(4000); h.session.commitControl();
+  }
+  for (const h of modes.slice(1)) {
+    assert.deepEqual(h.session.snapshot(), modes[0].session.snapshot());
+    assert.deepEqual(h.session.pendingActions(), modes[0].session.pendingActions());
+    assert.deepEqual(h.sockets.map(s => s.sent), modes[0].sockets.map(s => s.sent));
+    assert.deepEqual(h.counters(), modes[0].counters());
+  }
+  for (const h of modes.slice(1)) {
+    assert.equal(h.reports[2].events.length, 0, 'nonplaying row command and final capture omitted');
+    if (h === modes[2]) {
+      assert.deepEqual(h.reports[2].leaderboardRows, []);
+      assert(h.calls.every(c => c.plan.schema === 2));
+    } else {
+      assert(!Object.hasOwn(h.reports[2], 'leaderboardRows'));
+      assert(h.calls.every(c => c.plan.schema === 1));
+    }
+  }
+});
+
+test('valid wrong-mode reports and malformed/mismatched sidecars reject before staged controls commit', () => {
+  for (const rows of [false, true]) {
+    const h = harness({ rows }); h.start();
+    h.hooks.packet = (bytes, elapsed, plan) => reportFor(decode(bytes), { ...plan, schema: rows ? 1 : 2 });
+    h.sockets[0].message(setup, v(1), leaderboard);
+    assert.equal(h.session.snapshot().lifeEnded, false); assert.equal(h.reports.length, 0);
+    assert.equal(h.errors.length, 1); assert.match(h.errors[0].message, /Invalid HUD data/);
+  }
+  for (const mutate of [
+    r => { r.leaderboardRows = []; }, r => { r.leaderboardRows.reverse(); },
+    r => { r.leaderboardRows[0].commandIndex = 0; }, r => { r.leaderboardRows[1].commandIndex = 1; },
+    r => { r.leaderboardRows.push({ commandIndex: 2, rows: [] }); },
+    r => { r.leaderboardRows[0].rows = [rawRow(2)]; },
+    r => { r.leaderboardRows[0].rows = [rawRow(1, new Array(256).fill(0))]; },
+  ]) {
+    const h = harness({ rows: true }); h.start();
+    h.hooks.packet = (bytes, elapsed, plan) => { const r = reportFor(decode(bytes), plan); mutate(r); return r; };
+    h.sockets[0].message(setup, leaderboard, v(1), leaderboard);
+    assert.equal(h.session.snapshot().phase, 'failed'); assert.equal(h.session.snapshot().lifeEnded, false);
+    assert.equal(h.reports.length, 0); assert.equal(h.calls.length, 1); assert.equal(h.errors.length, 1);
+  }
+});
+
+test('row membership cannot smuggle a board for a nonplaying command', () => {
+  const h = harness({ rows: true }); h.connect(v(1)); finishVictory(h);
+  h.hooks.packet = () => ({ schema: 2, commandCount: 1, setupDraws: 0,
+    events: [{ commandIndex: 0, kind: 'leaderboard', localRow: 0, rank: 0, population: 0, deathPending: false }],
+    leaderboardRows: [{ commandIndex: 0, rows: [rawRow()] }] });
+  h.sockets[0].message(leaderboard);
+  assert.equal(h.session.snapshot().phase, 'failed'); assert.equal(h.errors.length, 1);
+});
+
+test('row reflection reentry and transport termination are checked again before control commit', () => {
+  for (const stop of [false, true]) {
+    const h = harness({ rows: true }); h.start();
+    h.hooks.packet = (bytes, elapsed, plan) => {
+      const r = reportFor(decode(bytes), plan);
+      r.leaderboardRows[0].rows = [rawRow(1, new Proxy([65], { ownKeys(target) {
+        assert.throws(() => h.session.close(), /reentry/);
+        assert.throws(() => h.session.commitControl(), /reentry/);
+        assert.throws(() => h.session.afterStepWithHud({ nowMs: 1000, delta: 1, wholeSteps: 1 }), /reentry/);
+        if (stop) h.sockets[0].onclose();
+        return Reflect.ownKeys(target);
+      } }))];
+      return r;
+    };
+    h.sockets[0].message(setup, v(1), leaderboard);
+    assert.equal(h.session.snapshot().phase, stop ? 'disconnected' : 'victory');
+    assert.equal(h.session.snapshot().lifeEnded, !stop); assert.equal(h.reports.length, stop ? 0 : 1);
+  }
+});
+
+test('new row callback inherits synchronous result/reentry checks and postcommit no-replay failure semantics', () => {
+  for (const site of ['packet', 'report', 'hud', 'state']) for (const primary of [undefined, null, false, 0, Symbol('primary')]) {
+    const h = harness({ rows: true }); h.start();
+    if (site === 'report') h.hooks.packet = (bytes, elapsed, plan) => {
+      const r = reportFor(decode(bytes), plan);
+      r.leaderboardRows[0].rows = [rawRow(1, new Proxy([65], { ownKeys() { throw primary; } }))]; return r;
+    };
+    else h.hooks[site] = () => { throw primary; };
+    h.hooks.close = () => { throw new Error('secondary close'); };
+    h.hooks.error = () => { throw new Error('secondary error'); };
+    const socket = h.sockets[0], late = socket.onmessage;
+    socket.message(setup, v(1), leaderboard);
+    assert.equal(h.errors.length, 1); assert.equal(h.errors[0], primary);
+    assert.equal(h.session.snapshot().lifeEnded, site === 'hud' || site === 'state');
+    assert.equal(socket.closes, 1);
+    late({ data: frame([setup, leaderboard]) });
+    assert.equal(h.calls.length, 1); assert.equal(socket.closes, 1); assert.equal(h.sockets.length, 1);
+  }
+  let reads = 0;
+  for (const result of [false, {}, Promise.resolve(), Object.defineProperty({}, 'then', { get() { reads++; } })]) {
+    const h = harness({ rows: true }); h.start(); h.hooks.hud = () => result;
+    h.sockets[0].message(setup, v(1), leaderboard);
+    assert.equal(h.errors.length, 1); assert.equal(h.reports.length, 1);
+    assert.equal(h.session.snapshot().lifeEnded, true);
+  }
+  assert.equal(reads, 0);
+  const h = harness({ rows: true }); h.start();
+  h.hooks.hud = () => {
+    assert.equal(h.session.snapshot().playing, true);
+    for (const mutation of [() => h.session.close(), () => h.session.pendingActions(),
+      () => h.session.commitControl(), () => h.session.uiTick(1000)]) assert.throws(mutation, /reentry/);
+  };
+  h.sockets[0].message(setup, leaderboard); assert.equal(h.errors.length, 0);
+});
+
+test('row unsubscribe blocks later delivery and cannot renew owner or Play', () => {
+  const h = harness({ rows: true }); h.connect();
+  const count = h.reports.length, socket = h.sockets[0], late = socket.onmessage;
+  h.unsubscribe(); h.unsubscribe();
+  socket.message(leaderboard); late({ data: frame([leaderboard]) });
+  assert.equal(h.reports.length, count);
+  for (const method of subscriptionMethods) assert.throws(() => h.session[method](subscriberFor(h, method)), /subscriber/);
+  assert.throws(() => h.session.play(request())); assert.equal(h.sockets.length, 1);
 });
