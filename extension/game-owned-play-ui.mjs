@@ -1,4 +1,6 @@
-// Original fixed Play panel. Retain the inert lease before guarded native work.
+import { startPageLayout } from './start-page-layout.mjs';
+
+// Retain the inert lease before guarded native work.
 const freeze = Object.freeze;
 const apply = Reflect.apply;
 const functionSource = Function.prototype.call.bind(Function.prototype.toString);
@@ -9,11 +11,6 @@ const domFields = ['nodeType', 'ownerDocument', 'parentNode', 'firstChild',
   'nextSibling', 'isConnected', 'localName', 'namespaceURI', 'style', 'setText', 'setStyle'];
 const constructFields = ['createElement', 'createTextNode', 'appendChild', 'removeChild'];
 const controlFields = ['inputValue', 'inputMaxLength', 'inputAutocompleteOff', 'buttonType', 'buttonDisabled'];
-const statuses = freeze({ ready: 'Ready.', 'empty-endpoint': 'Enter a server address.',
-  'invalid-endpoint': 'Enter a valid server address.', 'invalid-nickname': 'Check the nickname.',
-  preparing: 'Preparing connection.', connecting: 'Connecting.', connected: 'Connected.',
-  'not-connected': 'Not connected.', unavailable: 'Play unavailable on this page.',
-  failed: 'Play failed. Reload to start again.' });
 const invalid = () => { throw new TypeError('Invalid owned Play UI input'); };
 
 function record(value, fields) {
@@ -51,7 +48,7 @@ function synchronous(callback) {
 
 /** Native failures unwind to the retaining runtime; this view never cleans up an active operation. */
 export function createOwnedPlayUi(input) {
-  let options = record(input, ['document', 'parent', 'dom', 'construct', 'controls', 'isCurrentDocument']);
+  let options = record(input, ['document', 'parent', 'dom', 'construct', 'controls', 'isCurrentDocument', 'projectStartPage']);
   input = undefined;
   let document = options.document;
   let parent = options.parent;
@@ -65,9 +62,32 @@ export function createOwnedPlayUi(input) {
   for (const name of controlFields) synchronous(controls[name]);
   let checker = options.isCurrentDocument;
   synchronous(checker);
+  let project = options.projectStartPage;
+  synchronous(project);
   options = undefined;
   let attempted = false, disposed = false, active = false, mounted = false, locked = false;
-  let ownedMount, button, status, statusText;
+  let ownedMount, button, buttonText, status, statusText;
+  let state = 'ready', playing = false, appliedDisabled = false;
+
+  const view = (nextState = state, nextLocked = locked, nextPlaying = playing) => {
+    const result = record(apply(project, undefined, [nextState, nextLocked, nextPlaying]),
+      ['visible', 'busy', 'disabled', 'status', 'button']);
+    if (['visible', 'busy', 'disabled'].some(key => typeof result[key] !== 'boolean')
+      || typeof result.status !== 'string' || typeof result.button !== 'string') invalid();
+    return result;
+  };
+  const render = projection => {
+    call('setText', statusText, projection.status);
+    call('setText', buttonText, projection.button);
+    if (projection.disabled !== appliedDisabled) {
+      // Consume before a native setter that may throw after its effect.
+      appliedDisabled = projection.disabled;
+      apply(controls.buttonDisabled, undefined, [button, projection.disabled]);
+    }
+    const style = call('style', ownedMount);
+    call('setStyle', style, 'display', projection.visible ? 'block' : 'none');
+    call('setStyle', style, 'cursor', projection.busy ? 'progress' : 'auto');
+  };
 
   const call = (name, target, ...args) => apply(dom[name], undefined, [target, ...args]);
   const current = () => {
@@ -100,7 +120,9 @@ export function createOwnedPlayUi(input) {
     if (!currentMount() || !connectedHere(button) || !connectedHere(status) || !connectedHere(statusText)
       || call('parentNode', button) !== ownedMount || call('parentNode', status) !== ownedMount
       || call('parentNode', statusText) !== status || call('firstChild', status) !== statusText
-      || call('nextSibling', statusText) !== null) invalid();
+      || call('nextSibling', statusText) !== null
+      || !connectedHere(buttonText) || call('parentNode', buttonText) !== button
+      || call('firstChild', button) !== buttonText || call('nextSibling', buttonText) !== null) invalid();
   };
 
   function mount() {
@@ -132,9 +154,9 @@ export function createOwnedPlayUi(input) {
       const endpointParent = element('label'), endpointLabel = text('Server address'), endpoint = element('input');
       const nicknameParent = element('label'), nicknameLabel = text('Nickname'), nickname = element('input');
       button = element('button');
-      const buttonText = text('Play');
+      buttonText = text('Play');
       status = element('div');
-      statusText = text(statuses.ready);
+      statusText = text(view().status);
       for (const field of [endpoint, nickname]) {
         if (apply(controls.inputValue, undefined, [field]) !== '') invalid();
         apply(controls.inputAutocompleteOff, undefined, [field]);
@@ -153,16 +175,11 @@ export function createOwnedPlayUi(input) {
         styles.add(style);
         for (const [property, value] of properties) call('setStyle', style, property, value);
       };
-      layout(ownedMount, [['position', 'absolute'], ['left', '8px'], ['top', '56px'], ['width', '48ch'],
-        ['display', 'block'], ['color', '#eee'], ['font-family', 'monospace'], ['font-size', '12px'],
-        ['font-variant-numeric', 'tabular-nums'], ['border', '0'], ['border-radius', '0'], ['background', 'none']]);
-      for (const label of [endpointParent, nicknameParent]) layout(label,
-        [['display', 'block'], ['height', '4em'], ['white-space', 'nowrap']]);
-      for (const field of [endpoint, nickname]) layout(field, [['display', 'block'], ['width', '46ch'],
-        ['box-sizing', 'border-box'], ['font-family', 'monospace'], ['font-size', '12px'], ['border-radius', '0']]);
-      layout(button, [['position', 'static'], ['display', 'block'], ['font-family', 'monospace'],
-        ['font-size', '12px'], ['border-radius', '0']]);
-      layout(status, [['display', 'block'], ['width', '48ch'], ['height', '2em'], ['white-space', 'pre-wrap']]);
+      layout(ownedMount, startPageLayout.panel);
+      for (const label of [endpointParent, nicknameParent]) layout(label, startPageLayout.label);
+      for (const field of [endpoint, nickname]) layout(field, startPageLayout.field);
+      layout(button, startPageLayout.button);
+      layout(status, startPageLayout.status);
       for (const [target, children] of edges) {
         if (call('firstChild', target) !== children[0]) invalid();
         for (let index = 0; index < children.length; index++) {
@@ -185,18 +202,35 @@ export function createOwnedPlayUi(input) {
     }
   }
 
-  function setStatus(state) {
+  function setStatus(nextState) {
     requireIdle();
     if (disposed) return;
-    if (typeof state !== 'string' || !Object.hasOwn(statuses, state)) invalid();
+    if (typeof nextState !== 'string') invalid();
     active = true;
     try {
+      const projection = view(nextState);
       requireMounted();
-      call('setText', statusText, statuses[state]);
+      render(projection);
       requireCurrent();
+      state = nextState;
     } finally {
       active = false;
     }
+  }
+
+  // This observation changes only the copied view, never session or replay state.
+  function setPlaying(value) {
+    requireIdle();
+    if (disposed) return;
+    if (typeof value !== 'boolean') invalid();
+    if (value === playing) return;
+    active = true;
+    try {
+      requireMounted();
+      render(view(state, locked, value));
+      requireCurrent();
+      playing = value;
+    } finally { active = false; }
   }
 
   function lock() {
@@ -207,7 +241,7 @@ export function createOwnedPlayUi(input) {
       requireMounted();
       // Status updates never unlock an admitted attempt.
       locked = true;
-      apply(controls.buttonDisabled, undefined, [button, true]);
+      render(view());
       requireCurrent();
     } finally {
       active = false;
@@ -220,7 +254,7 @@ export function createOwnedPlayUi(input) {
     active = true;
     try {
       requireMounted();
-      apply(controls.buttonDisabled, undefined, [button, false]);
+      render(view(state, false));
       requireCurrent();
       locked = false;
     } finally {
@@ -238,10 +272,10 @@ export function createOwnedPlayUi(input) {
         apply(construct.removeChild, undefined, [parent, ownedMount]);
       }
     } finally {
-      ownedMount = button = status = statusText = document = parent = dom = construct = controls = checker = undefined;
+      ownedMount = button = buttonText = status = statusText = document = parent = dom = construct = controls = checker = project = undefined;
       active = false;
     }
   }
 
-  return freeze({ mount, setStatus, lock, unlock, dispose });
+  return freeze({ mount, setStatus, setPlaying, lock, unlock, dispose });
 }

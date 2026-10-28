@@ -14,9 +14,11 @@ const routes = new Map([
   ['/scene/pkg/slither_client.js', ['dist/web/slither_client.js', 'text/javascript; charset=utf-8']],
   ['/scene/pkg/slither_client_bg.wasm', ['dist/web/slither_client_bg.wasm', 'application/wasm']],
   ['/game/host.css', ['extension/game-host.css', 'text/css; charset=utf-8']],
+  ['/assets/logo.svg', ['assets/logo.svg', 'image/svg+xml']],
   ...[['bootstrap', 'game-bootstrap'], ['runtime', 'game-runtime'],
     ['owned-hud-ui', 'game-owned-hud-ui'], ['owned-play-ui', 'game-owned-play-ui'],
     ['owned-announcement-ui', 'game-owned-announcement-ui'],
+    ['start-page-layout', 'start-page-layout'],
     ['owned-leaderboard-ui', 'game-owned-leaderboard-ui'], ['owned-minimap-ui', 'game-owned-minimap-ui'],
     ['owned-end-screen-ui', 'game-owned-end-screen-ui']]
     .map(([route, name]) => [`/game/${route}.mjs`, [`extension/${name}.mjs`, 'text/javascript; charset=utf-8']]),

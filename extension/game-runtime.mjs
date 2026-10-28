@@ -212,6 +212,10 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
           playAccepted = false;
         }
       }
+      if (playUi) {
+        playUi.setPlaying(gameplay.diagnostics().session.playing);
+        checkHudOperation();
+      }
     }
     catch (error) { throw operation.failed ? operation.primary : error; }
     finally { hudOperation = undefined; operation.primary = undefined; }
@@ -706,7 +710,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
           runNative(callback);
           const after = gameplay.hudSnapshot();
           const rowsChanged = ownedLeaderboardUi && gameplay.leaderboardSnapshot() !== beforeRows;
-          if (after !== null && (after !== before || rowsChanged || localHost || ownedMinimapUi || ownedAnnouncementUi || ownedEndScreenUi)) publishHud(after);
+          if (after !== null && (after !== before || rowsChanged || localHost || ownedMinimapUi || ownedPlayUi || ownedAnnouncementUi || ownedEndScreenUi)) publishHud(after);
         } catch (error) { fail(error); }
       }) : native.queueMicrotask,
       setInterval: ownedMinimapUi ? (callback, milliseconds) => native.setInterval(() => {
@@ -822,7 +826,8 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
       runPlay(() => {
         playUi = createOwnedPlayUi({ document: hudCapabilities.document, parent: root,
           dom: hudCapabilities.dom, construct: constructCapabilities,
-          controls: playCapabilities.controls, isCurrentDocument: hudCapabilities.isCurrentDocument });
+          controls: playCapabilities.controls, isCurrentDocument: hudCapabilities.isCurrentDocument,
+          projectStartPage: wasmApi.start_page_view });
         checkHudOperation();
         const mounted = playUi.mount();
         checkHudOperation();
