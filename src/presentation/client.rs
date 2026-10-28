@@ -9,11 +9,11 @@ use super::{
     FoodConsume, FoodCullBounds, FoodEaterPose, FoodError, FoodFactory, FoodSpawn, FoodWorld,
     FrameClock, FrameStep, HudIngressEventKind, HudIngressPlan, HudIngressReport,
     MAX_CURVE_SAMPLES, MinimapError, MinimapLayout, MinimapRenderPlan, MinimapState,
-    MinimapUpdateInput, MinimapView, NicknameCullBounds, NicknameDraw, NicknameInput,
-    NicknameState, OrdinaryAntennaGeometry, PairedFaceGeometry, PairedSideGeometry,
-    PreparedAntenna, PresentationError, PreyError, PreyFactory, PreyWorld, ScoreError, ScoreTables,
-    SnakeMetrics, SnakeObjectToken, SnakePresentation, StandardEyeGeometry,
-    StaticHeadAccessoryGeometry, finite, plan_minimap,
+    MinimapUpdateInput, MinimapView, NEUTRAL_NICKNAME_COLOR, NicknameCullBounds, NicknameDraw,
+    NicknameInput, NicknameState, NicknameTint, OrdinaryAntennaGeometry, PairedFaceGeometry,
+    PairedSideGeometry, PreparedAntenna, PresentationError, PreyError, PreyFactory, PreyWorld,
+    ScoreError, ScoreTables, SnakeMetrics, SnakeObjectToken, SnakePresentation,
+    StandardEyeGeometry, StaticHeadAccessoryGeometry, finite, plan_minimap,
 };
 use crate::{
     protocol::ElapsedHeader,
@@ -209,6 +209,38 @@ impl From<FacePresentation> for AccessoryPresentation {
 impl From<AppearancePresentation> for AccessoryPresentation {
     fn from(presentation: AppearancePresentation) -> Self {
         FacePresentation::from(presentation).into()
+    }
+}
+
+/// Complete appearance metadata with optional appearance-time nickname tint inputs.
+///
+/// Existing resolvers convert to this with no tint, retaining the neutral color.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TintedPresentation {
+    /// Existing face, antenna and accessory metadata, unchanged by tint selection.
+    pub presentation: AccessoryPresentation,
+    /// Explicit base color and units; `None` selects [`NEUTRAL_NICKNAME_COLOR`].
+    pub nickname_tint: Option<NicknameTint>,
+}
+
+impl From<AccessoryPresentation> for TintedPresentation {
+    fn from(presentation: AccessoryPresentation) -> Self {
+        Self {
+            presentation,
+            nickname_tint: None,
+        }
+    }
+}
+
+impl From<FacePresentation> for TintedPresentation {
+    fn from(presentation: FacePresentation) -> Self {
+        AccessoryPresentation::from(presentation).into()
+    }
+}
+
+impl From<AppearancePresentation> for TintedPresentation {
+    fn from(presentation: AppearancePresentation) -> Self {
+        AccessoryPresentation::from(presentation).into()
     }
 }
 
@@ -591,6 +623,8 @@ struct Entry {
 #[derive(Clone, Debug, PartialEq)]
 struct RetainedNickname {
     text: String,
+    // Resolved once at appearance; draws never consult tint inputs again.
+    color: [u8; 3],
     state: NicknameState,
 }
 
@@ -978,7 +1012,7 @@ impl AnimatedClient {
 
     /// Plan each Setup draw in event order on the disposable transaction stage.
     /// Received validation precedes all callbacks; any error discards the stage.
-    #[cfg(any(target_arch = "wasm32", test))]
+    #[cfg(test)]
     pub(crate) fn apply_frame_with_factories_and_setup<E, F, G, H>(
         &mut self,
         bytes: &[u8],
@@ -1035,7 +1069,7 @@ impl AnimatedClient {
     }
 
     /// Include every prey transition in event-time Setup draw planning.
-    #[cfg(any(target_arch = "wasm32", test))]
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn apply_frame_with_all_factories_and_setup<E, F, G, P, H>(
         &mut self,
@@ -1146,7 +1180,7 @@ impl AnimatedClient {
     }
 
     /// Plan event-time Setup draws with full appearances and food factories.
-    #[cfg(any(target_arch = "wasm32", test))]
+    #[cfg(test)]
     pub(crate) fn apply_frame_with_appearance_and_factories_and_setup<E, F, G, H>(
         &mut self,
         bytes: &[u8],
@@ -1175,7 +1209,7 @@ impl AnimatedClient {
     }
 
     /// Plan every ordered Setup with the complete appearance, food and prey transaction.
-    #[cfg(any(target_arch = "wasm32", test))]
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn apply_frame_with_appearance_and_all_factories_and_setup<E, F, G, P, H>(
         &mut self,
@@ -1590,8 +1624,72 @@ impl AnimatedClient {
         Ok(journal.expect("HUD mode always constructs a journal"))
     }
 
+    /// Resolve complete appearances plus optional explicit nickname tint inputs.
+    ///
+    /// Uses the [`Self::apply_frame_with_accessory_presentation`] mode. Each tint
+    /// resolves once, before its appearance is retained; an invalid unit rejects
+    /// the frame. Callback effects, including random draws made for the units,
+    /// remain outside model rollback.
+    pub fn apply_frame_with_tinted_presentation<E, F>(
+        &mut self,
+        bytes: &[u8],
+        header: ElapsedHeader,
+        resolve: F,
+    ) -> Result<FrameReport, E>
+    where
+        E: From<ClientPresentationError>,
+        F: FnMut(&Appearance, AppearanceContext) -> Result<TintedPresentation, E>,
+    {
+        self.apply_frame_accessory_resolved(
+            bytes,
+            header,
+            resolve,
+            true,
+            true,
+            true,
+            |_, _| Ok(None),
+            false,
+            |_, _| Ok(None),
+            false,
+            |_, _| Ok(()),
+        )
+    }
+
+    /// Plan every ordered Setup with tinted appearances, food and prey factories.
     #[allow(clippy::too_many_arguments)]
-    fn apply_frame_accessory_resolved<E, F, G, P, H>(
+    pub fn apply_frame_with_tinted_presentation_and_all_factories_and_setup<E, F, G, P, H>(
+        &mut self,
+        bytes: &[u8],
+        header: ElapsedHeader,
+        resolve: F,
+        mut resolve_food: G,
+        mut resolve_prey: P,
+        on_setup: H,
+    ) -> Result<FrameReport, E>
+    where
+        E: From<ClientPresentationError>,
+        F: FnMut(&Appearance, AppearanceContext) -> Result<TintedPresentation, E>,
+        G: FnMut(&FoodSpawnInput, f64) -> Result<FoodFactory, E>,
+        P: FnMut(&PreySpawnInput, f64) -> Result<PreyFactory, E>,
+        H: FnMut(&mut AnimatedClient, &Setup) -> Result<(), E>,
+    {
+        self.apply_frame_accessory_resolved(
+            bytes,
+            header,
+            resolve,
+            true,
+            true,
+            true,
+            |spawn, zoom| resolve_food(spawn, zoom).map(Some),
+            true,
+            |spawn, zoom| resolve_prey(spawn, zoom).map(Some),
+            true,
+            on_setup,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn apply_frame_accessory_resolved<E, F, R, G, P, H>(
         &mut self,
         bytes: &[u8],
         header: ElapsedHeader,
@@ -1607,7 +1705,8 @@ impl AnimatedClient {
     ) -> Result<FrameReport, E>
     where
         E: From<ClientPresentationError>,
-        F: FnMut(&Appearance, AppearanceContext) -> Result<AccessoryPresentation, E>,
+        F: FnMut(&Appearance, AppearanceContext) -> Result<R, E>,
+        R: Into<TintedPresentation>,
         G: FnMut(&FoodSpawnInput, f64) -> Result<Option<FoodFactory>, E>,
         P: FnMut(&PreySpawnInput, f64) -> Result<Option<PreyFactory>, E>,
         H: FnMut(&mut AnimatedClient, &Setup) -> Result<(), E>,
@@ -1762,7 +1861,7 @@ impl AnimatedClient {
         self.apply_frame_accessory_transaction(
             bytes,
             header,
-            |appearance, _| resolve(appearance).map(Into::into),
+            |appearance, _| resolve(appearance),
             enable_appearance,
             enable_face_presentation,
             false,
@@ -1775,8 +1874,9 @@ impl AnimatedClient {
         )
     }
 
+    /// Shared appearance transaction; mode flags match the public resolver families.
     #[allow(clippy::too_many_arguments)]
-    fn apply_frame_accessory_transaction<E, F, G, P, H>(
+    pub(crate) fn apply_frame_accessory_transaction<E, F, R, G, P, H>(
         &mut self,
         bytes: &[u8],
         header: ElapsedHeader,
@@ -1793,7 +1893,8 @@ impl AnimatedClient {
     ) -> Result<(FrameReport, Option<HudIngressReport>), E>
     where
         E: From<ClientPresentationError>,
-        F: FnMut(&Appearance, AppearanceContext) -> Result<AccessoryPresentation, E>,
+        F: FnMut(&Appearance, AppearanceContext) -> Result<R, E>,
+        R: Into<TintedPresentation>,
         G: FnMut(&FoodSpawnInput, f64) -> Result<Option<FoodFactory>, E>,
         P: FnMut(&PreySpawnInput, f64) -> Result<Option<PreyFactory>, E>,
         H: FnMut(&mut AnimatedClient, &Setup) -> Result<(), E>,
@@ -1975,7 +2076,16 @@ impl AnimatedClient {
                             .ok_or(StateError::MissingSetup)
                             .map_err(ClientPresentationError::from)?;
                         let own = next.own_snake().is_none();
-                        let resolved = resolve(&appearance, AppearanceContext { own })?;
+                        let TintedPresentation {
+                            presentation: resolved,
+                            nickname_tint,
+                        } = resolve(&appearance, AppearanceContext { own })?.into();
+                        // Explicit tint inputs are validated even while nicknames are off.
+                        let nickname_color = nickname_tint
+                            .map(|tint| tint.light_color())
+                            .transpose()
+                            .map_err(ClientPresentationError::from)?
+                            .unwrap_or(NEUTRAL_NICKNAME_COLOR);
                         if let Some(accessory) = resolved.accessory {
                             accessory
                                 .validate()
@@ -2036,6 +2146,7 @@ impl AnimatedClient {
                             nickname: if next.nicknames_enabled {
                                 Some(RetainedNickname {
                                     text: appearance.name.clone(),
+                                    color: nickname_color,
                                     state: NicknameState::new(1.)
                                         .map_err(ClientPresentationError::from)?,
                                 })
@@ -2818,9 +2929,7 @@ impl AnimatedClient {
                 .state
                 .draw(NicknameInput {
                     text: &nickname.text,
-                    // Authored neutral local policy; stock light-color/filter fidelity
-                    // is deliberately unresolved rather than inferred from skin IDs.
-                    color: [238, 238, 238],
+                    color: nickname.color,
                     corrected_head: metrics.corrected_head,
                     camera,
                     viewport_half: Point {

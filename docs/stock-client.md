@@ -19,6 +19,16 @@ existing accessory APIs; stock accessory selection remains unintegrated and
 active host accessories are rejected. Ready-source support does
 not establish pending-source/loading equivalence.
 
+A snapshot may include caller-owned `nicknamePaletteRgb`: 42 own-data
+`[red, green, blue]` byte triples indexed by stock palette. It joins the
+same-revision consistency check. When present, each appearance returns the
+selected rule's first-palette triple and three units from the adapter's `random`
+capability as `nicknameTint`; Rust computes the color. The extension snapshot
+does not supply this table, so its names keep the neutral color and consume no
+extra randomness. The added draws shift the shared random stream for later food,
+prey and antenna units. External callback effects, including those draws, cannot
+roll back with a rejected frame.
+
 `createStockEntityAssets` in `web/stock-food-provider.mjs` supplies food and prey
 factories from that same held capture. Rust selects creation-time image indices;
 the adapter supplies every selectable entry and the declared full and half

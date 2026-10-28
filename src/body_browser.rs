@@ -15,7 +15,7 @@ use crate::presentation::{
     AntennaBulbCommand, AppearancePresentation, BodyAsset, BodyAssetStatus, BodyAssetUse,
     BodyBlend, BodyFade, BodyImageCommand, BodyPaintRecipe, BodyPalette, BodyRect, BodyRun,
     BodyStyle, BodyVariantMode, ClientPresentationError, FaceGeometry, FacePresentation,
-    MouthFaceLayout, OrdinaryAntennaGeometry, PairedFaceGeometry, PairedSideGeometry,
+    MouthFaceLayout, NicknameTint, OrdinaryAntennaGeometry, PairedFaceGeometry, PairedSideGeometry,
     PairedSideLayout, SingleEyeLayout, SnakePresentation, StandardEyeGeometry,
     StaticHeadAccessoryGeometry, StaticHeadAccessoryLayout,
 };
@@ -121,6 +121,36 @@ pub(crate) fn appearance_request(appearance: &Appearance) -> Result<Object, JsVa
         &Uint8Array::from(appearance.custom_skin.as_slice()).into(),
     )?;
     Ok(value)
+}
+
+/// Optional `nicknameTint: {baseRgb, randomUnits}` beside appearance metadata.
+/// Only an absent field selects the neutral color. Unit ranges and the color
+/// arithmetic are validated natively when the appearance is retained.
+pub(crate) fn nickname_tint(value: &JsValue) -> Result<Option<NicknameTint>, JsValue> {
+    let tint = field(value, "nicknameTint")?;
+    if tint.is_undefined() {
+        return Ok(None);
+    }
+    let mut base_rgb = [0; 3];
+    for (channel, raw) in base_rgb
+        .iter_mut()
+        .zip(list(field(&tint, "baseRgb")?, 3, 3)?)
+    {
+        *channel = integer(raw, 0, 255)? as u8;
+    }
+    let mut random_units = [0.; 3];
+    for (unit, raw) in random_units
+        .iter_mut()
+        .zip(list(field(&tint, "randomUnits")?, 3, 3)?)
+    {
+        *unit = raw
+            .as_f64()
+            .ok_or_else(|| error("nickname random unit number required"))?;
+    }
+    Ok(Some(NicknameTint {
+        base_rgb,
+        random_units,
+    }))
 }
 
 /// The explicit paired lane accepts normalized own-data metadata only. It does

@@ -567,3 +567,53 @@ test('antenna randomness is draw-owned, exact length/order, no retry and bounded
   f.read = () => { assert.throws(() => f.adapter.beginOperation(), /reentry/); return f.snapshot; };
   f.adapter.beginOperation(); assert.throws(() => f.adapter.beginOperation(), /already active/); f.adapter.endOperation();
 });
+
+test('optional caller-owned nickname palette supplies selected base channels and three units per appearance', () => {
+  // Authored synthetic channels; no stock palette values are represented.
+  const table = () => Array.from({ length: 42 }, (_, i) => [i, 100 + i, 255 - i]);
+  const f = fixture(); f.snapshot.nicknamePaletteRgb = table();
+  f.adapter.beginOperation();
+  const cases = [[0], [9], [26], [60], [65], [200], [60, custom([1, 41])], [24, custom([0, 5], [2, 40], [1, 7])]];
+  for (const [skin, customBytes] of cases) {
+    const before = f.randomCalls, request = customBytes ? { skin, customBytes } : { skin };
+    const { basePalette } = resolveStockSkin(request, false);
+    const { nicknameTint } = f.adapter.resolveAppearance(request);
+    assert.deepEqual(nicknameTint, { baseRgb: table()[basePalette],
+      randomUnits: [before, before + 1, before + 2].map(n => (n % 64) / 64) }, `skin ${skin}`);
+    assert(Object.isFrozen(nicknameTint) && Object.isFrozen(nicknameTint.baseRgb) && Object.isFrozen(nicknameTint.randomUnits));
+    assert.equal(f.randomCalls, before + 3);
+  }
+  const before = f.randomCalls;
+  assert.equal(f.adapter.resolveRecipe({ skin: 60 }).status, 'ready');
+  assert.throws(() => f.adapter.resolveAppearance({ skin: 0, x: NaN }), /Finite/);
+  assert.equal(f.randomCalls, before, 'recipes and rejected appearances draw no tint units');
+  f.adapter.endOperation();
+
+  f.snapshot.nicknamePaletteRgb[3][1] = 7;
+  assert.throws(() => f.adapter.beginOperation(), /without a new revision/);
+  f.snapshot.revision = 'authored-palette-2';
+  f.adapter.beginOperation();
+  assert.deepEqual(f.adapter.resolveAppearance({ skin: 3 }).nicknameTint.baseRgb, [3, 7, 252]);
+  f.adapter.endOperation();
+
+  const g = fixture(); g.adapter.beginOperation();
+  assert.equal(Object.hasOwn(g.adapter.resolveAppearance({ skin: 3 }), 'nicknameTint'), false);
+  assert.equal(g.randomCalls, 0, 'missing palette metadata keeps the neutral path without randomness');
+});
+
+test('explicit nickname palette metadata is bounded own data before any operation', () => {
+  const valid = () => Array.from({ length: 42 }, () => [1, 2, 3]);
+  const invalid = [null, {}, valid().slice(1), [...valid(), [1, 2, 3]], new Uint8Array(126)];
+  for (const [index, color] of [[0, [1, 2]], [5, [1, 2, 256]], [9, [1, -1, 2]], [41, [1.5, 2, 3]], [2, ['1', 2, 3]], [3, null]]) {
+    const table = valid(); table[index] = color; invalid.push(table);
+  }
+  for (const table of invalid) {
+    const f = fixture(); f.snapshot.nicknamePaletteRgb = table;
+    assert.throws(() => f.adapter.beginOperation(), /nickname palette|Incompatible|Invalid|Expected record/);
+    assert.equal(f.randomCalls, 0);
+  }
+  const f = fixture(); let getters = 0;
+  f.snapshot.nicknamePaletteRgb = valid();
+  Object.defineProperty(f.snapshot.nicknamePaletteRgb[4], '1', { get() { getters++; return 2; } });
+  assert.throws(() => f.adapter.beginOperation(), /Accessor/); assert.equal(getters, 0);
+});

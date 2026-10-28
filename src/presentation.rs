@@ -65,7 +65,7 @@ pub use client::{
     AppearanceContext, AppearancePresentation, ClientControlActions, ClientControlView,
     ClientPresentationError, ClientScoreView, FacePresentation, MAX_DRAW_SAMPLES,
     MAX_RETAINED_SNAKES, MAX_RETAINED_TOTAL_BODY_POINTS, OwnControlView, OwnScoreView,
-    PreparedAccessorySnake, PreparedBodyGeometry, PreparedSnake, ScoreStatus,
+    PreparedAccessorySnake, PreparedBodyGeometry, PreparedSnake, ScoreStatus, TintedPresentation,
 };
 pub use curve::{
     CurveInput, CurveOutput, CurveSample, CurveVertex, MAX_CURVE_SAMPLES, sample_curve,
@@ -99,8 +99,8 @@ pub use minimap::{
 };
 pub use mouth_face::{MouthFaceGeometry, MouthFaceLayout, MouthImageLayout};
 pub use nickname::{
-    NicknameAlignment, NicknameBaseline, NicknameCullBounds, NicknameDraw, NicknameInput,
-    NicknameState,
+    NEUTRAL_NICKNAME_COLOR, NicknameAlignment, NicknameBaseline, NicknameCullBounds, NicknameDraw,
+    NicknameInput, NicknameState, NicknameTint,
 };
 pub use prey::{
     MAX_PREY_FAMILY_SOURCES, MAX_RETAINED_PREYS, PreyCorrections, PreyEaterPose, PreyError,
