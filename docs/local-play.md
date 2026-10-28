@@ -44,6 +44,25 @@ official-server checks retain [manual authorization and ledger requirements](ver
 
 ## Diagnostics and evidence
 
+### Private comparison artwork
+
+An external local comparison harness can call
+`createLocalGameHost({ endpoint, sourceFactory })`. The single asset map awaits
+`sourceFactory({ realm, random })` and uses its complete existing source bundle:
+`{ palettes, background, backgroundImage?, adapter, hostAssets }`. `palettes`
+contains the three context sources; the adapter's recipe catalog can contain
+the full palette families. The supplied adapter owns its source operations and
+skin selection. The default local Rust skin-policy binding remains available
+for ordinary startup but does not select the private adapter's sources.
+
+With no factory, the authored local assets and resolvers remain the default.
+A supplied factory must succeed; failure does not fall back to authored artwork.
+This hook does not load a pack, select a URL or change the simulator endpoint.
+Keep the factory, original image pack and all original-containing comparison
+evidence outside this checkout and public artifacts, following
+[the source boundary](provenance.md#tracked-material). Compare rendering using
+the same image pack on both sides; assess replacement artwork separately.
+
 The default page displays the server's received minimap in a separate bottom-right
 widget, with the own-position marker and a server label when supplied. Rust owns
 its decoding, pixels, transitions and placement; the DOM only displays the plan.
