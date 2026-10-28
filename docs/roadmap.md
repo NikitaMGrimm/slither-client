@@ -23,17 +23,20 @@ state, presentation state and drawing distinct, using idiomatic Rust types.
 The separate animated preview now connects ordered events, head/body/length
 corrections, following camera, draw-driven spacing and sampled curves. Synthetic
 native/Wasm and Windows browser checks exercise this path. Standard paired eyes
-now retain gaze, pupil motion and deferred draw targets. Full skins, special
-faces, HUD and team-mode drawing remain pending. An additive API now
+now retain gaze, pupil motion and deferred draw targets. Stock adapters select
+ordinary/custom body recipes, paired side images, single-image and mouth faces,
+and ordinary antennas from ready borrowed sources. Complete loading behavior,
+stock static accessories and team-mode drawing remain pending. An additive API now
 installs trusted normalized paired geometry before the first pupil update,
 retains it per appearance and checks standard-recipe coherence before drawing.
 An additional paired-face API retains side geometry and ready borrowed
 images to compose the complete represented ordinary paired family in both renderers.
-Startup blank-source behavior, other special faces and general host mapping remain
-outside this completion. Full host skin adaptation remains future work.
+Startup blank-source behavior and broader host acceptance remain outside this
+completion. Generic static accessory APIs exist; stock selection and the
+accessory-aware runtime path remain unintegrated.
 Ordinary antennas now have explicit appearance metadata, retained draw-driven
 chains and borrowed bulbs in both animated renderers, including their standard
-death-pass cursor effect. Chooser dynamics, pending-source timing and host mapping
+death-pass cursor effect. Chooser dynamics and pending-source timing
 remain separate. Radius easing shares the connected update clock and retains cadence
 through reset. The opt-in
 standard-body renderer now connects ordered body effects and applied quality to
@@ -67,10 +70,32 @@ the existing preview does not establish original rendering or gameplay parity.
 ## 4. Package the browser client
 
 The [extension package](extension.md) bundles the authored client and Rust/Wasm
-for Chrome and Firefox with local installation instructions. Its launcher opens
-the current client surface. This establishes packaging, not game-page replacement.
-Complete host asset mapping, input/connection flow, HUD/login and gameplay still
-need implemented and tested paths before claiming a fully playable extension.
+for Chrome and Firefox with local installation instructions, a preview launcher
+and explicit game-page activation. The activated runtime captures host
+capabilities and ready borrowed assets, holds original scheduling/socket paths,
+and composes authored input, session, update and rendering. Explicit Play APIs
+exist; activation alone starts neither profile acquisition nor a game connection.
+
+The current default entry mounts no Play controls or HUD and leaves score
+tracking disabled. Explicit owned-HUD and owned-Play selections provide fixed
+current/final readouts and, for owned-Play, endpoint/nickname controls. These are
+bounded compositions, not complete login/HUD equivalence. Raw leaderboard rows
+are delivered through an explicit schema-2 API; runtime readout entries still
+select schema 1 and have no visible row renderer.
+
+Planned work includes default-path and visible-leaderboard unification, minimap
+state/display, announcement retention/display, nickname drawing, full background
+layers, viewport/login layout, menu transitions, preferences and
+victory/save/replay flows. Unification is in progress; it does not yet establish
+a delivered entry or complete UI. Follow the
+[Rust ownership decision](architecture.md#ownership-decision) when moving the
+remaining JavaScript game/HUD/presentation state and policy; keep browser/DOM
+glue, extension plumbing and host capability capture in JavaScript.
+
+Installed Chrome/Firefox/CSP behavior, native input/layout/pixels, loading
+lifecycle and end-to-end gameplay need separate evidence. Existing APIs,
+synthetic checks and local package builds do not establish a fully playable
+installed extension.
 
 Keep [release configuration](releases.md) dormant until a releasable milestone
 and its packaged contents have been reviewed.

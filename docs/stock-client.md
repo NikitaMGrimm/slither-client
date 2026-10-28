@@ -1,8 +1,10 @@
 # Stock asset and input adapters
 
 The authored stock adapters connect existing live image objects to the Rust/Wasm
-presentation APIs. They do not ship artwork, execute the original skin or entity
-factories, open a connection, or establish complete game-page compatibility.
+presentation APIs. The source adapters do not ship artwork, execute the original
+skin or entity factories, or open connections. The separate session/gameplay
+composition provides explicit Play and transport; complete game-page compatibility
+remains unverified.
 
 ## Capture and source ownership
 
@@ -10,8 +12,12 @@ factories, open a connection, or establish complete game-page compatibility.
 host snapshot per operation. Appearance callbacks retain numeric face and antenna
 geometry; draw callbacks borrow the selected body, effect, face and bulb objects.
 Accepted custom data takes precedence over built-in special features. Skin 27
-uses the single-image face family. Skin 40 and static accessories remain
-unsupported.
+uses the single-image face family; skin 40 uses the mouth-face family. The stock
+rules also select ordinary/custom body recipes, paired side images and ordinary
+antennas from ready borrowed sources. Generic Rust/Wasm static accessory APIs
+exist, but stock selection and the accessory-aware controller path remain
+unintegrated; active host accessories are rejected. Ready-source support does
+not establish pending-source/loading equivalence.
 
 `createStockEntityAssets` in `web/stock-food-provider.mjs` supplies food and prey
 factories from that same held capture. Rust selects creation-time image indices;
@@ -64,6 +70,27 @@ cannot establish pre-motion input order. `reset_lag()` changes only the retained
 clock multiplier; a stock pong clears lag status and permits gradual recovery,
 rather than resetting that multiplier.
 
+## Entry composition and remaining gaps
+
+The extension runtime composes the host snapshot, skin/entity adapters,
+controller, gameplay and session. Its default entry provides explicit local Play
+APIs without bound Play controls, score tracking or a visible HUD. The separately
+selected owned-HUD entry enables score tracking and fixed current score/rank
+and final-score readouts; owned-Play adds endpoint/nickname controls and an admitted Play
+click. Activation alone starts neither profile acquisition nor a game socket.
+
+These entries do not yet provide a visible leaderboard, minimap or announcement
+display. Raw leaderboard row delivery is an explicit API, separate from the
+schema-1 readout selection below. Full viewport/login layout, menu transitions,
+nickname drawing, background layers, preference controls and victory/save/replay
+flows remain incomplete. Default-path and visible-leaderboard unification are
+planned on the [roadmap](roadmap.md).
+
+Game/HUD/presentation policy still held in JavaScript is listed in the
+[architecture ownership decision](architecture.md#ownership-decision). Browser
+capability capture, DOM operations and extension plumbing remain JavaScript's
+intended responsibilities.
+
 ## Opt-in session HUD planning
 
 `createStockSession.subscribeWithHud({packet, hud, state, error})` is an
@@ -92,9 +119,15 @@ responsible for score arithmetic and retained-own target resolution.
 `packetWithHud` and the optional gameplay `onHudPacket` callback connect this
 session seam to the native command-time journal and real Setup renderer.
 Score tracking requires explicit caller enablement before ingress. Default
-gameplay uses the legacy subscription. See the [journal API](hud-ingress.md).
+gameplay uses the legacy subscription. `subscribeWithLeaderboardRows` selects
+schema 2 through the same controller seam and adds copied raw rows; gameplay's
+HUD mode currently selects the header-only schema-1 subscription. Row delivery
+alone supplies no visible row state, text policy or renderer. See the
+[journal API](hud-ingress.md).
 The optional [semantic readout mode](hud-state.md) stages lifecycle fade and
-required draw samples after source release; visible HUD remains separate.
+required draw samples after source release. The owned entries bind its
+[view/DOM renderer](hud-view.md) to fixed readout/final nodes; a visible
+leaderboard remains separate.
 An error after a future native commit or observer effect cannot roll those
 effects back; the session terminates and never replays the packet.
 
