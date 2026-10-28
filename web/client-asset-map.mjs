@@ -10,20 +10,36 @@ export async function createClientAssetMap({ realm = globalThis } = {}) {
     return canvas;
   });
   const tile = createElement('canvas');
-  tile.width = 40; tile.height = 40;
+  const cellScale = 3;
+  tile.width = 108 * cellScale; tile.height = 64 * cellScale;
   const context = tile.getContext('2d');
-  // Leave gaps transparent so the separate dim backdrop remains visible below.
-  context.fillStyle = '#263440'; context.fillRect(0, 0, 1, 1);
+  function hexagon(x, y, radius, color) {
+    x *= cellScale; y *= cellScale; radius *= cellScale;
+    context.fillStyle = color;
+    context.beginPath();
+    context.moveTo(x + radius, y + radius / 4);
+    context.lineTo(x + radius / 4, y + radius);
+    context.lineTo(x - radius * 3 / 4, y + radius * 3 / 4);
+    context.lineTo(x - radius, y - radius / 4);
+    context.lineTo(x - radius / 4, y - radius);
+    context.lineTo(x + radius * 3 / 4, y - radius * 3 / 4);
+    context.closePath(); context.fill();
+  }
+  // Four staggered columns and two rows repeat exactly at both tile edges.
+  // Draw the overlapping edge cells too; gaps retain the dim backdrop below.
+  for (let column = 0; column <= 4; column++) {
+    for (let row = -1; row <= 2; row++) {
+      const x = column * 27, y = row * 32 + (column % 2) * 16;
+      hexagon(x, y, 15, '#09131d');
+      hexagon(x, y - 0.5, 13.5, '#26384a');
+      hexagon(x, y + 0.5, 13, '#1c2b3b');
+    }
+  }
 
   const backdrop = createElement('canvas');
   backdrop.width = 512; backdrop.height = 512;
   const backdropContext = backdrop.getContext('2d');
-  backdropContext.fillStyle = '#45505d'; backdropContext.fillRect(0, 0, 512, 512);
-  backdropContext.fillStyle = '#53606d';
-  for (let offset = 64; offset < 512; offset += 64) {
-    backdropContext.fillRect(offset, 0, 1, 512);
-    backdropContext.fillRect(0, offset, 512, 1);
-  }
+  backdropContext.fillStyle = '#34475b'; backdropContext.fillRect(0, 0, 512, 512);
   function image(canvas) {
     const source = new realm.Image();
     source.src = canvas.toDataURL();
