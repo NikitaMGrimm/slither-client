@@ -12,7 +12,7 @@ const webNames = ['stock-skin-provider.mjs', 'stock-client.mjs', 'stock-food-pro
   'skin-provider.mjs', 'client-input.mjs', 'stock-session.mjs', 'stock-hud-contract.mjs',
   'stock-hud-state.mjs', 'handshake-session.mjs', 'stock-live-profile.mjs',
   'stock-leaderboard-state.mjs', 'stock-leaderboard-view.mjs',
-  'local-game-host.mjs', 'synthetic-body.mjs', 'synthetic-food.mjs', 'synthetic-prey.mjs', 'loopback-session.mjs'];
+  'local-game-host.mjs', 'client-asset-map.mjs', 'synthetic-body.mjs', 'synthetic-food.mjs', 'synthetic-prey.mjs', 'loopback-session.mjs'];
 const entryNames = { 'bootstrap.mjs': 'game-bootstrap.mjs', 'runtime.mjs': 'game-runtime.mjs',
   'owned-hud-ui.mjs': 'game-owned-hud-ui.mjs', 'owned-play-ui.mjs': 'game-owned-play-ui.mjs',
   'owned-leaderboard-ui.mjs': 'game-owned-leaderboard-ui.mjs' };

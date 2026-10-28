@@ -32,14 +32,14 @@ function fixture({ href = 'http://127.0.0.1:18884/game', decode } = {}) {
       assert.equal(kind, '2d');
       return { beginPath() {}, arc() {}, fill() {}, fillRect() {} };
     }
-    toDataURL() { return 'data:image/png;base64,synthetic-local-tile'; }
+    toDataURL() { return `data:image/png;base64,synthetic-local-${this.width}x${this.height}`; }
   }
   class Image extends dom.hud.HTMLElement {
     constructor() { super('img'); }
-    get naturalWidth() { return 40; }
-    get naturalHeight() { return 40; }
-    get complete() { return true; }
-    async decode() { calls.push('decode'); await decode?.(); }
+    get naturalWidth() { return this.complete ? Number(this.src.match(/-(\d+)x/)[1]) : 0; }
+    get naturalHeight() { return this.naturalWidth; }
+    get complete() { return this.ready === true; }
+    async decode() { calls.push('decode'); await decode?.(); this.ready = true; }
   }
   const originalCreate = dom.Document.prototype.createElement;
   dom.Document.prototype.createElement = function (tag) {
@@ -86,8 +86,12 @@ test('local host supplies authored sources/profile and one claim without startin
   assert.equal(host.sources.palettes.length, 3);
   assert(host.sources.palettes.every(value => value instanceof f.realm.HTMLCanvasElement));
   assert(host.sources.background instanceof f.realm.HTMLImageElement);
-  assert.equal(host.sources.background.src, 'data:image/png;base64,synthetic-local-tile');
-  assert.deepEqual(f.calls, ['decode']);
+  assert.equal(host.sources.background.src, 'data:image/png;base64,synthetic-local-40x40');
+  assert(host.sources.backgroundImage instanceof f.realm.HTMLImageElement);
+  assert.equal(host.sources.backgroundImage.src, 'data:image/png;base64,synthetic-local-512x512');
+  assert.equal(host.sources.background.complete, true); assert.equal(host.sources.backgroundImage.complete, true);
+  assert.equal(host.sources.background.naturalWidth, 40); assert.equal(host.sources.backgroundImage.naturalWidth, 512);
+  assert.deepEqual(f.calls, ['decode', 'decode']);
   assert.equal(f.sockets.length, 0); assert.equal(f.listeners.size, 0);
   const metadata = host.gate.metadata();
   assert.equal(metadata, host.gate.metadata()); assert.equal(metadata.schema, 1); assert.equal(metadata.code, 'held');
@@ -140,7 +144,7 @@ test('source operation wraps existing resolvers, maps ordinary skins modulo3 and
     assert.equal(result.recipe.palettes[skin % 3].variants[0].asset.source, palettes[skin % 3]);
   }
   assert.throws(() => adapter.resolveRecipe({ skin: 256 }), /skin byte/);
-  assert.deepEqual(f.calls, ['decode']);
+  assert.deepEqual(f.calls, ['decode', 'decode']);
   const food = hostAssets.resolveFood({ palette: 9 }, active), prey = hostAssets.resolvePrey({ palette: 8 }, active);
   assert.equal(food.palette.color, 9); assert.equal(prey.palette.color, 8);
   assert(food.palette.bodies[0].asset.source instanceof f.realm.HTMLCanvasElement);
@@ -254,7 +258,7 @@ test('socket capability constructs only the selected endpoint; status and local 
   }
   assert.equal(f.sockets.length, 0);
   const socket = native.createSocket(endpoint); assert.equal(socket.url, endpoint); assert.equal(f.sockets.length, 1);
-  native.status('connected'); native.ordinaryReload(); assert.deepEqual(f.calls, ['decode', 'reload']);
+  native.status('connected'); native.ordinaryReload(); assert.deepEqual(f.calls, ['decode', 'decode', 'reload']);
   f.realm.requestAnimationFrame = () => assert.fail('Uncaptured RAF');
   native.requestAnimationFrame(() => {}); assert.equal(f.calls.at(-1)[0], 'requestAnimationFrame');
   host.dispose(); assert.throws(() => native.createSocket(endpoint), /Current local/);
@@ -270,9 +274,10 @@ test('document, top and URL changes invalidate the host, including navigation du
     assert.throws(() => host.sources.adapter.beginOperation(), /Current local/);
     assert.throws(() => native.createSocket(endpoint), /Current local/); host.dispose();
   }
-  let release;
-  const f = fixture({ decode: () => new Promise(resolve => { release = resolve; }) });
-  const pending = create(f); f.realm.location.href += '?navigation'; release();
+  const releases = [];
+  const f = fixture({ decode: () => new Promise(resolve => { releases.push(resolve); }) });
+  const pending = create(f); f.realm.location.href += '?navigation';
+  for (const release of releases) release();
   await assert.rejects(pending, /Current local/);
   assert.equal(f.listeners.size, 0); assert.equal(f.sockets.length, 0);
 });

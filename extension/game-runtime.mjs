@@ -520,6 +520,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
       if (localHost && !localHost.isCurrentDocument()) throw new Error('Current local game document required');
       const capture = localHost ? localHost.sources : reader.capture();
       if (context && (capture.background !== context.background
+        || capture.backgroundImage !== context.backgroundImage
         || capture.palettes.some((source, index) => source !== context.palettes[index]))) {
         const error = new Error('Renderer context sources changed; reload required'); error.status = 'unsupported'; throw error;
       }
@@ -573,8 +574,10 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
         return held;
       } });
     const startMs = native.now();
-    context = { palettes: initial.palettes, background: initial.background };
+    context = { palettes: initial.palettes, background: initial.background,
+      backgroundImage: initial.backgroundImage };
     scene = new wasmApi.AnimatedScene(startMs);
+    if (initial.backgroundImage !== undefined) scene.set_background_backdrop(initial.backgroundImage);
     if (hudReadout) scene.enable_score_tracking();
     quality = new wasmApi.DesktopQuality(1, startMs);
     const backing = size();

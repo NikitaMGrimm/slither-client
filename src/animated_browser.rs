@@ -11,7 +11,7 @@ use crate::{
         BorrowedSources, Recipe, ResolveError, appearance_request, paired_face, request,
         same_decoration, same_eyes, standard_eyes,
     },
-    canvas_browser::{CanvasFrame, CanvasPreflight, draw_sprite},
+    canvas_browser::{CanvasFrame, CanvasPreflight, draw_sprite, validate_background_image},
     face_browser::{
         AccessorySources, FaceSources, accessory_appearance as parse_accessory_presentation,
         appearance as parse_face_presentation,
@@ -20,18 +20,19 @@ use crate::{
     presentation::{
         AccessoryPresentation, AnimatedClient, AntennaDrawBudget, AntennaPath,
         AntennaRandomRequest, AppearanceContext, AppearancePresentation, ArenaEdgeInput,
-        ArenaEdgePlan, BodyPaintError, BodyPaintInput, BodyPaintPlan, BodyPaintQuality,
-        BodyPaintView, BodyPaintVisual, ClientControlActions, ClientControlView, ClientScoreView,
-        CurveInput, CurveOutput, EyeLayoutInput, FaceGeometry, FacePresentation, FoodImageCommand,
-        FoodPaintInput, FoodPaintPlan, HudCommandGuard, HudIngressEventKind, HudIngressPlan,
-        HudIngressReport, LeaderboardRowScore, LeaderboardScoreInput,
-        LeaderboardScoreProjector as NativeLeaderboardScoreProjector, MAX_BODY_PAINT_COMMANDS,
-        MAX_DRAW_SAMPLES, MAX_RETAINED_SNAKES, MouthFaceLayout, OrdinaryAntennaGeometry,
-        PairedSideLayout, PreparedAccessorySnake, PreparedAntenna, PreparedSnake, PreyEaterPose,
-        PreyImageCommand, PreyPaintInput, PreyPaintPlan, QualitySnapshot, ScoreError, ScoreStatus,
-        SingleEyeLayout, SnakePresentation, StandardEyeLayout, StaticHeadAccessoryGeometry,
-        StaticHeadAccessoryLayout, Turn, plan_arena_edge, plan_food, plan_prey, plan_standard_body,
-        plan_standard_body_with_antenna, sample_curve_with_heading,
+        ArenaEdgePlan, BackgroundInput, BackgroundPlan, BodyPaintError, BodyPaintInput,
+        BodyPaintPlan, BodyPaintQuality, BodyPaintView, BodyPaintVisual, ClientControlActions,
+        ClientControlView, ClientScoreView, CurveInput, CurveOutput, EyeLayoutInput, FaceGeometry,
+        FacePresentation, FoodImageCommand, FoodPaintInput, FoodPaintPlan, HudCommandGuard,
+        HudIngressEventKind, HudIngressPlan, HudIngressReport, LeaderboardRowScore,
+        LeaderboardScoreInput, LeaderboardScoreProjector as NativeLeaderboardScoreProjector,
+        MAX_BODY_PAINT_COMMANDS, MAX_DRAW_SAMPLES, MAX_RETAINED_SNAKES, MouthFaceLayout,
+        OrdinaryAntennaGeometry, PairedSideLayout, PreparedAccessorySnake, PreparedAntenna,
+        PreparedSnake, PreyEaterPose, PreyImageCommand, PreyPaintInput, PreyPaintPlan, QualityMode,
+        QualitySnapshot, ScoreError, ScoreStatus, SingleEyeLayout, SnakePresentation,
+        StandardEyeLayout, StaticHeadAccessoryGeometry, StaticHeadAccessoryLayout, Turn,
+        plan_arena_edge, plan_food, plan_prey, plan_standard_body, plan_standard_body_with_antenna,
+        sample_curve_with_heading,
     },
     presentation_browser::AnimationStep,
     prey_browser::PreySources,
@@ -805,6 +806,7 @@ pub struct AnimatedScene {
     client: AnimatedClient,
     food_sources: FoodSources,
     prey_sources: PreySources,
+    background_backdrop: Option<HtmlImageElement>,
 }
 
 #[wasm_bindgen]
@@ -816,6 +818,7 @@ impl AnimatedScene {
             client: AnimatedClient::new(start_ms).map_err(error)?,
             food_sources: FoodSources::default(),
             prey_sources: PreySources::default(),
+            background_backdrop: None,
         })
     }
 
@@ -825,6 +828,23 @@ impl AnimatedScene {
         self.client.reset();
         self.food_sources.clear();
         self.prey_sources.clear();
+    }
+
+    /// Supply the optional loaded 512x512 screen-filling image from the asset map.
+    /// None clears it. Existing render arguments remain the repeating tile.
+    /// Selection survives world reset and never loads or copies a source.
+    pub fn set_background_backdrop(
+        &mut self,
+        image: Option<HtmlImageElement>,
+    ) -> Result<(), JsValue> {
+        if let Some(image) = &image {
+            validate_background_image(image)?;
+            if image.natural_width() != 512 || image.natural_height() != 512 {
+                return Err(error("scene backdrop must be a 512x512 image"));
+            }
+        }
+        self.background_backdrop = image;
+        Ok(())
     }
 
     /// Restore only the existing clock's lag multiplier, without advancing time.
@@ -3046,10 +3066,7 @@ impl AnimatedScene {
             applied.quality_scale,
             detailed_style,
             Some(resolve_face),
-            Some(BodyPaintQuality {
-                high_quality: applied.high_quality,
-                blend: applied.quality_blend,
-            }),
+            Some(applied),
         )
     }
 
@@ -3288,7 +3305,12 @@ impl AnimatedScene {
         }
         let entry = size;
         let mut prepared = self.client.clone();
-        let context = SceneDrawContext::committed(&prepared, size);
+        let context = SceneDrawContext::committed(
+            &prepared,
+            size,
+            &background,
+            self.background_backdrop.is_some(),
+        );
         let mut sources = BorrowedSources::default();
         let mut budget = DrawBudget::default();
         let plan = PlannedScene::build(
@@ -3304,14 +3326,18 @@ impl AnimatedScene {
         )?;
         validate_scene_sources(&sources, &self.food_sources, &self.prey_sources, &target)?;
         entry.validate_entry(&target)?;
-        let frame = CanvasFrame::new(
+        let frame = CanvasPreflight::new(
             &target,
             &sprites,
             &background,
+            size.width,
+            size.height,
             plan.camera.x - context.center,
             plan.camera.y - context.center,
             plan.zoom,
-        )?;
+            self.background_backdrop.as_ref(),
+        )?
+        .begin(&target, &plan.background, self.background_backdrop.as_ref())?;
         plan.submit(
             frame,
             &sprites,
@@ -3395,7 +3421,13 @@ impl AnimatedScene {
         let mut on_setup =
             |client: &mut AnimatedClient, setup: &Setup| -> Result<(), ResolveError> {
                 setup_budget.charge(size)?;
-                let context = SceneDrawContext::at_setup(client, size, Some(setup));
+                let context = SceneDrawContext::at_setup(
+                    client,
+                    size,
+                    Some(setup),
+                    &background,
+                    self.background_backdrop.is_some(),
+                );
                 // Finish host callbacks before borrowing the food registry.
                 let paint = build_paint(
                     client,
@@ -3582,6 +3614,7 @@ impl AnimatedScene {
             &target,
             &sprites,
             &background,
+            self.background_backdrop.as_ref(),
             entry,
             &sources,
             &foods,
@@ -3608,7 +3641,12 @@ impl AnimatedScene {
         }
         let entry = DrawSize::entry(&target);
         let mut prepared = self.client.clone();
-        let context = SceneDrawContext::committed(&prepared, size);
+        let context = SceneDrawContext::committed(
+            &prepared,
+            size,
+            &background,
+            self.background_backdrop.is_some(),
+        );
         let mut sources = BorrowedSources::default();
         let mut budget = DrawBudget::default();
         let plan = PlannedScene::build(
@@ -3629,6 +3667,7 @@ impl AnimatedScene {
             &target,
             &sprites,
             &background,
+            self.background_backdrop.as_ref(),
             entry,
             &sources,
             &self.food_sources,
@@ -3670,17 +3709,22 @@ impl AnimatedScene {
         quality_scale: f64,
         detailed_style: bool,
         resolve_face: Option<&js_sys::Function>,
-        food_quality: Option<BodyPaintQuality>,
+        applied: Option<QualitySnapshot>,
     ) -> Result<(), JsValue> {
         quality(quality_scale)?;
-        if (self.client.food_enabled() || self.client.prey_enabled()) && food_quality.is_none() {
+        if (self.client.food_enabled() || self.client.prey_enabled()) && applied.is_none() {
             return Err(error(
                 "retained food requires the basic renderer's applied-quality API",
             ));
         }
         let size = DrawSize::new(f64::from(target.width()), f64::from(target.height()))?;
         let mut prepared = self.client.clone();
-        let context = SceneDrawContext::committed(&prepared, size);
+        let context = SceneDrawContext::committed(
+            &prepared,
+            size,
+            &background,
+            self.background_backdrop.is_some(),
+        );
         let mut sources = BorrowedSources::default();
         let mut budget = DrawBudget::default();
         let paint = build_basic(
@@ -3698,14 +3742,17 @@ impl AnimatedScene {
         )?;
         let camera = prepared.camera().position();
         let zoom = prepared.camera().zoom();
-        let food = food_quality
+        let food = applied
             .map(|q| {
                 food_plan(
                     &self.food_sources,
                     &prepared,
                     &target,
                     view(size, camera, zoom),
-                    q,
+                    BodyPaintQuality {
+                        high_quality: q.high_quality,
+                        blend: q.quality_blend,
+                    },
                     &mut budget,
                 )
             })
@@ -3721,6 +3768,17 @@ impl AnimatedScene {
         )?;
         let plan = PlannedScene {
             context,
+            // Legacy diagnostic APIs have no applied-quality input and draw HQ.
+            background: context.background(
+                &mut prepared,
+                applied.unwrap_or(QualitySnapshot {
+                    requested: QualityMode::High,
+                    high_quality: true,
+                    quality_blend: 1.,
+                    quality_scale,
+                    low_fps_counter: 0.,
+                }),
+            )?,
             camera,
             zoom,
             food,
@@ -3731,14 +3789,18 @@ impl AnimatedScene {
         };
         validate_scene_sources(&sources, &self.food_sources, &self.prey_sources, &target)?;
         size.validate_entry(&target)?;
-        let frame = CanvasFrame::new(
+        let frame = CanvasPreflight::new(
             &target,
             &sprites,
             &background,
+            size.width,
+            size.height,
             camera.x - context.center,
             camera.y - context.center,
             zoom,
-        )?;
+            self.background_backdrop.as_ref(),
+        )?
+        .begin(&target, &plan.background, self.background_backdrop.as_ref())?;
         plan.submit(
             frame,
             &sprites,
@@ -3789,18 +3851,61 @@ struct SceneDrawContext {
     size: DrawSize,
     center: f64,
     boundary: Option<f64>,
+    tile_size: Point,
+    image_loaded: bool,
 }
 
 impl SceneDrawContext {
-    fn at_setup(client: &AnimatedClient, size: DrawSize, setup: Option<&Setup>) -> Self {
+    fn at_setup(
+        client: &AnimatedClient,
+        size: DrawSize,
+        setup: Option<&Setup>,
+        tile: &HtmlImageElement,
+        image_loaded: bool,
+    ) -> Self {
         Self {
             size,
             center: setup.map_or(0., |s| s.grid_center),
             boundary: setup.and(client.boundary()).map(|b| b.displayed()),
+            tile_size: Point {
+                x: f64::from(tile.natural_width()),
+                y: f64::from(tile.natural_height()),
+            },
+            image_loaded,
         }
     }
-    fn committed(client: &AnimatedClient, size: DrawSize) -> Self {
-        Self::at_setup(client, size, client.received().setup.as_ref())
+    fn committed(
+        client: &AnimatedClient,
+        size: DrawSize,
+        tile: &HtmlImageElement,
+        image_loaded: bool,
+    ) -> Self {
+        Self::at_setup(
+            client,
+            size,
+            client.received().setup.as_ref(),
+            tile,
+            image_loaded,
+        )
+    }
+
+    fn background(
+        self,
+        prepared: &mut AnimatedClient,
+        quality: QualitySnapshot,
+    ) -> Result<BackgroundPlan, JsValue> {
+        prepared
+            .prepare_background(BackgroundInput {
+                width: self.size.width,
+                height: self.size.height,
+                zoom: prepared.camera().zoom(),
+                image_loaded: self.image_loaded,
+                pattern_available: true,
+                quality,
+                tile_width: self.tile_size.x,
+                tile_height: self.tile_size.y,
+            })
+            .map_err(error)
     }
 }
 
@@ -3987,6 +4092,7 @@ struct StandardDraw {
 }
 struct PlannedScene {
     context: SceneDrawContext,
+    background: BackgroundPlan,
     camera: Point,
     zoom: f64,
     food: Option<FoodPaintPlan>,
@@ -4936,6 +5042,7 @@ fn submit_plans(
     target: &HtmlCanvasElement,
     sprites: &[HtmlCanvasElement; 3],
     background: &HtmlImageElement,
+    backdrop: Option<&HtmlImageElement>,
     entry: DrawSize,
     sources: &BorrowedSources,
     foods: &FoodSources,
@@ -4958,11 +5065,13 @@ fn submit_plans(
             plan.camera.x - plan.context.center,
             plan.camera.y - plan.context.center,
             plan.zoom,
+            backdrop,
         )?);
     }
     entry.validate_entry(target)?;
     for (plan, frame) in plans.into_iter().zip(frames) {
-        plan.submit(frame.begin(target)?, sprites, sources, foods, preys)?;
+        let frame = frame.begin(target, &plan.background, backdrop)?;
+        plan.submit(frame, sprites, sources, foods, preys)?;
     }
     Ok(())
 }
@@ -5053,7 +5162,7 @@ impl PlannedScene {
 
     #[allow(clippy::too_many_arguments)]
     fn finish(
-        prepared: &AnimatedClient,
+        prepared: &mut AnimatedClient,
         food_sources: &FoodSources,
         prey_sources: &PreySources,
         target: &HtmlCanvasElement,
@@ -5085,6 +5194,7 @@ impl PlannedScene {
         )?;
         Ok(Self {
             context,
+            background: context.background(prepared, applied)?,
             camera,
             zoom,
             food,

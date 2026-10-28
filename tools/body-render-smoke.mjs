@@ -54,7 +54,8 @@ export function bodyRenderSmoke(wasm) {
     moveTo(...args) { this.throwIf('moveTo'); this.path.push(args); this.pathCommands.push({ op: 'moveTo', args }); this.trace.push({ op: 'moveTo', args }); }
     lineTo(...args) { this.throwIf('lineTo'); this.path.push(args); this.pathCommands.push({ op: 'lineTo', args }); this.trace.push({ op: 'lineTo', args }); }
     closePath() { this.throwIf('closePath'); this.pathCommands.push({ op: 'closePath' }); this.trace.push({ op: 'closePath' }); }
-    fillRect(...args) { this.trace.push({ op: 'fillRect', args }); }
+    fillRect(...args) { this.trace.push({ op: 'fillRect', args, color: this.fillStyle,
+      alpha: this.alpha, transforms: this.transforms.slice() }); }
     stroke() { this.throwIf('stroke'); this.trace.push({ op: 'stroke', path: this.path.slice(), commands: this.pathCommands.slice(), color: this.strokeStyle,
       width: this.lineWidth, alpha: this.alpha, blend: this.blend, transforms: this.transforms.slice(),
       lineCap: this.lineCap, lineJoin: this.lineJoin }); }
@@ -151,6 +152,37 @@ export function bodyRenderSmoke(wasm) {
     return failure;
   }
   try {
+    const backgroundLayers = fixture();
+    try {
+      const f = backgroundLayers, backdrop = new HTMLImageElement('authored backdrop');
+      backdrop.naturalWidth = backdrop.naturalHeight = 512;
+      f.scene.set_background_backdrop(backdrop);
+      const wrongSize = new HTMLImageElement('authored wrong-size backdrop');
+      wrongSize.naturalWidth = 511; wrongSize.naturalHeight = 512;
+      rejects(() => f.scene.set_background_backdrop(wrongSize), /512x512/);
+      f.render();
+      const trace = f.target.context.trace;
+      const image = trace.find(value => value.op === 'image' && value.source === backdrop);
+      const fills = trace.filter(value => value.op === 'fillRect');
+      eq([fills[0].color, fills[0].alpha, fills[0].args], ['#000000', 1, [0, 0, 960, 540]],
+        'background clears black in screen coordinates');
+      eq([image.args, image.alpha, image.transforms], [[0, 0, 512, 512, 0, 0, 960, 540], .3, []],
+        'backdrop uses the Rust screen-space crop and constant alpha');
+      eq(fills[1].color.source, f.background, 'pattern uses the separate tile');
+      ok(trace.indexOf(fills[0]) < trace.indexOf(image) && trace.indexOf(image) < trace.indexOf(fills[1]),
+        'clear, backdrop and tile precede entity drawing');
+      ok(trace.find(value => value.op === 'image' && f.sources.includes(value.source)).alpha !== .3,
+        'backdrop alpha does not leak into body drawing');
+      f.scene.reset();
+      f.target.context.trace = []; f.render();
+      ok(f.target.context.trace.some(value => value.op === 'image' && value.source === backdrop),
+        'reset retains the selected backdrop');
+      f.quality.set_requested_mode(0); f.quality.begin_connection();
+      f.target.context.trace = []; f.render();
+      ok(!f.target.context.trace.some(value => value.op === 'image' && value.source === backdrop),
+        'fully applied low quality omits the backdrop');
+      f.scene.set_background_backdrop(null);
+    } finally { backgroundLayers.close(); }
     faceRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok, rejects, checkAtomic, bodyImages });
     foodRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok, rejects });
     preyRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok, rejects });
