@@ -51,6 +51,10 @@ test('actual default graph mounts HUD, Play and leaderboard with one claim, scen
     assert.equal(root.children.length, 9, 'existing scene nodes plus HUD, Play, leaderboard, minimap, end-screen and announcement mounts');
     const [hudMount, playMount, leaderboardMount, minimapMount, endScreenMount, announcementMount] = root.children.slice(3);
     assert.equal(hudMount.children.length, 2); assert.equal(playMount.children.length, 4);
+    assert.equal(graph.f.document.getElementById('slither-client-reload').hidden, true);
+    assert.equal(graph.f.edit.hud.style(playMount.children[0].style).get('display'), 'none');
+    assert.equal(graph.f.edit.hud.style(playMount.children[1].style).get('display'), 'block');
+    assert.equal(graph.f.edit.hud.style(playMount.children[2].style).get('display'), 'block');
     assert.equal(leaderboardMount.children.length, 4);
     assert.equal(minimapMount.children.length, 5);
     assert.equal(endScreenMount.children.length, 3);
@@ -106,7 +110,8 @@ test('factory validates explicit dependencies and primitive options before any g
     for (const request of [{}, { initialize: undefined }, { initialize: null }, { initialize: {} }, { wasmApi: undefined }, { wasmApi: null },
       { wasmApi: () => {} }, { wasmApi: 0 }, { hudReadout: undefined, ownedHudUi: true },
       { hudReadout: false, ownedHudUi: true }, { hudReadout: {} }, { hudReadout: 1 },
-      { ownedHudUi: null }, { ownedHudUi: 0 }, { ownedHudUi: {} }]) {
+      { ownedHudUi: null }, { ownedHudUi: 0 }, { ownedHudUi: {} },
+      { diagnosticUi: null }, { diagnosticUi: 0 }, { diagnosticUi: {} }]) {
       const options = { ...valid, ...request };
       if (Object.keys(request).length === 0) delete options.initialize;
       await assert.rejects(startGamePage(options), /Explicit/);
@@ -134,11 +139,12 @@ test('default wrapper honors explicit dependencies and always selects all owned 
     const hud = graph.hudWasm(); let initialized = 0, projectors = 0;
     graph.wasm.api.LeaderboardScoreProjector = graph.run('(created => class { constructor() { created(); } project() { throw Error("Unexpected projection"); } free() {} })')(() => { projectors++; });
     const runtime = await entry.startGamePage({ realm: graph.f.realm, initialize() { initialized++; },
-      wasmApi: graph.wasm.api, hudReadout: false, ownedHudUi: false, ownedPlayUi: false, ownedLeaderboardUi: false });
+      wasmApi: graph.wasm.api, hudReadout: false, ownedHudUi: false, ownedPlayUi: false, ownedLeaderboardUi: false, diagnosticUi: true });
     assert.equal(initialized, 1); assert.equal(graph.counts.initialize, 0);
     assert.equal(hud.tracking, 1); assert.equal(projectors, 1);
     assert.equal(typeof runtime.bindHudReadout, 'function');
     assert.equal(graph.f.document.getElementById('slither-client-root').children.length, 9);
+    assert.equal(graph.f.document.getElementById('slither-client-reload').hidden, true);
     assert.equal(graph.f.raf.size, 1); assert.equal(graph.f.sockets, 0); runtime.dispose();
   });
 });

@@ -1,9 +1,15 @@
 # Start and ready view
 
-The default local and packaged game entries compose the existing server address,
-nickname and Play controls in a responsive centered panel with the project's
-original `assets/logo.svg`. The field order, native labels, 24-byte nickname
-editor, endpoint validation and single explicit Play admission are retained.
+The default local and packaged game entries display nickname and Play controls
+in a responsive centered panel with the project's original `assets/logo.svg`.
+The technical server-address row and ordinary Reload control start hidden in this
+consumer entry. Play reveals the same editable server row when its endpoint is
+empty or invalid, without beginning profile acquisition or consuming the attempt.
+Explicit runtime composition retains diagnostic controls through
+`diagnosticUi: true` (the runtime factory's default). The configured endpoint node,
+native labels, 24-byte nickname editor, endpoint validation and single explicit
+Play admission are retained. Local startup still presets only its selected
+loopback endpoint; hiding the row supplies no remote endpoint or connection.
 The logo is packaged byte for byte at its approved asset path. No new artwork
 or external source is included.
 

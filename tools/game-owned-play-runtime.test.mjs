@@ -239,12 +239,13 @@ test('genuine queued action validates local proposals once, permits correction a
     const realm = graph.nativeBoundary(native => Object.freeze({ ...native, liveProfile: profile.capabilities }));
     const factory = await graph.load('runtime.mjs');
     const runtime = await factory.startGamePage({ realm, initialize() {}, wasmApi: graph.wasm.api,
-      hudReadout: true, ownedHudUi: true, ownedPlayUi: true });
+      hudReadout: true, ownedHudUi: true, ownedPlayUi: true, diagnosticUi: false });
     const mount = graph.f.document.getElementById('slither-client-root').children.at(-1);
     const endpoint = mount.children[0].children[1], nickname = mount.children[1].children[1], button = mount.children[2];
     const endpointState = graph.f.edit.inputValue(endpoint), nicknameState = graph.f.edit.inputValue(nickname);
     const status = () => graph.f.edit.hud.character(mount.children[3].children[0]).data;
     assert.equal(status(), 'Ready.'); assert.equal(profile.counts.fetch, 0); assert.equal(hud.scoreReads, 0);
+    assert.equal(graph.f.edit.hud.style(mount.children[0].style).get('display'), 'none');
     const baselineControls = graph.wasm.controlReads();
     let clicks = 0;
     const click = () => { clicks++; graph.f.edit.dispatch('click', { target: button, button: 0, trusted: true }); graph.f.flush(); };
@@ -266,6 +267,7 @@ test('genuine queued action validates local proposals once, permits correction a
       const before = [endpointState.gets, nicknameState.gets]; click();
       assert.deepEqual([endpointState.gets, nicknameState.gets], before.map(x => x + 1));
       assert.equal(status(), expected); assert.equal(profile.counts.fetch, 0);
+      assert.equal(graph.f.edit.hud.style(mount.children[0].style).get('display'), 'block');
       assert.equal(graph.f.edit.ownedPlay.buttonState(button).disabled, false);
       assert.equal(graph.wasm.calls.includes('quality.connection'), false); assert.equal(graph.f.sockets, 0);
       assert.equal(runtime.diagnostics().gameplay.profilePhase, 'idle');
@@ -291,7 +293,7 @@ test('genuine queued action validates local proposals once, permits correction a
 
 test('accepted genuine action keeps staged reset, source release and one socket on the existing next-frame seam', async () => {
   await runGameModuleTest(async ({ assert, createGraph }) => {
-    for (const address of ['ws://192.0.2.9:1234/slither','wss://[2001:db8::9]:443/slither']) {
+    for (const diagnosticUi of [false, true]) for (const address of ['ws://192.0.2.9:1234/slither','wss://[2001:db8::9]:443/slither']) {
       const graph = createGraph({ hudNative: true, ownedHudNative: true, ownedPlayNative: true }), hud = graph.hudWasm();
       const profile = graph.profileNative(), endpoints = [], login = [];
       const encode = graph.wasm.api.encode_login;
@@ -307,9 +309,13 @@ test('accepted genuine action keeps staged reset, source release and one socket 
       }));
       const factory = await graph.load('runtime.mjs');
       const runtime = await factory.startGamePage({ realm, initialize() {}, wasmApi: graph.wasm.api,
-        hudReadout: true, ownedHudUi: true, ownedPlayUi: true });
+        hudReadout: true, ownedHudUi: true, ownedPlayUi: true, diagnosticUi });
       const mount = graph.f.document.getElementById('slither-client-root').children.at(-1);
       const endpoint = mount.children[0].children[1], nickname = mount.children[1].children[1], button = mount.children[2];
+      assert.equal(graph.f.document.getElementById('slither-client-reload').hidden, !diagnosticUi);
+      assert.equal(graph.f.edit.hud.style(mount.children[0].style).get('display'), diagnosticUi ? 'block' : 'none');
+      graph.f.edit.state(endpoint).visible = diagnosticUi;
+      graph.f.edit.state(mount.children[0]).visible = diagnosticUi;
       graph.f.edit.inputValue(endpoint).value = address; graph.f.edit.inputValue(nickname).value = ' \u007f ';
       const readout = () => graph.f.edit.hud.character(mount.children[3].children[0]).data;
       const beforeCalls = [...graph.wasm.calls], source = graph.f.realm.per_color_imgs[0].kmcs[0];

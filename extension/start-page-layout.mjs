@@ -13,6 +13,7 @@ export const startPageLayout = Object.freeze({
     ['background-position', 'center top'], ['background-size', '100% auto'],
   ]),
   label: freeze([['display', 'block'], ['margin-bottom', '16px'], ['text-align', 'left']]),
+  configuredEndpoint: freeze([['display', 'none']]),
   field: freeze([['display', 'block'], ['width', '100%'], ['min-height', '40px'],
     ['box-sizing', 'border-box'], ['padding', '8px'], ['margin-top', '6px'],
     ['font-family', 'inherit'], ['font-size', '18px'], ['border-radius', '0']]),

@@ -23,8 +23,9 @@ const editNotifications = new Set(['keypress', 'beforeinput', 'input', 'composit
   'dragstart', 'drag', 'dragenter', 'dragleave', 'dragover', 'drop', 'dragend']);
 
 /** Local runtime factory. Importing this module performs no page ownership work. */
-export async function startGamePage({ realm = globalThis, initialize, wasmApi, hudReadout = false, ownedHudUi = false, ownedPlayUi = false, ownedLeaderboardUi = false, ownedMinimapUi = false, ownedAnnouncementUi = false, ownedEndScreenUi = false, localHost } = {}) {
+export async function startGamePage({ realm = globalThis, initialize, wasmApi, hudReadout = false, ownedHudUi = false, ownedPlayUi = false, ownedLeaderboardUi = false, ownedMinimapUi = false, ownedAnnouncementUi = false, ownedEndScreenUi = false, diagnosticUi = true, localHost } = {}) {
   if (typeof hudReadout !== 'boolean') throw new TypeError('Explicit hudReadout boolean required');
+  if (typeof diagnosticUi !== 'boolean') throw new TypeError('Explicit diagnosticUi boolean required');
   if (typeof initialize !== 'function' || wasmApi === null || typeof wasmApi !== 'object') {
     throw new TypeError('Explicit initialize function and wasmApi object required');
   }
@@ -435,6 +436,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
   reload = realm.document.getElementById('slither-client-reload');
   if (!reload) { reload = realm.document.createElement('button'); reload.id = 'slither-client-reload';
     reload.textContent = 'Reload ordinary page'; root.appendChild(reload); }
+  reload.hidden = !diagnosticUi;
   const target = realm.document.createElement('canvas'); target.tabIndex = 0; root.appendChild(target);
   const report = code => {
     if (!ownedPlayUi) { output.textContent = `SlitherClient: ${code}`; native.status(code); return; }
@@ -827,7 +829,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
         playUi = createOwnedPlayUi({ document: hudCapabilities.document, parent: root,
           dom: hudCapabilities.dom, construct: constructCapabilities,
           controls: playCapabilities.controls, isCurrentDocument: hudCapabilities.isCurrentDocument,
-          projectStartPage: wasmApi.start_page_view });
+          projectStartPage: wasmApi.start_page_view }, diagnosticUi);
         checkHudOperation();
         const mounted = playUi.mount();
         checkHudOperation();

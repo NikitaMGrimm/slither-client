@@ -31,6 +31,7 @@ test('scene server is local, allowlisted and requires no reference or socket', a
   const request = await running(t);
   const page = await request('/');
   assert.equal(page.status, 200); assert.match(page.text, /\/game\/bootstrap.mjs/);
+  assert.match(page.text, /<button id="slither-client-reload" hidden>/);
   assert.equal(JSON.parse((await request('/scene/config.json')).text).simulatorUrl, null);
   const policy = page.headers['content-security-policy'];
   assert.match(policy, /connect-src 'self';/); assert.doesNotMatch(policy, /ws:|'unsafe-inline'|'unsafe-eval'/);

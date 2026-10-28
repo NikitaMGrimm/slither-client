@@ -313,7 +313,7 @@ test('local host selects explicit accessory dispatch, ready sources and profile;
     };
     const { startGamePage } = await graph.load('runtime.mjs');
     runtime = await startGamePage({realm,localHost,initialize(){initialized=true;},wasmApi:graph.wasm.api,
-      hudReadout:true,ownedHudUi:true,ownedPlayUi:true,ownedLeaderboardUi:true});
+      hudReadout:true,ownedHudUi:true,ownedPlayUi:true,ownedLeaderboardUi:true,diagnosticUi:false});
     assert.equal(selectedBackdrop, sources.backgroundImage);
     assert.equal(skinBindings, 1, 'Rust policy is bound once after initialization and before source use');
     const seam = (await graph.load('stock-gameplay.mjs')).seam;
@@ -321,6 +321,9 @@ test('local host selects explicit accessory dispatch, ready sources and profile;
     assert.equal('liveProfile' in seam.options,false);assert.equal(graph.f.sockets,0);
     const root=graph.f.document.getElementById('slither-client-root'), mount=root.children[4];
     const field=mount.children[0].children[1], nickname=mount.children[1].children[1], button=mount.children[2];
+    assert.equal(graph.f.document.getElementById('slither-client-reload').hidden,true);
+    assert.equal(graph.f.edit.hud.style(mount.children[0].style).get('display'),'none');
+    graph.f.edit.state(field).visible=false; graph.f.edit.state(mount.children[0]).visible=false;
     assert.equal(graph.f.edit.inputValue(field).value,endpoint);
     assert.equal(graph.f.edit.ownedPlay.buttonState(button).disabled,false);
     const status=()=>graph.f.edit.hud.character(mount.children[3].children[0]).data;
