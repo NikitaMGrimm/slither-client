@@ -15,6 +15,9 @@ function fixture({ decode } = {}) {
         fillStyle: '#000000',
         beginPath() { commands.push(['beginPath']); },
         arc(...args) { commands.push(['arc', ...args]); },
+        moveTo(...args) { commands.push(['moveTo', ...args]); },
+        lineTo(...args) { commands.push(['lineTo', ...args]); },
+        closePath() { commands.push(['closePath']); },
         fill() { commands.push(['fill', this.fillStyle]); },
         fillRect(...args) { commands.push(['fillRect', this.fillStyle, ...args]); },
       };
@@ -44,7 +47,7 @@ function fixture({ decode } = {}) {
   return { realm, canvases, images, encoded };
 }
 
-test('asset map keeps the authored palettes and repeating tile, with a separate ready 512-square backdrop', async () => {
+test('asset map preserves the authored palettes and returns ready tile and 512-square backdrop images', async () => {
   const f = fixture(), assets = await createClientAssetMap({ realm: f.realm });
   assert.deepEqual(Object.keys(assets).sort(), ['background', 'backgroundImage', 'palettes']);
   assert.equal(assets.palettes.length, 3);
@@ -55,21 +58,53 @@ test('asset map keeps the authored palettes and repeating tile, with a separate 
     assert.deepEqual([canvas.width, canvas.height], [32, 32]);
     assert.deepEqual(canvas.commands, [['beginPath'], ['arc', 16, 16, 16, 0, Math.PI * 2], ['fill', color]]);
   }
-  assert.deepEqual(f.encoded.get(assets.background.src).commands, [
-    ['fillRect', '#263440', 0, 0, 1, 1],
-  ]);
   assert.notEqual(assets.background, assets.backgroundImage);
   assert.notEqual(assets.background.src, assets.backgroundImage.src);
-  for (const [image, size] of [[assets.background, 40], [assets.backgroundImage, 512]]) {
+  for (const [image, width, height] of [[assets.background, 108, 64], [assets.backgroundImage, 512, 512]]) {
     assert(image instanceof f.realm.HTMLImageElement);
     assert.equal(image.complete, true);
-    assert.deepEqual([image.naturalWidth, image.naturalHeight], [size, size]);
-    assert.deepEqual([f.encoded.get(image.src).width, f.encoded.get(image.src).height], [size, size]);
+    assert.deepEqual([image.naturalWidth, image.naturalHeight], [width, height]);
+    assert.deepEqual([f.encoded.get(image.src).width, f.encoded.get(image.src).height], [width, height]);
   }
   const backdrop = f.encoded.get(assets.backgroundImage.src);
-  assert.deepEqual(backdrop.commands[0], ['fillRect', '#45505d', 0, 0, 512, 512]);
-  assert(backdrop.commands.slice(1).every(([kind, color]) => kind === 'fillRect' && color === '#53606d'));
+  assert.deepEqual(backdrop.commands, [['fillRect', '#34475b', 0, 0, 512, 512]]);
   assert.equal(f.images.length, 2);
+});
+
+test('hex tile uses finite closed polygons and repeats matching artwork across both seams', async () => {
+  const f = fixture(), assets = await createClientAssetMap({ realm: f.realm });
+  const tile = f.encoded.get(assets.background.src), paths = [];
+  let points, closed;
+  for (const [operation, ...args] of tile.commands) {
+    switch (operation) {
+      case 'beginPath': points = []; closed = false; break;
+      case 'moveTo': assert.equal(points.length, 0); points.push(args); break;
+      case 'lineTo': assert(points.length > 0); points.push(args); break;
+      case 'closePath': closed = true; break;
+      case 'fill':
+        assert.equal(closed, true); assert.equal(points.length, 6);
+        assert(points.every(point => point.length === 2 && point.every(Number.isFinite)));
+        assert.match(args[0], /^#[0-9a-f]{6}$/);
+        paths.push({ color: args[0], points });
+        break;
+      default: assert.fail(`Unexpected tile operation: ${operation}`);
+    }
+  }
+  assert(paths.length > 0);
+  const signatures = new Set(paths.map(path => JSON.stringify(path)));
+  const wrapped = (path, dx, dy) => signatures.has(JSON.stringify({ color: path.color,
+    points: path.points.map(([x, y]) => [x + dx, y + dy]) }));
+  for (const [axis, extent] of [[0, tile.width], [1, tile.height]]) {
+    const crossing = paths.filter(path => {
+      const values = path.points.map(point => point[axis]);
+      return Math.min(...values) < 0 && Math.max(...values) > 0;
+    });
+    assert(crossing.length > 0, 'edge cells must cross the tile boundary');
+    for (const path of crossing) {
+      assert(wrapped(path, axis === 0 ? extent : 0, axis === 1 ? extent : 0),
+        'opposite edges must contain the same translated polygon and shade');
+    }
+  }
 });
 
 test('asset map waits for both generated images before publishing sources', async () => {
@@ -78,7 +113,7 @@ test('asset map waits for both generated images before publishing sources', asyn
   let ready = false;
   const pending = createClientAssetMap({ realm: f.realm }).then(assets => { ready = true; return assets; });
   assert.equal(releases.size, 2);
-  releases.get(40)();
+  releases.get(108)();
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(ready, false);
   assert.equal(f.images[0].complete, true); assert.equal(f.images[1].complete, false);
@@ -88,7 +123,7 @@ test('asset map waits for both generated images before publishing sources', asyn
 });
 
 test('a failed tile or backdrop decode rejects the map', async () => {
-  for (const size of [40, 512]) {
+  for (const size of [108, 512]) {
     const failure = new Error(`Synthetic decode failure: ${size}`);
     const f = fixture({ decode(canvas) { if (canvas.width === size) throw failure; } });
     await assert.rejects(createClientAssetMap({ realm: f.realm }), error => error === failure);
