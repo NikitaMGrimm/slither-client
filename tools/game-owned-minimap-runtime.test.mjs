@@ -11,7 +11,7 @@ test('default minimap publishes Rust views, reuses image buffers and stays outsi
       } });
     graph.hudWasm();
     const entry = await graph.load('bootstrap.mjs'), runtime = await entry.gamePageRuntime;
-    const root = graph.f.document.getElementById('slither-client-root'), holder = root.children.at(-2);
+    const root = graph.f.document.getElementById('slither-client-root'), holder = root.children[6];
     const style = node => graph.f.edit.hud.style(node.style);
     const uploads = () => graph.f.edit.minimap.trace.filter(call => call[0] === 'putImageData');
     const frame = now => {

@@ -17,6 +17,7 @@ const routes = new Map([
   ['/assets/logo.svg', ['assets/logo.svg', 'image/svg+xml']],
   ...[['bootstrap', 'game-bootstrap'], ['runtime', 'game-runtime'],
     ['owned-hud-ui', 'game-owned-hud-ui'], ['owned-play-ui', 'game-owned-play-ui'],
+    ['owned-announcement-ui', 'game-owned-announcement-ui'],
     ['start-page-layout', 'start-page-layout'],
     ['owned-leaderboard-ui', 'game-owned-leaderboard-ui'], ['owned-minimap-ui', 'game-owned-minimap-ui'],
     ['owned-end-screen-ui', 'game-owned-end-screen-ui']]

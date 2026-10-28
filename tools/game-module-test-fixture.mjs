@@ -18,7 +18,9 @@ const entryNames = { 'bootstrap.mjs': 'game-bootstrap.mjs', 'runtime.mjs': 'game
   'owned-hud-ui.mjs': 'game-owned-hud-ui.mjs', 'owned-play-ui.mjs': 'game-owned-play-ui.mjs',
   'start-page-layout.mjs': 'start-page-layout.mjs',
   'owned-leaderboard-ui.mjs': 'game-owned-leaderboard-ui.mjs',
-  'owned-minimap-ui.mjs': 'game-owned-minimap-ui.mjs', 'owned-end-screen-ui.mjs': 'game-owned-end-screen-ui.mjs' };
+  'owned-announcement-ui.mjs': 'game-owned-announcement-ui.mjs',
+  'owned-minimap-ui.mjs': 'game-owned-minimap-ui.mjs',
+  'owned-end-screen-ui.mjs': 'game-owned-end-screen-ui.mjs' };
 const origin = 'https://authored-package.invalid/game/';
 
 export async function runGameModuleTest(scenario) {
@@ -56,6 +58,13 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
   }
   f.host(); f.complete();
   const wasm = wasmDouble(f), counts = { initialize: 0 };
+  const announcements = { enabled: 0, reads: 0, view: {
+    schema: 1, present: false, opacity: 0, left: 8, top: 4, width: 300, height: 228, lines: [],
+  } };
+  Object.assign(wasm.api.AnimatedScene.prototype, {
+    enable_announcement_tracking() { announcements.enabled++; },
+    announcement_view() { announcements.reads++; return announcements.view; },
+  });
   wasm.api.start_page_view = vm.runInContext('(' + projectStartPageDouble.toString() + ')', f.context);
   const minimap = { enabled: 0, reads: [], fractions: [], view: {
     schema: 1, enabled: true, imageRevision: 0n, dimension: null,
@@ -106,7 +115,7 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
     if (module.status === 'linked') await module.evaluate();
     return module.namespace;
   };
-  return { f, wasm, counts, minimap, load, sources, run: source => vm.runInContext(source, f.context),
+  return { f, wasm, counts, minimap, announcements, load, sources, run: source => vm.runInContext(source, f.context),
     message(values) {
       // Native WebSocket delivery supplies an ArrayBuffer from the document's own realm.
       const data = vm.runInContext(`(values => {
@@ -210,7 +219,7 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
         }
       }};
       })`, f.context)(wasm.api.AnimatedScene, counts);
-      for (const name of ['enable_minimap_tracking', 'minimap_view', 'observe_minimap_ui_fraction']) {
+      for (const name of ['enable_minimap_tracking', 'minimap_view', 'observe_minimap_ui_fraction', 'enable_announcement_tracking', 'announcement_view']) {
         const method = Object.getOwnPropertyDescriptor(wasm.api.AnimatedScene.prototype, name);
         if (method) Object.defineProperty(boundary.Scene.prototype, name, method);
       }

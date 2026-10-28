@@ -15,6 +15,7 @@ use super::{
     ScoreError, ScoreTables, SnakeMetrics, SnakeObjectToken, SnakePresentation,
     StandardEyeGeometry, StaticHeadAccessoryGeometry, finite, plan_minimap,
 };
+use super::{AnnouncementLifecycle, AnnouncementState, AnnouncementView};
 use crate::{
     protocol::ElapsedHeader,
     state::{
@@ -159,6 +160,8 @@ pub struct ClientControlActions {
     pub connected: Option<bool>,
     /// Existing session return-fade observation, before the connected map update.
     pub minimap_ui_fraction: Option<f64>,
+    /// Existing session lifecycle for selected announcement fade, on this same step.
+    pub announcement_lifecycle: Option<AnnouncementLifecycle>,
 }
 
 /// Appearance-owned numeric style; borrowed images are resolved only during drawing.
@@ -655,6 +658,8 @@ impl Entry {
 #[derive(Clone, Debug, PartialEq)]
 pub struct AnimatedClient {
     received: ClientState,
+    announcements_enabled: bool,
+    announcements: AnnouncementState,
     minimap_enabled: bool,
     minimap: MinimapState,
     nicknames_enabled: bool,
@@ -702,6 +707,8 @@ impl AnimatedClient {
     pub fn new(start_ms: f64) -> Result<Self, ClientPresentationError> {
         Ok(Self {
             received: ClientState::default(),
+            announcements_enabled: false,
+            announcements: AnnouncementState::default(),
             minimap_enabled: false,
             minimap: MinimapState::default(),
             nicknames_enabled: false,
@@ -764,6 +771,21 @@ impl AnimatedClient {
     /// Reading these commands advances no fade, camera or update clock.
     pub fn nickname_draws(&self) -> &[NicknameDraw] {
         &self.nickname_draws
+    }
+
+    /// Select announcement admission on the HUD ingress lane before the first packet.
+    /// Content and selection survive world reset; ordinary packet APIs stay opaque.
+    pub fn enable_announcement_tracking(&mut self) -> Result<(), ClientPresentationError> {
+        if !self.announcements_enabled && self.received.frames_applied != 0 {
+            return Err(PresentationError.into());
+        }
+        self.announcements_enabled = true;
+        Ok(())
+    }
+
+    /// Project retained announcement text and opacity without consuming clocks.
+    pub fn announcement_view(&self) -> AnnouncementView {
+        self.announcements.view()
     }
 
     /// Enable minimap admission before ingress; reset preserves this selection.
@@ -1904,6 +1926,7 @@ impl AnimatedClient {
         }
         let mut collector = plan.map(|plan| HudCommandCollector {
             plan,
+            announcements: self.announcements_enabled,
             boundaries: Vec::new(),
         });
         let mut received = self.received.clone();
@@ -1924,6 +1947,21 @@ impl AnimatedClient {
         .map_err(ClientPresentationError::from)?;
         if self.minimap_enabled {
             validate_minimap_work(&applied.events, self.minimap.view().dimension)?;
+        }
+        if let Some(collector) = collector
+            .as_ref()
+            .filter(|collector| collector.announcements)
+        {
+            super::announcement::prevalidate_announcement_scores(
+                self.score_tables.as_ref().map(|tables| tables.table_max()),
+                &applied.events,
+                &collector.boundaries,
+            )
+            .map_err(|error| {
+                ClientPresentationError::from(StateError::Hud(
+                    super::HudIngressError::Announcement(error),
+                ))
+            })?;
         }
         if enable_accessory_presentation
             && !self.accessory_presentation_enabled
@@ -1994,6 +2032,9 @@ impl AnimatedClient {
                     PresentationEvent::Setup(value) => {
                         if value.game_mode == Some(2) {
                             return Err(ClientPresentationError::UnsupportedMode(2).into());
+                        }
+                        if next.announcements_enabled {
+                            next.announcements.setup();
                         }
                         if next.minimap_enabled {
                             next.minimap
@@ -2343,6 +2384,15 @@ impl AnimatedClient {
                 }
                 match boundary.marker {
                     HudCommandMarker::Other => {}
+                    HudCommandMarker::Announcement(packet) => {
+                        next.announcements
+                            .receive(&packet, next.score_tables.as_deref())
+                            .map_err(|error| {
+                                ClientPresentationError::from(StateError::Hud(
+                                    super::HudIngressError::Announcement(error),
+                                ))
+                            })?;
+                    }
                     HudCommandMarker::Leaderboard {
                         local_row,
                         rank,
@@ -2350,6 +2400,9 @@ impl AnimatedClient {
                         death_pending,
                         rows,
                     } => {
+                        if next.announcements_enabled {
+                            next.announcements.leaderboard(death_pending);
+                        }
                         journal.push(
                             command_index,
                             HudIngressEventKind::Leaderboard {
@@ -2433,6 +2486,13 @@ impl AnimatedClient {
         }
         if let Some(fraction) = actions.minimap_ui_fraction {
             next.observe_minimap_ui_fraction(fraction)?;
+        }
+        if let Some(lifecycle) = actions.announcement_lifecycle
+            && next.announcements_enabled
+        {
+            next.announcements
+                .advance(step.delta, lifecycle)
+                .map_err(ClientPresentationError::from)?;
         }
         next.advance_entities(step, now_ms)?;
         *self = next;
