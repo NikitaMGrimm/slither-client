@@ -34,7 +34,7 @@ use crate::{
     },
     presentation_browser::AnimationStep,
     prey_browser::PreySources,
-    protocol::ElapsedHeader,
+    protocol::{ElapsedHeader, MAX_FRAME_BYTES},
     quality_browser::DesktopQuality,
     state::{Food, Point, Setup},
 };
@@ -145,6 +145,7 @@ extern "C" {
 }
 
 struct OwnedHudPlan {
+    schema: u8,
     guards: Vec<HudCommandGuard>,
     captures: Vec<usize>,
 }
@@ -158,6 +159,7 @@ impl OwnedHudPlan {
         let captures = get(&value, "finalCaptureIndices")?;
         let capture_count = crate::body_browser::integer(get(&captures, "length")?, 0, count)?;
         let mut result = Self {
+            schema: crate::body_browser::integer(get(&value, "schema")?, 1, 2)? as u8,
             guards: Vec::new(),
             captures: Vec::new(),
         };
@@ -189,7 +191,7 @@ impl OwnedHudPlan {
 
     fn borrowed(&self) -> HudIngressPlan<'_> {
         HudIngressPlan {
-            schema: 1,
+            schema: self.schema,
             command_count: self.guards.len(),
             guards: &self.guards,
             final_capture_indices: &self.captures,
@@ -197,7 +199,79 @@ impl OwnedHudPlan {
     }
 }
 
+fn hud_leaderboard_rows_record(report: &HudIngressReport) -> Result<JsValue, JsValue> {
+    let boards = js_sys::Array::new();
+    for (board_index, board) in report.leaderboard_rows().iter().enumerate() {
+        let rows = js_sys::Array::new();
+        for (row_index, row) in board.rows().iter().enumerate() {
+            let name = js_sys::Array::new();
+            for (index, byte) in row.name().iter().enumerate() {
+                if !js_sys::Reflect::set(&name, &(index as u32).into(), &(*byte).into())? {
+                    return Err(error("could not construct HUD row name"));
+                }
+            }
+            let value = record([
+                ("ordinal", row.ordinal().into()),
+                ("count", row.count().into()),
+                ("fractionalMass", row.fractional_mass().into()),
+                ("rawColor", row.raw_color().into()),
+                ("paletteIndex", row.palette_index().into()),
+                ("name", name.into()),
+            ])?;
+            if !js_sys::Reflect::set(&rows, &(row_index as u32).into(), &value)? {
+                return Err(error("could not construct HUD rows"));
+            }
+        }
+        let value = record([
+            ("commandIndex", (board.command_index() as f64).into()),
+            ("rows", rows.into()),
+        ])?;
+        if !js_sys::Reflect::set(&boards, &(board_index as u32).into(), &value)? {
+            return Err(error("could not construct HUD leaderboard boards"));
+        }
+    }
+    Ok(boards.into())
+}
+
+fn preflight_hud_leaderboard_rows(report: &HudIngressReport) -> Result<(), JsValue> {
+    if report.schema() != 2 {
+        return Ok(());
+    }
+    let resource = || error("HUD leaderboard rows resource limit");
+    if report.leaderboard_rows().len() > report.command_count() {
+        return Err(resource());
+    }
+    let mut row_count = 0_usize;
+    let mut wire_bytes = 0_usize;
+    for board in report.leaderboard_rows() {
+        row_count = row_count
+            .checked_add(board.rows().len())
+            .ok_or_else(resource)?;
+        if row_count > (MAX_FRAME_BYTES - 6) / 7 {
+            return Err(resource());
+        }
+        wire_bytes = wire_bytes.checked_add(6).ok_or_else(resource)?;
+        for row in board.rows() {
+            if row.name().len() > usize::from(u8::MAX) {
+                return Err(resource());
+            }
+            wire_bytes = wire_bytes
+                .checked_add(7 + row.name().len())
+                .ok_or_else(resource)?;
+            if wire_bytes > MAX_FRAME_BYTES {
+                return Err(resource());
+            }
+        }
+        if wire_bytes > MAX_FRAME_BYTES {
+            return Err(resource());
+        }
+    }
+    Ok(())
+}
+
 fn hud_report_record(report: &HudIngressReport) -> Result<JsValue, JsValue> {
+    // Bound aggregate row output before allocating either output journal.
+    preflight_hud_leaderboard_rows(report)?;
     let events = js_sys::Array::new();
     for (index, event) in report.events().iter().enumerate() {
         let command = ("commandIndex", JsValue::from(event.command_index as f64));
@@ -246,6 +320,15 @@ fn hud_report_record(report: &HudIngressReport) -> Result<JsValue, JsValue> {
         ("setupDraws", (report.setup_draws() as f64).into()),
         ("events", events.into()),
     ])?;
+    if report.schema() == 2
+        && !js_sys::Reflect::set(
+            &value,
+            &"leaderboardRows".into(),
+            &hud_leaderboard_rows_record(report)?,
+        )?
+    {
+        return Err(error("could not construct HUD leaderboard rows"));
+    }
     copy_hud_report(&value, report.command_count())
 }
 

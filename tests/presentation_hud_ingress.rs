@@ -331,7 +331,7 @@ fn capture_membership_and_plan_errors_reject_before_any_callback() {
     }
     for invalid in [
         HudIngressPlan {
-            schema: 2,
+            schema: 3,
             ..plan(&guards, &[2, 4])
         },
         HudIngressPlan {
@@ -1092,5 +1092,419 @@ fn all_thirteen_existing_public_wrappers_keep_legacy_r_controls_and_opaque_hud_c
             assert!(legacy_wrapper(index, &mut c, &bundle(&[setup(29), vec![b'h']])).is_err());
             assert_eq!(c, before);
         }
+    }
+}
+
+// Schema-2 fixtures are original synthetic packets, not external captures.
+fn apply_schema_bytes(
+    c: &mut AnimatedClient,
+    bytes: &[u8],
+    guards: &[HudCommandGuard],
+    captures: &[usize],
+    schema: u8,
+) -> Result<HudIngressReport, ClientPresentationError> {
+    c.apply_frame_with_face_presentation_and_all_factories_and_setup_and_hud(
+        bytes,
+        ElapsedHeader::Absent,
+        |_| Ok(FacePresentation::default()),
+        |p, _| Ok(food_factory(p.raw_color)),
+        |p, _| Ok(prey_factory(p.raw_color)),
+        |_, _| Ok(()),
+        HudIngressPlan {
+            schema,
+            ..plan(guards, captures)
+        },
+    )
+}
+
+fn raw_board(rows: &[(u16, u32, u8, Vec<u8>)]) -> Vec<u8> {
+    let mut p = vec![b'l', 1, 0, 7, 0, 12];
+    for (count, numerator, color, name) in rows {
+        p.extend(count.to_be_bytes());
+        p.extend(u24(*numerator));
+        p.extend([*color, u8::try_from(name.len()).unwrap()]);
+        p.extend(name);
+    }
+    p
+}
+
+#[test]
+fn explicit_rows_distinguish_the_red_names_while_schema_one_remains_equal() {
+    let one = raw_board(&[(4, 0, 10, vec![65])]);
+    let two = raw_board(&[(4, 0, 10, vec![66])]);
+    for schema in [1, 2] {
+        let mut a = ready();
+        let mut b = ready();
+        let guards = [guard(true, false, false)];
+        let ra = apply_schema_bytes(&mut a, &one, &guards, &[], schema).unwrap();
+        let rb = apply_schema_bytes(&mut b, &two, &guards, &[], schema).unwrap();
+        assert_eq!(ra.schema(), schema);
+        assert_eq!(ra.events(), rb.events());
+        assert_eq!(ra.frame_report(), rb.frame_report());
+        assert_eq!(ra.setup_draws(), 0);
+        assert_eq!(a, b);
+        if schema == 1 {
+            assert_eq!(ra, rb);
+            assert!(ra.leaderboard_rows().is_empty());
+        } else {
+            assert_ne!(ra, rb);
+            let ba = &ra.leaderboard_rows()[0];
+            let bb = &rb.leaderboard_rows()[0];
+            assert_eq!(ba.command_index(), 0);
+            assert_eq!(ba.rows()[0].name(), [65]);
+            assert_eq!(bb.rows()[0].name(), [66]);
+            let arow = &ba.rows()[0];
+            let brow = &bb.rows()[0];
+            assert_eq!(arow.ordinal(), brow.ordinal());
+            assert_eq!(arow.count(), brow.count());
+            assert_eq!(
+                arow.fractional_mass().to_bits(),
+                brow.fractional_mass().to_bits()
+            );
+            assert_eq!(arow.raw_color(), brow.raw_color());
+            assert_eq!(arow.palette_index(), brow.palette_index());
+        }
+    }
+}
+
+#[test]
+fn raw_rows_preserve_every_byte_maximal_names_counts_colors_and_exact_f64() {
+    let numerators = [0, 1, 8_388_608, 16_777_214, 16_777_215];
+    let mut rows = Vec::new();
+    for byte in 0..=u8::MAX {
+        rows.push((
+            u16::MAX,
+            numerators[usize::from(byte) % numerators.len()],
+            byte,
+            vec![byte],
+        ));
+    }
+    rows.push((0, 0, 0, vec![]));
+    rows.push((u16::MAX, 16_777_215, u8::MAX, (0..u8::MAX).collect()));
+    let mut bytes = raw_board(&rows);
+    let mut c = ready();
+    let report = apply_schema_bytes(&mut c, &bytes, &[guard(true, true, true)], &[], 2).unwrap();
+    bytes.fill(0);
+    assert_eq!(report.leaderboard_rows().len(), 1);
+    let board = &report.leaderboard_rows()[0];
+    assert_eq!(board.rows().len(), rows.len());
+    for (index, (row, expected)) in board.rows().iter().zip(rows.iter()).enumerate() {
+        assert_eq!(row.ordinal(), u32::try_from(index + 1).unwrap());
+        assert_eq!(row.count(), expected.0);
+        assert_eq!(
+            row.fractional_mass().to_bits(),
+            (f64::from(expected.1) / 16777215.0).to_bits()
+        );
+        assert_eq!(row.raw_color(), expected.2);
+        assert_eq!(row.palette_index(), expected.2 % 9);
+        assert_eq!(row.name(), expected.3);
+    }
+    assert!(matches!(
+        report.events()[0].kind,
+        Kind::Leaderboard {
+            death_pending: true,
+            ..
+        }
+    ));
+    let saved = report.clone();
+    c.reset();
+    assert_eq!(report, saved);
+    fn require_copy<T: Copy>() {}
+    require_copy::<slither_client::presentation::HudIngressEvent>();
+    require_copy::<Kind>();
+}
+
+#[test]
+fn repeated_empty_and_ignored_boards_follow_original_command_indices_and_only_playing() {
+    let board = raw_board(&[(4, 1, 255, vec![0, 255])]);
+    let empty_board = raw_board(&[]);
+    let commands = [
+        vec![b'm'],
+        board.clone(),
+        board.clone(),
+        empty_board.clone(),
+        vec![b'p'],
+        board.clone(),
+        empty_board,
+        board,
+    ];
+    let mut guards = [guard(true, true, true); 8];
+    guards[5].playing = false;
+    let mut c = ready();
+    let report = apply_schema_bytes(&mut c, &bundle(&commands), &guards, &[], 2).unwrap();
+    let boards = report.leaderboard_rows();
+    assert_eq!(
+        boards.iter().map(|b| b.command_index()).collect::<Vec<_>>(),
+        [1, 2, 3, 6, 7]
+    );
+    assert_eq!(boards[0].rows(), boards[1].rows());
+    assert!(boards[2].rows().is_empty());
+    assert!(boards[3].rows().is_empty());
+    let headers = report
+        .events()
+        .iter()
+        .filter_map(|e| matches!(e.kind, Kind::Leaderboard { .. }).then_some(e.command_index))
+        .collect::<Vec<_>>();
+    assert_eq!(headers, [1, 2, 3, 6, 7]);
+    assert_eq!(
+        report.frame_report(),
+        FrameReport {
+            commands: 8,
+            ignored: 2
+        }
+    );
+    assert_eq!(report.setup_draws(), 0);
+    assert_eq!(c.draw_serial(), 0);
+}
+
+#[test]
+fn maximum_bare_board_is_not_capped_at_ten_or_4096_and_next_byte_rolls_back() {
+    use slither_client::protocol::{MAX_FRAME_BYTES, ProtocolError};
+    let count = (MAX_FRAME_BYTES - 6) / 7;
+    assert_eq!(count, 149_795);
+    let mut bytes = vec![b'l', 255, 255, 255, 0, 0];
+    for _ in 0..count {
+        bytes.extend([255, 255, 255, 255, 255, 255, 0]);
+    }
+    // Five bytes remain at the exact 1 MiB frame bound; keep a complete last name.
+    *bytes.last_mut().unwrap() = 5;
+    bytes.extend([0, 127, 128, 254, 255]);
+    assert_eq!(bytes.len(), MAX_FRAME_BYTES);
+    let mut c = ready();
+    let guards = [guard(true, false, false)];
+    let report = apply_schema_bytes(&mut c, &bytes, &guards, &[], 2).unwrap();
+    let rows = report.leaderboard_rows()[0].rows();
+    assert_eq!(rows.len(), count);
+    assert_eq!(rows.last().unwrap().ordinal(), 149_795);
+    assert_eq!(rows.last().unwrap().name(), [0, 127, 128, 254, 255]);
+    assert_eq!(rows[4096].count(), u16::MAX);
+    assert_eq!(rows[4096].fractional_mass().to_bits(), 1_f64.to_bits());
+    assert_eq!(rows[4096].raw_color(), 255);
+    let before = c.clone();
+    bytes.push(0);
+    assert_eq!(
+        apply_schema_bytes(&mut c, &bytes, &guards, &[], 2),
+        Err(ClientPresentationError::State(StateError::Protocol(
+            ProtocolError::FrameTooLarge
+        )))
+    );
+    assert_eq!(c, before);
+}
+
+#[test]
+fn aggregate_boards_fill_a_legal_frame_and_maximum_empty_board_count_is_retained() {
+    use slither_client::protocol::MAX_FRAME_BYTES;
+    let mut remaining = MAX_FRAME_BYTES;
+    let mut commands = Vec::new();
+    let mut expected_rows = 0;
+    while remaining != 0 {
+        // Bundled two-byte length prefixes must remain below 32.
+        let size = (remaining - 2).min(8191);
+        let row_count = (size - 6) / 7;
+        let padding = (size - 6) % 7;
+        let mut board = raw_board(&vec![(u16::MAX, 1, 255, vec![]); row_count]);
+        *board.last_mut().unwrap() = u8::try_from(padding).unwrap();
+        board.extend(std::iter::repeat_n(255, padding));
+        assert_eq!(board.len(), size);
+        remaining -= size + 2;
+        expected_rows += row_count;
+        commands.push(board);
+    }
+    let bytes = bundle(&commands);
+    assert_eq!(bytes.len(), MAX_FRAME_BYTES);
+    let mut c = ready();
+    let report = apply_schema_bytes(
+        &mut c,
+        &bytes,
+        &vec![guard(true, false, false); commands.len()],
+        &[],
+        2,
+    )
+    .unwrap();
+    let boards = report.leaderboard_rows();
+    assert_eq!(boards.len(), commands.len());
+    assert_eq!(
+        boards.iter().map(|b| b.rows().len()).sum::<usize>(),
+        expected_rows
+    );
+    for (i, board) in boards.iter().enumerate() {
+        assert_eq!(board.command_index(), i);
+        assert_eq!(board.rows()[0].ordinal(), 1);
+        assert_eq!(
+            board.rows()[0].fractional_mass().to_bits(),
+            (1_f64 / 16777215.0).to_bits()
+        );
+    }
+    let commands = vec![raw_board(&[]); MAX_FRAME_COMMANDS];
+    let report = apply_schema_bytes(
+        &mut c,
+        &bundle(&commands),
+        &vec![guard(true, true, true); MAX_FRAME_COMMANDS],
+        &[],
+        2,
+    )
+    .unwrap();
+    assert_eq!(report.leaderboard_rows().len(), MAX_FRAME_COMMANDS);
+    assert!(
+        report
+            .leaderboard_rows()
+            .iter()
+            .all(|b| b.rows().is_empty())
+    );
+    assert_eq!(report.events().len(), MAX_FRAME_COMMANDS);
+}
+
+#[test]
+fn row_history_survives_setup_r_final_removal_death_and_wire_id_reuse() {
+    for died in [false, true] {
+        let mut legacy = ready();
+        let mut c = legacy.clone();
+        let token = c.own_token().unwrap();
+        let first = raw_board(&[(u16::MAX, 16_777_215, 255, vec![255; 255])]);
+        let second = raw_board(&[(0, 1, 0, vec![])]);
+        let commands = [
+            first,
+            vec![b'R', 9],
+            vec![b'v', 1],
+            setup(29),
+            second,
+            vec![b's', 0, 7, u8::from(died)],
+            appearance(7, 5),
+            mass(7, 0),
+            vec![b'R', 3],
+            vec![b'v', 1],
+            raw_board(&[]),
+        ];
+        let guards = [guard(true, false, true); 11];
+        let bytes = bundle(&commands);
+        let legacy_report = apply_schema_bytes(&mut legacy, &bytes, &guards, &[2, 9], 1).unwrap();
+        let report = apply_schema_bytes(&mut c, &bytes, &guards, &[2, 9], 2).unwrap();
+        assert_eq!(c, legacy);
+        assert_eq!(report.events(), legacy_report.events());
+        assert_eq!(report.frame_report(), legacy_report.frame_report());
+        assert_eq!(report.setup_draws(), 1);
+        assert_eq!(c.own_token(), Some(token));
+        assert_eq!(
+            finals(&report).iter().map(|(i, _)| *i).collect::<Vec<_>>(),
+            [2, 9]
+        );
+        assert_eq!(finals(&report)[0].1.own.unwrap().score_adjustment, 9);
+        assert_eq!(finals(&report)[1].1.own.unwrap().score_adjustment, 3);
+        assert_eq!(finals(&report)[0].1.table_max, Some(17));
+        assert_eq!(finals(&report)[1].1.table_max, Some(29));
+        assert!(schedules(&report).is_empty());
+        let boards = report.leaderboard_rows();
+        assert_eq!(
+            boards.iter().map(|b| b.command_index()).collect::<Vec<_>>(),
+            [0, 4, 10]
+        );
+        assert_eq!(boards[0].rows()[0].count(), u16::MAX);
+        assert_eq!(boards[0].rows()[0].name(), vec![255; 255]);
+        assert_eq!(
+            boards[1].rows()[0].fractional_mass().to_bits(),
+            (1_f64 / 16777215.0).to_bits()
+        );
+        assert!(boards[2].rows().is_empty());
+        let saved = report.clone();
+        for step in 1..=200 {
+            c.advance(f64::from(step * 40), false).unwrap();
+        }
+        c.reset();
+        assert_eq!(report, saved);
+    }
+}
+
+#[test]
+fn schema_two_validates_false_playing_tails_and_late_supported_errors_before_callbacks() {
+    let good = raw_board(&[(4, 0, 10, vec![65])]);
+    let mut bad = good.clone();
+    bad.pop();
+    for playing in [false, true] {
+        for tail in [
+            bad.clone(),
+            vec![b'h'],
+            vec![b'R'],
+            vec![b'f'],
+            vec![b'y', 0, 31, 9],
+        ] {
+            let mut c = ready();
+            let before = c.clone();
+            let commands = [
+                setup(29),
+                good.clone(),
+                appearance(8, 3),
+                vec![b'f', 1, 2, 8, 9, 5],
+                prey(),
+                tail.clone(),
+            ];
+            let result = c.apply_frame_with_face_presentation_and_all_factories_and_setup_and_hud::<ClientPresentationError, _, _, _, _>(
+                &bundle(&commands), ElapsedHeader::Absent,
+                |_| panic!("appearance before complete received validation"),
+                |_, _| panic!("food before complete received validation"),
+                |_, _| panic!("prey before complete received validation"),
+                |_, _| panic!("setup before complete received validation"),
+                HudIngressPlan { schema: 2, ..plan(&[guard(playing, true, true); 6], &[]) });
+            if tail[0] == b'l' {
+                assert!(matches!(
+                    result,
+                    Err(ClientPresentationError::State(StateError::Hud(
+                        HudIngressError::Leaderboard(_)
+                    )))
+                ));
+            } else {
+                assert_eq!(
+                    result,
+                    Err(ClientPresentationError::State(StateError::InvalidPacket(
+                        tail[0]
+                    )))
+                );
+            }
+            assert_eq!(c, before);
+        }
+    }
+    let mut c = ready();
+    let report = apply_schema_bytes(&mut c, &good, &[guard(false, true, true)], &[], 2).unwrap();
+    assert!(report.events().is_empty());
+    assert!(report.leaderboard_rows().is_empty());
+    let mut no_tracking = AnimatedClient::new(0.).unwrap();
+    let before = no_tracking.clone();
+    assert_eq!(
+        apply_schema_bytes(
+            &mut no_tracking,
+            &good,
+            &[guard(true, false, false)],
+            &[],
+            2
+        ),
+        Err(ClientPresentationError::ScoreTrackingRequired)
+    );
+    assert_eq!(no_tracking, before);
+}
+
+#[test]
+fn schema_two_late_source_and_setup_failures_discard_rows_and_preserve_client() {
+    for failure in ["appearance", "food", "prey", "setup"] {
+        let mut c = ready();
+        let before = c.clone();
+        let calls = RefCell::new(Vec::new());
+        let commands = [
+            raw_board(&[(4, 1, 255, vec![0, 255])]),
+            appearance(8, 3),
+            vec![b'f', 1, 2, 8, 9, 5],
+            prey(),
+            setup(29),
+        ];
+        let result = c.apply_frame_with_face_presentation_and_all_factories_and_setup_and_hud::<ClientPresentationError, _, _, _, _>(
+            &bundle(&commands), ElapsedHeader::Absent,
+            |_| { calls.borrow_mut().push("appearance"); if failure == "appearance" { Err(ClientPresentationError::Limit) } else { Ok(FacePresentation::default()) } },
+            |p, _| { calls.borrow_mut().push("food"); if failure == "food" { Err(ClientPresentationError::Limit) } else { Ok(food_factory(p.raw_color)) } },
+            |p, _| { calls.borrow_mut().push("prey"); if failure == "prey" { Err(ClientPresentationError::Limit) } else { Ok(prey_factory(p.raw_color)) } },
+            |_, _| { calls.borrow_mut().push("setup"); Err(ClientPresentationError::Limit) },
+            HudIngressPlan { schema: 2, ..plan(&[guard(true, false, true); 5], &[]) });
+        assert_eq!(result, Err(ClientPresentationError::Limit));
+        assert_eq!(c, before);
+        let expected = ["appearance", "food", "prey", "setup"];
+        let end = expected.iter().position(|name| *name == failure).unwrap();
+        assert_eq!(*calls.borrow(), expected[..=end]);
     }
 }

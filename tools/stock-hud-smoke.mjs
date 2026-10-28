@@ -8,6 +8,9 @@ import { createSkinProvider } from '../web/skin-provider.mjs';
 import { bundle, syntheticScene, syntheticSetup } from '../web/synthetic-scene.mjs';
 import { copyHudIngressReport } from '../web/stock-hud-contract.mjs';
 import { unpackCommands } from '../web/handshake-session.mjs';
+import { createStockClient } from '../web/stock-client.mjs';
+import { createStockSession } from '../web/stock-session.mjs';
+import { syntheticChallenge } from './reference-parity.mjs';
 
 const word = n => [n >>> 8 & 255, n & 255];
 const triple = n => [n >>> 16 & 255, n >>> 8 & 255, n & 255];
@@ -160,7 +163,7 @@ export function stockHudSmoke(wasm) {
       recipe: request => { calls.recipe++; return provider.resolve(request, snapshot); },
       random: () => { calls.random++; throw new Error('No antenna random expected'); },
     };
-    const args = (commands, overrides = {}) => [bundle(...commands), false,
+    const args = (commands, overrides = {}) => [overrides.bytes ?? bundle(...commands), false,
       overrides.appearance ?? callbacks.appearance, overrides.food ?? callbacks.food,
       overrides.prey ?? callbacks.prey, target, ...palettes, background,
       overrides.width ?? 320, overrides.height ?? 180,
@@ -236,9 +239,135 @@ export function stockHudSmoke(wasm) {
     eq(l.legacy([badLeaderboard]), 0, 'legacy still admits opaque leaderboard');
     cases.push('gated headers, deathPending, complete malformed tail, eleven rows, opaque m and legacy l');
 
+    const rowsPlan = (commands, guards) => ({ ...plan(commands, [], guards), schema: 2 });
+    const rawRow = (count, mass, color, name) => [...word(count), ...triple(mass), color, name.length, ...name];
+    const named = name => [...leaderboard, ...rawRow(4, 0, 10, name)];
+    const rowsFixture = fixture(); rowsFixture.hud([setup(17), spawn(0)]);
+    const a = named([65]), b = named([66]);
+    eq(rowsFixture.hud([a]), rowsFixture.hud([b]), 'schema1 remains deliberately header-only');
+    const namedA = rowsFixture.hud([a], rowsPlan([a]));
+    const namedB = rowsFixture.hud([b], rowsPlan([b]));
+    eq(namedA.leaderboardRows[0].rows[0].name, [65]);
+    eq(namedB.leaderboardRows[0].rows[0].name, [66]);
+    ok(JSON.stringify(namedA) !== JSON.stringify(namedB), 'explicit rows retain the previously lost name distinction');
+    eq(Reflect.ownKeys(namedA).sort(), ['schema', 'commandCount', 'setupDraws', 'events', 'leaderboardRows'].sort());
+    eq(namedA.schema, 2); eq(namedA.setupDraws, 0);
+    const arbitraryName = Array.from({ length: 255 }, (_, index) => index);
+    const board = [...leaderboard, ...rawRow(65535, 16777215, 255, arbitraryName),
+      ...rawRow(0, 8388608, 10, []), ...rawRow(4, 1, 0, [255])];
+    const rowCommands = [board, [250], leaderboard, a, [82, 3], setup(29)];
+    const rowReport = rowsFixture.hud(rowCommands, rowsPlan(rowCommands));
+    eq(rowReport.leaderboardRows.map(value => value.commandIndex), [0, 2, 3]);
+    eq(rowReport.leaderboardRows[0].rows, [
+      { ordinal: 1, count: 65535, fractionalMass: 1, rawColor: 255, paletteIndex: 3, name: arbitraryName },
+      { ordinal: 2, count: 0, fractionalMass: 8388608 / 16777215, rawColor: 10, paletteIndex: 1, name: [] },
+      { ordinal: 3, count: 4, fractionalMass: 1 / 16777215, rawColor: 0, paletteIndex: 0, name: [255] },
+    ]);
+    eq(rowReport.leaderboardRows[1].rows, []);
+    eq(rowReport.leaderboardRows[2].rows[0].name, [65]);
+    eq(rowReport.setupDraws, 1); frozen(rowReport);
+    rejects(() => { rowReport.leaderboardRows[0].rows[0].name[0] = 99; });
+    const suppressedRows = rowsFixture.hud([board, a], rowsPlan([board, a],
+      [guard(false), guard(true, true, true)]));
+    eq(suppressedRows.leaderboardRows.map(value => value.commandIndex), [1]);
+    eq(suppressedRows.events[0].deathPending, true);
+    const manyRows = [...leaderboard, ...Array.from({ length: 4097 }, () => rawRow(4, 0, 10, [])).flat()];
+    eq(rowsFixture.hud([manyRows], rowsPlan([manyRows]), {
+      bytes: Uint8Array.from(manyRows),
+    }).leaderboardRows[0].rows.length, 4097);
+    rowsFixture.atomic(() => rowsFixture.hud([setup(17), badLeaderboard],
+      rowsPlan([setup(17), badLeaderboard], [guard(false), guard(false)])));
+    rowsFixture.atomic(() => rowsFixture.hud([board, [104]], rowsPlan([board, [104]])));
+    rowsFixture.scene.reset();
+    eq(rowReport.leaderboardRows[0].rows[0].name, arbitraryName, 'copied names survive native reset');
+    eq(namedA.leaderboardRows[0].rows[0].name, [65]);
+    cases.push('schema2 raw rows, native f64 and byte ownership, all-row order, schema1 compatibility and rollback');
+
+    const rowConversion = fixture(); rowConversion.hud([setup(17), spawn(0)]);
+    for (const primary of [{ rowConversionFailure: true }, undefined]) {
+      const originalKeys = Reflect.ownKeys;
+      try {
+        eq(rowConversion.atomic(() => rowConversion.hud([board, setup(29)], rowsPlan([board, setup(29)]), {
+          recipe(request) {
+            const result = rowConversion.callbacks.recipe(request);
+            Reflect.ownKeys = value => {
+              if (Object.hasOwn(value, 'ordinal')) throw primary;
+              return originalKeys(value);
+            };
+            return result;
+          },
+        })), primary, 'row conversion fails before Canvas/commit with exact primary');
+      } finally { Reflect.ownKeys = originalKeys; }
+    }
+    eq(rowConversion.hud([a], rowsPlan([a])).leaderboardRows[0].rows[0].name, [65]);
+    cases.push('schema2 conversion errors precede Canvas and model/source commit, including undefined primary');
+
+    // Actual Rust/Wasm -> controller -> session, with an in-memory socket and held-source double.
+    const composed = fixture(), sourceLease = Object.freeze({ revision: 'authored-row-smoke' });
+    const rowTrace = [], sockets = [], delivered = [], sessionErrors = [];
+    let held = false, clockReads = 0, throwHud = false;
+    const adapter = {
+      beginOperation() { ok(!held); held = true; rowTrace.push('begin'); return sourceLease; },
+      endOperation() { ok(held); held = false; rowTrace.push('end'); },
+      resolveAppearance(request) { ok(held); return composed.callbacks.appearance(request); },
+      resolveRecipe(request) { ok(held); return composed.callbacks.recipe(request); },
+      resolveAntennaRandom(request) { ok(held); return composed.callbacks.random(request); },
+    };
+    const controller = createStockClient({ scene: composed.scene, quality: composed.quality, adapter,
+      hostAssets: {
+        resolveFood(request, lease) { ok(held); eq(lease, sourceLease); return composed.callbacks.food(request); },
+        resolvePrey(request, lease) { ok(held); eq(lease, sourceLease); return composed.callbacks.prey(request); },
+      }, target: composed.target, palettes: composed.palettes, background: composed.background, width: 320, height: 180 });
+    const session = createStockSession({ wasm, now() { clockReads++; return 1000; }, createSocket() {
+      const socket = { readyState: 0, bufferedAmount: 0, sends: [], closes: 0,
+        send(bytes) { this.sends.push(Uint8Array.from(bytes)); },
+        close() { this.closes++; this.readyState = 3; } };
+      sockets.push(socket); return socket;
+    } });
+    const unsubscribe = session.subscribeWithLeaderboardRows({
+      packet(bytes, elapsed, packetPlan) {
+        rowTrace.push('packet'); eq(packetPlan.schema, 2);
+        return controller.packetWithHud(bytes, elapsed, packetPlan);
+      },
+      hud(value) {
+        rowTrace.push('hud'); ok(!held); eq(session.snapshot().connected, true); frozen(value);
+        delivered.push(value); if (throwHud) throw undefined;
+      },
+      state() { rowTrace.push('state'); },
+      error(value) { sessionErrors.push(value); },
+    });
+    session.play({ endpoint: 'ws://192.0.2.9:1234/slither', profile: {
+      clientVersion: 1, password: new Uint8Array(20), protocolVersion: 19,
+    }, nickname: 'Authored rows', skin: 0, customSkin: new Uint8Array() });
+    eq(sockets.length, 0);
+    const resetStep = composed.scene.advance_with_control(0, false, request => session.afterStep(request));
+    resetStep.free(); session.commitControl(); eq(sockets.length, 1);
+    const socket = sockets[0]; socket.readyState = 1; socket.onopen();
+    const message = bytes => socket.onmessage({ data: Uint8Array.from(bytes).buffer });
+    message([54, ...syntheticChallenge('A'.repeat(27))]);
+    eq(session.snapshot().phase, 'setup'); eq(socket.sends.length, 4);
+    rowTrace.length = 0; const beforeReceiveReads = clockReads;
+    message(bundle(setup(17), spawn(0), a));
+    eq(sessionErrors, []); eq(rowTrace, ['packet', 'begin', 'end', 'hud', 'state']);
+    eq(clockReads, beforeReceiveReads + 1, 'one existing receive clock read');
+    eq(delivered[0].leaderboardRows[0].commandIndex, 2);
+    eq(delivered[0].leaderboardRows[0].rows[0].name, [65]);
+    eq(controller.diagnostics().draws, 1);
+    const qualityBeforeRows = composed.quality.snapshot(); rowTrace.length = 0;
+    message(b); eq(rowTrace, ['packet', 'begin', 'end', 'hud', 'state']);
+    eq(delivered[1].leaderboardRows[0].rows[0].name, [66]);
+    eq(composed.quality.snapshot(), qualityBeforeRows); eq(controller.diagnostics().draws, 1);
+    eq(socket.sends.length, 4, 'row delivery adds no send');
+    throwHud = true; message(a);
+    eq(session.snapshot().phase, 'failed'); eq(sessionErrors, [undefined]);
+    eq(delivered.length, 3); eq(socket.closes, 1); eq(socket.sends.length, 4);
+    eq(socket.onmessage, null, 'post-commit callback failure detaches without replay');
+    unsubscribe(); controller.dispose();
+    cases.push('actual Wasm/controller/session row delivery after source release and control commit, no extra clock/send or replay');
+
     const invalid = fixture(); const cp = [setup(17), spawn(0), [118, 1], [250], [118, 1]];
     const valid = () => plan(cp, [2, 4]);
-    const badPlans = [null, Promise.resolve(valid()), { ...valid(), schema: 2 }, { ...valid(), commandCount: 0 },
+    const badPlans = [null, Promise.resolve(valid()), { ...valid(), schema: 3 }, { ...valid(), commandCount: 0 },
       { ...valid(), commandCount: 4097 }, { ...valid(), commandCount: 4 }, { ...valid(), then: () => {} },
       { ...valid(), [Symbol('extra')]: true }, { ...valid(), guards: [] },
       { ...valid(), guards: Array(5) }, { ...valid(), guards: [...valid().guards, guard()] },

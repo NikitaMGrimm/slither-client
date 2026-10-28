@@ -1718,17 +1718,32 @@ impl AnimatedClient {
         next.face_presentation_enabled |= enable_face_presentation;
         next.accessory_presentation_enabled |= enable_accessory_presentation;
         let mut setup = self.received.setup.clone();
-        let mut journal = plan.map(|_| HudIngressReport::new(applied.report));
-        let legacy_boundary = [HudCommandBoundary {
-            event_end: applied.events.len(),
-            marker: HudCommandMarker::Other,
-        }];
-        let boundaries = collector
-            .as_ref()
-            .map_or(legacy_boundary.as_slice(), |c| c.boundaries.as_slice());
+        let board_count = collector.as_ref().map_or(0, |c| {
+            c.boundaries
+                .iter()
+                .filter(|b| {
+                    matches!(
+                        b.marker,
+                        HudCommandMarker::Leaderboard { rows: Some(_), .. }
+                    )
+                })
+                .count()
+        });
+        let mut journal = plan
+            .map(|plan| HudIngressReport::new(applied.report, plan.schema, board_count))
+            .transpose()
+            .map_err(|error| ClientPresentationError::from(StateError::Hud(error)))?;
+        let boundaries =
+            collector
+                .into_iter()
+                .flat_map(|c| c.boundaries)
+                .chain(plan.is_none().then_some(HudCommandBoundary {
+                    event_end: applied.events.len(),
+                    marker: HudCommandMarker::Other,
+                }));
         let mut events = applied.events.into_iter();
         let mut event_start = 0;
-        for (command_index, boundary) in boundaries.iter().enumerate() {
+        for (command_index, boundary) in boundaries.enumerate() {
             let mut own_length_scheduled = None;
             for event in events.by_ref().take(boundary.event_end - event_start) {
                 match event {
@@ -2058,6 +2073,7 @@ impl AnimatedClient {
                         rank,
                         population,
                         death_pending,
+                        rows,
                     } => {
                         journal.push(
                             command_index,
@@ -2068,6 +2084,9 @@ impl AnimatedClient {
                                 death_pending,
                             },
                         );
+                        if let Some(rows) = rows {
+                            journal.push_leaderboard_rows(rows);
+                        }
                     }
                     HudCommandMarker::FinalCapture => {
                         let view = next.score_view();

@@ -17,6 +17,7 @@ function record(value, fields) {
   if (value === null || typeof value !== 'object') invalid();
   const prototype = Object.getPrototypeOf(value);
   if (prototype !== Object.prototype && prototype !== null) invalid();
+  if (typeof fields === 'function') fields = fields();
   const keys = Reflect.ownKeys(value);
   if (keys.length !== fields.length) invalid();
   const copy = {};
@@ -28,11 +29,13 @@ function record(value, fields) {
   }
   return copy;
 }
-function array(value, minimum, maximum, copyElement) {
+function arraySize(value, minimum, maximum) {
   if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) invalid();
   const length = Object.getOwnPropertyDescriptor(value, 'length');
   if (!length || !Object.hasOwn(length, 'value')) invalid();
-  const size = integer(length.value, minimum, maximum);
+  return integer(length.value, minimum, maximum);
+}
+function arrayKeys(value, size) {
   // Check the bound before enumerating keys, visiting elements or allocating copies.
   const keys = Reflect.ownKeys(value);
   if (keys.length !== size + 1) invalid();
@@ -40,11 +43,18 @@ function array(value, minimum, maximum, copyElement) {
     if (key !== 'length' && (typeof key !== 'string' || !/^(0|[1-9][0-9]*)$/.test(key)
       || Number(key) >= size)) invalid();
   }
+}
+function element(value, index) {
+  const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+  if (!descriptor || !Object.hasOwn(descriptor, 'value')) invalid();
+  return descriptor.value;
+}
+function array(value, minimum, maximum, copyElement) {
+  const size = arraySize(value, minimum, maximum);
+  arrayKeys(value, size);
   const copy = [];
   for (let index = 0; index < size; index++) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
-    if (!descriptor || !Object.hasOwn(descriptor, 'value')) invalid();
-    copy.push(copyElement(descriptor.value));
+    copy.push(copyElement(element(value, index)));
   }
   return freeze(copy);
 }
@@ -52,7 +62,7 @@ function array(value, minimum, maximum, copyElement) {
 /** Copy the closed plan; actual command/opcode matching belongs to the ingress owner. */
 export function copyHudIngressPlan(value) {
   const plan = record(value, ['schema', 'commandCount', 'guards', 'finalCaptureIndices']);
-  if (plan.schema !== 1) invalid();
+  if (plan.schema !== 1 && plan.schema !== 2) invalid();
   integer(plan.commandCount, 1, 4096);
   plan.guards = array(plan.guards, plan.commandCount, plan.commandCount, value => {
     const guard = record(value, ['playing', 'closeRequested', 'deathPending']);
@@ -144,8 +154,15 @@ function event(value, commandCount) {
 /** Copy structural report data only; no native table/header/own-target inference. */
 export function copyHudIngressReport(value, commandCount) {
   integer(commandCount, 1, 4096);
-  const report = record(value, ['schema', 'commandCount', 'setupDraws', 'events']);
-  if (report.schema !== 1 || report.commandCount !== commandCount) invalid();
+  let schema;
+  const report = record(value, () => {
+    schema = Object.getOwnPropertyDescriptor(value, 'schema');
+    if (!schema || !Object.hasOwn(schema, 'value') || (schema.value !== 1 && schema.value !== 2)) invalid();
+    const fields = ['schema', 'commandCount', 'setupDraws', 'events'];
+    if (schema.value === 2) fields.push('leaderboardRows');
+    return fields;
+  });
+  if (report.schema !== schema.value || report.commandCount !== commandCount) invalid();
   integer(report.setupDraws, 0, commandCount);
   report.events = array(report.events, 0, 2 * commandCount, value => event(value, commandCount));
   let previous = -1;
@@ -162,5 +179,58 @@ export function copyHudIngressReport(value, commandCount) {
     }
   }
   if (setups !== report.setupDraws) invalid();
+  if (report.schema === 2) report.leaderboardRows = leaderboardRows(report.leaderboardRows, report.events, commandCount);
   return freeze(report);
+}
+
+function leaderboardRows(value, events, commandCount) {
+  const size = arraySize(value, 0, commandCount);
+  const headers = events.filter(event => event.kind === 'leaderboard');
+  if (size !== headers.length) invalid();
+  // Stage bounded descriptor snapshots. Do not enumerate row/name keys or build
+  // output arrays until the complete report's lengths fit their aggregate budgets.
+  const boards = [];
+  let rowCount = 0, bytes = 0;
+  for (let index = 0; index < size; index++) {
+    const board = record(element(value, index), ['commandIndex', 'rows']);
+    if (board.commandIndex !== headers[index].commandIndex) invalid();
+    const length = arraySize(board.rows, 0, 149795 - rowCount);
+    rowCount += length;
+    bytes += 6 + 7 * length;
+    if (bytes > 1048576) invalid();
+    boards.push({ board, length, rows: [] });
+  }
+  for (const staged of boards) {
+    for (let index = 0; index < staged.length; index++) {
+      const row = record(element(staged.board.rows, index),
+        ['ordinal', 'count', 'fractionalMass', 'rawColor', 'paletteIndex', 'name']);
+      if (row.ordinal !== index + 1) invalid();
+      integer(row.count, 0, 65535);
+      if (typeof row.fractionalMass !== 'number' || !Number.isFinite(row.fractionalMass)
+        || row.fractionalMass < 0 || row.fractionalMass > 1) invalid();
+      integer(row.rawColor, 0, 255);
+      if (row.paletteIndex !== row.rawColor % 9) invalid();
+      const length = arraySize(row.name, 0, 255);
+      bytes += length;
+      if (bytes > 1048576) invalid();
+      staged.rows.push({ row, length });
+    }
+  }
+  arrayKeys(value, size);
+  const result = [];
+  for (const { board, length, rows } of boards) {
+    arrayKeys(board.rows, length);
+    const copiedRows = [];
+    for (const staged of rows) {
+      // Captured lengths and data records cannot be replaced by later Proxy
+      // reflection. Read byte descriptors once, after all length preflights.
+      const { row, length } = staged;
+      arrayKeys(row.name, length);
+      const name = [];
+      for (let index = 0; index < length; index++) name.push(integer(element(row.name, index), 0, 255));
+      copiedRows.push(freeze({ ...row, name: freeze(name) }));
+    }
+    result.push(freeze({ commandIndex: board.commandIndex, rows: freeze(copiedRows) }));
+  }
+  return freeze(result);
 }
