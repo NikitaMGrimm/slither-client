@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { root, freshOutput, within, syntheticServer, temporaryProfile, json, fence } from './browser-common.mjs';
-import { summarizeTrace } from './browser-trace.mjs';
+import { summarizeTrace, assessGraphics } from './browser-trace.mjs';
 import { syntheticPeer } from './browser-session-fixture.mjs';
 import { WebSocket } from 'ws';
 import { once } from 'node:events';
@@ -71,6 +71,15 @@ test('GPU trace verification uses real event categories, raster work and present
   assert.equal(actual.hasGpuRasterPresentation, true);
   assert.equal(actual.gpuEvents, 1); assert.equal(actual.rasterEvents, 1);
   assert.deepEqual(actual.relevantTracks, [{ id: '7:9', thread: 'CrGpuMain', process: 'GPU Process' }]);
+});
+
+test('an advertised software adapter does not label the active hardware renderer as software', () => {
+  const gpu = { featureStatus: { '2d_canvas': 'enabled' }, devices: [{ deviceString: 'Synthetic GPU' },
+    { deviceString: 'Microsoft Basic Render Driver' }], auxAttributes: { glRenderer: 'ANGLE Synthetic GPU D3D11' } };
+  assert.equal(assessGraphics(gpu).softwareAdapterAdvertised, true);
+  assert.equal(assessGraphics(gpu).softwareRendererDetected, false);
+  assert.equal(assessGraphics({ ...gpu, auxAttributes: { glRenderer: 'SwiftShader' } }).softwareRendererDetected, true);
+  assert.equal(assessGraphics({ ...gpu, auxAttributes: {} }).softwareRendererDetected, null);
 });
 
 test('page capability fence admits only selected local HTTP and selected /slither socket', async () => {

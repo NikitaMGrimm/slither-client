@@ -2,6 +2,15 @@ import { writeFile } from 'node:fs/promises';
 
 export const traceCategories = ['toplevel', 'devtools.timeline', 'disabled-by-default-devtools.timeline',
   'cc', 'viz', 'gpu', 'benchmark', 'disabled-by-default-gpu.service', 'disabled-by-default-cc.debug'];
+export function assessGraphics(gpu) {
+  const software = value => typeof value === 'string' && /swiftshader|llvmpipe|software|microsoft basic render|\bwarp\b/i.test(value);
+  const renderer = gpu.auxAttributes?.glRenderer;
+  return { featureStatus: gpu.featureStatus,
+    softwareRendererDetected: typeof renderer === 'string' ? software(renderer) : null,
+    softwareAdapterAdvertised: gpu.devices.some(x => software(x.deviceString)),
+    rendererIdentificationAvailable: typeof renderer === 'string' && renderer.length > 0,
+    limit: 'Feature status and renderer metadata describe this process; an advertised software adapter need not be the active renderer, and trace event names alone cannot prove hardware execution.' };
+}
 export function summarizeTrace(events) {
   const categories = {}, names = {}, tracks = new Set();
   const threadNames = new Map(), processNames = new Map();
@@ -31,17 +40,12 @@ export async function startTrace(browser) {
   const commandLine = await cdp.send('Browser.getBrowserCommandLine');
   if (commandLine.arguments.some(x => /^--disable-gpu(?:=|$)/.test(x))) throw new Error('GPU disabled in actual Chrome command line');
   const available = await cdp.send('Tracing.getCategories');
-  const rendererLabels = [graphics.gpu.auxAttributes?.glRenderer,
-    graphics.gpu.auxAttributes?.glVendor, ...graphics.gpu.devices.map(x => x.deviceString)].filter(x => typeof x === 'string');
   const events = [];
   cdp.on('Tracing.dataCollected', ({ value }) => { for (const event of value) events.push(event); });
   await cdp.send('Tracing.start', { categories: traceCategories.join(','), options: 'record-as-much-as-possible', transferMode: 'ReportEvents' });
   let stopped = false;
   return { metadata: { version, commandLine, requestedCategories: traceCategories,
-    graphicsAssessment: { featureStatus: graphics.gpu.featureStatus,
-      softwareRendererDetected: rendererLabels.some(x => /swiftshader|llvmpipe|software|microsoft basic render|\bwarp\b/i.test(x)),
-      rendererIdentificationAvailable: rendererLabels.length > 0,
-      limit: 'Feature status and renderer metadata describe this process; trace event names alone cannot prove hardware execution.' },
+    graphicsAssessment: assessGraphics(graphics.gpu),
     availableRelevantCategories: available.categories.filter(x => /gpu|raster|viz|^cc$/.test(x)), graphics },
   async stop(file) {
     if (stopped) throw new Error('Trace already stopped'); stopped = true;
