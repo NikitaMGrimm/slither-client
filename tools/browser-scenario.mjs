@@ -8,15 +8,15 @@ import { pathToFileURL } from 'node:url';
 import { root, freshOutput, json, fence, hash, cleanupResources, readConfinedFile } from './browser-common.mjs';
 import { syntheticPeer } from './browser-session-fixture.mjs';
 import { installProbe } from './browser-probe.mjs';
+import { runScenarioSteps, validateScenario } from './browser-scenario-steps.mjs';
+import { createBrowserLocalPlayFixture } from './browser-local-play-fixture.mjs';
 
 // Declarative feature checks share one server, packet fixture and Playwright owner.
 const { values: v } = parseArgs({ options: { scenario: { type: 'string' }, output: { type: 'string' },
   repo: { type: 'string', default: root }, browser: { type: 'string', default: 'chromium' } } });
 if (!v.scenario || !['chromium', 'firefox'].includes(v.browser)) throw new Error('--scenario JSON and --browser chromium|firefox required');
 const scenario = JSON.parse(await readFile(v.scenario));
-if (scenario.kind !== 'authored-synthetic' || !Array.isArray(scenario.steps) || scenario.steps.length > 100
-  || !Number.isInteger(scenario.viewport?.width) || !Number.isInteger(scenario.viewport?.height)
-  || scenario.viewport.width < 320 || scenario.viewport.width > 3840 || scenario.viewport.height < 240 || scenario.viewport.height > 2160) throw new Error('Invalid authored scenario');
+validateScenario(scenario);
 const repo = path.resolve(v.repo), output = await freshOutput(v.output, [repo]);
 const result = { kind: 'authored-synthetic', scenarioSha256: hash(await readFile(v.scenario)),
   status: 'running', browser: v.browser, checkpoints: [], actions: [], cleanup: [] };
@@ -25,7 +25,7 @@ try {
   execFileSync(process.execPath, ['tools/build-web.mjs'], { cwd: repo, stdio: 'inherit' });
   result.wasmSha256 = hash(await readFile(path.join(repo, 'dist/web/slither_client_bg.wasm')));
   const { createSceneServer } = await import(pathToFileURL(path.join(repo, 'tools/scene-server.mjs')));
-  peer = await syntheticPeer();
+  peer = await syntheticPeer({ fixture: scenario.fixture === 'local-play-lifecycle' ? createBrowserLocalPlayFixture() : undefined });
   server = createSceneServer({ root: repo, simulatorPort: peer.port });
   // The repository's original vector is an owned static resource, never reference artwork.
   const handlers = server.listeners('request'); server.removeAllListeners('request');
@@ -45,42 +45,7 @@ try {
   await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
   await page.goto(origin); await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
   await page.evaluate(() => { browserProbe.recording = true; });
-  function locator(step) {
-    if (step.role) return page.getByRole(step.role, { name: step.name, exact: true });
-    if (step.label) return page.getByLabel(step.label, { exact: true });
-    if (step.selector) return page.locator(step.selector);
-    throw new Error('A role/name, label or selector is required');
-  }
-  async function advance(ms) {
-    if (!Number.isInteger(ms) || ms < 0 || ms > 10000) throw new Error('Invalid bounded advance');
-    await page.clock.runFor(ms);
-    // Allow native socket ingress between deterministic game-clock advances.
-    await new Promise(resolve => setTimeout(resolve, 10));
-  }
-  for (const [index, step] of scenario.steps.entries()) {
-    result.lastStep = index; result.actions.push(step.op);
-    if (step.op === 'press') await page.keyboard.press(step.key);
-    else if (step.op === 'fill') await locator(step).fill(step.value, { force: true });
-    else if (step.op === 'click') await locator(step).click({ force: true });
-    else if (step.op === 'advance') await advance(step.ms);
-    else if (step.op === 'disconnect') peer.disconnect();
-    else if (step.op === 'assert') {
-      const target = locator(step);
-      let passed = false;
-      for (let attempt = 0; attempt < 120; attempt++) {
-        passed = step.state === 'hidden' ? !(await target.isVisible())
-          : step.state === 'enabled' ? await target.isEnabled()
-            : step.state === 'focused' ? await target.evaluate(e => e === document.activeElement)
-              : step.state === 'visible' ? await target.isVisible() : false;
-        if (passed) break; await advance(16);
-      }
-      if (!passed) throw new Error(`Scenario assertion failed at step ${index}`);
-    } else if (step.op === 'screenshot') {
-      if (!/^[a-z][a-z0-9-]{0,63}$/.test(step.name) || result.checkpoints.some(x => x.name === step.name)) throw new Error('Unique safe screenshot name required');
-      const png = await page.screenshot({ path: path.join(output, step.name + '.png'), animations: 'allow' });
-      result.checkpoints.push({ name: step.name, sha256: hash(png), viewport: scenario.viewport });
-    } else throw new Error('Unsupported scenario operation');
-  }
+  await runScenarioSteps({ page, peer, scenario, output, result });
   const data = await page.evaluate(() => { browserProbe.recording = false; return { commands: browserProbe.commands,
     observations: browserProbe.observations, dropped: browserProbe.dropped }; });
   await json(path.join(output, 'canvas.json'), data.commands);

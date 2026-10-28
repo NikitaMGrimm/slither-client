@@ -98,6 +98,8 @@ try {
       ['./browser-common.mjs', common],
       ['./browser-session-fixture.mjs', { syntheticPeer: async () => peer }],
       ['./browser-probe.mjs', { installProbe() {} }],
+      ['./browser-scenario-steps.mjs', await import(pathToFileURL(path.join(repo, 'tools/browser-scenario-steps.mjs')))],
+      ['./browser-local-play-fixture.mjs', await import(pathToFileURL(path.join(repo, 'tools/browser-local-play-fixture.mjs')))],
     ]);
     const serverModule = await synthetic({ createSceneServer: options => {
       assert.equal(options.root, selectedRepo); assert.equal(options.simulatorPort, peer.port); return server;
