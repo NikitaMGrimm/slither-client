@@ -189,7 +189,7 @@ export function stockHudSmoke(wasm) {
     return { scene, quality, target, palettes, background, callbacks, calls, sources, body, hud, legacy, state, atomic };
   }
   try {
-    announcementSmoke({ fixture, setup, spawn, food, prey, plan, eq, ok, rejects });
+    announcementSmoke({ fixture, setup, spawn, food, prey, plan, expectedScore, eq, ok, rejects });
     cases.push('selected announcement text, receipt order, shared lifecycle and rollback ABI');
     const f = fixture();
     const commands = [setup(17), spawn(0), [82, 3], [118, 1], [250], [112], mass(8388608), [82, 5], [118, 1], setup(29)];

@@ -21,6 +21,7 @@ mod boundary;
 mod camera;
 mod client;
 mod curve;
+mod end_screen;
 mod eyes;
 mod face;
 mod follow_camera;
@@ -77,6 +78,7 @@ pub use curve::{
     CurveInput, CurveOutput, CurveSample, CurveVertex, MAX_CURVE_SAMPLES, sample_curve,
     sample_curve_with_heading,
 };
+pub use end_screen::{EndScreenInput, EndScreenPhase, EndScreenState, EndScreenView};
 pub use eyes::{EyeLayoutInput, EyePair, StandardEyeGeometry, StandardEyeLayout, StandardEyeState};
 pub use face::{PairedFaceGeometry, PairedSideGeometry, PairedSideLayout};
 pub use follow_camera::{FollowCamera, INITIAL_ZOOM};

@@ -24,7 +24,8 @@ const gameSources = [['game-activation.mjs', 'activation.mjs'], ['game-gate.js',
   ['game-owned-hud-ui.mjs', 'owned-hud-ui.mjs'], ['game-owned-play-ui.mjs', 'owned-play-ui.mjs'],
   ['game-owned-leaderboard-ui.mjs', 'owned-leaderboard-ui.mjs'],
   ['game-owned-announcement-ui.mjs', 'owned-announcement-ui.mjs'],
-  ['game-owned-minimap-ui.mjs', 'owned-minimap-ui.mjs'], ['game-host.css', 'host.css']];
+  ['game-owned-minimap-ui.mjs', 'owned-minimap-ui.mjs'],
+  ['game-owned-end-screen-ui.mjs', 'owned-end-screen-ui.mjs'], ['game-host.css', 'host.css']];
 const snippetName = 'snippets/slither-client-0000000000000000/web/stock-hud-contract.mjs';
 
 // Original synthetic Wasm with empty constructor exports, never a playable fixture.
@@ -43,7 +44,7 @@ function syntheticWasm(omit) {
     'animatedscene_enable_announcement_tracking', 'animatedscene_announcement_view',
     'animatedscene_enable_minimap_tracking', 'animatedscene_observe_minimap_ui_fraction', 'animatedscene_minimap_view',
     'encode_login', 'solve_challenge', 'decode_frame', 'setup_protocol_version',
-    'resolve_skin', 'resolve_local_skin'].filter(name => name !== omit);
+    'resolve_skin', 'resolve_local_skin', 'endscreenprojector_new', 'endscreenprojector_project', '__wbg_endscreenprojector_free'].filter(name => name !== omit);
   return Buffer.from([0, 97, 115, 109, 1, 0, 0, 0,
     ...section(1, [1, 0x60, 0, 0]),
     ...section(3, [2, 0, 0]),
@@ -103,7 +104,7 @@ test('default packages have a closed deterministic inventory and preserve module
     'game/pkg/slither_client.js', 'game/pkg/slither_client_bg.wasm', `game/pkg/${snippetName}`].sort();
   const result = f.build();
   assert.deepEqual(result.files.map(file => file.path), ['chrome', 'firefox'].flatMap(browser => expectedPerBrowser.map(name => `${browser}/${name}`)));
-  assert.equal(result.files.length, 118);
+  assert.equal(result.files.length, 120);
   assert(result.files.every(file => file.bytes > 0 && /^[a-f0-9]{64}$/.test(file.sha256)));
   assert.deepEqual(f.build(), result, 'an identical rerun neither accumulates nor changes files');
   for (const browser of ['chrome', 'firefox']) {
@@ -142,7 +143,7 @@ test('generated validator paths remain exact, byte-preserved and independent of 
     output.web_accessible_resources[0].resources.pop();
     assert.deepEqual(output, source, 'all source manifest fields remain intact');
   }
-  assert.equal(result.files.length, 118);
+  assert.equal(result.files.length, 120);
 });
 
 test('changing the authored HUD validator makes the generated pair stale', t => {
@@ -180,7 +181,7 @@ test('MV3 browser differences, explicit activation permissions, closed WAR and o
     assert.deepEqual(manifest.permissions, ['activeTab', 'scripting']);
     assert.deepEqual(manifest.web_accessible_resources, [{
       matches: ['http://slither.io/*', 'https://slither.io/*', 'http://www.slither.io/*', 'https://www.slither.io/*'],
-      resources: ['game/bootstrap.mjs', 'game/runtime.mjs', 'game/owned-hud-ui.mjs', 'game/owned-play-ui.mjs', 'game/owned-leaderboard-ui.mjs', 'game/owned-minimap-ui.mjs', 'game/owned-announcement-ui.mjs', 'game/stock-host-snapshot.mjs', 'game/stock-client.mjs', 'game/stock-skin-provider.mjs',
+      resources: ['game/bootstrap.mjs', 'game/runtime.mjs', 'game/owned-hud-ui.mjs', 'game/owned-play-ui.mjs', 'game/owned-leaderboard-ui.mjs', 'game/owned-minimap-ui.mjs', 'game/owned-end-screen-ui.mjs', 'game/owned-announcement-ui.mjs', 'game/stock-host-snapshot.mjs', 'game/stock-client.mjs', 'game/stock-skin-provider.mjs',
         'game/stock-skin-rules.mjs', 'game/stock-accessory-selection.mjs', 'game/skin-provider.mjs', 'game/stock-food-provider.mjs', 'game/stock-prey-provider.mjs',
         'game/stock-asset-sources.mjs', 'game/desktop-layout.mjs', 'game/client-input.mjs',
         'game/stock-gameplay.mjs', 'game/stock-session.mjs', 'game/stock-hud-contract.mjs', 'game/stock-hud-state.mjs',
@@ -279,7 +280,7 @@ for (const name of ['animatedscene_control_view', 'animatedscene_advance_with_co
   'animatedscene_enable_minimap_tracking', 'animatedscene_observe_minimap_ui_fraction', 'animatedscene_minimap_view',
   'animatedscene_apply_frame_and_render_standard_with_face_presentation_and_prey_and_hud',
   'encode_login', 'solve_challenge', 'decode_frame', 'setup_protocol_version',
-  'resolve_skin', 'resolve_local_skin']) {
+  'resolve_skin', 'resolve_local_skin', 'endscreenprojector_new', 'endscreenprojector_project', '__wbg_endscreenprojector_free']) {
   test(`missing production gameplay ABI ${name} fails before package output`, t => {
     const f = fixture(t);
     f.write('dist/web/slither_client_bg.wasm', syntheticWasm(name));
@@ -328,19 +329,19 @@ test('CLI requires unambiguous paths and confines outputs to the ignored extensi
   }
   for (const outputDir of ['dist/elsewhere', '.', 'dist/extension/../../outside']) assert.throws(() => f.build({ outputDir }), /must stay inside/);
   assert.throws(() => f.build({ webDir: 'dist/extension' }), /must be separate/);
-  assert.equal(f.build({ outputDir: 'dist/extension/fresh' }).files.length, 118);
+  assert.equal(f.build({ outputDir: 'dist/extension/fresh' }).files.length, 120);
 });
 
 test('one default package copies the actual bootstrap and all owned UI helpers in both browsers', t => {
   const f = fixture(t), outputDir = 'dist/extension/default';
   const result = f.build({ outputDir });
-  assert.equal(result.files.length, 118);
+  assert.equal(result.files.length, 120);
   for (const browser of ['chrome', 'firefox']) {
     const game = path.join(f.root, outputDir, browser, 'game');
     for (const [source, destination] of gameSources) {
       assert.deepEqual(fs.readFileSync(path.join(game, destination)), fs.readFileSync(path.join(f.root, 'extension', source)));
     }
-    assert.equal(result.files.filter(file => file.path.startsWith(browser + '/')).length, 59);
+    assert.equal(result.files.filter(file => file.path.startsWith(browser + '/')).length, 60);
     assert.deepEqual(fs.readdirSync(game).filter(name => /(?:bootstrap|entry)/.test(name)), ['bootstrap.mjs']);
     const bytes = fs.readFileSync(path.join(game, 'bootstrap.mjs'));
     const stamp = fs.statSync(path.join(game, 'bootstrap.mjs')).mtimeMs;

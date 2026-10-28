@@ -1,5 +1,5 @@
 // Authored synthetic actual-Wasm announcement witnesses; no network or reference.
-export function announcementSmoke({ fixture, setup, spawn, food, prey, plan, eq, ok, rejects }) {
+export function announcementSmoke({ fixture, setup, spawn, food, prey, plan, expectedScore, eq, ok, rejects }) {
   const f = fixture();
   f.scene.enable_announcement_tracking();
   const packet = (name, message, count = 1) => [109, count >>> 16 & 255, count >>> 8 & 255, count & 255,
@@ -32,6 +32,10 @@ export function announcementSmoke({ fixture, setup, spawn, food, prey, plan, eq,
   fresh.atomic(() => fresh.hud([packet('missing-table', ''), setup(1)]));
   eq(fresh.scene.announcement_view().present, false);
   f.hud([packet('zero', 'ignored', 0)]); eq(f.scene.announcement_view(), before, 'nonpositive score retains content');
+  const inclusive = fixture(); inclusive.scene.enable_announcement_tracking();
+  inclusive.hud([setup(1), packet('', '', 2049), setup(29), packet('', '', 2077), setup(1)]);
+  eq(inclusive.scene.announcement_view().lines[0].text,
+    `Longest today: ${expectedScore(29, 2077, 1)}`, 'inclusive bounds use each ordered table, not the final Setup');
   const life = { schema: 1, deathPending: true, returnActive: true, returnCompleted: false, returnFraction: .6 };
   const step = f.scene.advance_with_control(20, false, () => ({ announcementLifecycle: life })); step.free();
   eq(f.scene.announcement_view().opacity, .6);

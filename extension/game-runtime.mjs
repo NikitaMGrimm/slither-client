@@ -11,6 +11,7 @@ import { createOwnedPlayUi } from './owned-play-ui.mjs';
 import { createOwnedLeaderboardUi } from './owned-leaderboard-ui.mjs';
 import { createOwnedMinimapUi } from './owned-minimap-ui.mjs';
 import { createOwnedAnnouncementUi } from './owned-announcement-ui.mjs';
+import { createOwnedEndScreenUi } from './owned-end-screen-ui.mjs';
 import { projectLeaderboardView } from './stock-leaderboard-view.mjs';
 import { stockEndpoint } from './stock-session.mjs';
 
@@ -22,7 +23,7 @@ const editNotifications = new Set(['keypress', 'beforeinput', 'input', 'composit
   'dragstart', 'drag', 'dragenter', 'dragleave', 'dragover', 'drop', 'dragend']);
 
 /** Local runtime factory. Importing this module performs no page ownership work. */
-export async function startGamePage({ realm = globalThis, initialize, wasmApi, hudReadout = false, ownedHudUi = false, ownedPlayUi = false, ownedLeaderboardUi = false, ownedMinimapUi = false, ownedAnnouncementUi = false, localHost } = {}) {
+export async function startGamePage({ realm = globalThis, initialize, wasmApi, hudReadout = false, ownedHudUi = false, ownedPlayUi = false, ownedLeaderboardUi = false, ownedMinimapUi = false, ownedAnnouncementUi = false, ownedEndScreenUi = false, localHost } = {}) {
   if (typeof hudReadout !== 'boolean') throw new TypeError('Explicit hudReadout boolean required');
   if (typeof initialize !== 'function' || wasmApi === null || typeof wasmApi !== 'object') {
     throw new TypeError('Explicit initialize function and wasmApi object required');
@@ -41,6 +42,9 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
   }
   if (typeof ownedMinimapUi !== 'boolean' || (ownedMinimapUi && (!hudReadout || !ownedHudUi))) {
     throw new TypeError('Explicit ownedMinimapUi boolean requires hudReadout and ownedHudUi');
+  }
+  if (typeof ownedEndScreenUi !== 'boolean' || (ownedEndScreenUi && (!hudReadout || !ownedHudUi))) {
+    throw new TypeError('Explicit ownedEndScreenUi boolean requires hudReadout and ownedHudUi');
   }
   if (localHost !== undefined) {
     const href = realm.location?.href;
@@ -61,6 +65,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
   let leaderboardUi, leaderboardProperties, projector, Projector, projectScores, freeProjector;
   let minimapUi, minimapCanvas, readMinimapView;
   let announcementUi, readAnnouncementView;
+  let endScreenUi, endScreenProjector, EndScreenProjector, projectEndScreen, freeEndScreen;
   let playAccepted = false, playAvailable = false, playGeneration = 0;
   const documentIdentity = hudReadout ? Symbol('HUD document') : undefined;
   const ownKeys = Reflect.ownKeys, apply = Reflect.apply, prototype = Object.getPrototypeOf;
@@ -162,7 +167,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     checkHudOperation();
   }
   function publishHud(...snapshots) {
-    if ((!hud && !leaderboardUi && !(localHost && playUi)) || disposed || cleanupActive) return;
+    if ((!hud && !leaderboardUi && !announcementUi && !endScreenUi && !(localHost && playUi)) || disposed || cleanupActive) return;
     // This is a post-operation seam, never a held-source or native callback.
     guardNicknameOperation();
     if (held) nicknameBusy();
@@ -189,6 +194,14 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
         const view = apply(readMinimapView, scene, [0, 0, minimapUi.imageRevision()]);
         checkHudOperation();
         minimapUi.render(view);
+        checkHudOperation();
+      }
+      if (endScreenUi) {
+        const session = gameplay.diagnostics().session;
+        const view = apply(projectEndScreen, endScreenProjector,
+          [session.phase, session.playing, session.lifeEnded, Boolean(localHost), snapshot?.final?.score]);
+        checkHudOperation();
+        endScreenUi.render(view);
         checkHudOperation();
       }
       if (localHost && playUi && playAccepted) {
@@ -350,6 +363,13 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
       cleanup(() => lease.dispose());
     }
     readAnnouncementView = undefined;
+    if (endScreenUi !== undefined) {
+      const lease = endScreenUi; endScreenUi = undefined;
+      cleanup(() => lease.dispose());
+    }
+    const endOwner = endScreenProjector, endRelease = freeEndScreen;
+    endScreenProjector = EndScreenProjector = projectEndScreen = freeEndScreen = undefined;
+    if (endOwner !== undefined) cleanup(() => apply(endRelease, endOwner, []));
     if (minimapUi !== undefined) {
       const lease = minimapUi; minimapUi = undefined;
       cleanup(() => lease.dispose());
@@ -401,7 +421,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     if (failed) throw error;
   };
   // The selected composition admits raw capabilities before any DOM/listener/input effects.
-  if (ownedLeaderboardUi || ownedMinimapUi) captureHudCapabilities();
+  if (ownedLeaderboardUi || ownedMinimapUi || ownedAnnouncementUi || ownedEndScreenUi) captureHudCapabilities();
   listen(realm, 'pagehide', () => dispose());
   let root = realm.document.getElementById('slither-client-root');
   if (!root) { root = realm.document.createElement('section'); root.id = 'slither-client-root';
@@ -533,6 +553,18 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
         playCapabilities = { controls: freeze(controls), createControlsLease: guarded(group.createControlsLease) };
         playAvailable = Boolean(localHost) || native.liveProfile !== undefined;
       }
+      if (ownedEndScreenUi) {
+        const constructor = descriptor(wasmApi, 'EndScreenProjector');
+        const base = constructor && hasOwn(constructor, 'value') ? constructor.value : undefined;
+        const shape = typeof base === 'function' ? descriptor(base, 'prototype') : undefined;
+        const methods = shape && hasOwn(shape, 'value') ? shape.value : undefined;
+        const project = methods && descriptor(methods, 'project'), release = methods && descriptor(methods, 'free');
+        if (!synchronous(base) || !project || !hasOwn(project, 'value') || !synchronous(project.value)
+          || !release || !hasOwn(release, 'value') || !synchronous(release.value)) {
+          throw new TypeError('Synchronous own-data end-screen projector required');
+        }
+        EndScreenProjector = base; projectEndScreen = project.value; freeEndScreen = release.value;
+      }
       if (ownedLeaderboardUi) {
         const captured = descriptor(native, 'leaderboardDom')?.value;
         const group = copyRecord(captured, ['schema', 'document', 'properties']);
@@ -557,7 +589,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     }
   }
   try {
-    if (!ownedLeaderboardUi && !ownedMinimapUi) captureHudCapabilities();
+    if (!ownedLeaderboardUi && !ownedMinimapUi && !ownedAnnouncementUi && !ownedEndScreenUi) captureHudCapabilities();
     report('loading');
     await initialize();
     if (disposed) return Object.freeze({ dispose });
@@ -568,6 +600,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
       runNative(() => localHost.bindSkinPolicy(wasmApi.resolve_local_skin));
     }
     if (ownedLeaderboardUi) runNative(() => { projector = new Projector(); });
+    if (ownedEndScreenUi) runNative(() => { endScreenProjector = new EndScreenProjector(); });
     const reader = localHost ? undefined : createStockHostSnapshot({ realm, observer: native,
       readAccessory: () => native.readAccessory() });
     const started = native.now();
@@ -673,7 +706,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
           runNative(callback);
           const after = gameplay.hudSnapshot();
           const rowsChanged = ownedLeaderboardUi && gameplay.leaderboardSnapshot() !== beforeRows;
-          if (after !== null && (after !== before || rowsChanged || localHost || ownedMinimapUi)) publishHud(after);
+          if (after !== null && (after !== before || rowsChanged || localHost || ownedMinimapUi || ownedAnnouncementUi || ownedEndScreenUi)) publishHud(after);
         } catch (error) { fail(error); }
       }) : native.queueMicrotask,
       setInterval: ownedMinimapUi ? (callback, milliseconds) => native.setInterval(() => {
@@ -859,6 +892,22 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
       } catch (error) { throw operation.failed ? operation.primary : error; }
       finally { hudOperation = undefined; operation.primary = undefined; }
       publishHud();
+    }
+    if (ownedEndScreenUi) {
+      hudIdle();
+      const operation = { failed: false, primary: undefined };
+      hudOperation = operation;
+      try {
+        endScreenUi = createOwnedEndScreenUi({ document: hudCapabilities.document, parent: root,
+          dom: hudCapabilities.dom, construct: constructCapabilities,
+          isCurrentDocument: hudCapabilities.isCurrentDocument });
+        endScreenUi.mount();
+        checkHudOperation();
+      } catch (error) { throw operation.failed ? operation.primary : error; }
+      finally { hudOperation = undefined; operation.primary = undefined; }
+      // Minimap startup already published this initial snapshot; the end view
+      // starts hidden and joins the next ordinary post-operation publication.
+      if (!ownedMinimapUi) publishHud();
     }
     if (ownedAnnouncementUi) {
       hudIdle();

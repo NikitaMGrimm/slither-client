@@ -48,3 +48,6 @@ mod presentation_browser;
 
 #[cfg(target_arch = "wasm32")]
 mod quality_browser;
+
+#[cfg(target_arch = "wasm32")]
+mod end_screen_browser;
