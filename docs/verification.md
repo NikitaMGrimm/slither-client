@@ -199,8 +199,52 @@ mistakes and all candidate attempts remain retained outside Git.
 
 These checks use authored synthetic metadata and a logical Canvas recorder.
 They do not establish native Canvas pixels, original artwork, stock lazy loading,
-installed-host behavior or gameplay/server acceptance. The stock no-accessory
-guard remains. See [static accessories](static-accessory.md).
+installed-host behavior or gameplay/server acceptance. These historical checks
+precede the explicit ready stock binding below. See [static accessories](static-accessory.md).
+
+### Explicit ready stock binding
+
+The selected-source adapter slice uses authored synthetic source/realm doubles
+to check explicit own projection, own/remote selection with identical cosmetics,
+Paired/Mouth recipe and numeric coherence, custom-overrides-special eligibility,
+selected SingleImage rejection, positive-zero full crops, source aliases/content
+revisions, immutable selection and pending/error cleanup. Default face-mode
+appearance shapes and no-selection SingleImage remain unchanged. The shared
+validator is listed in both extension manifests, the package/VM fixture graphs
+and the exact local game route; package checks use synthetic Wasm metadata.
+
+The focused command passes 178 tests with zero skips on Node 24.15.0:
+
+```sh
+node --test tools/stock-skin-provider.test.mjs tools/stock-entity-assets.test.mjs tools/skin-provider.test.mjs tools/build-extension.test.mjs
+```
+
+The existing `staticAccessoryRenderSmoke` helper remains the real-Wasm recorder
+for retained own/death/ID reuse, crop submission, ordering, alpha and rollback;
+this slice introduces no rendering math. The clean delivery checkout passes all
+1352 Node tests with zero skips, including the local route's HTTP test, and 637
+native all-target tests with zero ignored tests. Formatting, doctests and strict
+native/Wasm Clippy pass with Rust 1.99.0. A fresh release build with wasm-bindgen
+CLI 0.2.129 passes the complete real-Wasm smoke, including 142 accessory cases
+and 769 assertions, and 1465 stock-adapter assertions. Both extension packages
+build with 116 files total.
+
+Independent GPT 6.1 Sol review found no concrete P1/P2 finding in the unchanged
+behavior diff. That review separately ran 122 focused Node tests and the full
+prebuilt Wasm smoke, checked source/export identities and static package closure;
+it did not rebuild or rerun all Node tests. Delivery retains every reviewed
+source file byte for byte except this verification document. The reviewed
+index and complete reachable-history guards pass in the clean publication clone;
+no guard or hook is weakened and no private app-owned history is published.
+
+These are authored source, native and logical Canvas recorder checks. The
+accessory recorder uses its own synthetic provider; it does not directly test
+the new selected-ready stock adapter composed with accessory rendering. No
+browser pixels, original artwork, installed-host readiness, gameplay/server
+acceptance or performance claim follows. The first binding requires explicitly
+supplied full geometry, including forward; automatic stock chooser/policy
+selection, lazy loading and live host direct-image readiness remain separate
+scope. Private browser comparison remains separate from this delivery.
 
 ## Bootstrap cleanup failures
 
