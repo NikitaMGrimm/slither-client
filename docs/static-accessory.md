@@ -99,9 +99,74 @@ body/food/prey/antenna source pool. Preflight precedes target clear/resize, and
 model state commits only after complete submission. Canvas exceptions unwind
 local scopes but can leave partial pixels or completed target-size changes.
 
-The stock adapters retain their `ownAccessory=-1` admission requirement. Generic
-ready-source support does not create the stock image's lazy download, select a
-table entry, or supply a direct-image content commitment. Startup loading,
+## Explicit ready stock source binding
+
+An external complete source bundle may create `createStockSkinAdapter` with
+`appearanceMode: 'accessory'` and supply this snapshot data alongside its existing
+host and readiness records. The controller must select the same mode before
+ingress. This is explicitly supplied metadata, not automatic stock chooser
+behavior. All values below are authored synthetic examples:
+
+```js
+ownAccessory: 71,
+ownAccessorySelection: {
+  id: 71,
+  geometry: { forward: 5, imageScale: 0.25, pivotX: 3, pivotY: 7 },
+  source: callerOwnedReadyImageOrCanvas,
+  width: 20,
+  height: 12,
+},
+readiness: [
+  // In addition to the existing body/face/entity commitments:
+  { source: callerOwnedReadyImageOrCanvas, state: 'ready', revision: 'selected-content-1' },
+],
+```
+
+The selection record has exactly the five shown own data fields, and geometry
+has exactly its four own numeric fields. The ID is an explicit integer in
+0..65535 and must equal `ownAccessory`; it has no built-in catalog semantics.
+Geometry uses the native bounds above. Width and height are positive integer
+cached extents at most 65535, equal to the full native canvas/natural image
+extent. Native prototype getters establish image completeness and dimensions.
+The exact source must have its own ready content revision in `readiness`;
+capture-wide revisions cannot substitute for it. Same-size pixel changes are
+the caller's responsibility and require a truthful new source content token
+and a new capture revision.
+
+`ownAccessory: -1` with an absent or null selection keeps the legacy no-selection
+contract. An active selection with `-1` rejects. Default `'face'` mode rejects a
+selected ready record. In accessory mode appearances always include `accessory`,
+null unless `request.own === true`. The generic recipe projection preserves an
+optional own boolean; absent old callers keep their old projected shape.
+Only the retained native own context selects numeric geometry and the tagged
+attachment. Wire cosmetic, skin, attachment ID, wire-ID reuse and callback order
+never select it. Rust continues to own death retention, placement, ordering,
+alpha and crop submission. Paired and Mouth are supported; selected SingleImage
+rejects. Accepted custom overrides determine face eligibility first.
+
+Both skin and entity source adapters use the same selected-source admission.
+Missing record/source/commitment, incomplete native image, zero cached/native
+extent or pending commitment rejects with `status: 'pending'` before numeric
+appearance metadata or entity entropy. Malformed/extra/inherited/accessor
+selection fields, ID mismatch, invalid geometry, extent mismatch and unsupported
+source reject with `status: 'unsupported'`. Neither path silently becomes null.
+The admitted ID, source identity, extent and geometry stay fixed for the adapter,
+including signed zero; changing them requires a new adapter/session. Operations
+copy selection metadata. Failed capture leaves no active operation; callers must
+still end held operations after resolver failures. Reentry guards release on error.
+Source content revisions may advance under the existing capture rules. Entity
+factories also recheck the complete commitment after their random callbacks.
+
+The recipe borrows the selected source through the existing shared catalog and
+normalizer, with `[+0, +0, width, height]` and the ten-field attachment above.
+Full-image extent remains explicit crop mode. No catalog, image creation,
+downloader, lazy-loading transition, fallback or chooser is provided. The caller
+supplies the full forward distance for every face family. Automatic stock
+forward selection needs a separately scoped pure Rust policy projection; this
+binding introduces no JavaScript formula or numeric table.
+
+The live host capture still rejects active accessories until its direct-image
+readiness/content commitment is separately provided. Startup loading,
 installed-host behavior, original artwork/pixels and gameplay acceptance remain
 separate. Native arithmetic and synthetic Wasm recordings establish only their
 documented inputs; see [verification](verification.md).
