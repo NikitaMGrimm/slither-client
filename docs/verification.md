@@ -43,7 +43,7 @@ access package sources. Release-plz remains dormant.
 The selected implementation uses one default bootstrap for HUD, Play and a
 visible schema-2 leaderboard. Packaging accepts only that default entry. The
 standalone `/` page uses the same runtime/controller/gameplay/session with
-authored flat sources, a configured loopback endpoint, authored zero credentials
+authored shaded sources, a configured loopback endpoint, authored zero credentials
 and the existing challenge handshake. See [local Play](local-play.md) for the
 runnable path. Simulation remains in the separate slither-sim repository.
 

@@ -2,7 +2,7 @@
 
 The local page runs the default bootstrap with Play controls, score readouts and
 leaderboard rows. It uses the same Rust/Wasm scene, controller, gameplay and
-session as game-page integration. Browser glue supplies generated flat stand-ins
+session as game-page integration. Browser glue supplies generated shaded stand-ins
 and a selected loopback endpoint; it does not load official artwork or acquire
 a remote profile. Simulation remains in the separate
 [slither-sim repository](https://github.com/NikitaMGrimm/slither-sim).
@@ -53,6 +53,12 @@ It uses the existing update/UI timers and does not affect world draw counts.
 animated diagnostic. Both also work without `--simulator-port`; `/` requires a
 configured simulator endpoint. These previews have their own diagnostic
 transport and do not substitute for the default game path.
+
+The default local body path uses three authored color families, with seven shaded
+variants, separate boost glow and shared outline/shadow/death sources from the
+single asset map. Rust owns the three-color selection and shading cadence;
+browser code binds the source objects after Wasm initialization. Full skin
+identity, displayed custom skins, special faces and accessories remain incomplete.
 
 The implementation connects the local host adapter to the shared runtime and
 visible HUD/leaderboard. A local Chrome check completed trusted Play, steering and boost-on/off, then

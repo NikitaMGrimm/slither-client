@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
 import { createSkinProvider } from '../web/skin-provider.mjs';
+import { createLocalBodyResolver } from '../web/synthetic-body.mjs';
 import { bundle, syntheticScene, syntheticSetup, syntheticStep } from '../web/synthetic-scene.mjs';
 import { denseScene } from '../web/dense-scene.mjs';
 import { faceRenderSmoke } from './face-render-smoke.mjs';
@@ -665,6 +666,30 @@ export function bodyRenderSmoke(wasm) {
       limits.metadata.bodyStyle.tailFade = { palette: 1, length: 65535 };
       ok(String(checkAtomic(limits)).includes('CommandLimit'), 'aggregate image-command budget fails before reset');
     } finally { limits.close(); }
+    const local = fixture();
+    try {
+      const source = name => new HTMLCanvasElement(name);
+      const bodySources = {
+        palettes: Array.from({ length: 3 }, (_, palette) => ({
+          variants: Array.from({ length: 7 }, (_, variant) => source(`local-${palette}-${variant}`)),
+          boostGlow: source(`local-glow-${palette}`),
+        })),
+        effects: { outline: source('local-outline'), shadow: source('local-shadow'),
+          deathHighlight: source('local-death') },
+      };
+      let policyCalls = 0;
+      const resolveLocal = createLocalBodyResolver(bodySources, realm, (skin, bytes) => {
+        policyCalls++;
+        return wasm.resolve_local_skin(skin, bytes);
+      });
+      local.scene.render_standard(local.target, ...local.foods, local.background, resolveLocal, local.quality);
+      ok(policyCalls >= 3, 'pure Rust selection can run inside real Wasm draw callbacks');
+      const images = local.target.context.trace.filter(entry => entry.op === 'image');
+      const shades = bodySources.palettes[0].variants;
+      ok(new Set(images.filter(entry => shades.includes(entry.source)).map(entry => entry.source)).size > 1,
+        'the local recipe submits multiple exact shaded sources');
+      ok(images.some(entry => entry.source === bodySources.effects.outline));
+    } finally { local.close(); }
     return { assertions, synthetic: true, browser: false, reference: false, network: false };
   } finally {
     for (const [key, prior] of globals) {

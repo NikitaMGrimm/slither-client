@@ -9,7 +9,9 @@ import { createClientInput } from '../web/client-input.mjs';
 function fixture({ href = 'http://127.0.0.1:18884/game', decode, minimap = false } = {}) {
   const dom = createGateTestDom({ hud: true, ownedHud: true, ownedPlay: true, leaderboard: true, minimap });
   const document = new dom.Document();
-  const listeners = new Map(), sockets = [], calls = [];
+  const listeners = new Map(), sockets = [], calls = [], canvases = [];
+  const gradient = (...coordinates) => ({ coordinates, stops: [],
+    addColorStop(offset, color) { this.stops.push([offset, color]); } });
   class Events {
     addEventListener(type, callback, capture) {
       let entries = listeners.get(this);
@@ -31,13 +33,17 @@ function fixture({ href = 'http://127.0.0.1:18884/game', decode, minimap = false
     constructor() { super('canvas'); }
     getContext(kind) {
       assert.equal(kind, '2d');
-      return { beginPath() {}, arc() {}, moveTo() {}, lineTo() {}, closePath() {}, fill() {}, fillRect() {} };
+      return { beginPath() {}, arc() {}, moveTo() {}, lineTo() {}, closePath() {}, fill() {}, fillRect() {},
+        createRadialGradient: gradient };
     }
     toDataURL() { return `data:image/png;base64,synthetic-local-${this.width}x${this.height}`; }
   };
-  if (minimap) Canvas.prototype.toDataURL = function () {
-    return `data:image/png;base64,synthetic-local-${this.width}x${this.height}`;
-  };
+  if (minimap) {
+    Canvas.prototype.toDataURL = function () {
+      return `data:image/png;base64,synthetic-local-${this.width}x${this.height}`;
+    };
+    dom.minimap.Context.prototype.createRadialGradient = gradient;
+  }
   class Image extends dom.hud.HTMLElement {
     constructor() { super('img'); }
     get naturalWidth() { return this.complete ? Number(this.src.match(/-(\d+)x/)[1]) : 0; }
@@ -48,7 +54,7 @@ function fixture({ href = 'http://127.0.0.1:18884/game', decode, minimap = false
   const originalCreate = dom.Document.prototype.createElement;
   dom.Document.prototype.createElement = function (tag) {
     if (tag === 'canvas') {
-      const canvas = new Canvas(); dom.state(canvas).owner = this; return canvas;
+      const canvas = new Canvas(); dom.state(canvas).owner = this; canvases.push(canvas); return canvas;
     }
     return Reflect.apply(originalCreate, this, [tag]);
   };
@@ -79,12 +85,22 @@ function fixture({ href = 'http://127.0.0.1:18884/game', decode, minimap = false
     parent.appendChild(field); parent.appendChild(button);
     return { parent, field, button };
   }
-  return { realm, document, dom, calls, sockets, listeners, dispatch, controls };
+  return { realm, document, dom, calls, sockets, canvases, listeners, dispatch, controls };
 }
 
 const endpoint = 'ws://127.0.0.1:8766/slither';
 const create = f => createLocalGameHost({ realm: f.realm, endpoint });
 const claim = host => host.gate.claim(host.gate.metadata().id);
+
+// Labelled stand-in for the copied Rust numeric rule, not a second skin policy.
+const localRuleDouble = () => ({ skin: 255, custom: false, basePalette: 2,
+  runs: [{ palette: 2, count: 1 }], variantMode: 'ping-pong', variantPeriod: 7,
+  eyes: { kind: 'standard', distance: 6, separation: 6, radius: 6, pupilRadius: 3.5,
+    pupilTravel: 2.3, outlineWidth: 0, eyeColor: 0xffffff, pupilColor: 0, outlineColor: 0,
+    eyeOpacity: 0.75, pupilOpacity: 1, angleSmoothing: 0.12 },
+  bodyStyle: { detailedSegments: false, swell: 0, rotateSegments: true, headFade: null, tailFade: null },
+  antenna: null, faceDecoration: null, unsupportedFeatures: [],
+});
 
 test('local native minimap capture composes with the builder using issued Rust-view doubles', async () => {
   const f = fixture({ minimap: true }), host = await create(f), native = claim(host);
@@ -126,7 +142,7 @@ test('local native minimap capture composes with the builder using issued Rust-v
 
 test('local host supplies authored sources/profile and one claim without starting browser work', async () => {
   const f = fixture(), host = await create(f);
-  assert.deepEqual(Object.keys(host).sort(), ['gate', 'sources', 'profile', 'endpoint', 'isCurrentDocument', 'presetEndpoint', 'dispose'].sort());
+  assert.deepEqual(Object.keys(host).sort(), ['gate', 'sources', 'profile', 'endpoint', 'isCurrentDocument', 'presetEndpoint', 'bindSkinPolicy', 'dispose'].sort());
   assert.equal(host.endpoint, endpoint);
   assert.deepEqual(host.profile, { clientVersion: 0, password: new Uint8Array(20), protocolVersion: 19 });
   assert.equal(host.sources.palettes.length, 3);
@@ -174,22 +190,49 @@ test('wrong document origins, endpoint aliases and missing browser capabilities 
   await assert.rejects(create(socket), /WebSocket/);
 });
 
-test('source operation wraps existing resolvers, maps ordinary skins modulo3 and draws no random tape eagerly', async () => {
+test('bound Rust policy resolves only inside the existing source operation with raw skin/custom metadata', async () => {
   const f = fixture(), host = await create(f), { adapter, hostAssets, palettes } = host.sources;
+  const calls = [], rule = localRuleDouble(), customBytes = Uint8Array.of(7, 255, 3);
+  // Deliberately choose a palette different from 255 % 3 to expose JS selection.
+  rule.eyes.radius = 7; rule.eyes.eyeColor = 0x123456;
+  rule.bodyStyle.swell = 0.04;
+  assert.throws(() => adapter.beginOperation(), /policy must be bound/);
+  assert.throws(() => host.bindSkinPolicy(null), /policy function/);
+  host.bindSkinPolicy((skin, bytes) => { calls.push({ skin, bytes }); return rule; });
+  assert.deepEqual(calls, []);
+  assert.throws(() => host.bindSkinPolicy(localRuleDouble), /already bound/);
   assert.throws(() => adapter.resolveAppearance({}), /operation required/);
   assert.throws(() => adapter.resolveRecipe({ skin: 0 }), /operation required/);
+  assert.deepEqual(calls, []);
   const active = adapter.beginOperation();
   assert.throws(() => adapter.beginOperation(), /already active/);
-  const appearance = adapter.resolveAppearance({ skin: 255 });
+  const request = { skin: 255, customBytes, cosmetic: 73, x: 4, y: -5 };
+  const appearance = adapter.resolveAppearance(request);
   assert.equal(appearance.face.kind, 'paired'); assert.equal(appearance.antenna, null);
-  assert.equal(appearance.face.eyes.radius, 6);
-  for (const skin of [0, 1, 2, 3, 41, 255]) {
-    const result = adapter.resolveRecipe({ skin, customBytes: new Uint8Array(), cosmetic: 0 });
-    assert.equal(result.status, 'ready'); assert.equal(result.recipe.basePalette, skin % 3);
-    assert.deepEqual(result.recipe.eyes, appearance.face.eyes);
-    assert.equal(result.recipe.palettes[skin % 3].variants[0].asset.source, palettes[skin % 3]);
+  assert.equal(appearance.face.eyes, rule.eyes);
+  assert.equal(appearance.face.eyes.radius, 7);
+  assert.deepEqual(appearance.face.decoration, { kind: 'none' });
+  assert.deepEqual(calls, [{ skin: 255, bytes: customBytes }]);
+  assert.equal(calls[0].bytes, customBytes);
+  const result = adapter.resolveRecipe(request);
+  assert.equal(result.status, 'ready'); assert.equal(result.recipe.basePalette, 2);
+  assert.deepEqual(result.recipe.eyes, appearance.face.eyes);
+  assert.deepEqual(result.recipe.bodyStyle, rule.bodyStyle);
+  assert.equal(result.recipe.variantMode, 'ping-pong'); assert.equal(result.recipe.variantPeriod, 7);
+  assert.equal(calls.length, 2); assert.equal(calls[1].skin, 255);
+  assert.deepEqual(calls[1].bytes, customBytes);
+  assert.deepEqual(request, { skin: 255, customBytes: Uint8Array.of(7, 255, 3), cosmetic: 73, x: 4, y: -5 });
+  const used = [];
+  for (const palette of result.recipe.palettes) {
+    assert.equal(palette.variants.length, 7);
+    used.push(...palette.variants.map(use => use.asset.source), palette.boostGlow.asset.source);
   }
-  assert.throws(() => adapter.resolveRecipe({ skin: 256 }), /skin byte/);
+  used.push(...result.recipe.effects.map(effect => effect.asset.source));
+  assert.equal(new Set(used).size, 27);
+  assert(used.every(source => f.canvases.includes(source) && !palettes.includes(source)));
+  assert(palettes.every(source => source.width === 32 && source.height === 32));
+  assert.throws(() => adapter.resolveRecipe({ skin: 256 }), /skin/);
+  assert.equal(calls.length, 2);
   assert.deepEqual(f.calls, ['decode', 'decode']);
   const food = hostAssets.resolveFood({ palette: 9 }, active), prey = hostAssets.resolvePrey({ palette: 8 }, active);
   assert.equal(food.palette.color, 9); assert.equal(prey.palette.color, 8);
@@ -200,8 +243,16 @@ test('source operation wraps existing resolvers, maps ordinary skins modulo3 and
   assert.equal(adapter.resolveAntennaRandom({ nodeCount: 8, randomPairCount: 7 }).length, 14);
   assert.equal(f.calls.length - randomCalls, 14);
   adapter.endOperation();
+  assert.throws(() => adapter.resolveRecipe(request), /operation required/);
+  assert.throws(() => adapter.resolveAppearance(request), /operation required/);
+  assert.equal(calls.length, 2);
   assert.throws(() => hostAssets.resolvePrey({ palette: 0 }, active), /operation required/);
   adapter.beginOperation(); adapter.endOperation(); host.dispose();
+  assert.throws(() => host.bindSkinPolicy(localRuleDouble), /Current local/);
+  assert.throws(() => adapter.beginOperation(), /Current local/);
+  assert.throws(() => adapter.resolveAppearance(request), /Current local/);
+  assert.throws(() => adapter.resolveRecipe(request), /Current local/);
+  assert.equal(calls.length, 2);
 });
 
 test('captured native DOM groups construct and edit runtime nodes after prototype methods change', async () => {

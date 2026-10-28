@@ -545,6 +545,12 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     report('loading');
     await initialize();
     if (disposed) return Object.freeze({ dispose });
+    if (localHost) {
+      if (!synchronous(localHost.bindSkinPolicy) || !synchronous(wasmApi.resolve_local_skin)) {
+        throw new TypeError('Local Rust skin policy binding required');
+      }
+      runNative(() => localHost.bindSkinPolicy(wasmApi.resolve_local_skin));
+    }
     if (ownedLeaderboardUi) runNative(() => { projector = new Projector(); });
     const reader = localHost ? undefined : createStockHostSnapshot({ realm, observer: native,
       readAccessory: () => native.readAccessory() });
