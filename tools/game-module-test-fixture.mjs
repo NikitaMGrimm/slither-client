@@ -18,7 +18,7 @@ const entryNames = { 'bootstrap.mjs': 'game-bootstrap.mjs', 'runtime.mjs': 'game
   'owned-hud-ui.mjs': 'game-owned-hud-ui.mjs', 'owned-play-ui.mjs': 'game-owned-play-ui.mjs',
   'start-page-layout.mjs': 'start-page-layout.mjs',
   'owned-leaderboard-ui.mjs': 'game-owned-leaderboard-ui.mjs',
-  'owned-minimap-ui.mjs': 'game-owned-minimap-ui.mjs' };
+  'owned-minimap-ui.mjs': 'game-owned-minimap-ui.mjs', 'owned-end-screen-ui.mjs': 'game-owned-end-screen-ui.mjs' };
 const origin = 'https://authored-package.invalid/game/';
 
 export async function runGameModuleTest(scenario) {
@@ -71,6 +71,10 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
     },
   });
   // Test-owned generated-ABI doubles are installed before module export capture.
+  wasm.api.EndScreenProjector = vm.runInContext(`(class {
+    project() { return { schema: 1, visible: false, title: '', scoreText: '', statusText: '' }; }
+    free() {}
+  })`, f.context);
   prepareWasm?.(wasm.api, source => vm.runInContext(source, f.context));
   const sources = new Map();
   for (const name of webNames) sources.set(origin + name, readFileSync(new URL('web/' + name, root), 'utf8'));
