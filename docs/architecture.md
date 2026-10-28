@@ -33,9 +33,12 @@ Local rendering binds a pure Rust skin resolver after Wasm initialization. Rust
 selects the existing three authored color stand-ins, plain paired eyes and
 seven-variant shading cadence. The asset map supplies shaded body, boost-glow,
 outline, shadow and death-highlight canvases; JavaScript binds those source
-objects through the existing provider. Custom skin data remains undisplayed on
-this local path. The separate Rust stock resolver covers built-in/custom runs,
-face and antenna geometry, but complete palette artwork and special-source
+objects through the existing provider. Admitted custom runs use first-variant
+shading and project each palette modulo three, preserving admitted run counts
+and order without merging projection collisions. Empty or rejected custom data
+keeps the existing `skin % 3` selection. These authored families do not imply
+stock 42-color equivalence. The separate Rust stock resolver covers built-in/custom
+runs, face and antenna geometry, but complete palette artwork and special-source
 binding are still needed before that policy can replace the local stand-ins.
 
 The default runtime enables Rust-owned nickname presentation before ingress.

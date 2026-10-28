@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { resolveStockSkin } from '../web/stock-skin-rules.mjs';
+import { createLocalBodyResolver } from '../web/synthetic-body.mjs';
 
 // Authored numeric differential witnesses only; no artwork, browser or network.
 const custom = (...pairs) => Uint8Array.of(255, 40, 7, 99, 0, 255, 64, 3, ...pairs.flat());
@@ -42,9 +43,45 @@ export function skinPolicySmoke(wasm) {
   for (const [skin, palette] of [[0, 0], [1, 1], [2, 2], [24, 0], [25, 1], [26, 2],
     [27, 0], [40, 1], [41, 2], [60, 0], [255, 0]]) {
     const expected = { ...resolveStockSkin({ skin: palette }), skin };
-    for (const bytes of [new Uint8Array(), custom([7, 41]), new Uint8Array(255).fill(255)]) {
+    for (const bytes of [new Uint8Array(), new Uint8Array(255).fill(255),
+      custom([0, 1], [2, 36], [3, 38], [4, 40], [5, 42])]) {
       equal(wasm.resolve_local_skin(skin, bytes), expected, `authored local skin ${skin}`);
     }
+  }
+  const projected = Uint8Array.of(...custom([1, 5], [9, 36], [0, 7], [2, 5], [2, 41], [3, 39], [1, 5]), 255);
+  const localCustom = { ...resolveStockSkin({ skin: 0, customBytes: custom([3, 2], [2, 2], [3, 0], [1, 2]) }),
+    basePalette: 2, runs: [{ palette: 2, count: 3 }, { palette: 2, count: 2 }, { palette: 0, count: 3 }, { palette: 2, count: 1 }] };
+  for (const skin of [24, 27, 40, 41, 60, 255]) {
+    equal(wasm.resolve_local_skin(skin, projected), { ...localCustom, skin },
+      `authored modulo-three projection preserves admitted run boundaries for ${skin}`);
+  }
+  equal(wasm.resolve_local_skin(60, maximum).runs, [{ palette: 0, count: 31365 }],
+    'maximum authored custom count remains compact');
+
+  // Real Wasm selection through the production local binder, with authored
+  // source doubles. This witnesses source identity and runs, not browser pixels.
+  class Canvas { width = 64; height = 64; }
+  class Image {}
+  const bodySources = {
+    palettes: Array.from({ length: 3 }, () => ({
+      variants: Array.from({ length: 7 }, () => new Canvas()), boostGlow: new Canvas(),
+    })),
+    effects: { outline: new Canvas(), shadow: new Canvas(), deathHighlight: new Canvas() },
+  };
+  const bind = createLocalBodyResolver(bodySources,
+    { HTMLCanvasElement: Canvas, HTMLImageElement: Image }, wasm.resolve_local_skin);
+  const customBytes = custom([2, 0], [3, 1], [4, 2]);
+  const { recipe } = bind({ skin: 40, customBytes, cosmetic: 255 });
+  equal(recipe.custom, true, 'authored custom selection reaches the production binder');
+  equal(recipe.runs, [{ palette: 0, count: 2 }, { palette: 1, count: 3 }, { palette: 2, count: 4 }],
+    'authored custom run lengths and order survive Wasm/source binding');
+  equal([recipe.basePalette, recipe.variantMode, recipe.variantPeriod, recipe.eyes.kind, recipe.attachment],
+    [0, 'first', 1, 'standard', null], 'custom local policy retains plain face and first shading');
+  for (const run of recipe.runs) {
+    equal(recipe.palettes[run.palette].variants[0].asset.source === bodySources.palettes[run.palette].variants[0],
+      true, 'authored custom body source identity');
+    equal(recipe.palettes[run.palette].boostGlow.asset.source === bodySources.palettes[run.palette].boostGlow,
+      true, 'authored custom glow source identity');
   }
 
   // Returned nested records and input bytes cannot alias later resolver results.
@@ -62,6 +99,12 @@ export function skinPolicySmoke(wasm) {
   local.eyes.radius = 999;
   equal(wasm.resolve_local_skin(41, new Uint8Array()),
     { ...resolveStockSkin({ skin: 2 }), skin: 41 }, 'local results are fresh nested records');
+  const retainedCustom = wasm.resolve_local_skin(40, projected);
+  projected.fill(0);
+  equal(retainedCustom, { ...localCustom, skin: 40 }, 'local custom result does not borrow input bytes');
+  retainedCustom.runs[0].count = 999;
+  equal(wasm.resolve_local_skin(40, custom([3, 5], [2, 41], [3, 39], [1, 5])),
+    { ...localCustom, skin: 40 }, 'local custom runs are fresh nested records');
 
   for (const resolve of [() => wasm.resolve_skin(0, new Uint8Array(256), false),
     () => wasm.resolve_local_skin(0, new Uint8Array(256))]) {

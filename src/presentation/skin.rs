@@ -158,19 +158,23 @@ impl Error for SkinError {}
 
 /// Preserve the current authored local three-color stand-in selection.
 ///
-/// This interim policy selects `skin % 3`, seven ping-pong shading variants,
-/// ordinary paired eyes and no antenna. Custom bytes are bounded to 255 bytes
-/// but are not displayed. The requested skin byte is retained; these local
-/// family IDs do not claim a mapping to the stock 42-palette artwork.
+/// Without admitted custom runs, select `skin % 3` and seven ping-pong variants.
+/// Otherwise reuse normal custom admission, projecting each admitted palette
+/// modulo three without merging the resulting runs, with first-variant shading.
+/// Both paths retain plain paired eyes, no antenna and the requested skin byte.
+/// These authored family IDs do not claim stock 42-palette color equivalence.
 pub fn resolve_authored_local_skin(
     skin: u8,
     custom_bytes: &[u8],
 ) -> Result<SkinDescriptor, SkinError> {
-    if custom_bytes.len() > 255 {
-        return Err(SkinError);
-    }
-    let mut descriptor = resolve_skin(skin % 3, &[], false)?;
+    let mut descriptor = resolve_skin(skin % 3, custom_bytes, false)?;
     descriptor.skin = skin;
+    if descriptor.custom {
+        for run in &mut descriptor.runs {
+            run.palette %= 3;
+        }
+        descriptor.base_palette = descriptor.runs[0].palette;
+    }
     Ok(descriptor)
 }
 
