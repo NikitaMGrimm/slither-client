@@ -138,6 +138,15 @@ renderer metadata, with software-renderer detection explicitly reported. An
 enabled feature or a GPU-named event alone is not proof of hardware execution.
 This is not a Playwright trace archive.
 
+Before Arm, the headed diagnostic also enables CDP DOM and LayerTree, resolves
+the exact world element to a backend node ID, and retains safe
+`layerTreeDidChange`/`layerPainted` metadata. It queries `compositingReasons` only
+for exact backend-node matches before and during replay. Trace summaries match
+explicit layer/backend-node fields where available, without treating generic GPU
+events as world-specific evidence. Missing layers are inconclusive; Chrome's
+`Canvas` reason can mean accelerated Canvas or a promoted display-list Canvas.
+No LayerTree snapshot, picture, replay or command-log API is called.
+
 Native callback timestamps cover CPU/submission plus forwarding/recording
 instrumentation. Keyframe screenshot/readback, fake-clock control and native RAF
 wait overhead occur outside those callbacks and remain in the full trace. No
@@ -191,6 +200,17 @@ in page memory, use a fresh same-size context, reject incomplete captures or
 source rewrites, and serialize safe telemetry only. There is no built-in
 synthetic substitute or automatic probe retry.
 
+For a cheap source/backend investigation, append `--metadata-only` to each
+explicit reference command. This suppresses screenshots and Canvas argument
+logs, and keeps only scrubbed step metadata, exact world layer mappings/reasons,
+native callback timings and the real trace. Captured native Canvas/element
+forwarders count `getImageData`, `toDataURL`, `toBlob` and world self-draws by
+startup/play/driver phase without serializing their arguments or artwork. Driver
+keyframe captures are kept outside the play interval in ordinary capture mode.
+This mode cannot run the exact-frame probe. A separately requested diagnostic
+recording uses a fresh external reference; ordinary comparison still never
+reruns original implicitly.
+
 ## Executed evidence and limits
 
 On 2026-10-28, the 24-frame synthetic regression passed twice with unchanged
@@ -207,12 +227,21 @@ captured/replayed 1,791 commands with retained source/Pattern identities, equal
 instrumented callback and plain-JS submission are separate CPU observations;
 neither establishes GPU completion or an isolated bridge-cost difference.
 Setup/readiness failures and earlier failed synthetic/Chrome runs remain external.
-The six full-skin cases, official-server acceptance and installed extension
-gameplay are not established by these results.
+All six prepared full-skin scenarios later completed 361-batch serial original
+and ours runs with matching actual viewport/DPR, foreground gates, keyframes and
+real traces. Every saved keyframe comparison differed, so no visual parity is
+claimed. A separate 120-batch metadata-only layer check mapped both exact world
+nodes to content layers with Chrome's `Canvas` compositing reason. It found no
+supporting creation-order difference; no creation-order variant was run. Ours
+had zero play-time Canvas pixel reads, element serialization or world self-draws
+in that interval. Direct trace layer matches did not identify world-specific
+GPU/raster work, so that attribution remains unknown. Official-server acceptance
+and installed extension gameplay remain separate.
 
 Primary API references checked for this implementation:
 [Playwright clock](https://playwright.dev/docs/api/class-clock),
 [browser channels](https://playwright.dev/docs/browsers),
 [CDP sessions](https://playwright.dev/docs/api/class-cdpsession),
 [Chrome Tracing](https://chromedevtools.github.io/devtools-protocol/tot/Tracing/),
-[Chrome SystemInfo](https://chromedevtools.github.io/devtools-protocol/tot/SystemInfo/).
+[Chrome SystemInfo](https://chromedevtools.github.io/devtools-protocol/tot/SystemInfo/),
+[Chrome LayerTree](https://chromedevtools.github.io/devtools-protocol/tot/LayerTree/).
