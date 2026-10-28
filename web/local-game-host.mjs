@@ -20,7 +20,7 @@ function method(prototype, name) {
 }
 
 /** Browser plumbing and original stand-ins for the same game runtime on localhost. */
-export async function createLocalGameHost({ realm = globalThis, endpoint } = {}) {
+export async function createLocalGameHost({ realm = globalThis, endpoint, sourceFactory } = {}) {
   const document = realm.document, location = realm.location, href = location?.href;
   const match = typeof href === 'string' && /^http:\/\/127\.0\.0\.1:([1-9][0-9]{0,4})(?:[/?#]|$)/.exec(href);
   if (!document || realm.top !== realm || !match || Number(match[1]) > 65535) {
@@ -227,52 +227,57 @@ export async function createLocalGameHost({ realm = globalThis, endpoint } = {})
 
   const sourceRealm = { HTMLCanvasElement: realm.HTMLCanvasElement, HTMLImageElement: realm.HTMLImageElement,
     document: { createElement: tag => construct.createElement(document, tag) } };
-  const { palettes, background, backgroundImage, bodySources } = await createClientAssetMap({
-    realm: { ...sourceRealm, Image: realm.Image },
+  let sources = await createClientAssetMap({
+    realm: sourceFactory === undefined ? { ...sourceRealm, Image: realm.Image } : realm,
+    sourceFactory, random,
   });
   current();
-  const resolveBody = createLocalBodyResolver(bodySources, sourceRealm, (skin, customBytes) => {
-    inOperation();
-    const rule = skinPolicy(skin, customBytes);
-    inOperation();
-    return rule;
-  });
-  const resolveFood = createSyntheticFoodResolver(sourceRealm, random);
-  const resolvePrey = createSyntheticPreyResolver(sourceRealm, random);
-  const revision = 'authored-local-1';
-  function inOperation() {
-    current();
-    if (!operation) throw new Error('Local source operation required');
-  }
-  const adapter = freeze({
-    beginOperation() {
+  if (sourceFactory === undefined) {
+    const { palettes, background, backgroundImage, bodySources } = sources;
+    const resolveBody = createLocalBodyResolver(bodySources, sourceRealm, (skin, customBytes) => {
+      inOperation();
+      const rule = skinPolicy(skin, customBytes);
+      inOperation();
+      return rule;
+    });
+    const resolveFood = createSyntheticFoodResolver(sourceRealm, random);
+    const resolvePrey = createSyntheticPreyResolver(sourceRealm, random);
+    const revision = 'authored-local-1';
+    function inOperation() {
       current();
-      if (!skinPolicy) throw new Error('Local skin policy must be bound before source operations');
-      if (operation) throw new Error('Local source operation already active');
-      operation = true;
-      return freeze({ revision });
-    },
-    resolveAppearance(request) {
-      inOperation();
-      const rule = skinPolicy(request.skin, request.customBytes);
-      inOperation();
-      return freeze({ face: freeze({ kind: 'paired', eyes: rule.eyes, decoration: freeze({ kind: 'none' }) }), antenna: null });
-    },
-    resolveRecipe(request) {
-      inOperation();
-      return resolveBody(request);
-    },
-    resolveAntennaRandom({ nodeCount, randomPairCount }) {
-      inOperation();
-      if (![8, 9, 11].includes(nodeCount) || randomPairCount !== nodeCount - 1) throw new TypeError('Local antenna random request required');
-      return Float64Array.from({ length: randomPairCount * 2 }, random);
-    },
-    endOperation() { inOperation(); operation = false; },
-  });
-  const hostAssets = freeze({
-    resolveFood(request, active) { inOperation(); if (active?.revision !== revision) throw new Error('Local source revision required'); return resolveFood(request); },
-    resolvePrey(request, active) { inOperation(); if (active?.revision !== revision) throw new Error('Local source revision required'); return resolvePrey(request); },
-  });
+      if (!operation) throw new Error('Local source operation required');
+    }
+    const adapter = freeze({
+      beginOperation() {
+        current();
+        if (!skinPolicy) throw new Error('Local skin policy must be bound before source operations');
+        if (operation) throw new Error('Local source operation already active');
+        operation = true;
+        return freeze({ revision });
+      },
+      resolveAppearance(request) {
+        inOperation();
+        const rule = skinPolicy(request.skin, request.customBytes);
+        inOperation();
+        return freeze({ face: freeze({ kind: 'paired', eyes: rule.eyes, decoration: freeze({ kind: 'none' }) }), antenna: null });
+      },
+      resolveRecipe(request) {
+        inOperation();
+        return resolveBody(request);
+      },
+      resolveAntennaRandom({ nodeCount, randomPairCount }) {
+        inOperation();
+        if (![8, 9, 11].includes(nodeCount) || randomPairCount !== nodeCount - 1) throw new TypeError('Local antenna random request required');
+        return Float64Array.from({ length: randomPairCount * 2 }, random);
+      },
+      endOperation() { inOperation(); operation = false; },
+    });
+    const hostAssets = freeze({
+      resolveFood(request, active) { inOperation(); if (active?.revision !== revision) throw new Error('Local source revision required'); return resolveFood(request); },
+      resolvePrey(request, active) { inOperation(); if (active?.revision !== revision) throw new Error('Local source revision required'); return resolvePrey(request); },
+    });
+    sources = { palettes, background, backgroundImage, adapter, hostAssets };
+  }
   const native = freeze({ ...scheduling, now, random, setInput, registerNicknameEditField,
     hudDom: freeze({ schema: 1, document, dom, isCurrentDocument }),
     ...(minimapDom ? { minimapDom } : {}),
@@ -293,7 +298,7 @@ export async function createLocalGameHost({ realm = globalThis, endpoint } = {})
     claimed = true;
     return native;
   } });
-  return { gate, sources: { palettes, background, backgroundImage, adapter, hostAssets },
+  return { gate, sources,
     bindSkinPolicy(resolveSkin) {
       current();
       if (skinPolicy) throw new Error('Local skin policy already bound');

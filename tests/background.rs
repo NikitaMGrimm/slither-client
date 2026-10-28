@@ -14,7 +14,7 @@ fn input() -> BackgroundInput {
         width: 801,
         height: 603,
         zoom: 2.,
-        image_loaded: true,
+        image_size: Some([512, 512]),
         pattern_available: true,
         quality: QualityState::new(QualityMode::High, 0.).unwrap().snapshot(),
         tile_width: 64.,
@@ -106,6 +106,20 @@ fn layer_geometry_keeps_screen_image_separate_from_zoomed_pattern() {
 }
 
 #[test]
+fn backdrop_uses_full_independent_source_dimensions() {
+    let background = BackgroundState::default();
+    let mut input = input();
+    input.image_size = Some([640, 360]);
+    let plan = background.plan(input).unwrap();
+    assert_eq!(plan.image.unwrap().source, [0., 0., 640., 360.]);
+    assert_eq!(plan.image.unwrap().destination, [0., 0., 801., 603.]);
+    for size in [[0, 360], [640, 0]] {
+        input.image_size = Some(size);
+        assert!(background.plan(input).is_err());
+    }
+}
+
+#[test]
 fn quality_only_gates_image_and_keeps_constant_alpha_through_fade() {
     let background = BackgroundState::default();
     let mut input = input();
@@ -120,7 +134,7 @@ fn quality_only_gates_image_and_keeps_constant_alpha_through_fade() {
     assert!(low.pattern.is_some());
     input.quality.high_quality = true;
     assert!(background.plan(input).unwrap().image.is_some());
-    input.image_loaded = false;
+    input.image_size = None;
     assert!(background.plan(input).unwrap().image.is_none());
 }
 
@@ -128,7 +142,7 @@ fn quality_only_gates_image_and_keeps_constant_alpha_through_fade() {
 fn unavailable_sources_do_not_prevent_phase_advancement_or_black_clear() {
     let mut background = BackgroundState::default();
     let mut input = input();
-    input.image_loaded = false;
+    input.image_size = None;
     input.pattern_available = false;
     background
         .advance_draw(point(0., 0.), point(8., -8.), 64., 32.)
@@ -137,7 +151,7 @@ fn unavailable_sources_do_not_prevent_phase_advancement_or_black_clear() {
     assert_eq!(plan.clear.rect, [0., 0., 801., 603.]);
     assert!(plan.image.is_none());
     assert!(plan.pattern.is_none());
-    input.image_loaded = true;
+    input.image_size = Some([512, 512]);
     assert!(background.plan(input).unwrap().image.is_some());
     input.pattern_available = true;
     let pattern = background.plan(input).unwrap().pattern.unwrap();

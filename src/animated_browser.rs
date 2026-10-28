@@ -1156,7 +1156,7 @@ impl AnimatedScene {
         self.prey_sources.clear();
     }
 
-    /// Supply the optional loaded 512x512 screen-filling image from the asset map.
+    /// Supply the optional loaded screen-filling image from the asset map.
     /// None clears it. Existing render arguments remain the repeating tile.
     /// Selection survives world reset and never loads or copies a source.
     pub fn set_background_backdrop(
@@ -1165,9 +1165,6 @@ impl AnimatedScene {
     ) -> Result<(), JsValue> {
         if let Some(image) = &image {
             validate_background_image(image)?;
-            if image.natural_width() != 512 || image.natural_height() != 512 {
-                return Err(error("scene backdrop must be a 512x512 image"));
-            }
         }
         self.background_backdrop = image;
         Ok(())
@@ -3705,7 +3702,7 @@ impl AnimatedScene {
             &prepared,
             size,
             &background,
-            self.background_backdrop.is_some(),
+            self.background_backdrop.as_ref(),
         );
         let mut sources = BorrowedSources::default();
         let mut budget = DrawBudget::default();
@@ -3822,7 +3819,7 @@ impl AnimatedScene {
                     size,
                     Some(setup),
                     &background,
-                    self.background_backdrop.is_some(),
+                    self.background_backdrop.as_ref(),
                 );
                 // Finish host callbacks before borrowing the food registry.
                 let paint = build_paint(
@@ -4041,7 +4038,7 @@ impl AnimatedScene {
             &prepared,
             size,
             &background,
-            self.background_backdrop.is_some(),
+            self.background_backdrop.as_ref(),
         );
         let mut sources = BorrowedSources::default();
         let mut budget = DrawBudget::default();
@@ -4119,7 +4116,7 @@ impl AnimatedScene {
             &prepared,
             size,
             &background,
-            self.background_backdrop.is_some(),
+            self.background_backdrop.as_ref(),
         );
         let mut sources = BorrowedSources::default();
         let mut budget = DrawBudget::default();
@@ -4249,7 +4246,7 @@ struct SceneDrawContext {
     center: f64,
     boundary: Option<f64>,
     tile_size: Point,
-    image_loaded: bool,
+    image_size: Option<[u32; 2]>,
 }
 
 impl SceneDrawContext {
@@ -4258,7 +4255,7 @@ impl SceneDrawContext {
         size: DrawSize,
         setup: Option<&Setup>,
         tile: &HtmlImageElement,
-        image_loaded: bool,
+        backdrop: Option<&HtmlImageElement>,
     ) -> Self {
         Self {
             size,
@@ -4268,21 +4265,21 @@ impl SceneDrawContext {
                 x: f64::from(tile.natural_width()),
                 y: f64::from(tile.natural_height()),
             },
-            image_loaded,
+            image_size: backdrop.map(|image| [image.natural_width(), image.natural_height()]),
         }
     }
     fn committed(
         client: &AnimatedClient,
         size: DrawSize,
         tile: &HtmlImageElement,
-        image_loaded: bool,
+        backdrop: Option<&HtmlImageElement>,
     ) -> Self {
         Self::at_setup(
             client,
             size,
             client.received().setup.as_ref(),
             tile,
-            image_loaded,
+            backdrop,
         )
     }
 
@@ -4296,7 +4293,7 @@ impl SceneDrawContext {
                 width: self.size.width,
                 height: self.size.height,
                 zoom: prepared.camera().zoom(),
-                image_loaded: self.image_loaded,
+                image_size: self.image_size,
                 pattern_available: true,
                 quality,
                 tile_width: self.tile_size.x,

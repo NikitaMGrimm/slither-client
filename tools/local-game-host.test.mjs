@@ -92,6 +92,40 @@ const endpoint = 'ws://127.0.0.1:8766/slither';
 const create = f => createLocalGameHost({ realm: f.realm, endpoint });
 const claim = host => host.gate.claim(host.gate.metadata().id);
 
+test('local comparison sources enter through the asset map without constructing authored stand-ins', async () => {
+  const f = fixture();
+  const operation = { revision: 'synthetic-private-pack' }, request = {};
+  const sources = { palettes: [{}, {}, {}], background: {},
+    adapter: { beginOperation: () => operation },
+    hostAssets: { resolveFood: (value, active) => {
+      assert.equal(value, request); assert.equal(active, operation); return 'synthetic-private-food';
+    } },
+  };
+  const host = await createLocalGameHost({ realm: f.realm, endpoint, sourceFactory: async ({ realm, random }) => {
+    assert.equal(realm, f.realm); assert.equal(random(), 0.25); return sources;
+  } });
+  assert.equal(host.sources, sources);
+  assert.deepEqual(f.calls, ['random']); assert.equal(f.canvases.length, 0);
+  assert.equal(f.sockets.length, 0);
+  host.bindSkinPolicy(() => { throw new Error('Authored policy must not select comparison sources'); });
+  assert.equal(host.sources.hostAssets.resolveFood(request, host.sources.adapter.beginOperation()), 'synthetic-private-food');
+  const native = claim(host);
+  assert.throws(() => native.createSocket('ws://127.0.0.1:8767/slither'), /Selected local/);
+  host.dispose();
+});
+
+test('comparison source loading cannot publish a host after document replacement', async () => {
+  const f = fixture();
+  let finish;
+  const pending = createLocalGameHost({ realm: f.realm, endpoint,
+    sourceFactory: () => new Promise(resolve => { finish = resolve; }),
+  });
+  f.realm.document = new f.dom.Document();
+  finish({ palettes: [{}, {}, {}], background: {}, adapter: {}, hostAssets: {} });
+  await assert.rejects(pending, /Current local game document/);
+  assert.equal(f.sockets.length, 0); assert.equal(f.canvases.length, 0);
+});
+
 // Labelled stand-in for the copied Rust numeric rule, not a second skin policy.
 const localRuleDouble = () => ({ skin: 255, custom: false, basePalette: 2,
   runs: [{ palette: 2, count: 1 }], variantMode: 'ping-pong', variantPeriod: 7,

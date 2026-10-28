@@ -24,8 +24,8 @@ pub struct BackgroundInput {
     pub height: u32,
     /// Positive world-to-screen scale for the repeating pattern.
     pub zoom: f64,
-    /// Readiness of the separate screen-filling image.
-    pub image_loaded: bool,
+    /// Full dimensions of the ready screen-filling image, or no image.
+    pub image_size: Option<[u32; 2]>,
     /// Whether a repeating source is available for this draw.
     pub pattern_available: bool,
     /// Read-only applied quality; only HQ and blend affect the image gate.
@@ -156,6 +156,7 @@ impl BackgroundState {
     pub fn plan(&self, input: BackgroundInput) -> Result<BackgroundPlan, PresentationError> {
         if input.width == 0
             || input.height == 0
+            || input.image_size.is_some_and(|size| size.contains(&0))
             || !input.zoom.is_finite()
             || input.zoom <= 0.
             || !input.tile_width.is_finite()
@@ -173,10 +174,11 @@ impl BackgroundState {
             color: [0, 0, 0],
             alpha: 1.,
         };
-        let image = (input.image_loaded
-            && (input.quality.high_quality || input.quality.quality_blend > 0.))
-            .then_some(BackgroundImageLayer {
-                source: [0., 0., 512., 512.],
+        let image = input
+            .image_size
+            .filter(|_| input.quality.high_quality || input.quality.quality_blend > 0.)
+            .map(|[source_width, source_height]| BackgroundImageLayer {
+                source: [0., 0., f64::from(source_width), f64::from(source_height)],
                 destination: clear.rect,
                 alpha: 0.3,
             });
