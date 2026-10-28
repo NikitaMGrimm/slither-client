@@ -1,3 +1,4 @@
+import { HudHistoryDouble } from './hud-history-double.mjs';
 // Authored synthetic native-operation doubles. No browser, CSS or pixel acceptance.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -215,7 +216,7 @@ test('fresh 21-node tree, exact frozen wrappers and original fixed layout admit 
 
 test('real histories publish safe integer domains, negative zero, ranks/populations and retained final suffix', () => {
   const f = fixture(), lease = f.lease(), nodes = lease.mount(), b = bind(f, nodes);
-  let state = createHudState(b.sceneIdentity);
+  let state = createHudState(b.sceneIdentity, HudHistoryDouble);
   let receipt = b.render(state);
   assert.equal(receipt.readiness, 'pending');
   assert.equal(receipt.readoutWritten, false); assert.equal(receipt.finalWritten, false);

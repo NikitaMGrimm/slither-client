@@ -1,3 +1,4 @@
+import { HudHistoryDouble } from './hud-history-double.mjs';
 // Authored session + gameplay + actual controller with native/Wasm/source doubles.
 // No real socket, native/Wasm execution, reference, browser or score calculation.
 import assert from 'node:assert/strict';
@@ -94,7 +95,7 @@ function harness({ hud = true, callback, configure, controllerOverride } = {}) {
     forwardedPlan = args[2]; trace.push('hud-route'); const result = controller.packetWithHud(...args); trace.push('packet-return'); return result;
   };
   const options = { scene, quality, controller: controllerOverride ?? routed,
-    wasm: {
+    wasm: { HudHistory: HudHistoryDouble,
       encode_login() { return Uint8Array.of(115, 1); }, solve_challenge() { return new Uint8Array(27); },
       setup_protocol_version() { return 19; },
       decode_frame(bytes) {

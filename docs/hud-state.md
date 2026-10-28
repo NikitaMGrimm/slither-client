@@ -1,15 +1,19 @@
 # Semantic HUD state
 
-`web/stock-hud-state.mjs` reduces the copied packet journal, same-step lifecycle
-observations and successful draw samples into bounded semantic state. It retains
-no packets, rows, report history, native objects, timers or DOM nodes. Score
-arithmetic remains native-owned. This state is separate from a visible HUD or
-proof that host UI nodes are ready.
+`presentation::HudHistory` reduces the admitted packet journal, same-step
+lifecycle observations and successful draw samples into bounded semantic state.
+The browser-free Rust module retains no packets, rows, report history, timers
+or DOM nodes. `hud_history_browser.rs` converts copied records at the Wasm
+boundary. `web/stock-hud-state.mjs` captures that ABI, admits closed JS inputs and
+associates immutable Rust histories with issued frozen diagnostic snapshots.
+Score arithmetic remains in the existing native score owner. This state is separate
+from a visible HUD or proof that host UI nodes are ready.
 
 ## Pure API
 
-- `createHudState(sceneIdentity)` creates a frozen empty state for a caller-owned
-  Symbol identifying one scene lifetime.
+- `createHudState(sceneIdentity, wasm.HudHistory)` creates a frozen empty state for
+  a caller-owned Symbol identifying one scene lifetime. The generated constructor
+  is an explicit trusted composition dependency; its methods are captured once.
 - `hudReadoutRequired(state, playing)` returns exactly
   `dirty && playing && rank > 0 && population > 0`, with a required boolean.
 - `reduceHudState(state, sceneIdentity, change)` returns a complete frozen
@@ -18,14 +22,18 @@ proof that host UI nodes are ready.
 Only snapshots issued by these functions are accepted as state. Module-private
 weak membership rejects structural clones and Proxy wrappers without walking
 their object graphs. There is no deserialization or restore API, and the module
-does not strongly retain a snapshot history. A different scene Symbol rejects
-before reduction; historical tokens must not migrate between scene lifetimes.
+does not strongly retain a snapshot history. Each issued snapshot has one
+private Rust history handle; unreachable handles use the generated bindgen
+finalizer. The copied fields are diagnostic output, never reducer input. A different
+scene Symbol rejects before reduction; historical tokens must not migrate between scene lifetimes.
 
 State contains the scene Symbol, live own token, rank/population and extrema,
 dirty flag, fade, four requested opacities, and optional current/final score
 records. Tokens remain BigInt. Scores remain Numbers, including signed zero,
 negative values and values above 32-bit bounds. The reducer performs no score
-formatting, narrowing, clamping or recomputation.
+narrowing, clamping or recomputation. Rust also formats current/final semantic values through `hudSemanticValues`, using the
+existing safe-integer decimal contract and captured final suffix. The JS view
+composes those values with actual binding/readiness observations.
 
 | Change | Effect |
 | --- | --- |
@@ -67,16 +75,17 @@ session, transport, pixel or observer effects. Required score/readout failure
 after those effects must terminate without replay; see the
 [journal's operation boundaries](hud-ingress.md).
 
-The shared `copyHudScoreView(value)` export delegates to the existing closed
-score-view copier. Packet/report helpers and their admitted grammar remain
-unchanged. The generated validator copy must be rebuilt and byte-verified when
-this authored module changes.
+The shared `copyHudScoreView(value)` boundary and packet/report grammar remain
+unchanged. Complete copied JS input admission precedes the Rust fold; semantic
+lifecycle bounds and candidate transitions are checked in Rust. Native callers
+provide typed admitted events. Neither path changes inclusive score-table bounds
+or command-time score acquisition.
 
 ## Explicit gameplay composition
 
 `createStockGameplay({...existing, hudReadout: true})` selects the journal and
-reducer path, requiring `packetWithHud` and `scene.score_view`. The caller must
-still enable score tracking before packets. Omitting the flag preserves the
+reducer path, requiring `packetWithHud`, `scene.score_view` and the generated
+`wasm.HudHistory` constructor. The caller must still enable score tracking before packets. Omitting the flag preserves the
 existing gameplay path; `onHudPacket` remains an independent packet-only option.
 There is no bootstrap, global, message or UI activation added here.
 
@@ -110,3 +119,19 @@ remain separate. See [verification](verification.md) for the exact evidence.
 
 The separate [view and passive renderer](hud-view.md) consume committed history
 with explicit binding readiness. They add no bootstrap activation or score read.
+
+## Migration boundary and synthetic evidence
+
+This slice moves HUD semantic history (RM-01) and dependent current/final numeric
+text projection into Rust. Leaderboard prepared-board lifetime, revisions, row
+ordering, name policy, row text/style and top-ten projection remain in the existing
+JS modules (RM-02 and the remaining leaderboard portion of RM-08). Session,
+handshake and gameplay orchestration remain separate migration work.
+
+Authored native tests port the existing history and text requirements. Ordinary
+Node/VM shell tests inject an explicitly labelled generated-ABI double, without
+requiring prebuilt Wasm. The full `tools/wasm-smoke.mjs` suite reruns the existing
+HUD state/view/DOM and leaderboard composition fixtures with the fresh real
+`HudHistory` class, then runs the existing actual-Wasm ingress/draw/gameplay
+matrix. These are synthetic tests, with no browser, pixel, installed-host or
+server acceptance claim.

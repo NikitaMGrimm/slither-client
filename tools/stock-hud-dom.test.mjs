@@ -1,3 +1,4 @@
+import { HudHistoryDouble } from './hud-history-double.mjs';
 // Authored synthetic native-capability doubles; no DOM, CSS, browser or pixel acceptance.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -23,7 +24,7 @@ const packet = (state, events) => reduce(state, { kind: 'packet', report: {
   schema: 1, commandCount: 1, setupDraws: 0, events,
 } });
 function history(sceneIdentity, { current = 42, final = 1001, token = 7n } = {}) {
-  let state = createHudState(sceneIdentity);
+  let state = createHudState(sceneIdentity, HudHistoryDouble);
   if (current !== null) {
     state = packet(state, [board()]);
     state = reduce(state, { kind: 'draw', playing: true, view: scoreView(current, token) });
