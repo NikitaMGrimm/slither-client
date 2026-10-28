@@ -4,8 +4,8 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { once } from 'node:events';
+import { pathToFileURL } from 'node:url';
 import { root, freshOutput, json, fence, hash } from './browser-common.mjs';
-import { createSceneServer } from './scene-server.mjs';
 import { syntheticPeer } from './browser-session-fixture.mjs';
 import { installProbe } from './browser-probe.mjs';
 
@@ -24,6 +24,7 @@ let peer, server, browser, context, page;
 try {
   execFileSync(process.execPath, ['tools/build-web.mjs'], { cwd: repo, stdio: 'inherit' });
   result.wasmSha256 = hash(await readFile(path.join(repo, 'dist/web/slither_client_bg.wasm')));
+  const { createSceneServer } = await import(pathToFileURL(path.join(repo, 'tools/scene-server.mjs')));
   peer = await syntheticPeer();
   server = createSceneServer({ root: repo, simulatorPort: peer.port });
   // The repository's original vector is an owned static resource, never reference artwork.
