@@ -3191,7 +3191,7 @@ mod resolved_draw_tests {
             width,
             height,
             zoom: client.camera().zoom(),
-            image_loaded: true,
+            image_size: Some([512, 512]),
             pattern_available: true,
             quality: crate::presentation::QualityState::new(
                 crate::presentation::QualityMode::High,
