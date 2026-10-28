@@ -205,10 +205,24 @@ export function createOwnedPlayUi(input) {
     active = true;
     try {
       requireMounted();
-      // A failed native disable still consumes the attempt; no later status can unlock it.
+      // Status updates never unlock an admitted attempt.
       locked = true;
       apply(controls.buttonDisabled, undefined, [button, true]);
       requireCurrent();
+    } finally {
+      active = false;
+    }
+  }
+
+  function unlock() {
+    requireIdle();
+    if (disposed || !locked) return;
+    active = true;
+    try {
+      requireMounted();
+      apply(controls.buttonDisabled, undefined, [button, false]);
+      requireCurrent();
+      locked = false;
     } finally {
       active = false;
     }
@@ -229,5 +243,5 @@ export function createOwnedPlayUi(input) {
     }
   }
 
-  return freeze({ mount, setStatus, lock, dispose });
+  return freeze({ mount, setStatus, lock, unlock, dispose });
 }

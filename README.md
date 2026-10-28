@@ -24,10 +24,10 @@
 
 Version `0.1.0-alpha.0` is unreleased. The client provides bounded handshake
 primitives, atomic protocol-19 scene state, and Rust/Wasm Canvas2D previews
-with authored previews and live-source adapters. The animated preview connects prediction, body
-corrections, sampled curves and a following camera. Deterministic synthetic scenes
-run offline; an optional loopback simulator connection adds pointer heading and Space boost.
-Chrome/Firefox packages include experimental explicit game-page activation.
+with authored stand-ins and live-source adapters. One default bootstrap selects
+Play controls, current/final score readouts and a visible leaderboard. The local
+game page uses that same runtime with the separate simulator; diagnostic previews
+remain available. Chrome/Firefox packages include experimental explicit game-page activation.
 Complete installed gameplay remains unverified.
 See [architecture](docs/architecture.md) for supported inputs and limits.
 
@@ -66,10 +66,26 @@ CI require no external reference and do not connect to game servers. The optiona
 loopback prototype and external comparison are described in
 [verification](docs/verification.md), along with index/history guards and hooks.
 
-After building, run `npm run scene` and open `http://127.0.0.1:18884/` for the
-synthetic scene. **Step** advances a received anchor; **Palette**, **Zoom**, and
-**Follow** change the preview. For local simulator controls, see
-[the loopback procedure](docs/verification.md#offline-scene-and-local-simulator).
+After building, start a current challenge-capable
+[slither-sim](https://github.com/NikitaMGrimm/slither-sim) host in a separate
+terminal, then serve the local game page:
+
+```sh
+slither-sim host --bind 127.0.0.1:8766
+```
+
+```sh
+npm run scene -- --simulator-port 8766
+```
+
+Open `http://127.0.0.1:18884/`, enter a nickname and click **Play**. The selected
+loopback endpoint is filled in; local Play uses authored zero credentials and
+the existing challenge handshake without profile acquisition. Pointer heading,
+Space/mouse boost and explicit Play after a normal disconnect use the shared
+gameplay path. See [local Play](docs/local-play.md) for controls and evidence limits.
+
+For offline diagnostics, `npm run scene` also serves `/anchors`, the received-only
+preview with **Step**, **Palette**, **Zoom** and **Follow** controls.
 
 Open `http://127.0.0.1:18884/animated` for continuous prediction, corrected
 body sampling, standard paired eyes and an eased arena edge. Pointer motion
@@ -77,8 +93,9 @@ controls visual gaze,
 including in the synthetic preview. The synthetic fixture uses original
 stand-ins with ordered body effects, retained food/prey animation and adaptive quality.
 Local simulator mode keeps its basic snake stand-ins and uses the same retained
-food path. Full skins, stock static accessories and installed-host integration remain pending.
-The received-anchor preview at `/` remains available for comparison.
+food path. These diagnostic fixtures do not cover full stock skins; stock static
+accessories and installed-host acceptance remain separate.
+The received-anchor preview at `/anchors` remains available for comparison.
 
 Both animated renderers draw the nearby arena edge as a late red band and open
 inner stroke. Its camera angle/distance update with retained-own draw preparation;
@@ -113,8 +130,9 @@ loading equivalence and complete host adaptation remain separate.
 
 An additive [paired-face API](docs/standard-body-renderer.md#complete-ordinary-paired-faces)
 also retains optional geometric side images and composes the complete represented
-face through both renderers with trusted ready borrowed sources. Host skin mapping,
-startup loading equivalence, other special faces and extension packaging remain pending.
+face through both renderers with trusted ready borrowed sources. Stock adapters
+select represented paired, single-image and mouth families; startup-loading
+equivalence and broader installed-host acceptance remain separate.
 
 The generalized [mouth-face family](docs/mouth-face.md) retains appearance-owned
 gaze and submits two eye marks followed by a mouth through both render paths.
@@ -126,8 +144,8 @@ The additive [ordinary antenna API](docs/antenna-presentation.md) retains each
 appearance's Float32 chain and bulb rotation. Both renderers step it on eligible
 draws with supplied random units; standard rendering also preserves its effect
 on the following death pass. Trusted ready whole-source bulbs are required.
-The default page keeps its existing fixtures; host skin mapping and pending-source
-timing remain separate.
+The diagnostic animated page keeps its existing fixtures; stock mapping exists
+for ordinary antennas, while pending-source timing remains separate.
 
 The additive [static accessory APIs](docs/static-accessory.md) retain one optional
 head image beside a Paired or Mouth face, using an explicit ready borrowed crop.
@@ -145,10 +163,10 @@ holds the original scheduling/socket paths and binds authored presentation to
 existing ready source objects. A trusted local caller can explicitly supply a
 profile or request bounded pinned profile acquisition on canonical HTTPS before
 Play, with a selected endpoint. Activation starts neither acquisition nor a game
-connection. An explicit `owned-play` package selection adds empty server-address
-and nickname fields with a Play button. It starts acquisition only after an
-admitted user click; the default and owned-HUD selections keep their existing
-behavior. Live host/CSP compatibility, actual profile acquisition and end-to-end
+connection. The sole default package entry supplies server-address/nickname
+fields, Play, score readouts and leaderboard rows. On the remote game page,
+bounded profile acquisition starts only after an admitted Play click and remains
+one-shot. Live host/CSP compatibility, actual profile acquisition and end-to-end
 gameplay remain unverified.
 
 ## Source and license

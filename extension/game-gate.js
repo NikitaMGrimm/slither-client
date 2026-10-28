@@ -137,6 +137,65 @@
     } catch { return; }
   }
   const hudDom = captureHudDom();
+  function captureLeaderboardDom() {
+    if (hudDom === undefined) return;
+    try {
+      const property = descriptor(realm.HTMLElement.prototype, 'translate');
+      if (!property || !Object.hasOwn(property, 'set')) return;
+      const translate = property.set;
+      const source = descriptor(Function.prototype, 'toString')?.value;
+      if (typeof translate !== 'function' || typeof source !== 'function') return;
+      // Bound foreign asynchronous kinds retain their prototype ancestry. Inspect
+      // descriptors without invoking a tag getter or the candidate setter.
+      let cursor = translate;
+      const seen = new Set();
+      for (let visits = 0; cursor !== null && visits < 64; visits++) {
+        if (seen.has(cursor)) return;
+        seen.add(cursor);
+        const kind = descriptor(cursor, functionKind);
+        if (kind && (!Object.hasOwn(kind, 'value')
+          || ['AsyncFunction', 'GeneratorFunction', 'AsyncGeneratorFunction'].includes(kind.value))) return;
+        cursor = prototype(cursor);
+      }
+      if (cursor !== null || /^(?:\*|function\s*\*|async(?:\s+function\b|\s+[$\w]+|\s*\([^]*?\)\s*=>))/.test(apply(source, translate, []))) return;
+      let operation;
+      function setTranslate(receiver, booleanValue) {
+        if (operation) {
+          if (!operation.failed) { operation.failed = true; operation.primary = new Error('Leaderboard property reentry'); }
+          throw operation.primary;
+        }
+        const active = { failed: false, primary: undefined };
+        operation = active;
+        const current = () => {
+          if (active.failed) throw active.primary;
+          const fresh = hudDom.isCurrentDocument();
+          if (active.failed) throw active.primary;
+          if (!fresh) throw new Error('Current leaderboard document required');
+        };
+        const receiverCurrent = () => {
+          current();
+          for (const [read, expected] of [[hudDom.dom.nodeType, 1],
+            [hudDom.dom.namespaceURI, 'http://www.w3.org/1999/xhtml'],
+            [hudDom.dom.ownerDocument, hudDom.document]]) {
+            const value = read(receiver);
+            current();
+            if (value !== expected) throw new TypeError('Current HTML leaderboard receiver required');
+          }
+        };
+        try {
+          if (typeof booleanValue !== 'boolean') throw new TypeError('Leaderboard primitive boolean required');
+          receiverCurrent();
+          apply(translate, receiver, [booleanValue]);
+          receiverCurrent();
+        } catch (error) {
+          if (active.failed) throw active.primary;
+          throw error;
+        } finally { operation = undefined; }
+      }
+      return freeze({ schema: 1, document: hudDom.document, properties: freeze({ setTranslate }) });
+    } catch { return; }
+  }
+  const leaderboardDom = captureLeaderboardDom();
   function captureOwnedHudDom() {
     if (hudDom === undefined) return;
     try {
@@ -618,6 +677,7 @@
     native.now = realm.performance.now.bind(realm.performance);
     native.random = realm.Math.random.bind(realm.Math);
     if (hudDom !== undefined) native.hudDom = hudDom;
+    if (leaderboardDom !== undefined) native.leaderboardDom = leaderboardDom;
     if (ownedHudDom !== undefined) native.ownedHudDom = ownedHudDom;
     if (ownedPlayDom !== undefined) native.ownedPlayDom = ownedPlayDom;
     const liveProfile = captureLiveProfile();
