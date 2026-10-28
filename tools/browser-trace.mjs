@@ -7,7 +7,7 @@ export function assessGraphics(gpu) {
   const software = value => typeof value === 'string' && /swiftshader|llvmpipe|software|microsoft basic render|\bwarp\b/i.test(value);
   const renderer = gpu.auxAttributes?.glRenderer;
   return { featureStatus: gpu.featureStatus,
-    softwareRendererDetected: typeof renderer === 'string' ? software(renderer) : null,
+    softwareRendererDetected: typeof renderer === 'string' && renderer.length > 0 ? software(renderer) : null,
     softwareAdapterAdvertised: gpu.devices.some(x => software(x.deviceString)),
     rendererIdentificationAvailable: typeof renderer === 'string' && renderer.length > 0,
     limit: 'Feature status and renderer metadata describe this process; an advertised software adapter need not be the active renderer, and trace event names alone cannot prove hardware execution.' };

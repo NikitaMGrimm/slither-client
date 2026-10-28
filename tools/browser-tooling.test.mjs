@@ -96,6 +96,9 @@ test('an advertised software adapter does not label the active hardware renderer
   assert.equal(assessGraphics(gpu).softwareRendererDetected, false);
   assert.equal(assessGraphics({ ...gpu, auxAttributes: { glRenderer: 'SwiftShader' } }).softwareRendererDetected, true);
   assert.equal(assessGraphics({ ...gpu, auxAttributes: {} }).softwareRendererDetected, null);
+  const unavailable = assessGraphics({ ...gpu, auxAttributes: { glRenderer: '' } });
+  assert.equal(unavailable.softwareRendererDetected, null);
+  assert.equal(unavailable.rendererIdentificationAvailable, false);
 });
 
 test('layer observations retain only safe DOM/compositing metadata', () => {
