@@ -1,6 +1,7 @@
+import { LeaderboardHistoryDouble } from './leaderboard-history-double.mjs';
 import { HudHistoryDouble } from './hud-history-double.mjs';
 // Authored synthetic schema2 reports; numeric results are projector doubles,
-// never evidence of native/Wasm arithmetic or browser text/CSS behavior.
+// The flagged ABI run selects real Rust history; score arithmetic and browser CSS stay separate.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import vm from 'node:vm';
@@ -10,7 +11,7 @@ import { createHudState, reduceHudState } from '../web/stock-hud-state.mjs';
 import { projectHudView } from '../web/stock-hud-view.mjs';
 
 const scene = Symbol('synthetic leaderboard scene');
-const fresh = () => api.createLeaderboardState(scene);
+const fresh = () => api.createLeaderboardState(scene, LeaderboardHistoryDouble);
 const setup = (commandIndex, tableMax = 3) => [
   { kind: 'setup', commandIndex, tableMax },
   { kind: 'setup-draw', commandIndex, view: { schema: 1, enabled: true, tableMax,
@@ -36,9 +37,121 @@ const freezeTree = value => {
   }
 };
 
+// Forward real or synthetic generated methods while faulting only the conversion boundary.
+function conversionBoundary(overrides) {
+  function History() { return new LeaderboardHistoryDouble(); }
+  for (const name of ['is_open', 'prepare', 'requests', 'begin_plan', 'admit_name', 'admit_score',
+    'complete', 'discard_plan', 'reset', 'commit', 'snapshot', 'projection', 'free']) {
+    const original = Object.getOwnPropertyDescriptor(LeaderboardHistoryDouble.prototype, name).value;
+    Object.defineProperty(History.prototype, name, { value: overrides[name]?.(original) ?? original });
+  }
+  return History;
+}
+
+test('native per-element admission preserves failure order before later result reflection', () => {
+  let observations = 0;
+  const later = new Proxy([0], { ownKeys() { observations++; throw 9; } });
+  const raw = report([...setup(0), header(1), header(2)],
+    [{ commandIndex: 1, rows: [row()] }, { commandIndex: 2, rows: [row()] }]);
+  assert.throws(() => complete(fresh(), raw, [[NaN], later]), TypeError);
+  assert.equal(observations, 0);
+  const scores = new Proxy([[0]], { ownKeys() { observations++; throw 8; } });
+  assert.throws(() => complete(fresh(), boardReport(), scores, '\0'), TypeError);
+  assert.equal(observations, 0);
+});
+
+test('direct generated completion consumes the native plan even when result conversion fails', () => {
+  const native = new LeaderboardHistoryDouble();
+  const plan = native.prepare(boardReport());
+  try {
+    native.begin_plan(plan);
+    assert.throws(() => native.complete(plan, [], 'Local'), TypeError);
+    assert.throws(() => native.complete(plan, [[42]], 'Local'), TypeError);
+    assert.equal(native.is_open(), true);
+  } finally { native.discard_plan(plan); native.free(); }
+});
+
+test('copied-output failure releases candidate, consumes plan and keeps old native history usable', () => {
+  for (const primary of [undefined, null, false, 0, new Error('leaderboard copy')]) {
+    let armed = false, frees = 0;
+    const History = conversionBoundary({
+      snapshot: original => function () { if (armed) throw primary; return Reflect.apply(original, this, []); },
+      free: original => function () { frees++; return Reflect.apply(original, this, []); },
+    });
+    const state = api.createLeaderboardState(scene, History);
+    const plan = api.prepareLeaderboardPacket(state, boardReport());
+    armed = true;
+    let caught = false;
+    try { api.completeLeaderboardPacket(state, plan, [[42]], 'Local'); }
+    catch (error) { caught = true; assert.equal(error, primary); }
+    assert.equal(caught, true);
+    assert.equal(frees, 1);
+    armed = false;
+    assert.throws(() => api.completeLeaderboardPacket(state, plan, [[42]], 'Local'), TypeError);
+    assert.equal(complete(state, boardReport(), [[43]]).board.rows[0].score, 43);
+  }
+});
+
+test('caught reentry during native output conversion cannot close the old history', () => {
+  let active, armed = false;
+  const History = conversionBoundary({ snapshot: original => function () {
+    const result = Reflect.apply(original, this, []);
+    if (armed) assert.throws(() => api.resetLeaderboardWorld(active), TypeError);
+    return result;
+  } });
+  active = api.createLeaderboardState(scene, History);
+  armed = true;
+  assert.throws(() => complete(active, boardReport(), [[42]]), TypeError);
+  armed = false;
+  assert.equal(complete(active, boardReport(), [[43]]).board.rows[0].score, 43);
+});
+
+test('the JS transition guard covers the native freshness observation itself', () => {
+  let active, armed = true;
+  const History = conversionBoundary({ is_open: original => function () {
+    if (armed) assert.throws(() => api.resetLeaderboardWorld(active), TypeError);
+    return Reflect.apply(original, this, []);
+  } });
+  active = api.createLeaderboardState(scene, History);
+  assert.throws(() => api.prepareLeaderboardPacket(active, boardReport()), TypeError);
+  armed = false;
+  assert.equal(complete(active, boardReport(), [[43]]).board.rows[0].score, 43);
+});
+
+test('plan cleanup failure is attempted once before commit and preserves the exact primary', () => {
+  let armed = true, attempts = 0;
+  const History = conversionBoundary({ discard_plan: original => function (plan) {
+    attempts++;
+    Reflect.apply(original, this, [plan]);
+    if (armed) throw undefined;
+  } });
+  const state = api.createLeaderboardState(scene, History);
+  let caught = false;
+  try { complete(state, boardReport(), [[42]]); }
+  catch (error) { caught = true; assert.equal(error, undefined); }
+  assert.equal(caught, true);
+  assert.equal(attempts, 1);
+  armed = false;
+  assert.equal(complete(state, boardReport(), [[43]]).board.rows[0].score, 43);
+});
+
+test('failed reset conversion leaves pending native plans valid', () => {
+  let armed = false;
+  const History = conversionBoundary({ snapshot: original => function () {
+    if (armed) throw 7;
+    return Reflect.apply(original, this, []);
+  } });
+  const state = api.createLeaderboardState(scene, History);
+  const plan = api.prepareLeaderboardPacket(state, boardReport());
+  armed = true;
+  assert.throws(() => api.resetLeaderboardWorld(state), error => error === 7);
+  armed = false;
+  assert.equal(api.completeLeaderboardPacket(state, plan, [[42]], 'Local').board.rows[0].score, 42);
+});
+
 test('exact exports, initial closed state, Symbol identity and pure private admission', () => {
   assert.deepEqual(Object.keys(api).sort(), ['completeLeaderboardPacket', 'createLeaderboardState',
-    'prepareLeaderboardPacket', 'requireLeaderboardState', 'resetLeaderboardWorld']);
+    'leaderboardSemanticView', 'prepareLeaderboardPacket', 'requireLeaderboardState', 'resetLeaderboardWorld']);
   const state = fresh();
   assert.deepEqual(state, { schema: 1, sceneIdentity: scene, tableMax: null,
     setupSeen: false, revision: 0n, board: null });
@@ -51,7 +164,7 @@ test('exact exports, initial closed state, Symbol identity and pure private admi
     assert.throws(() => api.resetLeaderboardWorld(value), TypeError);
   }
   assert.equal(observations, 0);
-  for (const value of [null, 1, {}, 'scene']) assert.throws(() => api.createLeaderboardState(value));
+  for (const value of [null, 1, {}, 'scene']) assert.throws(() => api.createLeaderboardState(value, LeaderboardHistoryDouble));
 });
 
 test('actual schema2 copy plus genuine existing HUD reducer/view retain distinct row names only here', () => {

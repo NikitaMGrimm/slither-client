@@ -122,16 +122,16 @@ with explicit binding readiness. They add no bootstrap activation or score read.
 
 ## Migration boundary and synthetic evidence
 
-This slice moves HUD semantic history (RM-01) and dependent current/final numeric
-text projection into Rust. Leaderboard prepared-board lifetime, revisions, row
-ordering, name policy, row text/style and top-ten projection remain in the existing
-JS modules (RM-02 and the remaining leaderboard portion of RM-08). Session,
+HUD semantic history (RM-01) and dependent current/final numeric text projection
+live in Rust. The separate [leaderboard owner](leaderboard-state.md) also owns
+prepared-board lifetime, revisions, row ordering, name policy, row text/style and
+top-ten semantic projection (RM-02 and the leaderboard portion of RM-08). Session,
 handshake and gameplay orchestration remain separate migration work.
 
 Authored native tests port the existing history and text requirements. Ordinary
 Node/VM shell tests inject an explicitly labelled generated-ABI double, without
 requiring prebuilt Wasm. The full `tools/wasm-smoke.mjs` suite reruns the existing
 HUD state/view/DOM and leaderboard composition fixtures with the fresh real
-`HudHistory` class, then runs the existing actual-Wasm ingress/draw/gameplay
+`HudHistory` and `LeaderboardHistory` classes, then runs the existing actual-Wasm ingress/draw/gameplay
 matrix. These are synthetic tests, with no browser, pixel, installed-host or
 server acceptance claim.

@@ -1,6 +1,7 @@
+import { LeaderboardHistoryDouble } from './leaderboard-history-double.mjs';
 import { HudHistoryDouble } from './hud-history-double.mjs';
 // Authored synthetic reports and projector-double result arrays. Genuine existing
-// HUD reducer/view membership; no native/Wasm/DOM/browser acceptance is implied.
+// HUD membership; the flagged ABI run selects real histories, without browser acceptance.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import vm from 'node:vm';
@@ -13,7 +14,7 @@ import * as api from '../web/stock-leaderboard-view.mjs';
 const scene = Symbol('synthetic scene'), bindingIdentity = Symbol('binding'), documentIdentity = Symbol('document');
 const binding = (changes = {}) => ({ schema: 1, sceneIdentity: scene, bindingIdentity,
   documentIdentity, state: 'ready', reason: null, ...changes });
-const create = () => ({ state: createLeaderboardState(scene), hud: createHudState(scene, HudHistoryDouble) });
+const create = () => ({ state: createLeaderboardState(scene, LeaderboardHistoryDouble), hud: createHudState(scene, HudHistoryDouble) });
 const setupEvents = (index = 0, tableMax = 1) => [
   { kind: 'setup', commandIndex: index, tableMax },
   { kind: 'setup-draw', commandIndex: index, view: { schema: 1, enabled: true,

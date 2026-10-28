@@ -19,12 +19,14 @@ the following exceptions:
 | `web/desktop-layout.mjs` | Numeric viewport-to-backing-size policy. |
 | `extension/game-runtime.mjs` | Mixed entry/DOM/capability plumbing and Play admission/availability state. |
 
-`web/stock-leaderboard-state.mjs` and
-`web/stock-leaderboard-view.mjs` also retain board/setup history, name filtering,
-row formatting/color/opacity policy and display projection in JavaScript. The
-selected default integrates these modules with visible rows. Their state and
-policy remain migration debt under the Rust ownership target. New local-host
-work is browser/DOM/capability glue; it must not introduce new game-domain logic.
+The browser-free Rust leaderboard owner retains command-ordered Setup/table and
+board history, one-use prepared operations, revisions, name/text/style policy and
+top-ten projection. `web/stock-leaderboard-state.mjs` and the copied view retain
+closed JS record admission, generated-ABI capability capture, scene/issued
+identity checks and DOM binding readiness composition. The same default runtime
+consumes the copied Rust output. See [leaderboard history](leaderboard-state.md).
+New local-host work is browser/DOM/capability glue; it must not introduce new
+game-domain logic.
 See the [roadmap](roadmap.md) for remaining work.
 
 Local rendering binds a pure Rust skin resolver after Wasm initialization. Rust
