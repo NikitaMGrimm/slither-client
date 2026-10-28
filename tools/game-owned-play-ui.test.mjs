@@ -184,6 +184,27 @@ test('eleven fresh nodes, closed frozen result, exact tree and bounded original 
   lease.dispose(); assert.deepEqual(f.parent.children, []);
 });
 
+test('consumer presentation hides only the configured endpoint row and preserves owned controls', () => {
+  const f = fixture(), lease = createOwnedPlayUi(f.input, false), nodes = lease.mount();
+  assert.equal(f.style(nodes.endpointParent).get('display'), 'none');
+  assert.equal(f.style(nodes.nicknameParent).get('display'), 'block');
+  assert.equal(f.style(nodes.button).get('display'), 'block');
+  assert.equal(f.native.state(nodes.endpoint).parent, nodes.endpointParent);
+  f.field(nodes.endpoint).value = 'ws://192.0.2.9:1234/slither';
+  lease.setStatus('ready'); lease.lock(); lease.setStatus('connecting');
+  lease.setPlaying(true); lease.setPlaying(false); lease.setStatus('ready'); lease.unlock();
+  assert.equal(f.style(nodes.endpointParent).get('display'), 'none');
+  assert.equal(f.field(nodes.endpoint).value, 'ws://192.0.2.9:1234/slither');
+  assert.equal(f.button(nodes.button).disabled, false);
+  assert.equal(f.calls.filter(call => call.name === 'inputValue').length, 2, 'layout never reads configured values');
+  lease.dispose();
+  for (const value of [null, 0, 'false', {}, []]) {
+    const bad = fixture();
+    assert.throws(() => createOwnedPlayUi(bad.input, value), /Invalid/);
+    assert.equal(bad.calls.length, 0);
+  }
+});
+
 test('fixed Rust-projected statuses never read fields, change focus, or release the admission lock', () => {
   const f = fixture(), lease = f.lease(), nodes = lease.mount(), status = nodes.mount.children[3].children[0];
   f.field(nodes.endpoint).value = 'synthetic private endpoint'; f.field(nodes.nickname).value = 'private nickname';

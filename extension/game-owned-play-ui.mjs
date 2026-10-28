@@ -47,7 +47,8 @@ function synchronous(callback) {
 }
 
 /** Native failures unwind to the retaining runtime; this view never cleans up an active operation. */
-export function createOwnedPlayUi(input) {
+export function createOwnedPlayUi(input, showEndpoint = true) {
+  if (typeof showEndpoint !== 'boolean') invalid();
   let options = record(input, ['document', 'parent', 'dom', 'construct', 'controls', 'isCurrentDocument', 'projectStartPage']);
   input = undefined;
   let document = options.document;
@@ -176,7 +177,8 @@ export function createOwnedPlayUi(input) {
         for (const [property, value] of properties) call('setStyle', style, property, value);
       };
       layout(ownedMount, startPageLayout.panel);
-      for (const label of [endpointParent, nicknameParent]) layout(label, startPageLayout.label);
+      layout(endpointParent, showEndpoint ? startPageLayout.label : startPageLayout.configuredEndpoint);
+      layout(nicknameParent, startPageLayout.label);
       for (const field of [endpoint, nickname]) layout(field, startPageLayout.field);
       layout(button, startPageLayout.button);
       layout(status, startPageLayout.status);

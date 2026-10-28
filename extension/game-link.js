@@ -21,6 +21,7 @@
     const root = document.getElementById('slither-client-root');
     if (root && !document.getElementById('slither-client-reload')) {
       const reload = document.createElement('button'); reload.id = 'slither-client-reload';
+      reload.hidden = true;
       reload.textContent = 'Reload ordinary page';
       reload.addEventListener('click', () => { sessionStorage.removeItem('__slitherClientArmV1'); location.reload(); });
       root.appendChild(reload);
