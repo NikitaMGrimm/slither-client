@@ -9,10 +9,12 @@ No browser execution belongs to ordinary `npm test`.
 
 ## Explicit boundary
 
-`extension/game-activation.mjs`, `game-gate.js`, `game-link.js` and the manifest's
-web-accessible resources admit only the four canonical HTTP/HTTPS Slither
-origins, at `/` or `/index.html` without query/fragment/credentials. Loopback is
-rejected. The exported explicit-profile runtime API does not bypass those
+`extension/game-activation.mjs`, `game-gate.js` and `game-link.js` restrict
+activation and injection to the four canonical HTTP/HTTPS Slither origins,
+at `/` or `/index.html` without query/fragment/credentials. The manifest's
+web-accessible-resource matches cover those origins with `/*`; they are not
+limited to the two activation paths. Both boundaries exclude loopback.
+The exported explicit-profile runtime API does not bypass those
 activation/source boundaries. Extension-page CSP also permits only self
 connections, so the packaged offline preview cannot connect a local game peer.
 
@@ -34,6 +36,11 @@ installed activation gate. This change does not implement or enable that seam.
 
 Use the matching wasm-bindgen 0.2.129 CLI. Preserve existing generated outputs;
 select a fresh package output when bytes differ:
+
+In every command below, `/external` is a placeholder for an existing directory
+outside the checkout and package inputs. Replace it with that directory's
+absolute path. Each final output directory must not already exist; the harness
+creates it and preserves prior runs.
 
 ```sh
 npm run build:web
