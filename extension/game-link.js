@@ -9,7 +9,7 @@
   let loaded = false;
   let activation;
   let timer;
-  function show(code) {
+  function show(code, reveal = false) {
     let output = document.getElementById('slither-client-status');
     if (!output) {
       const root = document.createElement('section'); root.id = 'slither-client-root';
@@ -17,7 +17,10 @@
       root.appendChild(output);
       (document.body ?? document.documentElement)?.appendChild(root);
     }
-    if (output) output.textContent = `SlitherClient: ${code}`;
+    if (output) {
+      if (reveal) output.style.setProperty('display', '');
+      output.textContent = `SlitherClient: ${code}`;
+    }
     const root = document.getElementById('slither-client-root');
     if (root && !document.getElementById('slither-client-reload')) {
       const reload = document.createElement('button'); reload.id = 'slither-client-reload';
@@ -44,10 +47,10 @@
         const script = document.createElement('script');
         script.type = 'module';
         script.src = api.runtime.getURL('game/bootstrap.mjs');
-        script.addEventListener('error', () => { clearTimeout(timer); show('csp-or-module-unavailable'); }, { once: true });
+        script.addEventListener('error', () => { clearTimeout(timer); show('csp-or-module-unavailable', true); }, { once: true });
         parent.appendChild(script);
-        timer = setTimeout(() => show('csp-or-module-unavailable'), 15000);
-      } catch { show('csp-or-module-unavailable'); return; }
+        timer = setTimeout(() => show('csp-or-module-unavailable', true), 15000);
+      } catch { show('csp-or-module-unavailable', true); return; }
     }
     if (data.code !== 'held' && data.code !== 'loading' && data.code !== 'waiting-assets') clearTimeout(timer);
     if (loaded || data.code === 'gate-unavailable') show(data.code);
