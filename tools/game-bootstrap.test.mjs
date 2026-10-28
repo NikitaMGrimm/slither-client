@@ -1,3 +1,4 @@
+import { createLeaderboardHistoryDouble } from './leaderboard-history-double.mjs';
 import { createHudHistoryDouble } from './hud-history-double.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -243,7 +244,7 @@ function wasmDouble(f) {
     begin_connection() { calls.push('quality.connection'); }
     free() { qualityFrees++; f.faults.cleanup?.('quality.free'); }
   }
-  const api = { AnimatedScene, DesktopQuality, HudHistory: createHudHistoryDouble(),
+  const api = { AnimatedScene, DesktopQuality, HudHistory: createHudHistoryDouble(), LeaderboardHistory: createLeaderboardHistoryDouble(),
     encode_login() { return Uint8Array.of(115, 1); }, solve_challenge() { return new Uint8Array(27); },
     setup_protocol_version() { return 19; },
     decode_frame(bytes) {

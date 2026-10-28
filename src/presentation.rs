@@ -29,6 +29,7 @@ mod food;
 mod food_painter;
 mod hud;
 mod hud_history;
+mod leaderboard_history;
 mod leaderboard_score;
 mod length;
 mod minimap;
@@ -100,6 +101,15 @@ pub use hud::{
 pub use hud_history::{
     HudCurrent, HudFinal, HudHistory, HudHistoryEvent, HudLifecycle, HudOpacity, HudSample,
     hud_score_text,
+};
+pub use leaderboard_history::{
+    LeaderboardEvent, LeaderboardEventKind, LeaderboardHistory, LeaderboardPlan, LeaderboardRawRow,
+    LeaderboardRequest, LeaderboardRevision, LeaderboardRow, LeaderboardView,
+};
+#[cfg(target_arch = "wasm32")]
+pub(crate) use leaderboard_history::{
+    validate_nickname as validate_leaderboard_nickname,
+    validate_score as validate_leaderboard_score,
 };
 pub use leaderboard_score::{
     LeaderboardRowScore, LeaderboardScoreError, LeaderboardScoreInput, LeaderboardScoreProjector,

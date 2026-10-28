@@ -107,7 +107,7 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
   const hudIdentity = hudReadout ? Symbol('gameplay scene') : null;
   let hudState = hudReadout ? createHudState(hudIdentity, wasm.HudHistory) : null;
   let pendingHudState = null;
-  let leaderboardState = leaderboardRows ? createLeaderboardState(hudIdentity) : null;
+  let leaderboardState = leaderboardRows ? createLeaderboardState(hudIdentity, wasm.LeaderboardHistory) : null;
   let pendingLeaderboardState = null, leaderboardCompanion = null, ownNickname = '';
   let profilePhase = profileOptions ? 'idle' : 'unavailable';
   let profileIntent, checkingCurrent = false;

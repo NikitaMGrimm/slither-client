@@ -58,3 +58,6 @@ mod end_screen_browser;
 
 #[cfg(target_arch = "wasm32")]
 mod hud_history_browser;
+
+#[cfg(target_arch = "wasm32")]
+mod leaderboard_history_browser;

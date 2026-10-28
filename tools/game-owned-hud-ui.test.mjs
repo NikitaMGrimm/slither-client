@@ -159,7 +159,7 @@ test('actual import and constructor are inert; lease consumes mount once', async
   }
 });
 
-test('fresh 21-node tree, exact frozen wrappers and original fixed layout admit real renderer', () => {
+test('fresh 21-node tree, exact frozen wrappers and authored lower-left layout admit real renderer', () => {
   const f = fixture(), lease = f.lease(), nodes = lease.mount();
   assert.deepEqual(Object.keys(nodes), ['schema', 'document', 'mount', 'textPolicy', 'readout', 'final']);
   assert.deepEqual(Object.keys(nodes.readout), ['root', 'lengthLine', 'rankLine', 'lengthLabel',
@@ -188,17 +188,23 @@ test('fresh 21-node tree, exact frozen wrappers and original fixed layout admit 
     assert.deepEqual(atom.element.children, [atom.text]);
   }
   for (const node of f.created) assert.equal(Object.isFrozen(node), false);
-  assert.deepEqual(atoms(nodes).map(a => f.text(a.text)), ['Length: ', '', 'Place: ', '', ' / ', '', 'Last length: ', '']);
+  assert.deepEqual(atoms(nodes).map(a => f.text(a.text)), ['Your length: ', '', 'Your rank: ', '', ' of ', '', 'Last length: ', '']);
   assert.deepEqual(Object.fromEntries(f.style(nodes.mount)), { position: 'absolute', left: '8px', bottom: '8px',
     width: '34ch', display: 'block', color: '#eee', 'font-family': 'monospace', 'font-size': '12px',
     'white-space': 'pre', 'pointer-events': 'none', border: '0', 'border-radius': '0', background: 'none' });
-  for (const [atom, width] of [[nodes.readout.lengthValue, '17ch'], [nodes.readout.rankValue, '5ch'],
-    [nodes.readout.populationValue, '5ch'], [nodes.final.value, '18ch']]) {
+  for (const atom of [nodes.readout.lengthValue, nodes.readout.rankValue, nodes.readout.populationValue]) {
     const style = f.style(atom.element);
-    assert.equal(style.get('width'), width); assert.equal(style.get('display'), 'inline-block');
-    assert.equal(style.get('box-sizing'), 'content-box'); assert.equal(style.get('text-align'), 'right');
-    assert.equal(style.get('font-family'), 'monospace'); assert.equal(style.get('font-variant-numeric'), 'tabular-nums');
+    assert.equal(style.get('display'), 'inline'); assert.equal(style.has('width'), false);
+    assert.equal(style.has('text-align'), false, 'values follow labels without reserved column gaps');
+    assert.equal(style.get('font-family'), 'inherit');
+    assert.equal(style.get('font-variant-numeric'), 'tabular-nums');
   }
+  assert.deepEqual(Object.fromEntries(f.style(nodes.final.value.element)), {
+    display: 'inline-block', 'box-sizing': 'content-box', 'text-align': 'right',
+    'font-family': 'monospace', 'font-variant-numeric': 'tabular-nums', width: '18ch', 'font-weight': 'bold',
+  });
+  assert.equal(f.style(nodes.readout.root).get('font-family'), 'Arial, sans-serif');
+  assert.equal(f.style(nodes.final.root).has('font-family'), false, 'final presentation retains its existing family');
   assert.equal(f.style(nodes.readout.lengthValue.element).get('font-weight'), 'bold');
   assert.equal(f.style(nodes.final.value.element).get('font-weight'), 'bold');
   assert.equal(f.style(nodes.final.root).get('display'), 'block');
@@ -214,13 +220,37 @@ test('fresh 21-node tree, exact frozen wrappers and original fixed layout admit 
   lease.dispose(); lease.dispose(); assert.deepEqual(f.parent.children, []);
 });
 
+test('default stylesheet omits the empty owned final row until genuine final text exists', async () => {
+  // Selector/tree/text contract only; this fixture does not execute a CSS engine.
+  const css = await readFile(new URL('../extension/game-host.css', import.meta.url), 'utf8');
+  assert.match(css, /#slither-client-root > div > div \+ div:has\(> span \+ b:empty\)\s*\{\s*display:\s*none\s*!important;\s*\}/);
+  const f = fixture(), lease = f.lease(), nodes = lease.mount(), b = bind(f, nodes);
+  assert.deepEqual(nodes.mount.children, [nodes.readout.root, nodes.final.root]);
+  assert.deepEqual(nodes.final.root.children, [nodes.final.label.element, nodes.final.value.element]);
+  assert.equal(f.text(nodes.final.value.text), '');
+  let state = displayed(createHudState(b.sceneIdentity, HudHistoryDouble), 21, 65, 65);
+  const current = b.render(state);
+  assert.equal(current.readoutWritten, true); assert.equal(current.finalWritten, false);
+  assert.equal(f.text(nodes.final.value.text), '', 'current history cannot expose an empty final row');
+  for (const score of [0, -0, -1, 1001]) {
+    state = packet(state, [{ kind: 'final-score', commandIndex: 0, view: scoreView(score) }]);
+    assert.equal(b.render(state).finalWritten, true);
+    assert.equal(f.text(nodes.final.value.text), String(score) + (score > 1000 ? '!' : ''));
+    assert.notEqual(f.text(nodes.final.value.text), '', 'zero is a populated final score');
+  }
+  state = reduce(state, { kind: 'world-reset' });
+  b.render(state);
+  assert.equal(f.text(nodes.final.value.text), '1001!', 'retained final history remains populated');
+  b.binding.dispose(); lease.dispose();
+});
+
 test('real histories publish safe integer domains, negative zero, ranks/populations and retained final suffix', () => {
   const f = fixture(), lease = f.lease(), nodes = lease.mount(), b = bind(f, nodes);
   let state = createHudState(b.sceneIdentity, HudHistoryDouble);
   let receipt = b.render(state);
   assert.equal(receipt.readiness, 'pending');
   assert.equal(receipt.readoutWritten, false); assert.equal(receipt.finalWritten, false);
-  assert.deepEqual(atoms(nodes).map(a => f.text(a.text)), ['Length: ', '', 'Place: ', '', ' / ', '', 'Last length: ', '']);
+  assert.deepEqual(atoms(nodes).map(a => f.text(a.text)), ['Your length: ', '', 'Your rank: ', '', ' of ', '', 'Last length: ', '']);
   for (const [index, score] of [-9007199254740991, -1, -0, 0, 4294967296, 9007199254740991].entries()) {
     const rank = index % 2 ? 65535 : 1, population = index % 2 ? 1 : 65535;
     state = displayed(state, score, rank, population);
@@ -231,8 +261,14 @@ test('real histories publish safe integer domains, negative zero, ranks/populati
     assert.equal(f.text(nodes.readout.lengthValue.text), String(score));
     assert.equal(f.text(nodes.readout.rankValue.text), String(rank));
     assert.equal(f.text(nodes.readout.populationValue.text), String(population));
+    assert.equal([nodes.readout.lengthLabel, nodes.readout.lengthValue].map(a => f.text(a.text)).join(''),
+      `Your length: ${String(score)}`);
+    assert.equal([nodes.readout.rankLabel, nodes.readout.rankValue, nodes.readout.separator, nodes.readout.populationValue]
+      .map(a => f.text(a.text)).join(''), `Your rank: ${rank} of ${population}`);
+    assert.equal(f.style(nodes.readout.root).get('font-family'), 'Arial, sans-serif');
     assert.equal(f.text(nodes.final.value.text), '');
-    assert.equal(f.style(nodes.readout.lengthValue.element).get('width'), '17ch');
+    assert.equal(f.style(nodes.readout.lengthValue.element).get('display'), 'inline');
+    assert.equal(f.style(nodes.readout.lengthValue.element).has('width'), false);
   }
   for (const score of [-9007199254740991, -0, 0, 1000, 1001, 9007199254740991]) {
     state = packet(state, [{ kind: 'final-score', commandIndex: 0, view: scoreView(score) }]);
