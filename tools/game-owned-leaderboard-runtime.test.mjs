@@ -14,7 +14,7 @@ test('owned leaderboard startup, deferred publication and resource ownership', a
       // Explicit gameplay seam DOUBLE: no session, wire parsing, source owner or native scene calls.
       export function createStockGameplay(options) {
         const identity = Symbol('Synthetic runtime seam scene');
-        let hud = createHudState(identity), rows = createLeaderboardState(identity), disposed = false;
+        let hud = createHudState(identity, options.wasm.HudHistory), rows = createLeaderboardState(identity), disposed = false;
         seam = { options, frames: 0, resizes: 0, frees: 0, snapshotHook: undefined,
           stage(names = [[65]], keepHud = false) {
             names = Array.from(names,name => Array.from(name));
@@ -235,7 +235,7 @@ test('local host selects explicit accessory dispatch, ready sources and profile;
       import { createLeaderboardState } from './stock-leaderboard-state.mjs';
       export let seam;
       export function createStockGameplay(options) {
-        const identity=Symbol('Local seam scene'), hud=createHudState(identity), rows=createLeaderboardState(identity);
+        const identity=Symbol('Local seam scene'), hud=createHudState(identity, options.wasm.HudHistory), rows=createLeaderboardState(identity);
         let phase='ready', playing=false, connected=false;
         seam={ options, requests:[],
           disconnect() { phase='disconnected'; playing=connected=false; options.onStatus('disconnected'); options.defer(()=>{}); },

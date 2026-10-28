@@ -1,3 +1,4 @@
+import { HudHistoryDouble } from './hud-history-double.mjs';
 // Authored synthetic schema2 reports; numeric results are projector doubles,
 // never evidence of native/Wasm arithmetic or browser text/CSS behavior.
 import assert from 'node:assert/strict';
@@ -56,7 +57,7 @@ test('exact exports, initial closed state, Symbol identity and pure private admi
 test('actual schema2 copy plus genuine existing HUD reducer/view retain distinct row names only here', () => {
   const rawA = boardReport([row(1, { name: [65] })]);
   const rawB = boardReport([row(1, { name: [66] })]);
-  const old = raw => projectHudView(reduceHudState(createHudState(scene), scene,
+  const old = raw => projectHudView(reduceHudState(createHudState(scene, HudHistoryDouble), scene,
     { kind: 'packet', report: copyHudIngressReport(raw, 2) }), {
     schema: 1, bindingIdentity: Symbol.for('synthetic binding'), documentIdentity: scene,
     sceneIdentity: scene, scope: 'readout', state: 'ready', reason: null });

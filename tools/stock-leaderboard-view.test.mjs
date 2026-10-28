@@ -1,3 +1,4 @@
+import { HudHistoryDouble } from './hud-history-double.mjs';
 // Authored synthetic reports and projector-double result arrays. Genuine existing
 // HUD reducer/view membership; no native/Wasm/DOM/browser acceptance is implied.
 import assert from 'node:assert/strict';
@@ -12,7 +13,7 @@ import * as api from '../web/stock-leaderboard-view.mjs';
 const scene = Symbol('synthetic scene'), bindingIdentity = Symbol('binding'), documentIdentity = Symbol('document');
 const binding = (changes = {}) => ({ schema: 1, sceneIdentity: scene, bindingIdentity,
   documentIdentity, state: 'ready', reason: null, ...changes });
-const create = () => ({ state: createLeaderboardState(scene), hud: createHudState(scene) });
+const create = () => ({ state: createLeaderboardState(scene), hud: createHudState(scene, HudHistoryDouble) });
 const setupEvents = (index = 0, tableMax = 1) => [
   { kind: 'setup', commandIndex: index, tableMax },
   { kind: 'setup-draw', commandIndex: index, view: { schema: 1, enabled: true,
@@ -95,7 +96,7 @@ test('genuine actual HUD membership and exact same scene; no spoof/proxy reflect
   assert.equal(view(pair).rows[0].nameText, 'A');
   let traps = 0;
   const proxy = new Proxy(pair.hud, { ownKeys() { traps++; }, get() { traps++; } });
-  for (const hud of [null, {}, { ...pair.hud }, proxy, createHudState(Symbol('other'))])
+  for (const hud of [null, {}, { ...pair.hud }, proxy, createHudState(Symbol('other'), HudHistoryDouble)])
     assert.throws(() => api.projectLeaderboardView(pair.state, hud, binding()), TypeError);
   for (const state of [{ ...pair.state }, {}, new Proxy(pair.state, { get() { traps++; } })])
     assert.throws(() => api.projectLeaderboardView(state, pair.hud, binding()), TypeError);
@@ -109,7 +110,7 @@ test('disabled grammar and precedence; no stale binding becomes write authority'
     revision: null, binding: { state: 'ready', reason: null }, readiness: 'unavailable',
     reason: 'leaderboard-disabled-or-disposed', setupSeen: false, boardPresent: false,
     requestedOpacity: null, rows: [] });
-  assert.throws(() => api.projectLeaderboardView(null, createHudState(scene), binding()), TypeError);
+  assert.throws(() => api.projectLeaderboardView(null, createHudState(scene, HudHistoryDouble), binding()), TypeError);
   assert.equal(api.projectLeaderboardView(null, null,
     binding({ state: 'unavailable', reason: 'disposed' })).reason, 'disposed');
   for (const [state, reasons] of [['pending', ['nodes-pending', 'text-unselected']],

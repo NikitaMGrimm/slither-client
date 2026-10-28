@@ -105,7 +105,7 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
   let reconciling = false;
   let nativeConnected = false;
   const hudIdentity = hudReadout ? Symbol('gameplay scene') : null;
-  let hudState = hudReadout ? createHudState(hudIdentity) : null;
+  let hudState = hudReadout ? createHudState(hudIdentity, wasm.HudHistory) : null;
   let pendingHudState = null;
   let leaderboardState = leaderboardRows ? createLeaderboardState(hudIdentity) : null;
   let pendingLeaderboardState = null, leaderboardCompanion = null, ownNickname = '';

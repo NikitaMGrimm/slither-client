@@ -1,3 +1,4 @@
+import { HudHistoryDouble } from './hud-history-double.mjs';
 // Original authored synthetic fixtures; no external inputs or native capabilities.
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -6,7 +7,7 @@ import * as hud from '../web/stock-hud-state.mjs';
 import { copyHudScoreView } from '../web/stock-hud-contract.mjs';
 
 const scene = Symbol('synthetic scene');
-const fresh = () => hud.createHudState(scene);
+const fresh = () => hud.createHudState(scene, HudHistoryDouble);
 const reduce = (state, change) => hud.reduceHudState(state, scene, change);
 const ready = (score = 42, token = 7n) => ({
   schema: 1, enabled: true, tableMax: 3,
@@ -37,6 +38,45 @@ const step = (state, delta = .5, changes = {}) => reduce(state, {
     returnCompleted: false, returnFraction: 1, ...changes },
 });
 const reset = state => reduce(state, { kind: 'world-reset' });
+
+test('generated history methods are captured once and copied fields grant no reduction authority', () => {
+  const state = pending();
+  const prototype = HudHistoryDouble.prototype;
+  const names = ['snapshot', 'reduce', 'required', 'values', 'free'];
+  const saved = names.map(name => Object.getOwnPropertyDescriptor(prototype, name));
+  let next, values;
+  try {
+    for (const name of names) Object.defineProperty(prototype, name,
+      { configurable: true, value() { assert.fail('late generated method lookup'); } });
+    assert.equal(hud.hudReadoutRequired(state, true), true);
+    next = draw(state, ready(73));
+    values = hud.hudSemanticValues(next, true);
+  } finally {
+    names.forEach((name, index) => Object.defineProperty(prototype, name, saved[index]));
+  }
+  assert.equal(next.current.score, 73);
+  assert.equal(values.current.scoreText, '73');
+  assert.throws(() => reduce({ ...next }, { kind: 'world-reset' }), TypeError);
+});
+
+test('missing ABI fails closed; failed native snapshot copy releases the handle and preserves primary', () => {
+  assert.throws(() => hud.createHudState(scene), TypeError);
+  for (const primary of [undefined, null, false, 0, new Error('snapshot copy')]) {
+    let frees = 0;
+    class History {
+      snapshot() { throw primary; }
+      required() {}
+      reduce() {}
+      values() {}
+      free() { frees++; throw new Error('secondary cleanup'); }
+    }
+    let caught = false;
+    try { hud.createHudState(scene, History); }
+    catch (error) { caught = true; assert.equal(error, primary); }
+    assert.equal(caught, true);
+    assert.equal(frees, 1);
+  }
+});
 const opacities = (readout, header = .85 * readout) => ({ readout, header, rows: readout, announcement: readout });
 
 function failsUnchanged(state, change) {
@@ -46,7 +86,7 @@ function failsUnchanged(state, change) {
 }
 
 test('only three state exports; exact empty closed frozen state', () => {
-  assert.deepEqual(Object.keys(hud).sort(), ['createHudState', 'hudReadoutRequired', 'reduceHudState']);
+  assert.deepEqual(Object.keys(hud).sort(), ['createHudState', 'hudReadoutRequired', 'hudSemanticValues', 'reduceHudState']);
   assert.deepEqual(fresh(), {
     schema: 1, sceneIdentity: scene, ownToken: null, rank: 0, population: 0,
     bestRank: 999999999, maxPopulation: 0, dirty: false, fade: -1,
@@ -55,7 +95,7 @@ test('only three state exports; exact empty closed frozen state', () => {
   const state = fresh();
   assert.equal(Object.isFrozen(state), true);
   assert.equal(Object.isFrozen(state.requestedOpacity), true);
-  for (const identity of [null, {}, 1, 'scene']) assert.throws(() => hud.createHudState(identity), TypeError);
+  for (const identity of [null, {}, 1, 'scene']) assert.throws(() => hud.createHudState(identity, HudHistoryDouble), TypeError);
 });
 
 test('state admission rejects clones, readonly claims, getters and proxies without reflection', () => {

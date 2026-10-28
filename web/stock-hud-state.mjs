@@ -1,10 +1,10 @@
-// Authored bounded semantic HUD reducer. No scene capabilities or score arithmetic.
+// Authored copied-data and identity shell for the Rust-owned semantic HUD history.
 import { copyHudIngressReport, copyHudScoreView } from './stock-hud-contract.mjs';
 
 const freeze = Object.freeze;
-// Weak membership admits only our immutable snapshots without retaining a history
-// or reflecting through arbitrary supplied state/prototype graphs.
-const issued = new WeakSet();
+// Weak membership associates copied snapshots with immutable Rust handles without
+// retaining old snapshots or reflecting through supplied state/prototype graphs.
+const issued = new WeakMap();
 const invalid = () => { throw new TypeError('Invalid HUD state change'); };
 const changeFields = {
   packet: ['kind', 'report'],
@@ -38,95 +38,49 @@ function boolean(value) {
   if (typeof value !== 'boolean') invalid();
 }
 
-function finiteRange(value, maximum) {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > maximum) invalid();
-}
-
 function stateRequired(state) {
   if (!issued.has(state)) invalid();
 }
 
-function required(state, playing) {
-  return state.dirty && playing && state.rank > 0 && state.population > 0;
-}
-
-function snapshot(state) {
-  state.requestedOpacity = freeze({ ...state.requestedOpacity });
-  if (state.current !== null) state.current = freeze({ ...state.current });
-  if (state.final !== null) state.final = freeze({ ...state.final });
-  freeze(state);
-  issued.add(state);
+function snapshot(history, sceneIdentity, methods) {
+  const copied = Reflect.apply(methods.snapshot, history, []);
+  const state = freeze({ schema: 1, sceneIdentity, ...copied });
+  issued.set(state, { history, methods });
   return state;
 }
 
-/** Initialize one scene's semantic history; identity is caller-owned local data. */
-export function createHudState(sceneIdentity) {
-  if (typeof sceneIdentity !== 'symbol') invalid();
-  return snapshot({
-    schema: 1, sceneIdentity, ownToken: null, rank: 0, population: 0,
-    bestRank: 999999999, maxPopulation: 0, dirty: false, fade: -1,
-    requestedOpacity: { readout: 0, header: 0, rows: 0, announcement: 0 },
-    current: null, final: null,
-  });
+/** Initialize one scene's Rust history; capture the generated ABI once. */
+export function createHudState(sceneIdentity, HudHistory) {
+  if (typeof sceneIdentity !== 'symbol' || typeof HudHistory !== 'function') invalid();
+  const methods = {};
+  for (const name of ['snapshot', 'reduce', 'required', 'values', 'free']) {
+    const descriptor = Object.getOwnPropertyDescriptor(HudHistory.prototype, name);
+    if (!descriptor || typeof descriptor.value !== 'function') invalid();
+    methods[name] = descriptor.value;
+  }
+  freeze(methods);
+  const history = new HudHistory();
+  try { return snapshot(history, sceneIdentity, methods); }
+  catch (error) {
+    try { Reflect.apply(methods.free, history, []); } catch { /* Preserve the copy failure. */ }
+    throw error;
+  }
 }
 
 /** Eligibility only; never accesses a native score view. */
 export function hudReadoutRequired(state, playing) {
   stateRequired(state);
   boolean(playing);
-  return required(state, playing);
+  const { history, methods } = issued.get(state);
+  return Reflect.apply(methods.required, history, [playing]);
 }
 
-function bind(state, token) {
-  if (state.ownToken !== null && state.ownToken !== token) invalid();
-  state.ownToken = token;
-}
-
-function draw(state, view) {
-  if (view === null || view.status !== 'ready') invalid();
-  bind(state, view.own.token);
-  state.current = {
-    score: view.score, rank: state.rank, population: state.population, ownToken: view.own.token,
-  };
-  state.dirty = false;
-}
-
-function opacity(state) {
-  state.requestedOpacity = {
-    readout: state.fade, header: .85 * state.fade, rows: state.fade, announcement: state.fade,
-  };
-}
-
-function packet(state, report) {
-  for (const event of report.events) {
-    switch (event.kind) {
-      case 'setup':
-        state.fade = -1;
-        state.requestedOpacity = { readout: 0, header: 0, rows: 0, announcement: 0 };
-        break;
-      case 'setup-draw':
-        if (required(state, true)) draw(state, event.view);
-        break;
-      case 'own-length-scheduled':
-        bind(state, event.token);
-        state.dirty = true;
-        break;
-      case 'leaderboard':
-        state.rank = event.rank;
-        state.population = event.population;
-        state.bestRank = Math.min(state.bestRank, event.rank);
-        state.maxPopulation = Math.max(state.maxPopulation, event.population);
-        state.dirty = true;
-        if (state.fade === -1 && !event.deathPending) state.fade = 0;
-        break;
-      case 'final-score':
-        bind(state, event.view.own.token);
-        state.final = {
-          score: event.view.score, exclamation: event.view.score > 1000, ownToken: event.view.own.token,
-        };
-        break;
-    }
-  }
+/** Copy Rust-formatted values for the binding/readiness projection. */
+export function hudSemanticValues(state, includesFinal) {
+  stateRequired(state);
+  boolean(includesFinal);
+  const { history, methods } = issued.get(state);
+  return Reflect.apply(methods.values, history, [includesFinal]);
 }
 
 /** Return a complete frozen candidate or throw; never mutates the input. */
@@ -141,51 +95,24 @@ export function reduceHudState(state, sceneIdentity, change) {
   if (kind === 'packet') {
     input.report = copyHudIngressReport(input.report, data(input.report, 'commandCount'));
   } else if (kind === 'step') {
-    finiteRange(input.delta, 5);
     input.lifecycle = record(input.lifecycle,
       ['schema', 'deathPending', 'returnActive', 'returnCompleted', 'returnFraction']);
-    const life = input.lifecycle;
-    if (life.schema !== 1) invalid();
-    boolean(life.deathPending);
-    boolean(life.returnActive);
-    boolean(life.returnCompleted);
-    finiteRange(life.returnFraction, 1);
-    if (life.returnCompleted) {
-      if (!life.returnActive || life.deathPending || life.returnFraction !== 0) invalid();
-    } else if (life.returnActive && (!life.deathPending || life.returnFraction <= 0)) invalid();
+    if (input.lifecycle.schema !== 1) invalid();
+    for (const name of ['deathPending', 'returnActive', 'returnCompleted']) boolean(input.lifecycle[name]);
+    if (typeof input.delta !== 'number' || typeof input.lifecycle.returnFraction !== 'number') invalid();
     freeze(input.lifecycle);
   } else if (kind === 'draw') {
     boolean(input.playing);
-    if (required(state, input.playing)) input.view = copyHudScoreView(input.view);
+    if (hudReadoutRequired(state, input.playing)) input.view = copyHudScoreView(input.view);
     else if (input.view !== null) invalid();
   }
 
   freeze(input);
-  const next = { ...state };
-  switch (kind) {
-    case 'packet': packet(next, input.report); break;
-    case 'draw':
-      if (required(next, input.playing)) draw(next, input.view);
-      break;
-    case 'world-reset':
-      next.ownToken = null;
-      next.rank = next.population = next.maxPopulation = 0;
-      next.bestRank = 999999999;
-      break;
-    case 'step': {
-      const life = input.lifecycle;
-      if (life.returnCompleted) {
-        next.fade = -1;
-        opacity(next);
-      } else if (life.returnActive) {
-        next.fade = life.returnFraction;
-        opacity(next);
-      } else if (!life.deathPending && next.fade !== -1 && next.fade !== 1) {
-        next.fade = Math.min(1, next.fade + .01 * input.delta);
-        opacity(next);
-      }
-      break;
-    }
+  const { history, methods } = issued.get(state);
+  const next = Reflect.apply(methods.reduce, history, [input]);
+  try { return snapshot(next, sceneIdentity, methods); }
+  catch (error) {
+    try { Reflect.apply(methods.free, next, []); } catch { /* Preserve the copy failure. */ }
+    throw error;
   }
-  return snapshot(next);
 }

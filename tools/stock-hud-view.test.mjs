@@ -1,3 +1,4 @@
+import { HudHistoryDouble } from './hud-history-double.mjs';
 // Original synthetic fixtures; no native scene, DOM, reference or transport inputs.
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -30,7 +31,7 @@ function header(state, rank = 7, population = 23) {
   return packet(state, [{ kind: 'leaderboard', localRow: 0, rank, population, deathPending: false }]);
 }
 function histories(current = true, final = true, score = 123, token = 1n) {
-  let state = createHudState(scene);
+  let state = createHudState(scene, HudHistoryDouble);
   if (current) state = change(header(state), { kind: 'draw', playing: true, view: scoreView(score, token) });
   if (final) state = packet(state, [{ kind: 'final-score', view: scoreView(score, token) }]);
   return state;
@@ -74,7 +75,7 @@ test('snapshot membership and scene coherence reject clones/wrappers without ins
   const wrapped = new Proxy(state, { get() { reads++; throw undefined; } });
   const revoked = Proxy.revocable(state, {}); revoked.revoke();
   for (const fake of [undefined, false, 0, {}, { ...state }, wrapped, revoked.proxy,
-    createHudState(Symbol('other scene'))]) assert.throws(() => projectHudView(fake, binding()), TypeError);
+    createHudState(Symbol('other scene'), HudHistoryDouble)]) assert.throws(() => projectHudView(fake, binding()), TypeError);
   assert.equal(reads, 0);
 });
 
@@ -215,7 +216,7 @@ test('displayed/captured histories outlive newer headers, loss of live own and t
   assert.equal(view.final.value.ownToken, 1n);
   assert.equal(projectHudView(change(next, { kind: 'draw', playing: false, view: null }), binding())
     .current.value.score, 789);
-  const minimum = change(header(createHudState(scene), 1, 1),
+  const minimum = change(header(createHudState(scene, HudHistoryDouble), 1, 1),
     { kind: 'draw', playing: true, view: scoreView(0) });
   assert.equal(projectHudView(minimum, binding()).current.value.rankText, '1');
   assert.equal(projectHudView(minimum, binding()).current.value.populationText, '1');
@@ -272,7 +273,7 @@ test('final suffix follows captured final flag while current can advance indepen
 });
 
 test('raw opacity requests distinguish initial/setup zero from return completion negatives', () => {
-  const initial = createHudState(scene);
+  const initial = createHudState(scene, HudHistoryDouble);
   const ready = histories();
   const zeroDelta = step(ready, {}, -0);
   const incoming = step(ready, {}, 5);

@@ -1,3 +1,4 @@
+import { HudHistoryDouble } from './hud-history-double.mjs';
 // Authored integration: actual gameplay/session/controller/state, with native,
 // socket, source and numeric-projector doubles. No Wasm, DOM or network execution.
 import assert from 'node:assert/strict';
@@ -108,7 +109,7 @@ function harness({ configure, callback, rows = true } = {}) {
   };
   const options = { scene, quality, controller: routed, hudReadout: true, leaderboardRows: rows,
     leaderboardProjector: projector,
-    wasm: {
+    wasm: { HudHistory: HudHistoryDouble,
       encode_login(_version, _password, nickname) { hit('encode'); faults.encodedNickname = nickname; return Uint8Array.of(115); },
       solve_challenge() { return new Uint8Array(27); }, setup_protocol_version() { return 19; },
       decode_frame(bytes) {
