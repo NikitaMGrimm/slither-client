@@ -60,10 +60,18 @@ function synchronousHudCallback(callback, name = 'onHudPacket', foreignKinds = f
 /** Trusted local composition; transports, native time and the scene remain caller-owned. */
 export function createStockGameplay({ scene, quality, controller, wasm, createSocket, now,
   defer, setInterval, clearInterval, onStatus, onFatal, liveProfile, onHudPacket, hudReadout = false,
-  leaderboardRows = false, leaderboardProjector, localSession = false }) {
+  leaderboardRows = false, leaderboardProjector, localSession = false, minimapTracking = false }) {
   if (typeof hudReadout !== 'boolean') throw new TypeError('Explicit hudReadout boolean required');
   if (typeof leaderboardRows !== 'boolean') throw new TypeError('Explicit leaderboardRows boolean required');
   if (typeof localSession !== 'boolean') throw new TypeError('Explicit localSession boolean required');
+  if (typeof minimapTracking !== 'boolean' || (minimapTracking && !hudReadout)) {
+    throw new TypeError('Explicit minimapTracking boolean requires hudReadout');
+  }
+  const observeMinimapFraction = minimapTracking
+    ? scene?.observe_minimap_ui_fraction?.bind(scene) : undefined;
+  if (minimapTracking && typeof observeMinimapFraction !== 'function') {
+    throw new TypeError('Gameplay capability required: observe_minimap_ui_fraction');
+  }
   let project;
   if (leaderboardRows) {
     if (!hudReadout) throw new TypeError('leaderboardRows requires hudReadout');
@@ -287,7 +295,11 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
         const timerSession = session;
         uiTimer = setInterval(() => {
           if (disposed || session !== timerSession) return;
-          try { timerSession.uiTick(now()); dirty = true; reconcile(); }
+          try {
+            const observed = timerSession.uiTick(now());
+            observeMinimapFraction?.(observed.returnFraction);
+            dirty = true; reconcile();
+          }
           catch (error) { latchError(error); }
         }, 25);
       } else if (!state.uiTimerNeeded) clearUiTimer();
@@ -461,6 +473,9 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
             if (hudReadout) {
               const observed = session.afterStepWithHud(request);
               actions = observed.actions;
+              if (minimapTracking && observed.lifecycle.returnActive) {
+                actions = { ...actions, minimapUiFraction: observed.lifecycle.returnFraction };
+              }
               candidate = reduceHudState(candidate, hudIdentity,
                 { kind: 'step', delta: request.delta, lifecycle: observed.lifecycle });
               if (actions.resetWorld) {

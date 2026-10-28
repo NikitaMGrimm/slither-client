@@ -21,7 +21,8 @@ const gameWebFiles = ['stock-client.mjs', 'stock-skin-provider.mjs', 'stock-skin
 const gameFiles = [['game-activation.mjs', 'activation.mjs'], ['game-gate.js', 'gate.js'],
   ['game-link.js', 'link.js'], ['game-runtime.mjs', 'runtime.mjs'], ['game-owned-hud-ui.mjs', 'owned-hud-ui.mjs'],
   ['game-owned-play-ui.mjs', 'owned-play-ui.mjs'],
-  ['game-owned-leaderboard-ui.mjs', 'owned-leaderboard-ui.mjs'], ['game-host.css', 'host.css']];
+  ['game-owned-leaderboard-ui.mjs', 'owned-leaderboard-ui.mjs'],
+  ['game-owned-minimap-ui.mjs', 'owned-minimap-ui.mjs'], ['game-host.css', 'host.css']];
 
 function within(root, candidate) {
   const relative = path.relative(root, candidate);
@@ -124,6 +125,7 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, g
     'animatedscene_control_view', 'animatedscene_advance_with_control', 'animatedscene_reset_lag',
     'animatedscene_set_background_backdrop',
     'animatedscene_enable_nicknames',
+    'animatedscene_enable_minimap_tracking', 'animatedscene_observe_minimap_ui_fraction', 'animatedscene_minimap_view',
     'encode_login', 'solve_challenge', 'decode_frame', 'setup_protocol_version',
     ...Array.from(glue.matchAll(/\bwasm\.([A-Za-z_]\w*)/g), match => match[1])]) {
     if (!exports.has(name)) throw new Error(`Wasm/glue export mismatch: ${name}`);
@@ -160,7 +162,7 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, g
     if (errors.length) throw new Error(errors.join('\n'));
     const manifest = JSON.parse(manifestBytes);
     const expected = new Set(['game/bootstrap.mjs', 'game/runtime.mjs', 'game/owned-hud-ui.mjs', 'game/owned-play-ui.mjs',
-      'game/owned-leaderboard-ui.mjs', ...gameWebFiles.map(name => `game/${name}`),
+      'game/owned-leaderboard-ui.mjs', 'game/owned-minimap-ui.mjs', ...gameWebFiles.map(name => `game/${name}`),
       ...bindingFiles.map(name => `game/pkg/${name}`)]);
     const declarations = manifest.web_accessible_resources;
     const matches = ['http://slither.io/*', 'https://slither.io/*', 'http://www.slither.io/*', 'https://www.slither.io/*'];

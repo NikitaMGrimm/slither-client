@@ -44,6 +44,11 @@ official-server checks retain [manual authorization and ledger requirements](ver
 
 ## Diagnostics and evidence
 
+The default page displays the server's received minimap in a separate bottom-right
+widget, with the own-position marker and a server label when supplied. Rust owns
+its decoding, pixels, transitions and placement; the DOM only displays the plan.
+It uses the existing update/UI timers and does not affect world draw counts.
+
 `/anchors` retains the received-only preview; `/animated` retains the synthetic
 animated diagnostic. Both also work without `--simulator-port`; `/` requires a
 configured simulator endpoint. These previews have their own diagnostic

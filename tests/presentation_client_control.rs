@@ -134,6 +134,7 @@ fn reset_before_motion_keeps_computed_lagged_step_and_future_clock_phase() {
                 reset_world: true,
                 reset_lag: true,
                 connected: Some(true),
+                ..Default::default()
             })
         })
         .unwrap();
@@ -217,6 +218,7 @@ fn invalid_actions_and_callback_error_preserve_complete_model() {
                     reset_world: true,
                     reset_lag: true,
                     connected: Some(false),
+                    ..Default::default()
                 })
             })
             .is_err()

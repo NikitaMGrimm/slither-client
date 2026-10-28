@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import * as vm from 'node:vm';
-import { createGateTestDom, attachGateTestRealm } from './game-gate-test-fixture.mjs';
+import { createGateTestDom, attachGateTestRealm, issuedMinimapViewDouble } from './game-gate-test-fixture.mjs';
 
 const root = new URL('../', import.meta.url);
 const webNames = ['stock-skin-provider.mjs', 'stock-client.mjs', 'stock-food-provider.mjs',
@@ -15,7 +15,8 @@ const webNames = ['stock-skin-provider.mjs', 'stock-client.mjs', 'stock-food-pro
   'local-game-host.mjs', 'client-asset-map.mjs', 'synthetic-body.mjs', 'synthetic-food.mjs', 'synthetic-prey.mjs', 'loopback-session.mjs'];
 const entryNames = { 'bootstrap.mjs': 'game-bootstrap.mjs', 'runtime.mjs': 'game-runtime.mjs',
   'owned-hud-ui.mjs': 'game-owned-hud-ui.mjs', 'owned-play-ui.mjs': 'game-owned-play-ui.mjs',
-  'owned-leaderboard-ui.mjs': 'game-owned-leaderboard-ui.mjs' };
+  'owned-leaderboard-ui.mjs': 'game-owned-leaderboard-ui.mjs',
+  'owned-minimap-ui.mjs': 'game-owned-minimap-ui.mjs' };
 const origin = 'https://authored-package.invalid/game/';
 
 export async function runGameModuleTest(scenario) {
@@ -34,7 +35,7 @@ export async function runGameModuleTest(scenario) {
 }
 
 function createGraph({ armed = true, hudNative = false, ownedHudNative = false, ownedPlayNative = false,
-  leaderboardNative = false, initialize, prepare, prepareWasm } = {}) {
+  leaderboardNative = false, minimapNative = false, initialize, prepare, prepareWasm } = {}) {
   // Reuse authored native/Wasm fixture definitions, never transform a product module.
   const testSource = readFileSync(new URL('tools/game-bootstrap.test.mjs', root), 'utf8');
   const definitions = testSource.slice(testSource.indexOf('function fixture('), testSource.indexOf("\ntest('an unarmed"));
@@ -43,7 +44,7 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
   const nativeSource = readFileSync(new URL('extension/game-gate.js', root), 'utf8');
   const { fixture, wasmDouble } = makeFixture(nativeSource, vm.Script, vm.createContext, vm.runInContext, assert,
     options => { const dom = createGateTestDom({ ...options, ownedHud: ownedHudNative, ownedPlay: ownedPlayNative,
-      leaderboard: leaderboardNative }); prepare?.(dom); return dom; }, attachGateTestRealm);
+      leaderboard: leaderboardNative, minimap: minimapNative }); prepare?.(dom); return dom; }, attachGateTestRealm);
   const f = fixture({ armed, hudNative });
   if (hudNative) {
     // The legacy native boundary must create HTML-branded borrowed root/status nodes too.
@@ -53,6 +54,19 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
   }
   f.host(); f.complete();
   const wasm = wasmDouble(f), counts = { initialize: 0 };
+  const minimap = { enabled: 0, reads: [], fractions: [], view: {
+    schema: 1, enabled: true, imageRevision: 0n, dimension: null,
+    baseRgba: new Uint8Array(), alternateRgba: new Uint8Array(), widget: null,
+  } };
+  if (minimapNative) Object.assign(wasm.api.AnimatedScene.prototype, {
+    enable_minimap_tracking() { minimap.enabled++; },
+    observe_minimap_ui_fraction(value) { minimap.fractions.push(value); },
+    minimap_view(right, bottom, revision) {
+      minimap.reads.push({ right, bottom, revision });
+      return revision === minimap.view.imageRevision
+        ? { ...minimap.view, baseRgba: null, alternateRgba: null } : minimap.view;
+    },
+  });
   // Test-owned generated-ABI doubles are installed before module export capture.
   prepareWasm?.(wasm.api, source => vm.runInContext(source, f.context));
   const sources = new Map();
@@ -85,7 +99,7 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
     if (module.status === 'linked') await module.evaluate();
     return module.namespace;
   };
-  return { f, wasm, counts, load, sources, run: source => vm.runInContext(source, f.context),
+  return { f, wasm, counts, minimap, load, sources, run: source => vm.runInContext(source, f.context),
     message(values) {
       // Native WebSocket delivery supplies an ArrayBuffer from the document's own realm.
       const data = vm.runInContext(`(values => {
@@ -189,6 +203,10 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
         }
       }};
       })`, f.context)(wasm.api.AnimatedScene, counts);
+      for (const name of ['enable_minimap_tracking', 'minimap_view', 'observe_minimap_ui_fraction']) {
+        const method = Object.getOwnPropertyDescriptor(wasm.api.AnimatedScene.prototype, name);
+        if (method) Object.defineProperty(boundary.Scene.prototype, name, method);
+      }
       wasm.api.AnimatedScene = boundary.Scene;
       const decode = wasm.api.decode_frame;
       wasm.api.decode_frame = bytes => {
@@ -207,7 +225,7 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
 if (!isMainThread && workerData?.kind === 'authored-game-module-test') {
   try {
     const scenario = new vm.Script('(' + workerData.scenario + ')').runInThisContext();
-    const value = await scenario({ assert, createGraph });
+    const value = await scenario({ assert, createGraph, issuedMinimapViewDouble });
     parentPort.postMessage({ ok: true, value });
   } catch (error) { parentPort.postMessage({ ok: false, error: error?.stack ?? String(error) }); }
 }

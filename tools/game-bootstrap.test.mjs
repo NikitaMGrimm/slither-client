@@ -76,6 +76,10 @@ function fixture({ armed = true, late = false, sourcePending = false, href = 'ht
     clearRect() {}
     reset() {}
   }
+  const SceneCanvas = dom.minimap?.Canvas ?? Canvas;
+  const SceneContext = dom.minimap?.Context ?? Context;
+  if (dom.minimap) SceneCanvas.prototype.getBoundingClientRect = () => ({ left: 0, top: 0, width: 960, height: 540 });
+  const makeCanvas = () => { const value = new SceneCanvas(); value.width = 32; value.height = 32; return value; };
   class Storage {
     constructor() { this.values = new Map(); }
     getItem(name) { return this.values.get(name) ?? null; }
@@ -87,7 +91,7 @@ function fixture({ armed = true, late = false, sourcePending = false, href = 'ht
   document.documentElement = new Element('html'); document.head = new Element('head'); document.body = new Element('body');
   document.appendChild(document.documentElement);
   document.documentElement.appendChild(document.head); document.documentElement.appendChild(document.body);
-  document.createElement = name => name === 'canvas' ? new Canvas() : name === 'input' ? new dom.Input() : new Element(name);
+  document.createElement = name => name === 'canvas' ? makeCanvas() : name === 'input' ? new dom.Input() : new Element(name);
   document.getElementById = id => {
     function find(element) { if (element.id === id) return element; for (const child of element.children) { const found = find(child); if (found) return found; } }
     return find(document.documentElement);
@@ -97,8 +101,8 @@ function fixture({ armed = true, late = false, sourcePending = false, href = 'ht
     id: 'a'.repeat(32), url: href, expires: Date.now() + 25000 }));
   let socket;
   const realm = { document, location: { href, reload() { reloads++; } },
-    sessionStorage, localStorage: new Storage(), Storage, HTMLCanvasElement: Canvas,
-    HTMLImageElement: Image, CanvasRenderingContext2D: Context, URL, Uint8Array, Math,
+    sessionStorage, localStorage: new Storage(), Storage, HTMLCanvasElement: SceneCanvas,
+    HTMLImageElement: Image, CanvasRenderingContext2D: SceneContext, URL, Uint8Array, Math,
     innerWidth: 960, innerHeight: 540, performance: { now: () => now },
     addEventListener: events.addEventListener.bind(events), removeEventListener: events.removeEventListener.bind(events),
     postMessage(data) { messages.push(data); const event = new Event('message'); Object.assign(event,
@@ -137,7 +141,7 @@ function fixture({ armed = true, late = false, sourcePending = false, href = 'ht
   }
   const nativeRaf = realm.requestAnimationFrame;
   new Script(gateSource).runInContext(context);
-  function canvas() { const value = new Canvas(); value.getContext('2d').fillRect(0, 0, 32, 32); return value; }
+  function canvas() { const value = makeCanvas(); value.getContext('2d').fillRect(0, 0, 32, 32); return value; }
   function host() {
     Object.assign(realm, { render_mode: 2, is_mobile: false, team_mode: false, choosing_skin: false,
       building_skin: false, testing: false, playing: false, connecting: false, ws: null, nsr: false });
@@ -161,7 +165,7 @@ function fixture({ armed = true, late = false, sourcePending = false, href = 'ht
     realm.sesti = new Image();
     for (const name of ['kwkbulb', 'pwdbulb', 'playbulb', 'leafbulb', 'swissbulb',
       'moldovabulb', 'vietnambulb', 'argentinabulb', 'movbulb', 'bonkbulb', 'sest', 'jmou']) {
-      realm[name] = new Canvas();
+      realm[name] = makeCanvas();
       if (name === 'jmou') { realm[name].width = 79; realm[name].height = 130; }
       if (!sourcePending) realm[name].getContext('2d').drawImage(name === 'sest' ? realm.sesti : canvas(), 0, 0);
     }
