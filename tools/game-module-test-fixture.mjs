@@ -10,10 +10,12 @@ const webNames = ['stock-skin-provider.mjs', 'stock-client.mjs', 'stock-food-pro
   'stock-host-snapshot.mjs', 'desktop-layout.mjs', 'stock-gameplay.mjs', 'stock-hud-dom.mjs',
   'stock-hud-view.mjs', 'stock-skin-rules.mjs', 'stock-prey-provider.mjs', 'stock-asset-sources.mjs',
   'skin-provider.mjs', 'client-input.mjs', 'stock-session.mjs', 'stock-hud-contract.mjs',
-  'stock-hud-state.mjs', 'handshake-session.mjs', 'stock-live-profile.mjs'];
+  'stock-hud-state.mjs', 'handshake-session.mjs', 'stock-live-profile.mjs',
+  'stock-leaderboard-state.mjs', 'stock-leaderboard-view.mjs',
+  'local-game-host.mjs', 'synthetic-body.mjs', 'synthetic-food.mjs', 'synthetic-prey.mjs', 'loopback-session.mjs'];
 const entryNames = { 'bootstrap.mjs': 'game-bootstrap.mjs', 'runtime.mjs': 'game-runtime.mjs',
-  'owned-entry.mjs': 'game-owned-hud-entry.mjs', 'owned-hud-ui.mjs': 'game-owned-hud-ui.mjs',
-  'play-entry.mjs': 'game-owned-play-entry.mjs', 'owned-play-ui.mjs': 'game-owned-play-ui.mjs' };
+  'owned-hud-ui.mjs': 'game-owned-hud-ui.mjs', 'owned-play-ui.mjs': 'game-owned-play-ui.mjs',
+  'owned-leaderboard-ui.mjs': 'game-owned-leaderboard-ui.mjs' };
 const origin = 'https://authored-package.invalid/game/';
 
 export async function runGameModuleTest(scenario) {
@@ -31,7 +33,8 @@ export async function runGameModuleTest(scenario) {
   });
 }
 
-function createGraph({ armed = true, hudNative = false, ownedHudNative = false, ownedPlayNative = false, initialize, prepare } = {}) {
+function createGraph({ armed = true, hudNative = false, ownedHudNative = false, ownedPlayNative = false,
+  leaderboardNative = false, initialize, prepare, prepareWasm } = {}) {
   // Reuse authored native/Wasm fixture definitions, never transform a product module.
   const testSource = readFileSync(new URL('tools/game-bootstrap.test.mjs', root), 'utf8');
   const definitions = testSource.slice(testSource.indexOf('function fixture('), testSource.indexOf("\ntest('an unarmed"));
@@ -39,7 +42,8 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
     ${definitions}\nreturn {fixture,wasmDouble};})`).runInThisContext();
   const nativeSource = readFileSync(new URL('extension/game-gate.js', root), 'utf8');
   const { fixture, wasmDouble } = makeFixture(nativeSource, vm.Script, vm.createContext, vm.runInContext, assert,
-    options => { const dom = createGateTestDom({ ...options, ownedHud: ownedHudNative, ownedPlay: ownedPlayNative }); prepare?.(dom); return dom; }, attachGateTestRealm);
+    options => { const dom = createGateTestDom({ ...options, ownedHud: ownedHudNative, ownedPlay: ownedPlayNative,
+      leaderboard: leaderboardNative }); prepare?.(dom); return dom; }, attachGateTestRealm);
   const f = fixture({ armed, hudNative });
   if (hudNative) {
     // The legacy native boundary must create HTML-branded borrowed root/status nodes too.
@@ -49,6 +53,8 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
   }
   f.host(); f.complete();
   const wasm = wasmDouble(f), counts = { initialize: 0 };
+  // Test-owned generated-ABI doubles are installed before module export capture.
+  prepareWasm?.(wasm.api, source => vm.runInContext(source, f.context));
   const sources = new Map();
   for (const name of webNames) sources.set(origin + name, readFileSync(new URL('web/' + name, root), 'utf8'));
   for (const [name, file] of Object.entries(entryNames)) {

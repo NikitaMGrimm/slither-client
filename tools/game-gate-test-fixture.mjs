@@ -1,6 +1,7 @@
 // Authored native-receiver and explicit propagation doubles. No browser semantics.
-export function createGateTestDom({ hud = false, ownedHud = false, ownedPlay = false } = {}) {
+export function createGateTestDom({ hud = false, ownedHud = false, ownedPlay = false, leaderboard = false } = {}) {
   ownedPlay = hud && ownedHud && ownedPlay;
+  leaderboard = hud && ownedHud && leaderboard;
   const nodes = new WeakMap(), eventData = new WeakMap();
   const state = value => {
     if (!nodes.has(value)) throw new TypeError('Synthetic native Node receiver');
@@ -73,7 +74,7 @@ export function createGateTestDom({ hud = false, ownedHud = false, ownedPlay = f
       control?.hook?.(this, ...args);
       if (control && Object.hasOwn(control, 'failure')) throw control.failure;
       const result = body(this, ...args);
-      if (ownedPlay) {
+      if (ownedPlay || leaderboard) {
         control?.afterHook?.(this, ...args);
         if (control && Object.hasOwn(control, 'afterFailure')) throw control.afterFailure;
       }
@@ -106,6 +107,11 @@ export function createGateTestDom({ hud = false, ownedHud = false, ownedPlay = f
     }
     Object.defineProperty(HTMLElement.prototype, 'style', { configurable: true,
       get: operation('style', receiver => branded(html, receiver)) });
+    if (leaderboard) Object.defineProperty(HTMLElement.prototype, 'translate', { configurable: true,
+      get() { branded(html, this); return state(this).translate ?? true; },
+      set: operation('setTranslate', (receiver, value) => {
+        branded(html, receiver); state(receiver).translate = Boolean(value);
+      }) });
     class CharacterData extends Node {
       constructor(data = '') { super('#text'); characters.set(this, { data }); }
     }

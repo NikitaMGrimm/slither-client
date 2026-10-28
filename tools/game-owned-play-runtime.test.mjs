@@ -16,19 +16,20 @@ test('owned Play requires both HUD options before any realm observation', async 
   });
 });
 
-test('Play entry selects one claim, one scene, one RAF and unchanged public keys with no startup request', async () => {
+test('Play factory option mounts controls with one scene, one RAF and no startup request', async () => {
   await runGameModuleTest(async ({ assert, createGraph }) => {
     const graph = createGraph({ hudNative: true, ownedHudNative: true, ownedPlayNative: true });
     const hud = graph.hudWasm();
-    const entry = await graph.load('play-entry.mjs'), runtime = await entry.gamePageRuntime;
+    const factory = await graph.load('runtime.mjs');
+    const runtime = await factory.startGamePage({ initialize() { graph.counts.initialize++; }, wasmApi: graph.wasm.api,
+      hudReadout: true, ownedHudUi: true, ownedPlayUi: true });
     assert.equal(graph.counts.initialize, 1); assert.equal(hud.tracking, 1); assert.equal(hud.scoreReads, 0);
     assert.deepEqual(Object.keys(runtime).sort(), ['diagnostics','play','playWithLiveProfile','bindNicknameField','bindHudReadout','dispose'].sort());
     assert.equal(graph.f.raf.size, 1); assert.equal(graph.f.intervals.size, 0); assert.equal(graph.f.sockets, 0);
     assert.equal(graph.wasm.calls.filter(x => x === 'scene').length, 1);
-    assert.equal((await graph.load('play-entry.mjs')).gamePageRuntime, entry.gamePageRuntime);
-    for (const name of ['bootstrap.mjs','owned-entry.mjs']) {
-      await assert.rejects((await graph.load(name)).gamePageRuntime, /Armed document-start gate/);
-    }
+    assert.equal((await graph.load('runtime.mjs')).startGamePage, factory.startGamePage);
+    await assert.rejects(factory.startGamePage({ initialize() {}, wasmApi: graph.wasm.api,
+      hudReadout: true, ownedHudUi: true, ownedPlayUi: true }), /Armed document-start gate/);
     const root = graph.f.document.getElementById('slither-client-root');
     const hudMount = root.children[3], playMount = root.children[4];
     const all = node => [node, ...node.children.flatMap(all)];
@@ -45,17 +46,18 @@ test('Play entry selects one claim, one scene, one RAF and unchanged public keys
 test('Play startup disposed during initialization retains the exact early-disposed key set', async () => {
   await runGameModuleTest(async ({ assert, createGraph }) => {
     let release;
-    const graph = createGraph({ hudNative: true, ownedHudNative: true, ownedPlayNative: true,
-      initialize: () => new Promise(resolve => { release = resolve; }) }); graph.hudWasm();
-    const entry = await graph.load('play-entry.mjs');
+    const graph = createGraph({ hudNative: true, ownedHudNative: true, ownedPlayNative: true }); graph.hudWasm();
+    const factory = await graph.load('runtime.mjs');
+    const pending = factory.startGamePage({ initialize: () => new Promise(resolve => { release = resolve; }),
+      wasmApi: graph.wasm.api, hudReadout: true, ownedHudUi: true, ownedPlayUi: true });
     graph.f.event('pagehide'); release();
-    const runtime = await entry.gamePageRuntime;
+    const runtime = await pending;
     assert.deepEqual(Object.keys(runtime), ['dispose']); assert.equal(graph.wasm.calls.length, 0);
     assert.equal(graph.f.raf.size, 0); assert.equal(graph.f.sockets, 0); runtime.dispose();
   });
 });
 
-test('default and HUD entries never inspect the optional Play sibling', async () => {
+test('runtime factory modes without Play never inspect its optional native sibling', async () => {
   await runGameModuleTest(async ({ assert, createGraph }) => {
     for (const ownedHudUi of [false, true]) {
       const graph = createGraph({ hudNative: true, ownedHudNative: true }); graph.hudWasm();
@@ -210,7 +212,7 @@ test('owned Play raw callback prototype traversal rejects cycles and depth beyon
   });
 });
 
-test('foreign kind correction leaves default, semantic HUD and owned-HUD admission unchanged', async () => {
+test('foreign kind correction preserves low-level factory admission without Play', async () => {
   await runGameModuleTest(async ({ assert, createGraph }) => {
     const foreign = createGraph({ armed: false }), callback = foreign.run('(async function(){}).bind(null)');
     for (const [hudReadout,ownedHudUi] of [[false,false],[true,false],[true,true]]) {
@@ -515,8 +517,9 @@ test('failed Play mount is externally disposed after its guard and before HUD/na
       graph.f.edit.hud.controls.set('removeChild', { hook(parent, child) {
         assert.equal(graph.wasm.counts().sceneFrees, 0); removed.push(child);
       } });
-      const entry = await graph.load('play-entry.mjs');
-      await assert.rejects(entry.gamePageRuntime, error => error === (mode === 'throw-after-append' ? primary : refusal));
+      const factory = await graph.load('runtime.mjs');
+      await assert.rejects(factory.startGamePage({ initialize() {}, wasmApi: graph.wasm.api,
+        hudReadout: true, ownedHudUi: true, ownedPlayUi: true }), error => error === (mode === 'throw-after-append' ? primary : refusal));
       assert(attached); assert.equal(removed.length, 2); assert.equal(removed[0], attached);
       assert.equal(graph.wasm.counts().sceneFrees, 1); assert.equal(graph.f.raf.size, 0);
       assert.equal(graph.f.document.getElementById('slither-client-root').children.length, 3);

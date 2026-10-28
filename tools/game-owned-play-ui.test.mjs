@@ -128,9 +128,9 @@ test('actual import and exact factory are inert; disposed lease is permanently q
     const imported = await import('../extension/game-owned-play-ui.mjs?synthetic-inert-import');
     assert.deepEqual(Object.keys(imported), ['createOwnedPlayUi']);
     const f = fixture(), lease = imported.createOwnedPlayUi(f.input);
-    assert.deepEqual(Object.keys(lease), ['mount', 'setStatus', 'lock', 'dispose']);
+    assert.deepEqual(Object.keys(lease), ['mount', 'setStatus', 'lock', 'unlock', 'dispose']);
     assert.equal(Object.isFrozen(lease), true); assert.equal(f.calls.length, 0);
-    lease.dispose(); lease.dispose(); lease.setStatus('ready'); lease.lock();
+    lease.dispose(); lease.dispose(); lease.setStatus('ready'); lease.lock(); lease.unlock();
     assert.throws(lease.mount, /consumed/); assert.equal(f.calls.length, 0);
   } finally {
     if (prior) Object.defineProperty(globalThis, 'document', prior);
@@ -217,6 +217,40 @@ test('lock consumes before disable effect and never retries on any thrown primit
     assert.equal(f.button(nodes.button).disabled, phase === 'after');
     lease.dispose();
   }
+});
+
+test('explicit unlock enables the same button once and permits another lock without reading fields', () => {
+  const f = fixture(), lease = f.lease(), nodes = lease.mount();
+  f.field(nodes.nickname).value = 'Local player';
+  let before = f.calls.length;
+  lease.unlock(); assert.equal(f.calls.length, before);
+  lease.lock(); lease.setStatus('not-connected'); assert.equal(f.button(nodes.button).disabled, true);
+  before = f.calls.length;
+  lease.unlock(); assert.equal(f.button(nodes.button).disabled, false);
+  assert.equal(f.calls.slice(before).filter(call => call.name === 'buttonDisabled').length, 1);
+  assert.equal(f.calls.slice(before).some(call => call.name === 'inputValue'), false);
+  before = f.calls.length; lease.unlock(); assert.equal(f.calls.length, before);
+  lease.lock(); assert.equal(f.button(nodes.button).disabled, true);
+  assert.equal(f.field(nodes.nickname).value, 'Local player');
+  lease.dispose(); before = f.calls.length; lease.unlock(); assert.equal(f.calls.length, before);
+});
+
+test('unlock refuses an adopted button and preserves a falsy native failure for external cleanup', () => {
+  const f = fixture(), lease = f.lease(), nodes = lease.mount();
+  lease.lock();
+  const destination = new f.native.Document();
+  Reflect.apply(f.native.Node.prototype.appendChild, destination, [f.parent]);
+  const before = f.calls.length;
+  assert.throws(lease.unlock, /Invalid/);
+  assert.equal(f.calls.slice(before).some(call => call.name === 'buttonDisabled'), false);
+  lease.dispose();
+  const g = fixture(), other = g.lease(); other.mount(); other.lock();
+  g.hook((phase, entry) => {
+    if (phase === 'after' && entry.name === 'buttonDisabled' && entry.args[1] === false) throw false;
+  });
+  throwsExact(other.unlock, false);
+  g.hook(() => {}); other.dispose(); assert.deepEqual(g.parent.children, []);
+  assert.equal(f.native.state(nodes.mount).parent, f.parent);
 });
 
 test('all operation records are closed own-data, ordinary or null-prototype; raw callback kinds are bounded', () => {
