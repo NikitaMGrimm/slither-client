@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { once } from 'node:events';
-import { root, freshOutput, hash, json, temporaryProfile, fence, within } from './browser-common.mjs';
+import { root, freshOutput, hash, json, temporaryProfile, fence, within, cleanupResources } from './browser-common.mjs';
 import { installProbe } from './browser-probe.mjs';
 import { startTrace } from './browser-trace.mjs';
 import { observeWorldLayers } from './browser-layers.mjs';
@@ -152,9 +152,14 @@ try {
 } finally {
   if (layers) { try { receipt.partialLayers = await layers.stop(); } catch { receipt.layerStopFailed = true; } }
   if (trace) { try { receipt.partialTrace = await trace.stop(path.join(output, 'private-chrome-trace-partial.json')); } catch { receipt.traceStopFailed = true; } }
-  try { if (context) await context.close(); } finally { if (browser) await browser.close(); }
-  if (profile) { await profile.remove(); receipt.cleanup.push('owned temporary profile removed; browser/context closed'); }
-  if (adapter) { await adapter.close(); receipt.cleanup.push('owned adapter server and peers closed'); }
+  receipt.cleanupErrors = await cleanupResources([
+    ['context', async () => { if (context) await context.close(); }],
+    ['browser', async () => { if (browser) await browser.close(); }],
+    ['profile', async () => { if (profile) await profile.remove(); }],
+    ['adapter', async () => { if (adapter) await adapter.close(); }],
+  ]);
+  if (receipt.cleanupErrors.length) { receipt.status = 'failed'; receipt.error ??= 'Resource cleanup failed; inspect cleanupErrors'; process.exitCode = 1; }
+  else receipt.cleanup.push('owned browser/context/profile/server/peers closed');
   await json(path.join(output, 'capture.json'), receipt);
 }
 // Safe metadata only; never relay private exceptions, logs, pixels or program values.

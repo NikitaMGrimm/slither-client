@@ -25,6 +25,13 @@ export async function freshOutput(selected, otherRoots = []) {
   return canonical;
 }
 export const json = (file, data) => writeFile(file, JSON.stringify(data, null, 2) + '\n', { flag: 'wx' });
+export async function cleanupResources(steps) {
+  const errors = [];
+  for (const [name, run] of steps) {
+    try { await run(); } catch (error) { errors.push({ name, error: error?.name ?? 'ThrownValue' }); }
+  }
+  return errors;
+}
 export async function syntheticServer() {
   const routes = new Map([
     ['/', ['tools/browser-fixture.html', 'text/html']],

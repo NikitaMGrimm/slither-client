@@ -5,7 +5,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { pathToFileURL } from 'node:url';
-import { root, freshOutput, json, fence, hash } from './browser-common.mjs';
+import { root, freshOutput, json, fence, hash, cleanupResources } from './browser-common.mjs';
 import { syntheticPeer } from './browser-session-fixture.mjs';
 import { installProbe } from './browser-probe.mjs';
 
@@ -92,9 +92,14 @@ try {
 } catch (e) { result.status = 'failed'; result.error = e.message; process.exitCode = 1;
   if (page) { try { await page.screenshot({ path: path.join(output, 'failure.png') }); } catch {} }
 } finally {
-  try { if (context) await context.close(); } finally { if (browser) await browser.close(); }
-  if (peer) { await peer.close(); result.cleanup.push('owned synthetic WebSocket fixture closed'); }
-  if (server) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); result.cleanup.push('owned HTTP server closed'); }
-  result.cleanup.push('owned browser/context closed'); await json(path.join(output, 'scenario.json'), result);
+  result.cleanupErrors = await cleanupResources([
+    ['context', async () => { if (context) await context.close(); }],
+    ['browser', async () => { if (browser) await browser.close(); }],
+    ['peer', async () => { if (peer) await peer.close(); }],
+    ['server', async () => { if (server) { server.closeAllConnections(); await new Promise((resolve, reject) => server.close(e => e ? reject(e) : resolve())); } }],
+  ]);
+  if (result.cleanupErrors.length) { result.status = 'failed'; result.error ??= 'Resource cleanup failed; inspect cleanupErrors'; process.exitCode = 1; }
+  else result.cleanup.push('owned browser/context/HTTP/WebSocket fixtures closed');
+  await json(path.join(output, 'scenario.json'), result);
 }
 console.log(JSON.stringify({ status: result.status, output, version: result.version, error: result.error }));

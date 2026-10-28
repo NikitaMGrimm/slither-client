@@ -4,7 +4,7 @@ import { mkdtemp, writeFile, readFile, rm, realpath } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import { root, freshOutput, within, syntheticServer, temporaryProfile, json, fence } from './browser-common.mjs';
+import { root, freshOutput, within, syntheticServer, temporaryProfile, json, fence, cleanupResources } from './browser-common.mjs';
 import { summarizeTrace, assessGraphics } from './browser-trace.mjs';
 import { syntheticPeer } from './browser-session-fixture.mjs';
 import { WebSocket } from 'ws';
@@ -12,6 +12,21 @@ import { once } from 'node:events';
 import { safeLayer, correlateWorldTrace } from './browser-layers.mjs';
 
 // Authored synthetic infrastructure checks. No browser process or external source.
+test('cleanup attempts every owned resource after independent failures and preserves receipt execution', async () => {
+  const calls = [], primary = new Error('Synthetic primary');
+  const result = { status: 'failed', error: primary };
+  const errors = await cleanupResources([
+    ['context', () => { calls.push('context'); throw new TypeError('Synthetic cleanup'); }],
+    ['browser', async () => { calls.push('browser'); }],
+    ['profile', async () => { calls.push('profile'); throw null; }],
+    ['server', async () => { calls.push('server'); }],
+  ]);
+  calls.push('receipt');
+  assert.deepEqual(calls, ['context', 'browser', 'profile', 'server', 'receipt']);
+  assert.deepEqual(errors, [{ name: 'context', error: 'TypeError' }, { name: 'profile', error: 'ThrownValue' }]);
+  assert.equal(result.error, primary); assert.equal(result.status, 'failed');
+});
+
 test('output directories are create-only and must stay outside the checkout', async () => {
   const temp = await mkdtemp(path.join(os.tmpdir(), 'browser-tooling-test-'));
   try {

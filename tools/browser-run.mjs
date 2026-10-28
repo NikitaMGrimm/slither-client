@@ -5,7 +5,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import os from 'node:os';
-import { freshOutput, syntheticServer, hash, json, fence, temporaryProfile, root } from './browser-common.mjs';
+import { freshOutput, syntheticServer, hash, json, fence, temporaryProfile, root, cleanupResources } from './browser-common.mjs';
 import { installProbe } from './browser-probe.mjs';
 import { startTrace } from './browser-trace.mjs';
 import { observeWorldLayers } from './browser-layers.mjs';
@@ -107,9 +107,13 @@ try {
     finally {
       if (layers) { try { result.partialLayers = await layers.stop(); } catch { result.layerStopFailed = true; } }
       if (trace) { try { result.partialTrace = await trace.stop(path.join(output, 'chrome-trace-partial.json')); } catch (e) { result.traceCleanupError = e.message; } }
-      try { if (context) await context.close(); } finally { if (browser) await browser.close(); }
-      if (profile) await profile.remove();
-      manifest.cleanup.push(`${name}: browser/context closed${profile ? ', owned temporary profile removed' : ''}`);
+      result.cleanupErrors = await cleanupResources([
+        ['context', async () => { if (context) await context.close(); }],
+        ['browser', async () => { if (browser) await browser.close(); }],
+        ['profile', async () => { if (profile) await profile.remove(); }],
+      ]);
+      if (result.cleanupErrors.length) { result.status = 'failed'; result.error ??= 'Resource cleanup failed; inspect cleanupErrors'; }
+      else manifest.cleanup.push(`${name}: browser/context closed${profile ? ', owned temporary profile removed' : ''}`);
     }
   }
   manifest.status = manifest.browsers.every(b => b.status === 'passed') ? 'passed' : 'failed';
@@ -118,7 +122,9 @@ try {
     [`${process.platform}-${process.arch}`]: Object.fromEntries(manifest.browsers.map(b => [b.name, b.baseline])) });
 } catch (error) { manifest.status = 'failed'; manifest.error = error.message; process.exitCode = 1; }
 finally {
-  if (server) { await server.close(); manifest.cleanup.push('owned loopback server closed'); }
+  const cleanupErrors = await cleanupResources([['server', async () => { if (server) await server.close(); }]]);
+  if (cleanupErrors.length) { manifest.cleanupErrors = cleanupErrors; manifest.status = 'failed'; manifest.error ??= 'Loopback cleanup failed'; process.exitCode = 1; }
+  else if (server) manifest.cleanup.push('owned loopback server closed');
   await json(path.join(output, 'run.json'), manifest);
 }
 console.log(JSON.stringify({ status: manifest.status, output, browsers: manifest.browsers.map(b => ({ name: b.name, version: b.version, status: b.status })), error: manifest.error }));
