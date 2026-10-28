@@ -4,7 +4,7 @@ import { normalCustomPalette, resolveStockSkin } from '../web/stock-skin-rules.m
 import { createStockSkinAdapter } from '../web/stock-skin-provider.mjs';
 
 // Authored synthetic DOM/source doubles. No external file, runtime or artwork.
-function fixture() {
+function fixture(appearanceMode) {
   class HTMLCanvasElement {
     #width = 48; #height = 48;
     get width() { return this.#width; } set width(value) { this.#width = value; }
@@ -35,7 +35,8 @@ function fixture() {
   let reads = 0, randomCalls = 0;
   let random = () => (randomCalls++ % 64) / 64;
   let read = () => snapshot;
-  const adapter = createStockSkinAdapter({ realm, readSnapshot: () => { reads++; return read(); }, random: () => random() });
+  const adapter = createStockSkinAdapter({ realm, appearanceMode,
+    readSnapshot: () => { reads++; return read(); }, random: () => random() });
   return { adapter, realm, host, readiness, get reads() { return reads; }, get randomCalls() { return randomCalls; },
     get snapshot() { return snapshot; }, set snapshot(value) { snapshot = value; },
     set random(value) { random = value; }, set read(value) { read = value; },
@@ -44,6 +45,201 @@ function fixture() {
 
 const custom = (...pairs) => Uint8Array.of(3, 8, 1, 42, 9, 0, 201, 7, ...pairs.flat());
 const expand = rule => rule.runs.flatMap(({ palette, count }) => Array(count).fill(palette));
+
+function selectAccessory(f, { image = true, source, id = 71 } = {}) {
+  source ??= new f.realm[image ? 'HTMLImageElement' : 'HTMLCanvasElement']();
+  const selection = { id, geometry: { forward: -0, imageScale: 0.375, pivotX: -3.25, pivotY: 7.5 },
+    source, width: 48, height: 48 };
+  const commitment = { source, state: 'ready', revision: 'authored-accessory-content-1' };
+  f.snapshot.ownAccessory = id; f.snapshot.ownAccessorySelection = selection;
+  f.readiness.push(commitment);
+  return { selection, commitment, source };
+}
+
+test('accessory opt-in preserves legacy no-selection recipes and only adds explicit numeric null', () => {
+  const f = fixture(); const g = fixture('accessory');
+  // The absent legacy selection is not probed for any source metadata.
+  Object.defineProperty(g.snapshot, 'unusedAccessoryCatalog', { get() { assert.fail('catalog lookup'); } });
+  f.adapter.beginOperation(); g.adapter.beginOperation();
+  for (const skin of [0, 24, 27, 40, 41]) {
+    const legacy = f.adapter.resolveAppearance({ skin });
+    assert.equal(Object.hasOwn(legacy, 'accessory'), false);
+    assert.deepEqual(g.adapter.resolveAppearance({ skin }), { ...legacy, accessory: null });
+    assert.deepEqual(g.adapter.resolveRecipe({ skin }).recipe.supportedFeatures,
+      f.adapter.resolveRecipe({ skin }).recipe.supportedFeatures);
+    assert.equal(g.adapter.resolveRecipe({ skin }).recipe.attachment, null);
+  }
+  assert.equal(f.randomCalls, 0); assert.equal(g.randomCalls, 0);
+  f.adapter.endOperation(); g.adapter.endOperation();
+  for (const appearanceMode of [null, '', 'automatic', true]) {
+    assert.throws(() => createStockSkinAdapter({ appearanceMode }), /appearance mode/);
+  }
+});
+
+test('explicit own alone binds ready numeric geometry and a coherent full source crop', () => {
+  for (const image of [true, false]) for (const skin of [0, 24, 40, 41]) {
+    const f = fixture('accessory'); const { selection, source } = selectAccessory(f, { image });
+    f.adapter.beginOperation();
+    for (const own of [true, false, undefined]) {
+      const request = { skin, cosmetic: 71, ...(own === undefined ? {} : { own }) };
+      const appearance = f.adapter.resolveAppearance(request);
+      const { recipe, status } = f.adapter.resolveRecipe(request);
+      assert.equal(status, 'ready');
+      if (own === true) {
+        assert.deepEqual(appearance.accessory, selection.geometry);
+        assert.notEqual(appearance.accessory, selection.geometry);
+        assert(Object.isFrozen(appearance.accessory)); assert(Object.is(appearance.accessory.forward, -0));
+        const use = recipe.attachment;
+        assert.equal(use.kind, 'static-head-image'); assert.equal(use.asset.source, source);
+        assert.equal(use.asset.kind, image ? 'image' : 'canvas');
+        assert.equal(use.asset.revision, 'authored-accessory-content-1');
+        assert.equal(use.sourceMode, 'crop'); assert.deepEqual(use.sourceRect, [+0, +0, 48, 48]);
+        assert(Object.is(use.sourceRect[0], +0) && Object.is(use.sourceRect[1], +0));
+        assert.deepEqual({ forward: use.forward, imageScale: use.scale, pivotX: use.pivotX, pivotY: use.pivotY }, appearance.accessory);
+        assert.equal(use.anchor, 'head'); assert.equal(use.opacity, 1);
+        assert(recipe.supportedFeatures.includes('head-attachment'));
+      } else {
+        assert.equal(appearance.accessory, null); assert.equal(recipe.attachment, null);
+        assert(!recipe.supportedFeatures.includes('head-attachment'));
+      }
+    }
+    assert.equal(f.adapter.resolveRecipe({ skin, own: true, cosmetic: 0 }).recipe.attachment.asset.source, source);
+    assert.equal(f.adapter.resolveRecipe({ skin, own: true, attachmentId: 71 }).status, 'unsupported');
+    assert.equal(f.randomCalls, 0); f.adapter.endOperation();
+  }
+});
+
+test('selected SingleImage rejects while accepted custom suppression resolves eligibility first', () => {
+  const f = fixture('accessory'); selectAccessory(f);
+  f.snapshot.nicknamePaletteRgb = Array.from({ length: 42 }, () => [1, 2, 3]);
+  f.adapter.beginOperation();
+  for (const method of ['resolveAppearance', 'resolveRecipe']) {
+    assert.throws(() => f.adapter[method]({ skin: 27, own: true }), error => error.status === 'unsupported');
+  }
+  assert.equal(f.randomCalls, 0);
+  assert.equal(f.adapter.resolveAppearance({ skin: 27, own: false }).accessory, null);
+  assert.equal(f.adapter.resolveRecipe({ skin: 27, own: false }).recipe.eyes.kind, 'single-image');
+  const request = { skin: 27, own: true, customBytes: custom([1, 25]) };
+  assert.equal(f.adapter.resolveAppearance(request).face.kind, 'paired');
+  assert.equal(f.adapter.resolveRecipe(request).recipe.attachment.kind, 'static-head-image');
+  f.adapter.endOperation();
+});
+
+test('selected source must be ready before operation metadata or tint randomness can publish', () => {
+  for (const change of [
+    (f, a) => { a.selection.source = null; },
+    (f, a) => { a.source.complete = false; },
+    (f, a) => { a.source.naturalWidth = 0; },
+    (f, a) => { a.selection.width = 0; },
+    (f, a) => { a.commitment.state = 'pending'; },
+    f => { f.readiness.pop(); },
+    f => { delete f.snapshot.ownAccessorySelection; },
+  ]) {
+    const f = fixture('accessory'); const a = selectAccessory(f); change(f, a);
+    assert.throws(() => f.adapter.beginOperation(), error => error.status === 'pending');
+    assert.throws(() => f.adapter.resolveAppearance({ skin: 0, own: true }), /operation required/);
+    assert.throws(() => f.adapter.endOperation(), /operation required/); assert.equal(f.randomCalls, 0);
+  }
+  const f = fixture('accessory'); const a = selectAccessory(f); a.source.complete = false;
+  assert.throws(() => f.adapter.beginOperation(), error => error.status === 'pending');
+  a.source.complete = true; f.adapter.beginOperation();
+  assert(f.adapter.resolveAppearance({ skin: 0, own: true }).accessory); f.adapter.endOperation();
+});
+
+test('malformed selections reject as unsupported with no accessor calls or silent null', () => {
+  for (const change of [
+    f => { f.snapshot.ownAccessory = -1; },
+    (f, a) => { a.selection.id++; },
+    (f, a) => { a.selection.extra = 1; },
+    (f, a) => { a.selection.geometry.extra = 1; },
+    (f, a) => { a.selection.geometry.forward = NaN; },
+    (f, a) => { a.selection.geometry.imageScale = 0; },
+    (f, a) => { a.selection.geometry.pivotX = 65536; },
+    (f, a) => { a.selection.width = 47; },
+    (f, a) => { a.selection.source = {}; },
+    (f, a) => { a.commitment.state = 'unsupported'; },
+    (f, a) => { a.selection.geometry = Promise.resolve(a.selection.geometry); },
+    (f, a) => { Object.defineProperty(a.selection, 'source', { get() { assert.fail('accessor called'); } }); },
+    (f, a) => { Object.defineProperty(a.selection.geometry, 'forward', { get() { assert.fail('accessor called'); } }); },
+    (f, a) => { const geometry = a.selection.geometry; delete a.selection.geometry; Object.setPrototypeOf(a.selection, { geometry }); },
+  ]) {
+    const f = fixture('accessory'); const a = selectAccessory(f); change(f, a);
+    assert.throws(() => f.adapter.beginOperation(), error => error.status === 'unsupported');
+    assert.equal(f.randomCalls, 0);
+  }
+  const f = fixture(); selectAccessory(f);
+  assert.throws(() => f.adapter.beginOperation(), error => error.status === 'unsupported' && /face mode/.test(error.message));
+});
+
+test('selected ID, source identity, extent and geometry stay fixed across successful operations', () => {
+  for (const change of [
+    (f, a) => { f.snapshot.ownAccessory = ++a.selection.id; },
+    (f, a) => { a.selection.geometry.forward = +0; },
+    (f, a) => { a.selection.geometry.pivotY++; },
+    (f, a) => { a.selection.source = new f.realm.HTMLImageElement(); f.readiness.push({ ...a.commitment, source: a.selection.source }); },
+    (f, a) => { a.selection.width = ++a.source.naturalWidth; },
+    f => { f.snapshot.ownAccessory = -1; f.snapshot.ownAccessorySelection = null; },
+  ]) {
+    const f = fixture('accessory'); const a = selectAccessory(f);
+    f.resolve({ skin: 0, own: true }); change(f, a); f.snapshot.revision = 'new-operation';
+    assert.throws(() => f.adapter.beginOperation(), /selection changed/);
+    assert.throws(() => f.adapter.resolveAppearance({ skin: 0, own: true }), /operation required/);
+  }
+  const f = fixture('accessory'); f.resolve({ skin: 0 }); selectAccessory(f); f.snapshot.revision = 'selected';
+  assert.throws(() => f.adapter.beginOperation(), /selection changed/);
+});
+
+test('held selections are copied while content revisions may advance with capture revisions', () => {
+  const f = fixture('accessory'); const a = selectAccessory(f);
+  f.adapter.beginOperation(); const before = f.adapter.resolveAppearance({ skin: 40, own: true });
+  a.selection.geometry.forward = 15;
+  assert.deepEqual(f.adapter.resolveAppearance({ skin: 40, own: true }).accessory, before.accessory);
+  assert(Object.is(f.adapter.resolveRecipe({ skin: 40, own: true }).recipe.attachment.forward, -0));
+  a.selection.geometry.forward = -0; f.adapter.endOperation();
+  a.commitment.revision = 'content-2';
+  assert.throws(() => f.adapter.beginOperation(), /without a new revision/);
+  f.snapshot.revision = 'capture-2';
+  const after = f.resolve({ skin: 40, own: true });
+  assert.equal(after.recipe.attachment.asset.revision, 'content-2');
+  a.commitment.revision = -0; f.snapshot.revision = 'capture-3';
+  assert(Object.is(f.resolve({ skin: 0, own: true }).recipe.attachment.asset.revision, -0));
+  a.commitment.revision = +0;
+  assert.throws(() => f.adapter.beginOperation(), /without a new revision/);
+  f.snapshot.revision = 'capture-4';
+  assert(Object.is(f.resolve({ skin: 0, own: true }).recipe.attachment.asset.revision, +0));
+  f.adapter.beginOperation(); a.source.complete = false;
+  assert.throws(() => f.adapter.resolveAppearance({ skin: 0, own: true }), error => error.status === 'pending');
+  assert.throws(() => f.adapter.resolveRecipe({ skin: 0, own: true }), error => error.status === 'pending');
+  f.adapter.endOperation(); a.source.complete = true;
+  assert.equal(f.resolve({ skin: 0, own: true }).status, 'ready');
+});
+
+test('selected aliases share the existing catalog and invalid own data rejects before tint', () => {
+  const f = fixture('accessory'); selectAccessory(f, { source: f.host.per_color_imgs[0].kmcs[0] });
+  // Alias commitments must retain the body's existing content revision.
+  f.readiness.pop(); f.adapter.beginOperation();
+  const recipe = f.adapter.resolveRecipe({ skin: 0, own: true }).recipe;
+  assert.equal(recipe.attachment.asset, recipe.palettes[0].variants[0].asset);
+  for (const own of [undefined, null, 1, 'true']) for (const method of ['resolveAppearance', 'resolveRecipe']) {
+    assert.throws(() => f.adapter[method]({ skin: 0, own }), /own/);
+  }
+  for (const method of ['resolveAppearance', 'resolveRecipe']) {
+    assert.throws(() => f.adapter[method]({ skin: 0, get own() { assert.fail('own getter'); } }), /Accessor/);
+    assert.equal(f.adapter[method]({ skin: 0, own: false })[method === 'resolveRecipe' ? 'status' : 'accessory'],
+      method === 'resolveRecipe' ? 'ready' : null);
+  }
+  assert.equal(f.randomCalls, 0); f.adapter.endOperation();
+});
+
+test('selected readiness rechecks before publishing metadata after caller-owned tint randomness', () => {
+  const f = fixture('accessory'); const a = selectAccessory(f);
+  f.snapshot.nicknamePaletteRgb = Array.from({ length: 42 }, () => [1, 2, 3]);
+  f.adapter.beginOperation();
+  f.random = () => { a.source.complete = false; return 0.5; };
+  assert.throws(() => f.adapter.resolveAppearance({ skin: 0, own: true }), error => error.status === 'pending');
+  f.adapter.endOperation(); a.source.complete = true; f.random = () => 0.5;
+  f.adapter.beginOperation(); assert(f.adapter.resolveAppearance({ skin: 0, own: true }).accessory); f.adapter.endOperation();
+});
 
 test('stock mouth face borrows two whole canvas roles and installs numeric geometry without readiness', () => {
   const f = fixture(); const mouth = f.readiness.find(entry => entry.source === f.host.jmou);
