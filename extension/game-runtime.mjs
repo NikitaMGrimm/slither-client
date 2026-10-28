@@ -577,6 +577,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     context = { palettes: initial.palettes, background: initial.background,
       backgroundImage: initial.backgroundImage };
     scene = new wasmApi.AnimatedScene(startMs);
+    scene.enable_nicknames();
     if (initial.backgroundImage !== undefined) scene.set_background_backdrop(initial.backgroundImage);
     if (hudReadout) scene.enable_score_tracking();
     quality = new wasmApi.DesktopQuality(1, startMs);

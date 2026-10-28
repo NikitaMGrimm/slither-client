@@ -9,6 +9,7 @@ import { preyRenderSmoke } from './prey-render-smoke.mjs';
 import { arenaEdgeRenderSmoke, assertArenaEdge } from './arena-edge-render-smoke.mjs';
 import { antennaRenderSmoke } from './antenna-render-smoke.mjs';
 import { singleEyeRenderSmoke } from './single-eye-render-smoke.mjs';
+import { nicknameRenderSmoke } from './nickname-render-smoke.mjs';
 
 // Original synthetic sources and Canvas recorder. This executes the real Wasm
 // ABI, but models Canvas state; it is neither a browser nor a raster oracle.
@@ -22,9 +23,11 @@ export function bodyRenderSmoke(wasm) {
     failSource = null; failMethod = null; failSourceAt = 1; failSourceCount = 0; failMethodAfterEyes = null; nullPattern = false;
     beforeCanvasCall = null; path = []; pathCommands = []; fillStyle = '#000000'; strokeStyle = '#000000'; lineWidth = 1;
     lineCap = 'butt'; lineJoin = 'miter';
+    font = '10px sans-serif'; textAlign = 'start'; textBaseline = 'alphabetic';
     reset() { this.trace.push({ op: 'reset' }); this.stack = []; this.alpha = 1; this.blend = 'source-over'; this.transforms = []; this.alphaWrites = [];
       this.path = []; this.pathCommands = []; this.fillStyle = '#000000'; this.strokeStyle = '#000000'; this.lineWidth = 1;
-      this.lineCap = 'butt'; this.lineJoin = 'miter'; }
+      this.lineCap = 'butt'; this.lineJoin = 'miter';
+      this.font = '10px sans-serif'; this.textAlign = 'start'; this.textBaseline = 'alphabetic'; }
     get globalAlpha() { return this.alpha; }
     set globalAlpha(requested) {
       if (Number.isFinite(requested) && requested >= 0 && requested <= 1) this.alpha = requested;
@@ -35,7 +38,8 @@ export function bodyRenderSmoke(wasm) {
     set globalCompositeOperation(value) { this.throwIf('globalCompositeOperation'); this.blend = value; this.trace.push({ op: 'blend', value }); }
     savedState() { return { alpha: this.alpha, blend: this.blend, transforms: this.transforms.slice(),
       fillStyle: this.fillStyle, strokeStyle: this.strokeStyle, lineWidth: this.lineWidth,
-      lineCap: this.lineCap, lineJoin: this.lineJoin }; }
+      lineCap: this.lineCap, lineJoin: this.lineJoin,
+      font: this.font, textAlign: this.textAlign, textBaseline: this.textBaseline }; }
     save() { this.beforeCanvasCall?.('save', this); this.stack.push(this.savedState()); this.trace.push({ op: 'save', state: this.savedState() }); }
     restore() { Object.assign(this, this.stack.pop()); this.trace.push({ op: 'restore', state: this.savedState() }); }
     setTransform(...args) { this.throwIf('setTransform'); this.transforms = [['setTransform', ...args]]; }
@@ -61,6 +65,8 @@ export function bodyRenderSmoke(wasm) {
       lineCap: this.lineCap, lineJoin: this.lineJoin }); }
     fill(...args) { this.throwIf('fill'); this.trace.push({ op: 'fill', args, path: this.path.slice(), commands: this.pathCommands.slice(),
       color: this.fillStyle, alpha: this.alpha, blend: this.blend, transforms: this.transforms.slice() }); }
+    fillText(text, x, y) { this.throwIf('fillText'); this.trace.push({ op: 'text', text, x, y,
+      ...this.savedState() }); }
     drawImage(source, ...args) {
       this.throwIf('drawImage');
       if (source === this.failSource && ++this.failSourceCount === this.failSourceAt) throw new Error('synthetic Canvas drawImage');
@@ -85,8 +91,9 @@ export function bodyRenderSmoke(wasm) {
   const vanillaEyes = () => ({ kind: 'standard', distance: 6, separation: 6, radius: 6,
     pupilRadius: 3.5, pupilTravel: 2.3, outlineWidth: 0, eyeColor: 0xffffff, pupilColor: 0,
     outlineColor: 0, eyeOpacity: 0.75, pupilOpacity: 1, angleSmoothing: 0.12 });
-  function fixture({ eyes = true, detailed = false, eyeStyle = null, faceStyle = null } = {}) {
+  function fixture({ eyes = true, detailed = false, eyeStyle = null, faceStyle = null, nicknames = false } = {}) {
     const scene = new wasm.AnimatedScene(0);
+    if (nicknames) scene.enable_nicknames();
     const quality = new wasm.DesktopQuality(1, 0);
     const target = new HTMLCanvasElement('target'); target.width = 960; target.height = 540;
     target.context.trace = [];
@@ -184,6 +191,7 @@ export function bodyRenderSmoke(wasm) {
       f.scene.set_background_backdrop(null);
     } finally { backgroundLayers.close(); }
     faceRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok, rejects, checkAtomic, bodyImages });
+    nicknameRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok, rejects });
     foodRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok, rejects });
     preyRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok, rejects });
     arenaEdgeRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok, rejects });

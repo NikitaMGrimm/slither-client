@@ -84,9 +84,11 @@ with generated stand-ins, a selected loopback endpoint and the challenge
 handshake. Local browser verification remains in progress; implementation does
 not establish complete login/HUD equivalence or verified restart/input behavior.
 
-Planned work includes minimap
-state/display, announcement retention/display, nickname drawing, full background
-layers, viewport/login layout, menu transitions, preferences and
+The default client draws Rust-owned nicknames and camera-driven background
+layers with authored replacement images. Nickname color/text fidelity and
+side-by-side visual matching remain incomplete. Planned work includes minimap
+state/display, announcement retention/display, viewport/login layout,
+menu transitions, preferences and
 victory/save/replay flows. Follow the
 [Rust ownership decision](architecture.md#ownership-decision) when moving the
 remaining JavaScript game/HUD/presentation state and policy; keep browser/DOM

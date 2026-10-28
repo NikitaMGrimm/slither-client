@@ -27,12 +27,12 @@ use crate::{
         HudIngressEventKind, HudIngressPlan, HudIngressReport, LeaderboardRowScore,
         LeaderboardScoreInput, LeaderboardScoreProjector as NativeLeaderboardScoreProjector,
         MAX_BODY_PAINT_COMMANDS, MAX_DRAW_SAMPLES, MAX_RETAINED_SNAKES, MouthFaceLayout,
-        OrdinaryAntennaGeometry, PairedSideLayout, PreparedAccessorySnake, PreparedAntenna,
-        PreparedSnake, PreyEaterPose, PreyImageCommand, PreyPaintInput, PreyPaintPlan, QualityMode,
-        QualitySnapshot, ScoreError, ScoreStatus, SingleEyeLayout, SnakePresentation,
-        StandardEyeLayout, StaticHeadAccessoryGeometry, StaticHeadAccessoryLayout, Turn,
-        plan_arena_edge, plan_food, plan_prey, plan_standard_body, plan_standard_body_with_antenna,
-        sample_curve_with_heading,
+        NicknameAlignment, NicknameBaseline, NicknameDraw, OrdinaryAntennaGeometry,
+        PairedSideLayout, PreparedAccessorySnake, PreparedAntenna, PreparedSnake, PreyEaterPose,
+        PreyImageCommand, PreyPaintInput, PreyPaintPlan, QualityMode, QualitySnapshot, ScoreError,
+        ScoreStatus, SingleEyeLayout, SnakePresentation, StandardEyeLayout,
+        StaticHeadAccessoryGeometry, StaticHeadAccessoryLayout, Turn, plan_arena_edge, plan_food,
+        plan_prey, plan_standard_body, plan_standard_body_with_antenna, sample_curve_with_heading,
     },
     presentation_browser::AnimationStep,
     prey_browser::PreySources,
@@ -868,6 +868,12 @@ impl AnimatedScene {
     /// The scene-scoped token is a BigInt; no table storage or mutable alias escapes.
     pub fn score_view(&self) -> Result<JsValue, JsValue> {
         score_view_record(self.client.score_view())
+    }
+
+    /// Enable Rust-owned name retention and drawing before ingress.
+    /// The default runtime enables this authored neutral-color slice unconditionally.
+    pub fn enable_nicknames(&mut self) -> Result<(), JsValue> {
+        self.client.enable_nicknames().map_err(error)
     }
 
     /// Gate boundary updates only; setup activates this gate and reset clears it.
@@ -3784,6 +3790,7 @@ impl AnimatedScene {
             food,
             prey,
             arena_edge: arena_edge_plan(&prepared, context)?,
+            nicknames: prepared.nickname_draws().to_vec(),
             fallback,
             paint,
         };
@@ -4098,8 +4105,39 @@ struct PlannedScene {
     food: Option<FoodPaintPlan>,
     prey: Option<PreyPaintPlan>,
     arena_edge: Option<ArenaEdgePlan>,
+    nicknames: Vec<NicknameDraw>,
     fallback: Vec<Food>,
     paint: PlannedSnakePaint,
+}
+
+fn submit_nicknames(
+    context: &CanvasRenderingContext2d,
+    names: &[NicknameDraw],
+) -> Result<(), JsValue> {
+    if names.is_empty() {
+        return Ok(());
+    }
+    context.save();
+    let result = (|| {
+        context.set_transform(1., 0., 0., 1., 0., 0.)?;
+        context.set_global_composite_operation("source-over")?;
+        for name in names {
+            context.set_global_alpha(name.alpha);
+            context.set_font(&format!("{}px {}", name.font_size, name.font_family));
+            context.set_text_align(match name.alignment {
+                NicknameAlignment::Center => "center",
+            });
+            context.set_text_baseline(match name.baseline {
+                NicknameBaseline::Middle => "middle",
+            });
+            let [r, g, b] = name.color;
+            context.set_fill_style_str(&format!("#{r:02x}{g:02x}{b:02x}"));
+            context.fill_text(&name.text, name.position.x, name.position.y)?;
+        }
+        Ok(())
+    })();
+    context.restore();
+    result
 }
 
 fn arena_edge_plan(
@@ -5200,6 +5238,7 @@ impl PlannedScene {
             food,
             prey,
             arena_edge: arena_edge_plan(prepared, context)?,
+            nicknames: prepared.nickname_draws().to_vec(),
             fallback,
             paint,
         })
@@ -5236,6 +5275,7 @@ impl PlannedScene {
         if let Some(plan) = &self.prey {
             submit_prey(prey_sources, context, &plan.early)?;
         }
+        submit_nicknames(context, &self.nicknames)?;
         match self.paint {
             PlannedSnakePaint::Basic {
                 snakes,
