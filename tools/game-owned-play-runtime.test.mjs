@@ -334,8 +334,12 @@ test('accepted genuine action keeps staged reset, source release and one socket 
       assert.equal(graph.f.raf.size, 1); assert.equal(profile.counts.fetch, 1);
       graph.f.socket.open(); graph.message([54,1]); graph.message([97,...new Array(24).fill(0)]); graph.f.flush();
       assert.equal(readout(), 'Connected.'); assert.equal(graph.f.edit.ownedPlay.buttonState(button).disabled, true);
+      assert.equal(graph.f.edit.hud.style(mount.style).get('display'), 'none', 'accepted Setup hides the entire start panel');
       assert.equal(graph.f.document.getElementById('slither-client-status').textContent, 'SlitherClient: Connected');
       assert.equal(graph.f.messages.at(-1).code, 'connected');
+      graph.f.socket.onclose(); graph.f.flush();
+      assert.equal(graph.f.edit.hud.style(mount.style).get('display'), 'block');
+      assert.equal(graph.f.edit.ownedPlay.buttonState(button).disabled, true, 'remote disconnect does not grant a second profile attempt');
       runtime.dispose(); assert.equal(graph.f.socket.closes, 1); assert.equal(graph.f.original, 0);
     }
   });

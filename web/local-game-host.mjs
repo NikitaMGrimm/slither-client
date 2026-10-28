@@ -27,7 +27,7 @@ export async function createLocalGameHost({ realm = globalThis, endpoint, source
     throw new Error('Literal top-level http://127.0.0.1:<port> document required');
   }
   endpoint = loopbackEndpoint(endpoint);
-  let disposed = false, claimed = false, operation = false, inputRoute, nickname, skinPolicy;
+  let disposed = false, claimed = false, operation = false, inputRoute, nickname, skinPolicy, playControl;
   const cleanups = new Set();
   const isCurrentDocument = () => {
     try {
@@ -131,6 +131,8 @@ export async function createLocalGameHost({ realm = globalThis, endpoint, source
   const minimapDom = captureMinimapDom();
   const inputValue = accessor(input, 'value'), setInputValue = accessor(input, 'value', 'set');
   const Input = realm.HTMLInputElement, TextArea = realm.HTMLTextAreaElement;
+  const activeElement = accessor(realm.Document.prototype, 'activeElement');
+  const matches = method(element, 'matches'), closest = method(element, 'closest'), visible = method(element, 'checkVisibility');
   const autocomplete = accessor(input, 'autocomplete', 'set'), buttonType = accessor(button, 'type', 'set');
   const controls = freeze({
     inputValue, inputMaxLength: accessor(input, 'maxLength', 'set'),
@@ -169,7 +171,11 @@ export async function createLocalGameHost({ realm = globalThis, endpoint, source
     if (schema !== 1 || typeof onPlay !== 'function') throw new TypeError('Local Play control lease required');
     child(field, endpointParent); child(play, buttonParent);
     let unlisten, ended = false;
-    const unregister = () => { ended = true; unlisten?.(); unlisten = undefined; cleanups.delete(unregister); };
+    const control = { button: play, parent: buttonParent, field, fieldParent: endpointParent };
+    const unregister = () => {
+      ended = true; if (playControl === control) playControl = undefined;
+      unlisten?.(); unlisten = undefined; cleanups.delete(unregister);
+    };
     cleanups.add(unregister);
     return freeze({
       bind() {
@@ -180,6 +186,7 @@ export async function createLocalGameHost({ realm = globalThis, endpoint, source
           child(field, endpointParent); child(play, buttonParent);
           onPlay();
         });
+        playControl = control;
       },
       unregister,
     });
@@ -208,6 +215,18 @@ export async function createLocalGameHost({ realm = globalThis, endpoint, source
     inputRoute = route;
     if (inputInstalled) return;
     inputInstalled = true;
+    const nativePlayDefault = event => {
+      const control = playControl;
+      return event.code === 'Space' && control && event.target === control.button
+        && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && !event.isComposing
+        && dom.ownerDocument(control.button) === document && dom.isConnected(control.button)
+        && dom.parentNode(control.button) === control.parent && activeElement(document) === control.button
+        && dom.ownerDocument(control.field) === document && dom.isConnected(control.field)
+        && dom.parentNode(control.field) === control.fieldParent
+        && !matches(control.button, ':disabled') && closest(control.button, '[inert]') === null
+        && visible(control.button, { opacityProperty: true, visibilityProperty: true, contentVisibilityAuto: true })
+        && isCurrentDocument() && playControl === control;
+    };
     const deliver = event => {
       if (!isCurrentDocument()) return;
       // Editing keeps native defaults and never becomes steering or boost input.
@@ -217,7 +236,8 @@ export async function createLocalGameHost({ realm = globalThis, endpoint, source
       // moves into an editor. Editing keeps its native default behavior.
       if (editable && !['input', 'mouseup', 'pointerup', 'keyup', 'blur'].includes(event.type)) return;
       if (!editable && ['keydown', 'keyup'].includes(event.type)
-        && ['Space', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.code)) preventDefault(event);
+        && ['Space', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.code)
+        && !nativePlayDefault(event)) preventDefault(event);
       inputRoute?.(event);
     };
     for (const type of ['pointerdown', 'pointerup', 'pointermove', 'mousedown', 'mouseup', 'mousemove',
