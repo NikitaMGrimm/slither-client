@@ -191,15 +191,15 @@ if (typeof vm.SourceTextModule !== 'function') {
     lease.dispose();
   });
 
-  test('dynamic rows preserve Text/color/raw opacity, own-name bold and every ordinal beyond 255', () => {
+  test('ten visible rows preserve Text/color/opacity and own-name bold', () => {
     const f = fixture(), lease = f.lease(), binding = lease.mount();
-    const rows = Array.from({ length: 260 }, (_, i) => row(i + 1, i === 254));
+    const rows = Array.from({ length: 10 }, (_, i) => row(i + 1, i === 4));
     const receipt = lease.render(boardView(binding, rows));
     assert.equal(receipt.rowsWritten, true);
-    assert.equal(f.created.length, 6 + 9 * 260);
+    assert.equal(f.created.length, 6 + 9 * 10);
     const { columns } = f.nodes();
     for (const [column, node] of columns.entries()) {
-      const children = f.children(node); assert.equal(children.length, 520);
+      const children = f.children(node); assert.equal(children.length, 20);
       for (const [index, value] of rows.entries()) {
         const span = children[index * 2], br = children[index * 2 + 1];
         assert.equal(f.native.state(span).tag, 'span'); assert.equal(f.native.state(br).tag, 'br');
@@ -209,7 +209,16 @@ if (typeof vm.SourceTextModule !== 'function') {
         assert.equal(f.style(span).get('font-weight'), column === 1 && value.own ? 'bold' : 'normal');
       }
     }
-    assert.ok(Number(f.style(f.children(columns[0])[28]).get('opacity')) < 0);
+    lease.dispose();
+  });
+
+  test('oversized issued-view double is rejected before DOM work', () => {
+    const f = fixture(), lease = f.lease(), binding = lease.mount();
+    const before = f.calls.length;
+    assert.throws(() => lease.render(boardView(binding,
+      Array.from({ length: 11 }, (_, index) => row(index + 1)))), { name: 'TypeError' });
+    assert.equal(f.calls.length, before);
+    assert.equal(f.created.length, 6);
     lease.dispose();
   });
 

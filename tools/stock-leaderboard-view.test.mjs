@@ -77,6 +77,17 @@ test('startup/Setup pending board versus accepted empty board; heading opacity b
   assert.equal(view(pair).revision, 1n);
 });
 
+test('large accepted boards display only the top ten without discarding history', () => {
+  const rows = Array.from({ length: 1000 }, (_, index) => ({ ...row(), ordinal: index + 1 }));
+  const pair = board(create(), rows, rows.map(() => 42));
+  const first = view(pair), nextFrame = view(step(pair));
+  assert.equal(pair.state.board.rows.length, 1000);
+  assert.equal(first.rows.length, 10);
+  assert.deepEqual(first.rows.map(value => value.numberText),
+    Array.from({ length: 10 }, (_, index) => `#${index + 1}`));
+  assert.deepEqual(nextFrame.rows, first.rows);
+});
+
 test('genuine actual HUD membership and exact same scene; no spoof/proxy reflection', () => {
   const pair = board();
   const legacy = projectHudView(pair.hud, { ...binding(), scope: 'readout' });

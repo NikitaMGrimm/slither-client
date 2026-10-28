@@ -10,9 +10,7 @@ const domFields = ['nodeType', 'ownerDocument', 'parentNode', 'firstChild',
   'nextSibling', 'isConnected', 'localName', 'namespaceURI', 'style', 'setText', 'setStyle'];
 const constructFields = ['createElement', 'createTextNode', 'appendChild', 'removeChild'];
 const html = 'http://www.w3.org/1999/xhtml';
-// A schema-2 bare frame has at most floor((1048576 - 7) / 7) rows.
-const maxRows = 149795;
-const maxRowNodes = 1348155;
+const maxRows = 10;
 const invalid = () => { throw new TypeError('Invalid owned leaderboard UI input'); };
 
 function record(value, fields) {
@@ -274,8 +272,7 @@ export function createOwnedLeaderboardUi(input) {
       if (view.bindingIdentity !== bindingIdentity || view.documentIdentity !== documentIdentity
         || view.sceneIdentity !== sceneIdentity) invalid();
       // This bound precedes all row enumeration, allocation and native observations.
-      if (!Array.isArray(view.rows) || view.rows.length > maxRows
-        || !Number.isSafeInteger(view.rows.length * 9) || view.rows.length * 9 > maxRowNodes) invalid();
+      if (!Array.isArray(view.rows) || view.rows.length > maxRows) invalid();
       if (!mounted) return receipt('pending', 'nodes-pending');
       inspect();
       if (view.binding.state !== 'ready' || view.readiness === 'unavailable')
