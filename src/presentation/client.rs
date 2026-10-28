@@ -24,6 +24,35 @@ use crate::{
     },
 };
 
+// Bound server-controlled resize/clear work before source or Setup draw
+// callbacks run; short map bodies can still request large pixel surfaces.
+fn validate_minimap_work(
+    events: &[PresentationEvent],
+    mut dimension: Option<u16>,
+) -> Result<(), ClientPresentationError> {
+    let mut remaining = 16 * 512_usize * 512;
+    for event in events {
+        let layers = match event {
+            PresentationEvent::Setup(_) => {
+                dimension = Some(24);
+                1
+            }
+            PresentationEvent::Minimap(command) => {
+                let packet = crate::protocol::minimap::parse_minimap(command)
+                    .map_err(|error| ClientPresentationError::Minimap(error.into()))?;
+                dimension = packet.dimension().or(dimension);
+                usize::from(packet.layer_count().max(1))
+            }
+            _ => continue,
+        };
+        let side = usize::from(dimension.unwrap_or(0));
+        remaining = remaining
+            .checked_sub(side * side * layers)
+            .ok_or(ClientPresentationError::MinimapFrameWorkLimit)?;
+    }
+    Ok(())
+}
+
 /// Retained objects, including duplicate appearances, deaths, and an undrawn own object.
 pub const MAX_RETAINED_SNAKES: usize = MAX_SNAKES * 2;
 /// Aggregate physical anchors, including retained dying body points and undrawn own geometry.
@@ -351,6 +380,8 @@ pub enum ClientPresentationError {
     MinimapModeRequiresReset,
     /// A minimap command or used numeric input is invalid.
     Minimap(MinimapError),
+    /// One frame requests more than sixteen maximum-size map layers of work.
+    MinimapFrameWorkLimit,
     /// Canonical R requires an original own object at its event position.
     ScoreOwnRequired,
     /// Score-table construction failed without changing the cache or world.
@@ -416,6 +447,7 @@ impl fmt::Display for ClientPresentationError {
                 f.write_str("enable minimap tracking before packets or after reset")
             }
             Self::Minimap(error) => error.fmt(f),
+            Self::MinimapFrameWorkLimit => f.write_str("minimap frame work limit exceeded"),
             Self::ScoreOwnRequired => {
                 f.write_str("score adjustment requires retained original own")
             }
@@ -482,6 +514,7 @@ impl Error for ClientPresentationError {
             | Self::ScoreModeRequiresReset
             | Self::NicknameModeRequiresReset
             | Self::MinimapModeRequiresReset
+            | Self::MinimapFrameWorkLimit
             | Self::ScoreOwnRequired
             | Self::AppearanceModeRequiresReset
             | Self::AppearanceResolverRequired
@@ -1785,6 +1818,9 @@ impl AnimatedClient {
             received.apply_frame_with_events(bytes, header)
         }
         .map_err(ClientPresentationError::from)?;
+        if self.minimap_enabled {
+            validate_minimap_work(&applied.events, self.minimap.view().dimension)?;
+        }
         if enable_accessory_presentation
             && !self.accessory_presentation_enabled
             && self.received.frames_applied != 0
