@@ -1353,3 +1353,39 @@ fn minimap_session_fraction_precedes_the_connected_fade_writer() {
         .unwrap();
     assert_eq!(client.minimap_view().holder_opacity, 0.5);
 }
+
+#[test]
+fn minimap_resize_burst_is_rejected_before_setup_draw_callbacks() {
+    let mut client = AnimatedClient::new(0.).unwrap();
+    client.enable_minimap_tracking().unwrap();
+    apply(&mut client, &[setup(), vec![b'M', 0, 2, 64]]);
+    let before = client.clone();
+    let mut commands = vec![setup()];
+    commands.extend((0..4095).map(|index| {
+        let dimension = if index % 2 == 0 { 511_u16 } else { 512 };
+        let [high, low] = dimension.to_be_bytes();
+        vec![b'U', high, low]
+    }));
+    let mut setup_draws = 0;
+    let result = client.apply_frame_with_face_presentation_and_all_factories_and_setup(
+        &bundle(&commands),
+        ElapsedHeader::Absent,
+        |_| Ok(FacePresentation::default()),
+        |_, _| panic!("no synthetic food"),
+        |_, _| panic!("no synthetic prey"),
+        |_, _| {
+            setup_draws += 1;
+            Ok::<_, ClientPresentationError>(())
+        },
+    );
+    assert_eq!(result, Err(ClientPresentationError::MinimapFrameWorkLimit));
+    assert_eq!(setup_draws, 0);
+    assert_eq!(client, before);
+
+    // Several large ordered updates still fit; admission starts fresh per frame.
+    let ordinary = vec![vec![b'U', 2, 0, 64], vec![b'V', 64]];
+    apply(&mut client, &ordinary);
+    assert_eq!(client.minimap_view().dimension, Some(512));
+    assert_eq!(client.minimap_view().toggles[512 * 512 - 1], 1);
+    apply(&mut client, &ordinary);
+}

@@ -59,6 +59,11 @@ export function minimapRenderSmoke(wasm) {
     eq(current.widget.side, 26);
     eq([current.widget.right, current.widget.bottom, current.widget.zIndex], [16, 16, 10]);
     eq(current.widget.opacity, 0.025);
+    const resizeBurst = bundle(...Array.from({ length: 4096 }, (_, index) =>
+      [85, ...(index % 2 ? [2, 0] : [1, 255])]));
+    const beforeBurst = view(scene);
+    throws(() => scene.apply_frame(resizeBurst, false));
+    eq(view(scene), beforeBurst, 'a short resize burst cannot monopolize the receiving frame');
     scene.advance_with_control(80, false, () => ({ minimapUiFraction: 0.5 })).free();
     eq(view(scene, revision).widget.opacity, 0.05,
       'return fraction is applied before the connected map fade writer');
