@@ -32,6 +32,8 @@ test('end view is a passive bottom-center sibling and submits Rust text verbatim
   assert.deepEqual(f.parent.children, [root]); assert.equal(f.style(root).get('display'), 'none');
   assert.equal(f.style(root).get('bottom'), '12%'); assert.equal(f.style(root).get('pointer-events'), 'none');
   assert.equal(f.style(root).get('font-variant-numeric'), 'tabular-nums');
+  for (const line of root.children) assert.equal(f.style(line).get('position'), 'static',
+    'inline normal flow overrides the production host stylesheet absolute paragraph rule');
   f.ui.render({ ...view, title: '<b>Victory</b>' });
   assert.deepEqual(root.children.map(f.text), ['<b>Victory</b>', view.scoreText, view.statusText]);
   assert.equal(root.children[0].children.length, 1); assert.equal(f.style(root).get('display'), 'block');
@@ -52,9 +54,27 @@ test('stale or reparented owned nodes cannot be published or removed', () => {
   for (const change of [f => f.current(false), f => {
     const foreign = f.document.createElement('div'); f.parent.appendChild(foreign);
     foreign.appendChild(f.parent.children[0]);
-  }, f => f.parent.children[0].children[1].appendChild(f.document.createTextNode('unexpected'))]) {
+  }]) {
     const f = fixture(), root = f.ui.mount(); change(f);
-    assert.throws(() => f.ui.render(view)); assert.throws(f.ui.dispose);
+    assert.throws(() => f.ui.render(view)); f.ui.dispose(); f.ui.dispose();
     assert.equal(root.isConnected, true);
   }
+});
+
+test('changed child topology blocks publication and disposal still releases the exact owned holder', () => {
+  const f = fixture(), root = f.ui.mount();
+  root.children[1].appendChild(f.document.createTextNode('unexpected'));
+  assert.throws(() => f.ui.render(view));
+  f.ui.dispose(); assert.deepEqual(f.parent.children, []);
+});
+
+test('attach-then-throw construction retains cleanup authority without acknowledging mount', () => {
+  const f = fixture(), append = f.construct.appendChild, primary = Error('Synthetic append guard failure');
+  f.construct.appendChild = (parent, node) => {
+    append(parent, node);
+    if (parent === f.parent) throw primary;
+  };
+  assert.throws(f.ui.mount, error => error === primary);
+  assert.equal(f.parent.children.length, 1);
+  f.ui.dispose(); f.ui.dispose(); assert.deepEqual(f.parent.children, []);
 });

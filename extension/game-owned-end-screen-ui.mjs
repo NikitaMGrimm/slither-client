@@ -83,7 +83,7 @@ export function createOwnedEndScreenUi({ document, parent, dom, construct, isCur
     for (const tag of ['h2', 'p', 'p']) {
       const line = fresh(tag), text = fresh(null);
       append(line, text); append(holder, line); texts.push(text);
-      style(line, { margin: '4px 0', 'font-size': tag === 'h2' ? '24px' : '16px' });
+      style(line, { position: 'static', margin: '4px 0', 'font-size': tag === 'h2' ? '24px' : '16px' });
     }
     style(holder, { position: 'fixed', left: '50%', bottom: '12%', transform: 'translateX(-50%)',
       display: 'none', 'pointer-events': 'none', 'z-index': '2147483646', 'text-align': 'center',
@@ -109,11 +109,18 @@ export function createOwnedEndScreenUi({ document, parent, dom, construct, isCur
   function dispose() {
     if (disposed) return;
     disposed = true;
-    if (!mounted) return;
-    inspect();
-    construct.removeChild(parent, holder.node);
-    holder.parent = null; mounted = false;
-    inspect();
+    try {
+      // Append can attach and then throw under the runtime guard. Retain cleanup
+      // authority by node identity, even before mounted is acknowledged.
+      if (holder && isCurrentDocument() === true && dom.ownerDocument(holder.node) === document
+        && dom.ownerDocument(parent) === document && dom.parentNode(holder.node) === parent) {
+        construct.removeChild(parent, holder.node);
+      }
+    } finally {
+      mounted = false;
+      entries.length = texts.length = 0;
+      holder = document = parent = dom = construct = isCurrentDocument = undefined;
+    }
   }
   return Object.freeze({ mount, render, dispose });
 }
