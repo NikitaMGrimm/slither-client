@@ -224,6 +224,7 @@ test('local host selects ready sources and explicit profile; disconnected or ret
     const graph = createGraph({ hudNative: true, ownedHudNative: true, ownedPlayNative: true,
       leaderboardNative: true, prepareWasm(api, run) {
         api.LeaderboardScoreProjector = run('(class { project(){return new Float64Array();} free(){} })');
+        api.resolve_local_skin = run('(function () { throw Error("No policy resolution expected in this runtime seam double"); })');
       } });
     graph.hudWasm();
     const origin = 'https://authored-package.invalid/game/';
@@ -262,6 +263,7 @@ test('local host selects ready sources and explicit profile; disconnected or ret
     let selectedBackdrop;
     graph.wasm.api.AnimatedScene.prototype.set_background_backdrop = image => { selectedBackdrop = image; };
     let runtime, active = false, disposed = false, begins = 0, ends = 0, claims = 0, presets = 0, sourceHook;
+    let initialized = false, skinBindings = 0;
     const sources = { palettes: [graph.f.canvas(),graph.f.canvas(),graph.f.canvas()],
       background: new graph.f.realm.HTMLImageElement(),
       backgroundImage: new graph.f.realm.HTMLImageElement(),
@@ -279,6 +281,10 @@ test('local host selects ready sources and explicit profile; disconnected or ret
     const metadata = Object.freeze({schema:1,id:Symbol('Local host double'),code:'held'});
     const original = graph.f.gate, armed = original.metadata();
     const localHost = { endpoint, sources,
+      bindSkinPolicy(resolveSkin) {
+        assert.equal(initialized, true); assert.equal(begins, 0);
+        assert.equal(resolveSkin, graph.wasm.api.resolve_local_skin); skinBindings++;
+      },
       profile: graph.run('({clientVersion:0,password:new Uint8Array(20),protocolVersion:19})'),
       gate: { metadata:()=>metadata, claim(id) {
         assert.equal(id,metadata.id); assert.equal(++claims,1);
@@ -295,9 +301,10 @@ test('local host selects ready sources and explicit profile; disconnected or ret
         assert.equal(graph.wasm.counts().qualityFrees,1);disposed=true;events.push('host.dispose');},
     };
     const { startGamePage } = await graph.load('runtime.mjs');
-    runtime = await startGamePage({realm,localHost,initialize(){},wasmApi:graph.wasm.api,
+    runtime = await startGamePage({realm,localHost,initialize(){initialized=true;},wasmApi:graph.wasm.api,
       hudReadout:true,ownedHudUi:true,ownedPlayUi:true,ownedLeaderboardUi:true});
     assert.equal(selectedBackdrop, sources.backgroundImage);
+    assert.equal(skinBindings, 1, 'Rust policy is bound once after initialization and before source use');
     const seam = (await graph.load('stock-gameplay.mjs')).seam;
     assert.equal(claims,1);assert.equal(presets,1);assert.equal(seam.options.localSession,true);
     assert.equal('liveProfile' in seam.options,false);assert.equal(graph.f.sockets,0);
