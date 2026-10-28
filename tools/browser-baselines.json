@@ -1,0 +1,63 @@
+{
+  "schema": 1,
+  "kind": "authored-synthetic",
+  "description": "Saved expectations from the authored 24-frame packet/input fixture; hashes only, no captured images or source artwork.",
+  "win32-x64": {
+    "chromium": {
+      "version": "156.0.8078.4",
+      "screenshots": [
+        {
+          "frame": 1,
+          "pngSha256": "53542c32ce623380921ad3be15bc3ca1f2cb95f06d1c9cb2a40b964b3fdcd6b6",
+          "rgbaSha256": "5a5d1e0c8427bd54c69dd92448067af877d35fcf4fb642c957e287d0e8449a0a",
+          "width": 640,
+          "height": 480
+        },
+        {
+          "frame": 12,
+          "pngSha256": "fb0b78deab9a7756509753216b273afb4d8d207d0e846d712cb55fea1138b72d",
+          "rgbaSha256": "c657a8a1f7ff5f9cf1066d09dd36a8797263fd992672042b3bd76b5fcd3f5d2b",
+          "width": 640,
+          "height": 480
+        },
+        {
+          "frame": 24,
+          "pngSha256": "854edde72c2384671549b23532b48fbe9fe9e24b1b0695b97df1dd87eea4aba1",
+          "rgbaSha256": "64eb3c3dc4e3f364e180ed5afa1a329fe9f698de9be284321d183617a0b062f5",
+          "width": 640,
+          "height": 480
+        }
+      ],
+      "commandSha256": "95596a1d4661a3771923aefe6876398a2a78c914490578338211836a4f18be5c",
+      "commands": 118603
+    },
+    "firefox": {
+      "version": "157.0",
+      "screenshots": [
+        {
+          "frame": 1,
+          "pngSha256": "9fa57c8a8295714fcd5e764cb58ab822a9719f469b0880db98ee4aca58f8d663",
+          "rgbaSha256": "92106ef2832335174ab8cc15de8558bf13c9fea63a2af9f493d93c9242260fc2",
+          "width": 640,
+          "height": 480
+        },
+        {
+          "frame": 12,
+          "pngSha256": "9772ab12ee208ce0e12de87fe1edf8e454bc5c2b7c2d6ef130a3546420a5669e",
+          "rgbaSha256": "f758e4c83709b6f5c515c01deb9ed402e476f7d6a3d5166760a2b3f00cfee402",
+          "width": 640,
+          "height": 480
+        },
+        {
+          "frame": 24,
+          "pngSha256": "54fa7a08944759afe301e7bc9b160bb928656f5da714ff78d46472344de1c61a",
+          "rgbaSha256": "4171f7af49189713a56e4d0b2764cd78a51eced07b04362645228c770aa8d081",
+          "width": 640,
+          "height": 480
+        }
+      ],
+      "commandSha256": "f42bcd1f5b0eb743bda06e6605626e9d208b545dcb57fcec0b7b44f5a6a33de6",
+      "commands": 118603
+    }
+  }
+}
