@@ -40,7 +40,7 @@ test('owned leaderboard startup, deferred publication and resource ownership', a
           frame() { seam.frames++; hud=reduceHudState(hud,identity,{kind:'step',delta:1,
             lifecycle:{schema:1,deathPending:false,returnActive:false,returnCompleted:false,returnFraction:1}}); },
           resize() { seam.resizes++; }, event() {}, play() {}, playWithLiveProfile() { return Promise.resolve(); },
-          diagnostics: () => ({session:{connected:false}}), dispose() { disposed=true; seam.frees++; } };
+          diagnostics: () => ({session:{connected:false,playing:false}}), dispose() { disposed=true; seam.frees++; } };
       }`;
     const selected = { hudReadout: true, ownedHudUi: true, ownedPlayUi: true, ownedLeaderboardUi: true };
     async function setup({ nativeTransform = value => value, initialize = () => {}, wasmTransform = () => {} } = {}) {
@@ -344,11 +344,13 @@ test('local host selects explicit accessory dispatch, ready sources and profile;
     const before=enables();graph.f.frame(16);graph.f.flush();assert.equal(enables(),before,'idle publication unlocks once');
     click();assert.equal(seam.requests.length,2);assert.equal(graph.f.edit.ownedPlay.buttonState(button).disabled,true);
     seam.victory();graph.f.flush();
+    assert.equal(graph.f.edit.hud.style(mount.style).get('display'),'none');
     assert.equal(graph.f.edit.ownedPlay.buttonState(button).disabled,true,'victory stays locked before return completes');
     graph.f.frame(24);assert.equal(graph.f.edit.ownedPlay.buttonState(button).disabled,true);
     seam.victory(true);
     assert.equal(graph.f.edit.ownedPlay.buttonState(button).disabled,true,'returned-victory status stack never unlocks');
     graph.f.flush();assert.equal(graph.f.edit.ownedPlay.buttonState(button).disabled,false);
+    assert.equal(graph.f.edit.hud.style(mount.style).get('display'),'block');
     assert.equal(runtime.diagnostics().gameplay.session.connected,true,'record victory can retain its connected socket');
     const returnedEnables=enables();graph.f.frame(32);graph.f.flush();assert.equal(enables(),returnedEnables);
     assert.equal(seam.requests.length,2,'return never starts another Play automatically');

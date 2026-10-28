@@ -21,6 +21,7 @@ const gameWebFiles = ['stock-client.mjs', 'stock-skin-provider.mjs', 'stock-skin
 const gameFiles = [['game-activation.mjs', 'activation.mjs'], ['game-gate.js', 'gate.js'],
   ['game-link.js', 'link.js'], ['game-runtime.mjs', 'runtime.mjs'], ['game-owned-hud-ui.mjs', 'owned-hud-ui.mjs'],
   ['game-owned-play-ui.mjs', 'owned-play-ui.mjs'],
+  ['start-page-layout.mjs', 'start-page-layout.mjs'],
   ['game-owned-leaderboard-ui.mjs', 'owned-leaderboard-ui.mjs'],
   ['game-owned-minimap-ui.mjs', 'owned-minimap-ui.mjs'], ['game-host.css', 'host.css']];
 
@@ -127,7 +128,7 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, g
     'animatedscene_enable_nicknames',
     'animatedscene_enable_minimap_tracking', 'animatedscene_observe_minimap_ui_fraction', 'animatedscene_minimap_view',
     'encode_login', 'solve_challenge', 'decode_frame', 'setup_protocol_version',
-    'resolve_skin', 'resolve_local_skin',
+    'resolve_skin', 'resolve_local_skin', 'start_page_view',
     ...Array.from(glue.matchAll(/\bwasm\.([A-Za-z_]\w*)/g), match => match[1])]) {
     if (!exports.has(name)) throw new Error(`Wasm/glue export mismatch: ${name}`);
   }
@@ -138,6 +139,7 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, g
   common.set('game/bootstrap.mjs', readFile(path.join(projectRoot, 'extension', 'game-bootstrap.mjs')));
   for (const name of gameWebFiles) common.set(`game/${name}`, readFile(path.join(projectRoot, 'web', name)));
   common.set('LICENSE', readFile(path.join(projectRoot, 'LICENSE')));
+  common.set('assets/logo.svg', readFile(path.join(projectRoot, 'assets/logo.svg')));
   common.set('scene/config.json', Buffer.from('{"simulatorUrl":null}\n'));
   for (const [name, bytes] of bindings) {
     common.set(`scene/pkg/${name}`, bytes);
@@ -163,6 +165,7 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, g
     if (errors.length) throw new Error(errors.join('\n'));
     const manifest = JSON.parse(manifestBytes);
     const expected = new Set(['game/bootstrap.mjs', 'game/runtime.mjs', 'game/owned-hud-ui.mjs', 'game/owned-play-ui.mjs',
+      'game/start-page-layout.mjs', 'assets/logo.svg',
       'game/owned-leaderboard-ui.mjs', 'game/owned-minimap-ui.mjs', ...gameWebFiles.map(name => `game/${name}`),
       ...bindingFiles.map(name => `game/pkg/${name}`)]);
     const declarations = manifest.web_accessible_resources;

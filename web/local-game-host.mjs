@@ -130,7 +130,7 @@ export async function createLocalGameHost({ realm = globalThis, endpoint, source
   }
   const minimapDom = captureMinimapDom();
   const inputValue = accessor(input, 'value'), setInputValue = accessor(input, 'value', 'set');
-  const Input = realm.HTMLInputElement, TextArea = realm.HTMLTextAreaElement;
+  const Input = realm.HTMLInputElement, TextArea = realm.HTMLTextAreaElement, Button = realm.HTMLButtonElement;
   const autocomplete = accessor(input, 'autocomplete', 'set'), buttonType = accessor(button, 'type', 'set');
   const controls = freeze({
     inputValue, inputMaxLength: accessor(input, 'maxLength', 'set'),
@@ -216,7 +216,7 @@ export async function createLocalGameHost({ realm = globalThis, endpoint, source
       // A release belongs to the game input owner even after the pointer/focus
       // moves into an editor. Editing keeps its native default behavior.
       if (editable && !['input', 'mouseup', 'pointerup', 'keyup', 'blur'].includes(event.type)) return;
-      if (!editable && ['keydown', 'keyup'].includes(event.type)
+      if (!editable && !(event.target instanceof Button) && ['keydown', 'keyup'].includes(event.type)
         && ['Space', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.code)) preventDefault(event);
       inputRoute?.(event);
     };

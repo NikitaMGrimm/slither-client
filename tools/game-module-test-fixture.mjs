@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import * as vm from 'node:vm';
 import { createGateTestDom, attachGateTestRealm, issuedMinimapViewDouble } from './game-gate-test-fixture.mjs';
+import { projectStartPageDouble } from './start-page-view-double.mjs';
 
 const root = new URL('../', import.meta.url);
 const webNames = ['stock-skin-provider.mjs', 'stock-client.mjs', 'stock-food-provider.mjs',
@@ -15,6 +16,7 @@ const webNames = ['stock-skin-provider.mjs', 'stock-client.mjs', 'stock-food-pro
   'local-game-host.mjs', 'client-asset-map.mjs', 'synthetic-body.mjs', 'synthetic-food.mjs', 'synthetic-prey.mjs', 'loopback-session.mjs'];
 const entryNames = { 'bootstrap.mjs': 'game-bootstrap.mjs', 'runtime.mjs': 'game-runtime.mjs',
   'owned-hud-ui.mjs': 'game-owned-hud-ui.mjs', 'owned-play-ui.mjs': 'game-owned-play-ui.mjs',
+  'start-page-layout.mjs': 'start-page-layout.mjs',
   'owned-leaderboard-ui.mjs': 'game-owned-leaderboard-ui.mjs',
   'owned-minimap-ui.mjs': 'game-owned-minimap-ui.mjs' };
 const origin = 'https://authored-package.invalid/game/';
@@ -54,6 +56,7 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
   }
   f.host(); f.complete();
   const wasm = wasmDouble(f), counts = { initialize: 0 };
+  wasm.api.start_page_view = vm.runInContext('(' + projectStartPageDouble.toString() + ')', f.context);
   const minimap = { enabled: 0, reads: [], fractions: [], view: {
     schema: 1, enabled: true, imageRevision: 0n, dimension: null,
     baseRgba: new Uint8Array(), alternateRgba: new Uint8Array(), widget: null,

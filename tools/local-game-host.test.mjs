@@ -386,6 +386,18 @@ test('Play lease binds once, admits trusted clicks and unregisters on owner disp
   f.dispatch(button, 'click'); assert.equal(plays, 1); assert.equal(f.listeners.get(button).length, 0);
 });
 
+test('local native Play button keeps Tab, Enter and Space defaults while gameplay retains its Space fence', async () => {
+  const f = fixture(), host = await create(f), native = claim(host), { button } = f.controls();
+  f.realm.HTMLButtonElement = class { static [Symbol.hasInstance]() { throw Error('Late button constructor read'); } };
+  const seen = []; native.setInput(event => seen.push(event));
+  for (const code of ['Tab', 'Enter', 'Space']) for (const type of ['keydown', 'keyup']) {
+    assert.equal(f.dispatch(f.realm, type, { target: button, code }).defaultPrevented, false);
+  }
+  assert.equal(f.dispatch(f.realm, 'keydown', { code: 'Space' }).defaultPrevented, true);
+  assert.equal(seen.length, 7); assert.equal(f.sockets.length, 0);
+  host.dispose();
+});
+
 test('socket capability constructs only the selected endpoint; status and local reload send no messages', async () => {
   const f = fixture(), host = await create(f), native = claim(host);
   for (const url of ['ws://127.0.0.1:8767/slither', 'ws://192.0.2.1:8766/slither', 'ws://localhost:8766/slither']) {

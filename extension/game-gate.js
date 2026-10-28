@@ -592,6 +592,23 @@
     const letter = key.length === 1 && key >= 'A' && key <= 'Z' ? key.toLowerCase() : key;
     return shift ? ['z', 'v'].includes(letter) : ['a', 'c', 'x', 'v', 'z', 'y'].includes(letter);
   }
+  // Permit native focus traversal and native button activation only inside the
+  // current owned control lease. The resulting click still needs queuePlay's
+  // trusted-event, visibility, disabled and post-router checks.
+  function controlsKeyboardDefault(controls, event, type, target) {
+    if (!['keydown', 'keyup', 'keypress'].includes(type) || !validControls(controls)
+      || editing.active(editing.initialDocument) !== target) return false;
+    const member = target === controls.edit.element ? controls.edit
+      : lease && target === lease.element ? lease : undefined;
+    if (target === controls.button ? !eligibleButton(controls) : !member || !eligible(member, true)) return false;
+    if (editing.ctrl(event) || editing.meta(event) || editing.alt(event)
+      || editing.composing(event) || editing.modifier(event, 'AltGraph')) return false;
+    const key = editing.key(event);
+    const allow = key === 'Tab' || target === controls.button && !editing.shift(event)
+      && (key === 'Enter' || key === ' ' || editing.code(event) === 'NumpadEnter');
+    return allow && controlsLease === controls && current(controls.generation)
+      && controlsLease === controls;
+  }
   function sameDocument(target) {
     return target === editing.initialDocument || editing.ownerDocument(target) === editing.initialDocument;
   }
@@ -837,7 +854,8 @@
         if (!claimed || !input) return;
         const nickname = lease, value = editMember(target), router = input, generation = routerGeneration;
         routing++; entered = true; wasDeciding = deciding; deciding = Boolean(value || controlsLease);
-        let attributed = false, candidate = false;
+        let attributed = false, candidate = false, navigation = false;
+        const controls = controlsLease;
         try {
           const live = value && valid(value);
           if (value === nickname) {
@@ -848,7 +866,7 @@
               && target === editing.initialDocument && editing.active(editing.initialDocument) === nickname.element) && valid(nickname);
           }
           candidate = live && disposition(value, event, type, target);
-          const controls = controlsLease;
+          navigation = controls && controlsKeyboardDefault(controls, event, type, target);
           if (controls && type === 'click' && target === controls.button && initiallyPrevented === false
             && editing.button(event) === 0 && eligibleButton(controls)) {
             const trusted = descriptor(event, 'isTrusted');
@@ -870,8 +888,11 @@
         if (operation?.failed) throw operation.primary;
         if (candidate && result !== undefined) throw new TypeError('Nickname edit router must return undefined synchronously');
         if (action && result !== undefined) throw new TypeError('Owned Play router must return undefined synchronously');
+        if (navigation && result !== undefined) throw new TypeError('Owned keyboard router must return undefined synchronously');
         allow = Boolean(candidate && (lease === value || controlsLease?.edit === value) && input === router && routerGeneration === generation
           && disposition(value, event, type, eventTarget(event)));
+        if (navigation && controlsLease === controls && input === router && routerGeneration === generation
+          && controlsKeyboardDefault(controls, event, type, eventTarget(event))) allow = true;
         if (action && (controlsLease !== action || input !== router || routerGeneration !== generation
           || eventTarget(event) !== action.button || !eligibleButton(action))) action = undefined;
         finishGesture(value, event, type, target, allow);
