@@ -14,21 +14,9 @@ fn custom(pairs: &[(u8, u8)]) -> Vec<u8> {
 
 #[test]
 fn authored_local_policy_preserves_three_choices_and_plain_faces() {
-    for (skin, palette) in [
-        (0, 0),
-        (1, 1),
-        (2, 2),
-        (24, 0),
-        (25, 1),
-        (26, 2),
-        (27, 0),
-        (40, 1),
-        (41, 2),
-        (60, 0),
-        (255, 0),
-    ] {
-        let descriptor = resolve_authored_local_skin(skin, &custom(&[(7, 41)])).unwrap();
-        let mut expected = selected(palette);
+    for skin in 0..=255 {
+        let descriptor = resolve_authored_local_skin(skin, &[]).unwrap();
+        let mut expected = selected(skin % 3);
         expected.skin = skin;
         assert_eq!(descriptor, expected);
         assert!(!descriptor.custom);
@@ -40,12 +28,73 @@ fn authored_local_policy_preserves_three_choices_and_plain_faces() {
 }
 
 #[test]
-fn authored_local_policy_bounds_but_does_not_display_custom_data() {
-    assert_eq!(
-        resolve_authored_local_skin(41, &[255; 255]).unwrap(),
-        resolve_authored_local_skin(41, &[]).unwrap()
-    );
+fn authored_local_policy_bounds_custom_data_and_preserves_empty_fallback() {
+    for bytes in [
+        vec![],
+        vec![255; 8],
+        vec![255; 9],
+        vec![255; 255],
+        custom(&[(0, 1), (2, 36), (3, 38), (4, 40), (5, 42)]),
+    ] {
+        assert_eq!(
+            resolve_authored_local_skin(41, &bytes).unwrap(),
+            resolve_authored_local_skin(41, &[]).unwrap()
+        );
+    }
     assert_eq!(resolve_authored_local_skin(41, &[0; 256]), Err(SkinError));
+}
+
+#[test]
+fn authored_local_custom_runs_reach_the_three_existing_families() {
+    let descriptor = resolve_authored_local_skin(40, &custom(&[(2, 0), (3, 1), (4, 2)])).unwrap();
+    assert!(descriptor.custom);
+    assert_eq!(descriptor.skin, 40);
+    assert_eq!(descriptor.base_palette, 0);
+    assert_eq!(pairs(&descriptor), [(0, 2), (1, 3), (2, 4)]);
+    assert_eq!(descriptor.variant_mode, BodyVariantMode::First);
+    assert_eq!(descriptor.variant_period, 1);
+    assert_eq!(descriptor.face, FaceGeometry::default());
+    assert_eq!(descriptor.face_sources, SkinFaceSources::None);
+    assert_eq!(descriptor.antenna, None);
+    assert_eq!(descriptor.body_style, selected(0).body_style);
+}
+
+#[test]
+fn authored_local_projection_preserves_admission_counts_collisions_and_cycle_seam() {
+    let mut bytes = custom(&[(1, 5), (9, 36), (0, 7), (2, 5), (2, 41), (3, 39), (1, 5)]);
+    bytes.push(255);
+    for skin in [24, 27, 40, 41, 60, 255] {
+        let descriptor = resolve_authored_local_skin(skin, &bytes).unwrap();
+        assert_eq!(descriptor.skin, skin);
+        assert!(descriptor.custom);
+        assert_eq!(descriptor.base_palette, 2);
+        assert_eq!(pairs(&descriptor), [(2, 3), (2, 2), (0, 3), (2, 1)]);
+        assert_eq!(descriptor.variant_mode, BodyVariantMode::First);
+        assert_eq!(descriptor.variant_period, 1);
+        assert_eq!(descriptor.face, FaceGeometry::default());
+        assert_eq!(descriptor.face_sources, SkinFaceSources::None);
+        assert_eq!(descriptor.antenna, None);
+        assert_eq!(descriptor.body_style, selected(0).body_style);
+    }
+    assert_eq!(
+        pairs(
+            &resolve_authored_local_skin(0, &custom(&[(1, 35), (2, 37), (3, 39), (4, 41)]))
+                .unwrap()
+        ),
+        [(2, 1), (1, 2), (0, 3), (2, 4)]
+    );
+}
+
+#[test]
+fn authored_local_projection_keeps_maximum_count_without_expanding_runs() {
+    let mut bytes = vec![0; 255];
+    for pair in bytes[8..].as_chunks_mut::<2>().0 {
+        pair.copy_from_slice(&[255, 41]);
+    }
+    let descriptor = resolve_authored_local_skin(60, &bytes).unwrap();
+    assert_eq!(pairs(&descriptor), [(2, 31_365)]);
+    assert_eq!(descriptor.base_palette, 2);
+    assert!(descriptor.custom);
 }
 
 fn pairs(rule: &SkinDescriptor) -> Vec<(usize, usize)> {
