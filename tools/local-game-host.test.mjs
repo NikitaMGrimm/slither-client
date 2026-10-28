@@ -387,14 +387,24 @@ test('Play lease binds once, admits trusted clicks and unregisters on owner disp
 });
 
 test('local native Play button keeps Tab, Enter and Space defaults while gameplay retains its Space fence', async () => {
-  const f = fixture(), host = await create(f), native = claim(host), { button } = f.controls();
+  const f = fixture(), host = await create(f), native = claim(host), { field, parent, button } = f.controls();
   f.realm.HTMLButtonElement = class { static [Symbol.hasInstance]() { throw Error('Late button constructor read'); } };
+  const lease = native.ownedPlayDom.createControlsLease({ schema: 1, endpoint: field, endpointParent: parent,
+    button, buttonParent: parent, onPlay() {} }); lease.bind(); f.dom.state(f.document).active = button;
   const seen = []; native.setInput(event => seen.push(event));
   for (const code of ['Tab', 'Enter', 'Space']) for (const type of ['keydown', 'keyup']) {
     assert.equal(f.dispatch(f.realm, type, { target: button, code }).defaultPrevented, false);
   }
   assert.equal(f.dispatch(f.realm, 'keydown', { code: 'Space' }).defaultPrevented, true);
   assert.equal(seen.length, 7); assert.equal(f.sockets.length, 0);
+  assert.equal(f.dispatch(f.realm, 'keydown', { target: button, code: 'ArrowLeft' }).defaultPrevented, true);
+  assert.equal(f.dispatch(f.realm, 'keydown', { target: button, code: 'Space', ctrlKey: true }).defaultPrevented, true);
+  f.dom.state(button).disabled = true;
+  assert.equal(f.dispatch(f.realm, 'keydown', { target: button, code: 'Space' }).defaultPrevented, true);
+  f.dom.state(button).disabled = false; f.dom.state(button).visible = false;
+  assert.equal(f.dispatch(f.realm, 'keydown', { target: button, code: 'Space' }).defaultPrevented, true);
+  f.dom.state(button).visible = true; lease.unregister();
+  assert.equal(f.dispatch(f.realm, 'keydown', { target: button, code: 'Space' }).defaultPrevented, true);
   host.dispose();
 });
 
