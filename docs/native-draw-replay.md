@@ -20,7 +20,9 @@ This schedule is authored test data, not a recording of another implementation.
 The test compares complete prepared geometry and ordered body plans from two
 fresh clients at every frame, including command floating-point bits and signed
 zero. Eight checked-in structural snapshots pin body counts, per-pass counts
-and an order-sensitive fingerprint of sequence, pass, ordinal and asset index.
+and an order-sensitive fingerprint of snake identity, sequence, pass, ordinal
+and asset index. An unsampled same-structure swap witness checks the identity
+fingerprint; the reuse checkpoint also requires distinct live/dying positions.
 The fingerprint is a compact regression checksum, not a cryptographic proof.
 At the same eight frames, numeric snapshots pin three final cursors and the
 first, middle and last image command's center, translation, rotation, destination
