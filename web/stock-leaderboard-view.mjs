@@ -67,7 +67,8 @@ function project(state, hudSnapshot, observation) {
     readiness = 'ready';
     reason = null;
   }
-  const rows = freeze(boardPresent ? state.board.rows.map(row => freeze({ ...row })) : []);
+  // The HUD shows the top ten; larger valid wire boards stay in packet history.
+  const rows = freeze(boardPresent ? state.board.rows.slice(0, 10).map(row => freeze({ ...row })) : []);
   const view = freeze({ schema: 1, bindingIdentity: observed.bindingIdentity,
     documentIdentity: observed.documentIdentity, sceneIdentity: observed.sceneIdentity,
     revision: disabled ? null : state.revision,
