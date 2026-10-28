@@ -554,6 +554,7 @@ test('actual isolated link loads exactly one fixed MAIN module and accepts bound
   new Script(readFileSync(new URL('../extension/game-link.js', import.meta.url), 'utf8')).runInContext(context);
   assert.equal(f.document.head.children.length, 1);
   const module = f.document.head.children[0];
+  assert.equal(f.document.getElementById('slither-client-reload').hidden, true);
   assert.equal(module.type, 'module');
   assert.equal(module.src, 'chrome-extension://synthetic/game/bootstrap.mjs');
   f.realm.postMessage({ type: 'slither-client-status', schema: 1, id: 'a'.repeat(32), code: 'held' });
@@ -562,6 +563,7 @@ test('actual isolated link loads exactly one fixed MAIN module and accepts bound
   assert.equal(f.document.getElementById('slither-client-status').textContent, 'SlitherClient: held');
   module.dispatchEvent(new Event('error'));
   assert.equal(f.document.getElementById('slither-client-status').textContent, 'SlitherClient: csp-or-module-unavailable');
+  assert.equal(f.document.getElementById('slither-client-reload').hidden, true);
   assert.equal(f.sockets, 0);
 });
 
