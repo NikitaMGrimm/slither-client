@@ -11,6 +11,7 @@ use std::{
 
 use crate::{math, state::Point};
 
+mod announcement;
 mod antenna;
 mod arena_edge;
 mod background;
@@ -40,6 +41,11 @@ mod skin;
 mod snake;
 mod static_accessory;
 
+pub(crate) use announcement::AnnouncementPacket;
+pub use announcement::{
+    AnnouncementContent, AnnouncementError, AnnouncementLifecycle, AnnouncementLine,
+    AnnouncementState, AnnouncementView,
+};
 pub use antenna::{
     AntennaBarrierEffect, AntennaBulbCommand, AntennaBulbGeometry, AntennaCullBounds,
     AntennaDrawInput, AntennaDrawRequest, AntennaError, AntennaPath, AntennaSnapshot, AntennaState,

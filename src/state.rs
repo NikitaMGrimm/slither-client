@@ -364,11 +364,13 @@ pub(crate) enum HudCommandMarker {
         death_pending: bool,
         rows: Option<HudLeaderboardRows>,
     },
+    Announcement(crate::presentation::AnnouncementPacket),
     FinalCapture,
 }
 
 pub(crate) struct HudCommandCollector<'a> {
     pub plan: HudIngressPlan<'a>,
+    pub announcements: bool,
     pub boundaries: Vec<HudCommandBoundary>,
 }
 
@@ -591,6 +593,12 @@ impl ClientState {
                             },
                         };
                     }
+                } else if collector.announcements && command[0] == b'm' {
+                    marker = HudCommandMarker::Announcement(
+                        crate::presentation::AnnouncementPacket::copy(command).map_err(
+                            |error| StateError::Hud(HudIngressError::Announcement(error)),
+                        )?,
+                    );
                 } else if collector.plan.final_capture_indices.get(captures) == Some(&index) {
                     marker = HudCommandMarker::FinalCapture;
                     captures += 1;

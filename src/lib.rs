@@ -23,6 +23,9 @@ mod canvas_browser;
 mod animated_browser;
 
 #[cfg(target_arch = "wasm32")]
+mod announcement_browser;
+
+#[cfg(target_arch = "wasm32")]
 mod body_browser;
 
 #[cfg(target_arch = "wasm32")]
