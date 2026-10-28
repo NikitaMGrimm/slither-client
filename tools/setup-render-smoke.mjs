@@ -170,7 +170,7 @@ export function setupRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, o
       eq([f.target.width, f.target.height], [701, 503]);
       dimensions.length = 0;
       f.resize(701, 503);
-      eq(dimensions, [['width', 701]], 'unchanged size still isolates hostile Canvas state once');
+      eq(dimensions, [], 'unchanged size resets Canvas state without resizing');
       eq(f.quality.snapshot(), before[2]);
       eq(f.target.context.stack.length, 0);
     } finally { f.close(); control.close(); }
@@ -403,9 +403,8 @@ export function setupRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, o
         eq(count.apply(bundle(...setups(accepted)), { width: size, height: size }), accepted);
         eq(observed.calls, { getContext: accepted, createPattern: accepted, reset: accepted + 1,
           fillRect: accepted * 2, fill: accepted, stroke: accepted, drawImage: 0 });
-        eq(observed.assignments, [['width', size], ['height', size],
-          ...Array.from({ length: accepted - 1 }, () => ['width', size])],
-        'first changed-size draw assigns both sizes, then every draw isolates once');
+        eq(observed.assignments, [['width', size], ['height', size]],
+          'only the first changed-size draw assigns dimensions; later draws reset state');
         const camera = JSON.parse(count.scene.snapshot()).camera;
         eq(count.target.context.trace.filter(row => row.op === 'stroke').map(row => row.path),
           Array.from({ length: accepted }, (_, index) => arenaEdgePoints({ center: 32550, angle: 0,

@@ -124,8 +124,8 @@ impl CanvasPreflight {
             target.set_width(self.width);
             target.set_height(self.height);
         } else {
-            // Each draw must also remove inherited clips, transforms and filters.
-            target.set_width(self.width);
+            // Drop inherited clips and state without resizing the backing store.
+            self.context.reset();
         }
         let width = f64::from(self.width);
         let height = f64::from(self.height);
@@ -210,8 +210,8 @@ impl CanvasFrame {
             zoom,
         )?;
         let context = context(target)?;
-        // Resizing also clears hostile inherited clips, transforms and filters.
-        target.set_width(target.width());
+        // Clear inherited clips and state without resizing the backing store.
+        context.reset();
         let width = f64::from(target.width());
         let height = f64::from(target.height());
         context.set_fill_style_str("#111820");
