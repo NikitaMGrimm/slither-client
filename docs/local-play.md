@@ -81,8 +81,30 @@ transport and do not substitute for the default game path.
 The default local body path uses three authored color families, with seven shaded
 variants, separate boost glow and shared outline/shadow/death sources from the
 single asset map. Rust owns the three-color selection and shading cadence;
-browser code binds the source objects after Wasm initialization. Full skin
-identity, displayed custom skins, special faces and accessories remain incomplete.
+browser code binds the source objects after Wasm initialization. Without admitted
+custom runs, selection remains `skin % 3` with seven ping-pong shading variants.
+Custom data uses the existing Rust admission: at most 255 bytes, an opaque
+eight-byte header, then complete positive count/palette pairs from the supported
+normal palette set. Adjacent equal admitted palettes merge before projection.
+Each admitted palette is then projected modulo three into the existing authored
+families, retaining run counts, order and boundaries without another merge.
+The first projected family supplies the body base and existing nickname tint
+base. Custom bodies use the first shading variant; empty or wholly rejected
+custom data retains the default appearance.
+
+This displays custom stripe structure in the authored palette namespace; it does
+not reproduce the stock 42-color palette. Plain paired faces remain selected;
+special faces, antennas, accessories and full skin identity remain incomplete.
+Same-art comparisons bypass these generated assets and do not validate them.
+
+An authored-only browser comparison remains deferred. Use the actual default
+asset generator and local resolver with fixed synthetic packets and identical
+viewport, DPR, clocks, quality and source-readiness controls. Compare unchanged
+no-custom families 0/1/2, a three-family custom cycle with unequal run lengths,
+and admitted palettes that collide after projection. Check the first body/tint
+family, head-to-tail run order, first-variant custom shading and existing
+boost/death sources. Inspect the actual images alongside recorded source
+identities; native/Wasm source-binding tests alone do not establish raster quality.
 
 The implementation connects the local host adapter to the shared runtime and
 visible HUD/leaderboard. A local Chrome check completed trusted Play, steering and boost-on/off, then

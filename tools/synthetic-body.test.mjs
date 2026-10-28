@@ -122,3 +122,25 @@ test('local binding uses policy outputs for numeric choices and retains provider
   assert.throws(() => resolve({ skin: 251 }), /variant period/);
   assert.throws(() => createLocalBodyResolver(localSourcesDouble(), realm, undefined), /policy/);
 });
+
+test('local binding preserves custom run boundaries and uses the existing authored sources', () => {
+  const bodySources = localSourcesDouble(), rule = localRuleDouble();
+  Object.assign(rule, { custom: true, basePalette: 2,
+    runs: [{ palette: 2, count: 3 }, { palette: 2, count: 5 }, { palette: 0, count: 2 }],
+    variantMode: 'first', variantPeriod: 1 });
+  const resolve = createLocalBodyResolver(bodySources, realm, () => rule);
+  const { recipe } = resolve({ skin: 251, customBytes: new Uint8Array(8) });
+  assert.equal(recipe.custom, true);
+  assert.deepEqual(recipe.runs, rule.runs, 'binding must not merge remapped run collisions');
+  assert.equal(recipe.basePalette, 2);
+  assert.equal(recipe.variantMode, 'first');
+  assert.equal(recipe.variantPeriod, 1);
+  for (const run of recipe.runs) {
+    assert.equal(recipe.palettes[run.palette].variants[0].asset.source,
+      bodySources.palettes[run.palette].variants[0]);
+    assert.equal(recipe.palettes[run.palette].boostGlow.asset.source,
+      bodySources.palettes[run.palette].boostGlow);
+  }
+  assert(Object.isFrozen(recipe.runs));
+  assert.equal(recipe.attachment, null);
+});
