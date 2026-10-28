@@ -51,8 +51,9 @@ An external local comparison harness can call
 `sourceFactory({ realm, random })` and uses its complete existing source bundle:
 `{ palettes, background, backgroundImage?, adapter, hostAssets }`. `palettes`
 contains the three context sources; the adapter's recipe catalog can contain
-the full palette families. The supplied adapter owns its source operations and
-skin selection. The default local Rust skin-policy binding remains available
+the full palette families. A loaded backdrop retains its full natural width
+and height when scaled to the viewport. The supplied adapter owns its source
+operations and skin selection. The default local Rust skin-policy binding remains available
 for ordinary startup but does not select the private adapter's sources.
 
 With no factory, the authored local assets and resolvers remain the default.

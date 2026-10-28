@@ -163,19 +163,19 @@ export function bodyRenderSmoke(wasm) {
     const backgroundLayers = fixture();
     try {
       const f = backgroundLayers, backdrop = new HTMLImageElement('authored backdrop');
-      backdrop.naturalWidth = backdrop.naturalHeight = 512;
+      backdrop.naturalWidth = 640; backdrop.naturalHeight = 360;
       f.scene.set_background_backdrop(backdrop);
-      const wrongSize = new HTMLImageElement('authored wrong-size backdrop');
-      wrongSize.naturalWidth = 511; wrongSize.naturalHeight = 512;
-      rejects(() => f.scene.set_background_backdrop(wrongSize), /512x512/);
+      const empty = new HTMLImageElement('authored empty backdrop');
+      empty.naturalWidth = 0;
+      rejects(() => f.scene.set_background_backdrop(empty), /loaded image/);
       f.render();
       const trace = f.target.context.trace;
       const image = trace.find(value => value.op === 'image' && value.source === backdrop);
       const fills = trace.filter(value => value.op === 'fillRect');
       eq([fills[0].color, fills[0].alpha, fills[0].args], ['#000000', 1, [0, 0, 960, 540]],
         'background clears black in screen coordinates');
-      eq([image.args, image.alpha, image.transforms], [[0, 0, 512, 512, 0, 0, 960, 540], .3, []],
-        'backdrop uses the Rust screen-space crop and constant alpha');
+      eq([image.args, image.alpha, image.transforms], [[0, 0, 640, 360, 0, 0, 960, 540], .3, []],
+        'backdrop uses its complete rectangular source and constant alpha');
       eq(fills[1].color.source, f.background, 'pattern uses the separate tile');
       ok(trace.indexOf(fills[0]) < trace.indexOf(image) && trace.indexOf(image) < trace.indexOf(fills[1]),
         'clear, backdrop and tile precede entity drawing');
@@ -185,6 +185,16 @@ export function bodyRenderSmoke(wasm) {
       f.target.context.trace = []; f.render();
       ok(f.target.context.trace.some(value => value.op === 'image' && value.source === backdrop),
         'reset retains the selected backdrop');
+      f.target.context.trace = [];
+      const unusedFactory = () => { throw new Error('Empty Setup must not resolve an entity'); };
+      eq(f.scene.apply_frame_and_render_standard(bundle(syntheticSetup()), false, unusedFactory, unusedFactory,
+        f.target, ...f.foods, f.background, 801, 603, f.resolve, f.quality), 1);
+      eq(f.target.context.trace.find(value => value.op === 'image' && value.source === backdrop).args,
+        [0, 0, 640, 360, 0, 0, 801, 603], 'ordered Setup keeps the full rectangular backdrop');
+      f.target.context.trace = [];
+      f.scene.render_standard_at_size(f.target, ...f.foods, f.background, 1280, 720, f.resolve, f.quality);
+      eq(f.target.context.trace.find(value => value.op === 'image' && value.source === backdrop).args,
+        [0, 0, 640, 360, 0, 0, 1280, 720], 'resize keeps the full rectangular backdrop');
       f.quality.set_requested_mode(0); f.quality.begin_connection();
       f.target.context.trace = []; f.render();
       ok(!f.target.context.trace.some(value => value.op === 'image' && value.source === backdrop),
