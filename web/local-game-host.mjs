@@ -1,6 +1,6 @@
 import { loopbackEndpoint } from './loopback-session.mjs';
 import { createClientAssetMap } from './client-asset-map.mjs';
-import { createSyntheticBodyResolver } from './synthetic-body.mjs';
+import { createLocalBodyResolver } from './synthetic-body.mjs';
 import { createSyntheticFoodResolver } from './synthetic-food.mjs';
 import { createSyntheticPreyResolver } from './synthetic-prey.mjs';
 
@@ -27,7 +27,7 @@ export async function createLocalGameHost({ realm = globalThis, endpoint } = {})
     throw new Error('Literal top-level http://127.0.0.1:<port> document required');
   }
   endpoint = loopbackEndpoint(endpoint);
-  let disposed = false, claimed = false, operation = false, inputRoute, nickname;
+  let disposed = false, claimed = false, operation = false, inputRoute, nickname, skinPolicy;
   const cleanups = new Set();
   const isCurrentDocument = () => {
     try {
@@ -227,17 +227,18 @@ export async function createLocalGameHost({ realm = globalThis, endpoint } = {})
 
   const sourceRealm = { HTMLCanvasElement: realm.HTMLCanvasElement, HTMLImageElement: realm.HTMLImageElement,
     document: { createElement: tag => construct.createElement(document, tag) } };
-  const { palettes, background, backgroundImage } = await createClientAssetMap({
+  const { palettes, background, backgroundImage, bodySources } = await createClientAssetMap({
     realm: { ...sourceRealm, Image: realm.Image },
   });
   current();
-  const resolveBody = createSyntheticBodyResolver(palettes, sourceRealm);
+  const resolveBody = createLocalBodyResolver(bodySources, sourceRealm, (skin, customBytes) => {
+    inOperation();
+    const rule = skinPolicy(skin, customBytes);
+    inOperation();
+    return rule;
+  });
   const resolveFood = createSyntheticFoodResolver(sourceRealm, random);
   const resolvePrey = createSyntheticPreyResolver(sourceRealm, random);
-  const eyes = freeze({ kind: 'standard', distance: 6, separation: 6, radius: 6, pupilRadius: 3.5,
-    pupilTravel: 2.3, outlineWidth: 0, eyeColor: 0xffffff, pupilColor: 0, outlineColor: 0,
-    eyeOpacity: 0.75, pupilOpacity: 1, angleSmoothing: 0.12 });
-  const appearance = freeze({ face: freeze({ kind: 'paired', eyes, decoration: freeze({ kind: 'none' }) }), antenna: null });
   const revision = 'authored-local-1';
   function inOperation() {
     current();
@@ -246,15 +247,20 @@ export async function createLocalGameHost({ realm = globalThis, endpoint } = {})
   const adapter = freeze({
     beginOperation() {
       current();
+      if (!skinPolicy) throw new Error('Local skin policy must be bound before source operations');
       if (operation) throw new Error('Local source operation already active');
       operation = true;
       return freeze({ revision });
     },
-    resolveAppearance() { inOperation(); return appearance; },
+    resolveAppearance(request) {
+      inOperation();
+      const rule = skinPolicy(request.skin, request.customBytes);
+      inOperation();
+      return freeze({ face: freeze({ kind: 'paired', eyes: rule.eyes, decoration: freeze({ kind: 'none' }) }), antenna: null });
+    },
     resolveRecipe(request) {
       inOperation();
-      if (!Number.isInteger(request.skin) || request.skin < 0 || request.skin > 255) throw new TypeError('Local skin byte required');
-      return resolveBody({ ...request, skin: request.skin % 3, customBytes: new Uint8Array(), cosmetic: 0 });
+      return resolveBody(request);
     },
     resolveAntennaRandom({ nodeCount, randomPairCount }) {
       inOperation();
@@ -288,6 +294,12 @@ export async function createLocalGameHost({ realm = globalThis, endpoint } = {})
     return native;
   } });
   return { gate, sources: { palettes, background, backgroundImage, adapter, hostAssets },
+    bindSkinPolicy(resolveSkin) {
+      current();
+      if (skinPolicy) throw new Error('Local skin policy already bound');
+      if (typeof resolveSkin !== 'function') throw new TypeError('Local skin policy function required');
+      skinPolicy = resolveSkin;
+    },
     // Authored local credentials accepted by the simulator; no profile discovery.
     profile: { clientVersion: 0, password: new Uint8Array(20), protocolVersion: 19 },
     endpoint, isCurrentDocument,
@@ -300,7 +312,7 @@ export async function createLocalGameHost({ realm = globalThis, endpoint } = {})
     },
     dispose() {
       if (disposed) return;
-      disposed = true; inputRoute = nickname = undefined; operation = false;
+      disposed = true; inputRoute = nickname = skinPolicy = undefined; operation = false;
       for (const cleanup of [...cleanups]) cleanup();
     },
   };

@@ -28,6 +28,15 @@ policy remain migration debt under the Rust ownership target. New local-host
 work is browser/DOM/capability glue; it must not introduce new game-domain logic.
 See the [roadmap](roadmap.md) for remaining work.
 
+Local rendering binds a pure Rust skin resolver after Wasm initialization. Rust
+selects the existing three authored color stand-ins, plain paired eyes and
+seven-variant shading cadence. The asset map supplies shaded body, boost-glow,
+outline, shadow and death-highlight canvases; JavaScript binds those source
+objects through the existing provider. Custom skin data remains undisplayed on
+this local path. The separate Rust stock resolver covers built-in/custom runs,
+face and antenna geometry, but complete palette artwork and special-source
+binding are still needed before that policy can replace the local stand-ins.
+
 The default runtime enables Rust-owned nickname presentation before ingress.
 Each retained snake appearance owns its text and fade state, independently of
 wire-ID reuse. Rust prepares screen-space text commands; a scoped Canvas pass
@@ -589,7 +598,7 @@ See [verification](verification.md) for procedures and evidence limits.
 `npm run scene -- --simulator-port 8766` serves `web/game.html` at `/` on literal
 loopback. It imports the same default bootstrap as the extension. The
 `web/local-game-host.mjs` adapter captures browser/DOM/input capabilities,
-generates authored flat sources and supplies only the configured loopback
+generates authored shaded sources and supplies only the configured loopback
 endpoint and authored zero credentials. The same runtime, stock controller,
 gameplay and session perform the existing challenge handshake, not a separate
 gameplay implementation or direct-login bypass. A normally disconnected local

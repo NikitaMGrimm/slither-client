@@ -48,5 +48,57 @@ export async function createClientAssetMap({ realm = globalThis } = {}) {
   // Keep the repeating tile separate from the optional whole-scene backdrop.
   const background = image(tile), backgroundImage = image(backdrop);
   await Promise.all([background, backgroundImage].map(source => Reflect.apply(decode, source, [])));
-  return { palettes, background, backgroundImage };
+
+  // Authored shaded stand-ins only; these families do not identify stock skins.
+  // All sprites share a 64-square frame with transparent margins and soft edges.
+  function radialSprite(stops, lightX = 32, lightY = 32) {
+    const canvas = createElement('canvas');
+    canvas.width = 64; canvas.height = 64;
+    const context = canvas.getContext('2d');
+    const gradient = context.createRadialGradient(lightX, lightY, 0, 32, 32, 31);
+    for (const [offset, color] of stops) gradient.addColorStop(offset, color);
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, 64, 64);
+    return canvas;
+  }
+  const bodySources = {
+    palettes: ['#83d5b0', '#efbb62', '#76b9ed'].map(color => {
+      const rgb = [1, 3, 5].map(offset => Number.parseInt(color.slice(offset, offset + 2), 16));
+      function shade(amount, alpha = 1) {
+        const channels = rgb.map(channel => Math.round(amount < 0
+          ? channel * (1 + amount) : channel + (255 - channel) * amount));
+        return `rgba(${channels.join(',')},${alpha})`;
+      }
+      return {
+        // Vary tone while keeping the silhouette and upper-left light fixed.
+        variants: Array.from({ length: 7 }, (_, index) => {
+          const tone = (index - 3) * 0.045;
+          return radialSprite([
+            [0, shade(tone + 0.3)], [0.42, shade(tone)],
+            [0.82, shade(tone - 0.28)], [0.96, shade(tone - 0.48, 0.9)],
+            [1, shade(tone - 0.48, 0)],
+          ], 25, 23);
+        }),
+        boostGlow: radialSprite([
+          [0, shade(0.2, 0.68)], [0.2, shade(0.2, 0.55)],
+          [0.58, shade(0.1, 0.2)], [0.85, shade(0, 0.04)], [1, shade(0, 0)],
+        ]),
+      };
+    }),
+    effects: {
+      outline: radialSprite([
+        [0, 'rgba(23,34,45,1)'], [0.88, 'rgba(23,34,45,1)'],
+        [0.95, 'rgba(23,34,45,0.7)'], [1, 'rgba(23,34,45,0)'],
+      ]),
+      shadow: radialSprite([
+        [0, 'rgba(0,0,0,0.55)'], [0.52, 'rgba(0,0,0,0.42)'],
+        [0.8, 'rgba(0,0,0,0.16)'], [1, 'rgba(0,0,0,0)'],
+      ]),
+      deathHighlight: radialSprite([
+        [0, 'rgba(255,255,255,0.9)'], [0.45, 'rgba(255,255,255,0.48)'],
+        [0.9, 'rgba(255,255,255,0.15)'], [1, 'rgba(255,255,255,0)'],
+      ], 25, 23),
+    },
+  };
+  return { palettes, background, backgroundImage, bodySources };
 }
