@@ -141,12 +141,19 @@ retains the lease before mounting under its HUD operation guard, exits that
 guard, and binds `readout-and-final` through the existing binding method. A
 second binding rejects while that slot is occupied.
 
-The authored lower-left layout uses monospace/tabular numbers and fixed widths:
-17ch current length, 5ch rank and population, and 18ch final length. Labels are
-`Length: `, `Place: `, ` / ` and `Last length: `. Numeric text stays empty until
-the corresponding history exists. The final line is always present and is
-independent of readout opacity. Publications change only the existing
-renderer-owned text/local styles; layout does not resize with the values.
+The authored lower-left current readout uses proportional Arial/sans-serif text
+with tabular numbers. Its labels are `Your length: ` and `Your rank: `, with
+` of ` between rank and population. Current values flow directly after their
+labels without reserved column gaps. The final line retains its 18ch numeric
+width, monospace family and `Last length: ` label. Numeric text stays empty until
+the corresponding history exists. The default stylesheet hides the final line
+while its numeric value is empty; the existing renderer's first final write,
+including zero, reveals it. Retained final history remains visible independently
+of readout opacity. Publications change only the existing renderer-owned
+text/local styles, without measuring or calculating per-value positions.
+The current labels and proportional type follow observed desktop readouts;
+the font family is an authored policy, without exact font-metric or pixel-parity
+acceptance. Start-page geometry and HUD placement remain separately unverified.
 
 The gate captures four additional own native methods in optional sibling
 `native.ownedHudDom`, reusing the existing captured Document. Unsupported capture
