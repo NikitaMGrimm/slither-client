@@ -6,7 +6,10 @@
 use std::{error::Error, fmt, sync::Arc};
 
 use super::{PresentationError, ScoreError, ScoreTables};
-use crate::protocol::hud::{HudPacketError, parse_announcement};
+use crate::{
+    protocol::hud::{HudPacketError, parse_announcement},
+    state::{HudCommandBoundary, HudCommandMarker, PresentationEvent},
+};
 
 /// Invalid announcement bytes, unsupported score or recoverable allocation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -47,6 +50,41 @@ impl AnnouncementPacket {
         bytes.extend_from_slice(command);
         Ok(Self(bytes))
     }
+
+    fn validate_table(&self, table_max: Option<u16>) -> Result<(), AnnouncementError> {
+        let table_max = table_max.ok_or(AnnouncementError::MissingTable)?;
+        if table_max == 0 {
+            return Err(AnnouncementError::Score(ScoreError::ZeroTableMax));
+        }
+        let packet = parse_announcement(&self.0).map_err(AnnouncementError::Packet)?;
+        if packet.count() > u32::from(table_max) + 2048 {
+            return Err(AnnouncementError::Score(ScoreError::IndexOutOfRange));
+        }
+        Ok(())
+    }
+}
+
+/// Admit every announcement's lookup before any resolver or Setup callback.
+/// Only table availability/bounds are needed here; scoring still happens at the
+/// original command position with the unchanged ordered f64 arithmetic.
+pub(crate) fn prevalidate_announcement_scores(
+    mut table_max: Option<u16>,
+    events: &[PresentationEvent],
+    boundaries: &[HudCommandBoundary],
+) -> Result<(), AnnouncementError> {
+    let mut event_start = 0;
+    for boundary in boundaries {
+        for event in &events[event_start..boundary.event_end] {
+            if let PresentationEvent::Setup(setup) = event {
+                table_max = Some(setup.max_segments);
+            }
+        }
+        if let HudCommandMarker::Announcement(packet) = &boundary.marker {
+            packet.validate_table(table_max)?;
+        }
+        event_start = boundary.event_end;
+    }
+    Ok(())
 }
 
 /// Frozen receipt-time content, independent of own identity and later tables.

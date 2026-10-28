@@ -7,8 +7,10 @@ or Setup callback. Unselected HUD and received-only packet APIs keep `m` opaque.
 This selection does not change the schema-1/schema-2 report shapes.
 
 Each accepted command uses its own u24 count and fractional mass with the score
-table active at that command position. It receives no own-score adjustment and
-has no playing guard. A positive score replaces the retained content; a zero or
+table active at that command position. A complete ordered table-availability and
+count-bound pass precedes every resolver and Setup callback; it allocates no score
+tables and leaves the existing command-time f64 scoring in place. It receives no
+own-score adjustment and has no playing guard. A positive score replaces the retained content; a zero or
 negative score preserves it. A missing table or index beyond `N + 2048` rejects
 the transaction. Later Setup commands do not recompute an earlier announcement.
 This data is independent of the local final score and retained snake identity.

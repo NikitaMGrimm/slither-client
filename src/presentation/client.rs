@@ -1948,6 +1948,21 @@ impl AnimatedClient {
         if self.minimap_enabled {
             validate_minimap_work(&applied.events, self.minimap.view().dimension)?;
         }
+        if let Some(collector) = collector
+            .as_ref()
+            .filter(|collector| collector.announcements)
+        {
+            super::announcement::prevalidate_announcement_scores(
+                self.score_tables.as_ref().map(|tables| tables.table_max()),
+                &applied.events,
+                &collector.boundaries,
+            )
+            .map_err(|error| {
+                ClientPresentationError::from(StateError::Hud(
+                    super::HudIngressError::Announcement(error),
+                ))
+            })?;
+        }
         if enable_accessory_presentation
             && !self.accessory_presentation_enabled
             && self.received.frames_applied != 0

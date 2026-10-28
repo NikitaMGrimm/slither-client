@@ -1,5 +1,5 @@
 // Authored synthetic actual-Wasm announcement witnesses; no network or reference.
-export function announcementSmoke({ fixture, setup, plan, eq, ok, rejects }) {
+export function announcementSmoke({ fixture, setup, spawn, food, prey, plan, eq, ok, rejects }) {
   const f = fixture();
   f.scene.enable_announcement_tracking();
   const packet = (name, message, count = 1) => [109, count >>> 16 & 255, count >>> 8 & 255, count & 255,
@@ -17,6 +17,20 @@ export function announcementSmoke({ fixture, setup, plan, eq, ok, rejects }) {
   eq(f.scene.announcement_view(), before);
   f.atomic(() => f.hud([packet('new', 'new'), packet('outside', '', 0xffffff)]));
   eq(f.scene.announcement_view(), before);
+  for (const commands of [
+    [setup(1), packet('outside', '', 0xffffff)],
+    [setup(29), spawn(3), food, prey(31), setup(1), packet('outside', '', 2050)],
+    [setup(1), packet('outside', '', 2050), setup(29)],
+    [setup(29), packet('outside', '', 2078), setup(1)],
+  ]) {
+    const callbacks = { ...f.calls };
+    f.atomic(() => f.hud(commands));
+    eq(f.calls, callbacks, 'all source resolvers remain uncalled on late invalid announcement');
+    eq(f.scene.announcement_view(), before);
+  }
+  const fresh = fixture(); fresh.scene.enable_announcement_tracking();
+  fresh.atomic(() => fresh.hud([packet('missing-table', ''), setup(1)]));
+  eq(fresh.scene.announcement_view().present, false);
   f.hud([packet('zero', 'ignored', 0)]); eq(f.scene.announcement_view(), before, 'nonpositive score retains content');
   const life = { schema: 1, deathPending: true, returnActive: true, returnCompleted: false, returnFraction: .6 };
   const step = f.scene.advance_with_control(20, false, () => ({ announcementLifecycle: life })); step.free();
