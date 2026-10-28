@@ -16,9 +16,10 @@ const routes = new Map([
   ['/game/host.css', ['extension/game-host.css', 'text/css; charset=utf-8']],
   ...[['bootstrap', 'game-bootstrap'], ['runtime', 'game-runtime'],
     ['owned-hud-ui', 'game-owned-hud-ui'], ['owned-play-ui', 'game-owned-play-ui'],
-    ['owned-leaderboard-ui', 'game-owned-leaderboard-ui'], ['owned-minimap-ui', 'game-owned-minimap-ui']]
+    ['owned-leaderboard-ui', 'game-owned-leaderboard-ui'], ['owned-minimap-ui', 'game-owned-minimap-ui'],
+    ['owned-end-screen-ui', 'game-owned-end-screen-ui']]
     .map(([route, name]) => [`/game/${route}.mjs`, [`extension/${name}.mjs`, 'text/javascript; charset=utf-8']]),
-  ...['stock-client', 'stock-skin-provider', 'stock-skin-rules', 'stock-host-snapshot',
+  ...['stock-client', 'stock-skin-provider', 'stock-skin-rules', 'stock-accessory-selection', 'stock-host-snapshot',
     'stock-food-provider', 'stock-prey-provider', 'stock-asset-sources', 'skin-provider',
     'desktop-layout', 'client-input', 'stock-gameplay', 'stock-session', 'stock-hud-contract',
     'stock-hud-state', 'stock-hud-view', 'stock-hud-dom', 'handshake-session', 'stock-live-profile',

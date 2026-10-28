@@ -8,7 +8,7 @@ import { createGateTestDom, attachGateTestRealm, issuedMinimapViewDouble } from 
 const root = new URL('../', import.meta.url);
 const webNames = ['stock-skin-provider.mjs', 'stock-client.mjs', 'stock-food-provider.mjs',
   'stock-host-snapshot.mjs', 'desktop-layout.mjs', 'stock-gameplay.mjs', 'stock-hud-dom.mjs',
-  'stock-hud-view.mjs', 'stock-skin-rules.mjs', 'stock-prey-provider.mjs', 'stock-asset-sources.mjs',
+  'stock-hud-view.mjs', 'stock-skin-rules.mjs', 'stock-accessory-selection.mjs', 'stock-prey-provider.mjs', 'stock-asset-sources.mjs',
   'skin-provider.mjs', 'client-input.mjs', 'stock-session.mjs', 'stock-hud-contract.mjs',
   'stock-hud-state.mjs', 'handshake-session.mjs', 'stock-live-profile.mjs',
   'stock-leaderboard-state.mjs', 'stock-leaderboard-view.mjs',
@@ -16,7 +16,7 @@ const webNames = ['stock-skin-provider.mjs', 'stock-client.mjs', 'stock-food-pro
 const entryNames = { 'bootstrap.mjs': 'game-bootstrap.mjs', 'runtime.mjs': 'game-runtime.mjs',
   'owned-hud-ui.mjs': 'game-owned-hud-ui.mjs', 'owned-play-ui.mjs': 'game-owned-play-ui.mjs',
   'owned-leaderboard-ui.mjs': 'game-owned-leaderboard-ui.mjs',
-  'owned-minimap-ui.mjs': 'game-owned-minimap-ui.mjs' };
+  'owned-minimap-ui.mjs': 'game-owned-minimap-ui.mjs', 'owned-end-screen-ui.mjs': 'game-owned-end-screen-ui.mjs' };
 const origin = 'https://authored-package.invalid/game/';
 
 export async function runGameModuleTest(scenario) {
@@ -68,6 +68,10 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
     },
   });
   // Test-owned generated-ABI doubles are installed before module export capture.
+  wasm.api.EndScreenProjector = vm.runInContext(`(class {
+    project() { return { schema: 1, visible: false, title: '', scoreText: '', statusText: '' }; }
+    free() {}
+  })`, f.context);
   prepareWasm?.(wasm.api, source => vm.runInContext(source, f.context));
   const sources = new Map();
   for (const name of webNames) sources.set(origin + name, readFileSync(new URL('web/' + name, root), 'utf8'));

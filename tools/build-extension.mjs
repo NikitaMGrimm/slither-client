@@ -11,7 +11,7 @@ const pageFiles = [
   'synthetic-prey.mjs', 'skin-provider.mjs', 'loopback-session.mjs',
 ];
 const bindingFiles = ['slither_client.js', 'slither_client_bg.wasm'];
-const gameWebFiles = ['stock-client.mjs', 'stock-skin-provider.mjs', 'stock-skin-rules.mjs',
+const gameWebFiles = ['stock-client.mjs', 'stock-skin-provider.mjs', 'stock-skin-rules.mjs', 'stock-accessory-selection.mjs',
   'stock-host-snapshot.mjs', 'stock-food-provider.mjs', 'stock-prey-provider.mjs', 'stock-asset-sources.mjs',
   'skin-provider.mjs', 'desktop-layout.mjs', 'client-input.mjs', 'stock-gameplay.mjs',
   'stock-session.mjs', 'stock-hud-contract.mjs', 'stock-hud-state.mjs', 'stock-hud-view.mjs',
@@ -22,7 +22,8 @@ const gameFiles = [['game-activation.mjs', 'activation.mjs'], ['game-gate.js', '
   ['game-link.js', 'link.js'], ['game-runtime.mjs', 'runtime.mjs'], ['game-owned-hud-ui.mjs', 'owned-hud-ui.mjs'],
   ['game-owned-play-ui.mjs', 'owned-play-ui.mjs'],
   ['game-owned-leaderboard-ui.mjs', 'owned-leaderboard-ui.mjs'],
-  ['game-owned-minimap-ui.mjs', 'owned-minimap-ui.mjs'], ['game-host.css', 'host.css']];
+  ['game-owned-minimap-ui.mjs', 'owned-minimap-ui.mjs'],
+  ['game-owned-end-screen-ui.mjs', 'owned-end-screen-ui.mjs'], ['game-host.css', 'host.css']];
 
 function within(root, candidate) {
   const relative = path.relative(root, candidate);
@@ -128,6 +129,7 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, g
     'animatedscene_enable_minimap_tracking', 'animatedscene_observe_minimap_ui_fraction', 'animatedscene_minimap_view',
     'encode_login', 'solve_challenge', 'decode_frame', 'setup_protocol_version',
     'resolve_skin', 'resolve_local_skin',
+    'endscreenprojector_new', 'endscreenprojector_project', '__wbg_endscreenprojector_free',
     ...Array.from(glue.matchAll(/\bwasm\.([A-Za-z_]\w*)/g), match => match[1])]) {
     if (!exports.has(name)) throw new Error(`Wasm/glue export mismatch: ${name}`);
   }
@@ -163,7 +165,7 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, g
     if (errors.length) throw new Error(errors.join('\n'));
     const manifest = JSON.parse(manifestBytes);
     const expected = new Set(['game/bootstrap.mjs', 'game/runtime.mjs', 'game/owned-hud-ui.mjs', 'game/owned-play-ui.mjs',
-      'game/owned-leaderboard-ui.mjs', 'game/owned-minimap-ui.mjs', ...gameWebFiles.map(name => `game/${name}`),
+      'game/owned-leaderboard-ui.mjs', 'game/owned-minimap-ui.mjs', 'game/owned-end-screen-ui.mjs', ...gameWebFiles.map(name => `game/${name}`),
       ...bindingFiles.map(name => `game/pkg/${name}`)]);
     const declarations = manifest.web_accessible_resources;
     const matches = ['http://slither.io/*', 'https://slither.io/*', 'http://www.slither.io/*', 'https://www.slither.io/*'];

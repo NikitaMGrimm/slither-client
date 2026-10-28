@@ -54,6 +54,92 @@ const foodRequest = (rawColor = 9, extra = {}) => ({ rawColor, palette: rawColor
 const preyRequest = (rawColor = 9, extra = {}) => ({ rawColor, palette: rawColor % 9, ...extra });
 const pending = error => error.name === 'StockEntityAssetError' && error.status === 'pending';
 
+function selectAccessory(f) {
+  const source = new Canvas(31, 19);
+  const selection = { id: 71, source, width: 31, height: 19,
+    geometry: { forward: -0, imageScale: 0.375, pivotX: -3.25, pivotY: 7.5 } };
+  const commitment = { source, state: 'ready', revision: 'authored-accessory-1' };
+  f.raw.ownAccessory = 71; f.raw.ownAccessorySelection = selection; f.raw.readiness.push(commitment);
+  return { source, selection, commitment };
+}
+
+test('food and prey admit the same complete selected-ready source without changing their palette output', () => {
+  for (const food of [true, false]) {
+    const f = fixture(); const g = fixture(); selectAccessory(g);
+    const method = food ? 'resolveFood' : 'resolvePrey'; const request = food ? foodRequest() : preyRequest();
+    const legacy = f.assets[method](request, f.operation); const selected = g.assets[method](request, g.operation);
+    assert.deepEqual(selected, legacy); assert.equal(g.cursor(), 2);
+    assert.equal(Object.hasOwn(selected, 'accessory'), false);
+  }
+});
+
+test('entity factories reject incomplete or malformed selected commitments before entropy and recover', () => {
+  for (const food of [true, false]) for (const [status, change] of [
+    ['pending', (f, a) => { a.selection.source = null; }],
+    ['pending', (f, a) => { pixels.get(a.source).width = 0; }],
+    ['pending', (f, a) => { a.commitment.state = 'pending'; }],
+    ['pending', f => { f.raw.readiness.pop(); }],
+    ['pending', f => { delete f.raw.ownAccessorySelection; }],
+    ['unsupported', (f, a) => { a.selection.width++; }],
+    ['unsupported', (f, a) => { a.selection.geometry.forward = -1; }],
+    ['unsupported', (f, a) => { a.selection.id++; }],
+    ['unsupported', f => { f.raw.ownAccessory = -1; }],
+    ['unsupported', (f, a) => { a.selection.extra = 1; }],
+  ]) {
+    const f = fixture(); const a = selectAccessory(f); change(f, a);
+    const method = food ? 'resolveFood' : 'resolvePrey'; const request = food ? foodRequest() : preyRequest();
+    assert.throws(() => f.assets[method](request, f.operation), error => error.status === status);
+    assert.equal(f.cursor(), 0);
+    f.raw.ownAccessory = -1; delete f.raw.ownAccessorySelection;
+    assert(f.assets[method](request, f.operation).palette);
+  }
+});
+
+test('entity selected binding freezes across factories and revisions while content can change explicitly', () => {
+  for (const change of [
+    (f, a) => { f.raw.ownAccessory = ++a.selection.id; },
+    (f, a) => { a.selection.geometry.forward = +0; },
+    (f, a) => { a.selection.source = new Canvas(31, 19); f.raw.readiness.push({ ...a.commitment, source: a.selection.source }); },
+    f => { f.raw.ownAccessory = -1; delete f.raw.ownAccessorySelection; },
+  ]) {
+    const f = fixture(); const a = selectAccessory(f);
+    f.assets.resolveFood(foodRequest(), f.operation); change(f, a);
+    f.raw.revision = f.operation.revision = 'capture-2';
+    assert.throws(() => f.assets.resolvePrey(preyRequest(), f.operation), /selection changed/);
+    assert.equal(f.cursor(), 2);
+  }
+  const f = fixture(); const a = selectAccessory(f);
+  f.assets.resolveFood(foodRequest(), f.operation); a.commitment.revision = 'content-2';
+  assert.throws(() => f.assets.resolvePrey(preyRequest(), f.operation), /without a new revision/);
+  f.raw.revision = f.operation.revision = 'capture-2';
+  assert(f.assets.resolvePrey(preyRequest(), f.operation).palette);
+});
+
+test('entity factories recheck the selected source and complete commitment after entropy', () => {
+  for (const change of [
+    (f, a) => { pixels.get(a.source).width++; },
+    (f, a) => { a.commitment.revision = 'content-2'; },
+    (f, a) => { a.commitment.state = 'pending'; },
+    (f, a) => { a.selection.geometry.pivotX++; },
+    f => { f.raw.ownAccessory = -1; delete f.raw.ownAccessorySelection; },
+  ]) {
+    const f = fixture(); const a = selectAccessory(f); let calls = 0;
+    const assets = createStockEntityAssets({ ...f.options, random() { if (++calls === 2) change(f, a); return 0.5; } });
+    assert.throws(() => assets.resolveFood(foodRequest(), f.operation)); assert.equal(calls, 2);
+  }
+});
+
+test('an admitted entity selection stays fixed after later factory failure and releases reentry guard', () => {
+  const f = fixture(); const a = selectAccessory(f); let fail = true;
+  const assets = createStockEntityAssets({ ...f.options, random() { if (fail) throw Error('authored entropy failure'); return 0.5; } });
+  assert.throws(() => assets.resolveFood(foodRequest(), f.operation), /authored entropy failure/);
+  fail = false; a.selection.geometry.pivotY++;
+  f.raw.revision = f.operation.revision = 'capture-2';
+  assert.throws(() => assets.resolvePrey(preyRequest(), f.operation), /selection changed/);
+  a.selection.geometry.pivotY--;
+  assert(assets.resolvePrey(preyRequest(), f.operation).palette);
+});
+
 test('food borrows every selectable entry and preserves independent declared halves', () => {
   const f = fixture();
   const result = f.assets.resolveFood(foodRequest(9, { zoom: 0.25, size: 0 }), f.operation);
