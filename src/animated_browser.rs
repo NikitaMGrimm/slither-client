@@ -819,6 +819,7 @@ impl AnimatedScene {
             plan.camera.y - context.center,
             plan.zoom,
             self.background_backdrop.as_ref(),
+            &plan.background,
         )?
         .begin(&target, &plan.background, self.background_backdrop.as_ref())?;
         plan.submit(
@@ -1180,6 +1181,7 @@ impl AnimatedScene {
             camera.y - context.center,
             zoom,
             self.background_backdrop.as_ref(),
+            &plan.background,
         )?
         .begin(&target, &plan.background, self.background_backdrop.as_ref())?;
         plan.submit(

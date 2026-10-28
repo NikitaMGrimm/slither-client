@@ -3,7 +3,7 @@
 use wasm_bindgen::{JsCast, prelude::*};
 use web_sys::{CanvasPattern, CanvasRenderingContext2d, HtmlCanvasElement, HtmlImageElement};
 
-use crate::presentation::BackgroundPlan;
+use crate::{pattern_browser::PatternRectangle, presentation::BackgroundPlan};
 
 fn error(message: &str) -> JsValue {
     JsValue::from_str(message)
@@ -30,6 +30,7 @@ pub(crate) struct CanvasFrame {
 pub(crate) struct CanvasPreflight {
     context: CanvasRenderingContext2d,
     pattern: CanvasPattern,
+    pattern_rectangle: PatternRectangle,
     width: u32,
     height: u32,
     camera_x: f64,
@@ -92,6 +93,7 @@ impl CanvasPreflight {
         camera_y: f64,
         zoom: f64,
         backdrop: Option<&HtmlImageElement>,
+        plan: &BackgroundPlan,
     ) -> Result<Self, JsValue> {
         validate(
             target, sprites, background, width, height, camera_x, camera_y, zoom,
@@ -103,9 +105,11 @@ impl CanvasPreflight {
         let pattern = context
             .create_pattern_with_html_image_element(background, "repeat")?
             .ok_or_else(|| error("could not create background pattern"))?;
+        let pattern_rectangle = PatternRectangle::new(plan.pattern.map(|layer| layer.fill))?;
         Ok(Self {
             context,
             pattern,
+            pattern_rectangle,
             width,
             height,
             camera_x,
@@ -138,7 +142,7 @@ impl CanvasPreflight {
             camera_y: self.camera_y,
             zoom: self.zoom,
         };
-        frame.paint_background_plan(&self.pattern, plan, backdrop)?;
+        frame.paint_background_plan(&self.pattern, self.pattern_rectangle, plan, backdrop)?;
         Ok(frame)
     }
 }
@@ -147,6 +151,7 @@ impl CanvasFrame {
     fn paint_background_plan(
         &self,
         pattern: &CanvasPattern,
+        rectangle: PatternRectangle,
         plan: &BackgroundPlan,
         backdrop: Option<&HtmlImageElement>,
     ) -> Result<(), JsValue> {
@@ -173,8 +178,7 @@ impl CanvasFrame {
                 context.translate(layer.translation.x, layer.translation.y)?;
                 context.set_fill_style_canvas_pattern(pattern);
                 context.set_global_alpha(layer.alpha);
-                let [x, y, width, height] = layer.fill;
-                context.fill_rect(x, y, width, height);
+                rectangle.fill(context);
                 Ok::<_, JsValue>(())
             })();
             context.restore();

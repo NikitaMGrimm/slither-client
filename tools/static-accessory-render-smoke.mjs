@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { Path2D, recordPatternPath } from './pattern-path-fixture.mjs';
 import { bundle, syntheticScene, syntheticSetup } from '../web/synthetic-scene.mjs';
 
 // Authored synthetic packets/sources and a logical Canvas state recorder. This
@@ -30,7 +31,7 @@ export async function staticAccessoryRenderSmoke(wasm, options = {}) {
     lineTo() { this.call('lineTo'); }
     closePath() { this.call('closePath'); }
     arc(...args) { this.call('arc'); this.trace.push({ op: 'arc', args }); }
-    fill() { this.call('fill'); this.trace.push({ op: 'fill', alpha: this.alpha }); }
+    fill(path) { this.call('fill', path); if (recordPatternPath(this, path)) return; this.trace.push({ op: 'fill', alpha: this.alpha }); }
     stroke() { this.call('stroke'); }
     fillRect() { this.call('fillRect'); }
     drawImage(source, ...args) { this.call('drawImage', source); this.trace.push({ op: 'image', source, args,
@@ -45,7 +46,7 @@ export async function staticAccessoryRenderSmoke(wasm, options = {}) {
   }
   class HTMLImageElement { complete = true; naturalWidth = 40; naturalHeight = 30; constructor(name) { this.name = name; } }
   const realm = { HTMLCanvasElement, HTMLImageElement };
-  const globals = new Map(Object.entries({ ...realm, CanvasRenderingContext2D }).map(([key, value]) => {
+  const globals = new Map(Object.entries({ ...realm, CanvasRenderingContext2D, Path2D }).map(([key, value]) => {
     const old = Object.getOwnPropertyDescriptor(globalThis, key);
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value }); return [key, old];
   }));
@@ -275,7 +276,7 @@ export async function staticAccessoryRenderSmoke(wasm, options = {}) {
         try {
           const marker = new Error(`synthetic accessory ${method}`), before = f.state(); let eyeFills = 0;
           f.target.context.beforeCall = (op, ctx, source) => {
-            if (op === 'fill') eyeFills++;
+            if (op === 'fill' && !(source instanceof Path2D)) eyeFills++;
             if ((method === 'drawImage' ? source === f.sources[1] : op === method && eyeFills === 4)) throw marker;
           };
           let thrown; try { f.render(lane); } catch (e) { thrown = e; }

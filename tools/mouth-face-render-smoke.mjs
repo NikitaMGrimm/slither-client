@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { Path2D, recordPatternPath } from './pattern-path-fixture.mjs';
 import fs from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { bundle, syntheticScene, syntheticSetup } from '../web/synthetic-scene.mjs';
@@ -42,7 +43,7 @@ export function mouthFaceRenderSmoke(wasm) {
     lineTo() { this.call('lineTo'); }
     closePath() { this.call('closePath'); }
     arc(...args) { this.call('arc'); this.trace.push({ op: 'arc', args }); }
-    fill() { this.call('fill'); this.trace.push({ op: 'fill', alpha: this.alpha }); }
+    fill(path) { this.call('fill'); if (recordPatternPath(this, path)) return; this.trace.push({ op: 'fill', alpha: this.alpha }); }
     stroke() { this.call('stroke'); }
     fillRect() { this.call('fillRect'); }
     drawImage(source, ...args) {
@@ -63,7 +64,7 @@ export function mouthFaceRenderSmoke(wasm) {
     complete = true; naturalWidth = 37; naturalHeight = 53;
     constructor(name = 'synthetic-image') { this.name = name; }
   }
-  const globals = new Map(Object.entries({ CanvasRenderingContext2D, HTMLCanvasElement, HTMLImageElement }).map(([key, value]) => {
+  const globals = new Map(Object.entries({ CanvasRenderingContext2D, HTMLCanvasElement, HTMLImageElement, Path2D }).map(([key, value]) => {
     const old = Object.getOwnPropertyDescriptor(globalThis, key);
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
     return [key, old];
