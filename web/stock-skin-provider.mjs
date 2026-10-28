@@ -106,8 +106,14 @@ function capture(raw, realm) {
       throw new TypeError(`Incompatible mouth canvas: ${name}`);
     }
   }
+  // Optional caller-owned channels for nickname tint bases. Absence keeps the
+  // neutral nickname color and consumes no appearance randomness.
+  const rawNickname = ownData(raw, 'nicknamePaletteRgb');
+  const nicknamePaletteRgb = rawNickname === undefined ? null : freeze(list(rawNickname, 42, 'nickname palette table')
+    .map(color => freeze(list(color, 3, 'nickname palette color')
+      .map(channel => stockInteger(channel, 0, 255, 'nickname palette channel')))));
   return freeze({ revision: version, nsr, palettes: freeze(palettes), slots: freeze(slots),
-    assetCatalog: freeze(catalog), shapes: freeze(shapes) });
+    assetCatalog: freeze(catalog), shapes: freeze(shapes), nicknamePaletteRgb });
 }
 
 function hostRecipe(rule, snapshot) {
@@ -177,7 +183,7 @@ export function createStockSkinAdapter({ realm, readSnapshot, random }) {
       return [source === null ? 0 : identities.get(source), state, token, snapshot.shapes[i]];
     });
     const selection = snapshot.palettes.map(family => `${family.variants.join(',')}/${family.glow}`).join('|');
-    return JSON.stringify([sources, selection, Object.values(snapshot.slots)]);
+    return JSON.stringify([sources, selection, Object.values(snapshot.slots), snapshot.nicknamePaletteRgb]);
   }
   const provider = createSkinProvider({ trusted: true, realm: constructors,
     resolveHostRecipe: request => hostRecipe(resolveStockSkin(request, active.nsr), active),
@@ -222,8 +228,11 @@ export function createStockSkinAdapter({ realm, readSnapshot, random }) {
           ? freeze({ kind: rule.eyes.kind, geometry: rule.eyes.geometry })
           : freeze({ kind: 'paired', eyes: rule.eyes, decoration: rule.faceDecoration
             ? freeze({ kind: rule.faceDecoration.kind, geometry: rule.faceDecoration.geometry }) : freeze({ kind: 'none' }) });
-        return freeze({ face,
-        antenna: rule.antenna?.geometry ?? null });
+        const palette = snapshot.nicknamePaletteRgb;
+        // Rust validates the units and resolves the color once for this appearance.
+        return freeze({ face, antenna: rule.antenna?.geometry ?? null,
+          ...(palette ? { nicknameTint: freeze({ baseRgb: palette[rule.basePalette],
+            randomUnits: freeze([random(), random(), random()]) }) } : {}) });
       });
     },
     resolveRecipe(request) {

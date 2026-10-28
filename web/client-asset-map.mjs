@@ -1,3 +1,8 @@
+const familyColors = ['#83d5b0', '#efbb62', '#76b9ed'];
+/** Authored stand-in family channels; the local host also uses them as nickname tint bases. */
+export const authoredPaletteRgb = Object.freeze(familyColors.map(color => Object.freeze([1, 3, 5]
+  .map(offset => Number.parseInt(color.slice(offset, offset + 2), 16)))));
+
 /** Default authored artwork, or an explicitly supplied private comparison pack. */
 export async function createClientAssetMap({ realm = globalThis, sourceFactory, random } = {}) {
   if (sourceFactory !== undefined) {
@@ -11,7 +16,7 @@ export async function createClientAssetMap({ realm = globalThis, sourceFactory, 
   }
   const createElement = realm.document.createElement.bind(realm.document);
   const decode = realm.HTMLImageElement.prototype.decode;
-  const palettes = ['#83d5b0', '#efbb62', '#76b9ed'].map(color => {
+  const palettes = familyColors.map(color => {
     const canvas = createElement('canvas');
     canvas.width = 32; canvas.height = 32;
     const context = canvas.getContext('2d');
@@ -71,8 +76,7 @@ export async function createClientAssetMap({ realm = globalThis, sourceFactory, 
     return canvas;
   }
   const bodySources = {
-    palettes: ['#83d5b0', '#efbb62', '#76b9ed'].map(color => {
-      const rgb = [1, 3, 5].map(offset => Number.parseInt(color.slice(offset, offset + 2), 16));
+    palettes: authoredPaletteRgb.map(rgb => {
       function shade(amount, alpha = 1) {
         const channels = rgb.map(channel => Math.round(amount < 0
           ? channel * (1 + amount) : channel + (255 - channel) * amount));

@@ -1,5 +1,5 @@
 import { loopbackEndpoint } from './loopback-session.mjs';
-import { createClientAssetMap } from './client-asset-map.mjs';
+import { authoredPaletteRgb, createClientAssetMap } from './client-asset-map.mjs';
 import { createLocalBodyResolver } from './synthetic-body.mjs';
 import { createSyntheticFoodResolver } from './synthetic-food.mjs';
 import { createSyntheticPreyResolver } from './synthetic-prey.mjs';
@@ -259,7 +259,12 @@ export async function createLocalGameHost({ realm = globalThis, endpoint, source
         inOperation();
         const rule = skinPolicy(request.skin, request.customBytes);
         inOperation();
-        return freeze({ face: freeze({ kind: 'paired', eyes: rule.eyes, decoration: freeze({ kind: 'none' }) }), antenna: null });
+        // Rust validates the units and resolves the color once for this appearance.
+        // These draws share the page random stream with food, prey and antennas.
+        const nicknameTint = freeze({ baseRgb: authoredPaletteRgb[rule.basePalette],
+          randomUnits: freeze([random(), random(), random()]) });
+        return freeze({ face: freeze({ kind: 'paired', eyes: rule.eyes, decoration: freeze({ kind: 'none' }) }),
+          antenna: null, nicknameTint });
       },
       resolveRecipe(request) {
         inOperation();

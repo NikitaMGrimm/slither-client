@@ -8,8 +8,8 @@ use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, HtmlImageElement};
 use crate::{
     antenna_browser::{AntennaDecoration, appearance as parse_appearance},
     body_browser::{
-        BorrowedSources, Recipe, ResolveError, appearance_request, paired_face, request,
-        same_decoration, same_eyes, standard_eyes,
+        BorrowedSources, Recipe, ResolveError, appearance_request, nickname_tint, paired_face,
+        request, same_decoration, same_eyes, standard_eyes,
     },
     canvas_browser::{CanvasFrame, CanvasPreflight, draw_sprite, validate_background_image},
     face_browser::{
@@ -33,8 +33,8 @@ use crate::{
         PreyImageCommand, PreyPaintInput, PreyPaintPlan, QualityMode, QualitySnapshot, ScoreError,
         ScoreStatus, SingleEyeLayout, SkinDescriptor, SkinFaceSources, SkinImage, SkinSourceRole,
         SnakePresentation, StandardEyeLayout, StaticHeadAccessoryGeometry,
-        StaticHeadAccessoryLayout, Turn, plan_arena_edge, plan_food, plan_prey, plan_standard_body,
-        plan_standard_body_with_antenna, resolve_authored_local_skin,
+        StaticHeadAccessoryLayout, TintedPresentation, Turn, plan_arena_edge, plan_food, plan_prey,
+        plan_standard_body, plan_standard_body_with_antenna, resolve_authored_local_skin,
         resolve_skin as native_resolve_skin, sample_curve_with_heading,
     },
     presentation_browser::AnimationStep,
@@ -46,16 +46,6 @@ use crate::{
 
 fn error(message: impl std::fmt::Display) -> JsValue {
     JsValue::from_str(&message.to_string())
-}
-
-fn paired_presentation(value: FacePresentation) -> Result<AppearancePresentation, ResolveError> {
-    Ok(AppearancePresentation {
-        face: *value
-            .face
-            .paired()
-            .ok_or_else(|| error("paired face required by legacy API"))?,
-        antenna: value.antenna,
-    })
 }
 
 fn record<const N: usize>(fields: [(&str, JsValue); N]) -> Result<JsValue, JsValue> {
@@ -3564,23 +3554,27 @@ impl AnimatedScene {
         let mut prepared = self.client.clone();
         let foods = RefCell::new(self.food_sources.clone());
         let preys = RefCell::new(self.prey_sources.clone());
-        let mut appearance = |input: &crate::state::Appearance,
-                              context: AppearanceContext|
+        let appearance = |input: &crate::state::Appearance,
+                          context: AppearanceContext|
          -> Result<_, ResolveError> {
             let request = appearance_request(input)?;
             if accessory {
                 js_sys::Reflect::set(&request, &"own".into(), &context.own.into())?;
             }
             let raw = resolve_appearance.call1(&JsValue::UNDEFINED, &request)?;
-            if accessory {
-                Ok(parse_accessory_presentation(&raw)?)
+            let presentation = if accessory {
+                parse_accessory_presentation(&raw)?
             } else if generalized {
-                Ok(AccessoryPresentation::from(parse_face_presentation(&raw)?))
+                AccessoryPresentation::from(parse_face_presentation(&raw)?)
             } else {
-                Ok(AccessoryPresentation::from(parse_appearance(&raw)?))
-            }
+                AccessoryPresentation::from(parse_appearance(&raw)?)
+            };
+            Ok(TintedPresentation {
+                presentation,
+                nickname_tint: nickname_tint(&raw)?,
+            })
         };
-        let mut food = |spawn: &crate::state::FoodSpawnInput, zoom| -> Result<_, ResolveError> {
+        let food = |spawn: &crate::state::FoodSpawnInput, zoom| -> Result<_, ResolveError> {
             let callback = resolve_food.ok_or_else(|| error("food factory resolver required"))?;
             let other = preys
                 .try_borrow()
@@ -3591,7 +3585,7 @@ impl AnimatedScene {
                 .map_err(|_| error("food registry already borrowed"))?
                 .resolve_limited(callback, spawn, zoom, catalog, snapshots)?)
         };
-        let mut prey = |spawn: &crate::state::PreySpawnInput, zoom| -> Result<_, ResolveError> {
+        let prey = |spawn: &crate::state::PreySpawnInput, zoom| -> Result<_, ResolveError> {
             let callback = resolve_prey.ok_or_else(|| error("prey factory resolver required"))?;
             let other = foods
                 .try_borrow()
@@ -3603,83 +3597,39 @@ impl AnimatedScene {
                 .resolve_limited(callback, spawn, zoom, catalog, snapshots)?)
         };
         let header = elapsed_header_kind(elapsed_header);
-        if accessory && resolve_prey.is_some() {
-            prepared.apply_frame_with_accessory_presentation_and_all_factories(
+        // Prey resolution also enables food, matching the public factory families.
+        let (enable_food, enable_prey) = (
+            resolve_food.is_some() || resolve_prey.is_some(),
+            resolve_prey.is_some(),
+        );
+        prepared
+            .apply_frame_accessory_transaction(
                 bytes,
                 header,
-                &mut appearance,
-                &mut food,
-                &mut prey,
-            )
-        } else if accessory && resolve_food.is_some() {
-            prepared.apply_frame_with_accessory_presentation_and_factories(
-                bytes,
-                header,
-                &mut appearance,
-                &mut food,
-            )
-        } else if accessory {
-            prepared.apply_frame_with_accessory_presentation(bytes, header, &mut appearance)
-        } else if generalized && resolve_prey.is_some() {
-            prepared.apply_frame_with_face_presentation_and_all_factories(
-                bytes,
-                header,
-                |input| {
-                    Ok::<_, ResolveError>(
-                        appearance(input, AppearanceContext { own: false })?.presentation,
-                    )
+                appearance,
+                true,
+                generalized || accessory,
+                accessory,
+                |spawn, zoom| {
+                    if enable_food {
+                        food(spawn, zoom).map(Some)
+                    } else {
+                        Ok(None)
+                    }
                 },
-                &mut food,
-                &mut prey,
-            )
-        } else if generalized && resolve_food.is_some() {
-            prepared.apply_frame_with_face_presentation_and_factories(
-                bytes,
-                header,
-                |input| {
-                    Ok::<_, ResolveError>(
-                        appearance(input, AppearanceContext { own: false })?.presentation,
-                    )
+                enable_food,
+                |spawn, zoom| {
+                    if enable_prey {
+                        prey(spawn, zoom).map(Some)
+                    } else {
+                        Ok(None)
+                    }
                 },
-                &mut food,
+                enable_prey,
+                |_, _| Ok(()),
+                None,
             )
-        } else if generalized {
-            prepared.apply_frame_with_face_presentation(bytes, header, |input| {
-                Ok::<_, ResolveError>(
-                    appearance(input, AppearanceContext { own: false })?.presentation,
-                )
-            })
-        } else if resolve_prey.is_some() {
-            prepared.apply_frame_with_appearance_and_all_factories(
-                bytes,
-                header,
-                |input| {
-                    paired_presentation(
-                        appearance(input, AppearanceContext { own: false })?.presentation,
-                    )
-                },
-                &mut food,
-                &mut prey,
-            )
-        } else if resolve_food.is_some() {
-            prepared.apply_frame_with_appearance_and_factories(
-                bytes,
-                header,
-                |input| {
-                    paired_presentation(
-                        appearance(input, AppearanceContext { own: false })?.presentation,
-                    )
-                },
-                &mut food,
-            )
-        } else {
-            prepared.apply_frame_with_appearance(bytes, header, |input| {
-                paired_presentation(
-                    appearance(input, AppearanceContext { own: false })?.presentation,
-                )
-            })
-        }
-        .map_err(|e| e.0)?;
+            .map_err(|e| e.0)?;
         self.commit_all(prepared, foods.into_inner(), preys.into_inner())
     }
 
@@ -3766,28 +3716,32 @@ impl AnimatedScene {
         let mut plans = Vec::new();
         let mut budget = DrawBudget::default();
         let mut setup_budget = SetupDrawBudget::default();
-        let mut appearance = |input: &crate::state::Appearance,
-                              context: AppearanceContext|
+        let appearance = |input: &crate::state::Appearance,
+                          context: AppearanceContext|
          -> Result<_, ResolveError> {
             let request = appearance_request(input)?;
             if lane.with_accessory_presentation() {
                 js_sys::Reflect::set(&request, &"own".into(), &context.own.into())?;
             }
             let raw = resolve_appearance.call1(&JsValue::UNDEFINED, &request)?;
-            if lane.with_accessory_presentation() {
-                Ok(parse_accessory_presentation(&raw)?)
+            let presentation = if lane.with_accessory_presentation() {
+                parse_accessory_presentation(&raw)?
             } else if lane.with_face_presentation() {
-                Ok(AccessoryPresentation::from(parse_face_presentation(&raw)?))
+                AccessoryPresentation::from(parse_face_presentation(&raw)?)
             } else if lane.with_antenna() {
-                Ok(AccessoryPresentation::from(parse_appearance(&raw)?))
+                AccessoryPresentation::from(parse_appearance(&raw)?)
             } else {
-                Ok(AccessoryPresentation::from(FacePresentation {
+                AccessoryPresentation::from(FacePresentation {
                     face: FaceGeometry::Paired(paired_face(&raw)?),
                     antenna: None,
-                }))
-            }
+                })
+            };
+            Ok(TintedPresentation {
+                presentation,
+                nickname_tint: nickname_tint(&raw)?,
+            })
         };
-        let mut food_factory =
+        let food_factory =
             |spawn: &crate::state::FoodSpawnInput, zoom| -> Result<_, ResolveError> {
                 let other = prey_sources
                     .try_borrow()
@@ -3798,8 +3752,8 @@ impl AnimatedScene {
                     .map_err(|_| error("food registry already borrowed"))?
                     .resolve_limited(resolve_food, spawn, zoom, catalog, snapshots)?)
             };
-        let mut prey_factory = |spawn: &crate::state::PreySpawnInput,
-                                zoom|
+        let prey_factory = |spawn: &crate::state::PreySpawnInput,
+                            zoom|
          -> Result<_, ResolveError> {
             let callback = resolve_prey.ok_or_else(|| error("prey factory resolver required"))?;
             let other = food_sources
@@ -3857,139 +3811,32 @@ impl AnimatedScene {
                 Ok(())
             };
         let header = elapsed_header_kind(elapsed_header);
-        let report = if let Some(plan) = hud {
-            Some(if lane.with_accessory_presentation() {
-                prepared
-                    .apply_frame_with_accessory_presentation_and_all_factories_and_setup_and_hud(
-                        bytes,
-                        header,
-                        &mut appearance,
-                        &mut food_factory,
-                        &mut prey_factory,
-                        &mut on_setup,
-                        plan,
-                    )
-                    .map_err(|e: ResolveError| e.0)?
-            } else {
-                prepared
-                    .apply_frame_with_face_presentation_and_all_factories_and_setup_and_hud(
-                        bytes,
-                        header,
-                        |input| {
-                            Ok::<_, ResolveError>(
-                                appearance(input, AppearanceContext { own: false })?.presentation,
-                            )
-                        },
-                        &mut food_factory,
-                        &mut prey_factory,
-                        &mut on_setup,
-                        plan,
-                    )
-                    .map_err(|e: ResolveError| e.0)?
-            })
-        } else {
-            if lane.with_accessory_presentation() && resolve_prey.is_some() {
-                prepared.apply_frame_with_accessory_presentation_and_all_factories_and_setup(
-                    bytes,
-                    header,
-                    &mut appearance,
-                    &mut food_factory,
-                    &mut prey_factory,
-                    &mut on_setup,
-                )
-            } else if lane.with_accessory_presentation() {
-                prepared.apply_frame_with_accessory_presentation_and_factories_and_setup(
-                    bytes,
-                    header,
-                    &mut appearance,
-                    &mut food_factory,
-                    &mut on_setup,
-                )
-            } else if lane.with_face_presentation() && resolve_prey.is_some() {
-                prepared.apply_frame_with_face_presentation_and_all_factories_and_setup(
-                    bytes,
-                    header,
-                    |input| {
-                        Ok::<_, ResolveError>(
-                            appearance(input, AppearanceContext { own: false })?.presentation,
-                        )
-                    },
-                    &mut food_factory,
-                    &mut prey_factory,
-                    &mut on_setup,
-                )
-            } else if lane.with_face_presentation() {
-                prepared.apply_frame_with_face_presentation_and_factories_and_setup(
-                    bytes,
-                    header,
-                    |input| {
-                        Ok::<_, ResolveError>(
-                            appearance(input, AppearanceContext { own: false })?.presentation,
-                        )
-                    },
-                    &mut food_factory,
-                    &mut on_setup,
-                )
-            } else if lane.with_antenna() && resolve_prey.is_some() {
-                prepared.apply_frame_with_appearance_and_all_factories_and_setup(
-                    bytes,
-                    header,
-                    |input| {
-                        paired_presentation(
-                            appearance(input, AppearanceContext { own: false })?.presentation,
-                        )
-                    },
-                    &mut food_factory,
-                    &mut prey_factory,
-                    &mut on_setup,
-                )
-            } else if lane.with_antenna() {
-                prepared.apply_frame_with_appearance_and_factories_and_setup(
-                    bytes,
-                    header,
-                    |input| {
-                        paired_presentation(
-                            appearance(input, AppearanceContext { own: false })?.presentation,
-                        )
-                    },
-                    &mut food_factory,
-                    &mut on_setup,
-                )
-            } else if resolve_prey.is_some() {
-                prepared.apply_frame_with_all_factories_and_setup(
-                    bytes,
-                    header,
-                    |input| {
-                        Ok::<_, ResolveError>(
-                            paired_presentation(
-                                appearance(input, AppearanceContext { own: false })?.presentation,
-                            )?
-                            .face,
-                        )
-                    },
-                    &mut food_factory,
-                    &mut prey_factory,
-                    &mut on_setup,
-                )
-            } else {
-                prepared.apply_frame_with_factories_and_setup(
-                    bytes,
-                    header,
-                    |input| {
-                        Ok::<_, ResolveError>(
-                            paired_presentation(
-                                appearance(input, AppearanceContext { own: false })?.presentation,
-                            )?
-                            .face,
-                        )
-                    },
-                    &mut food_factory,
-                    &mut on_setup,
-                )
-            }
-            .map_err(|e| e.0)?;
-            None
-        };
+        // HUD ingress always uses at least the generalized face family with prey.
+        let accessory = lane.with_accessory_presentation();
+        let face = hud.is_some() || lane.with_face_presentation();
+        let enable_prey = hud.is_some() || resolve_prey.is_some();
+        let (_, report) = prepared
+            .apply_frame_accessory_transaction(
+                bytes,
+                header,
+                appearance,
+                face || lane.with_antenna(),
+                face,
+                accessory,
+                |spawn, zoom| food_factory(spawn, zoom).map(Some),
+                true,
+                |spawn, zoom| {
+                    if enable_prey {
+                        prey_factory(spawn, zoom).map(Some)
+                    } else {
+                        Ok(None)
+                    }
+                },
+                enable_prey,
+                &mut on_setup,
+                hud,
+            )
+            .map_err(|e: ResolveError| e.0)?;
         let foods = food_sources.into_inner();
         let preys = prey_sources.into_inner();
         let count = plans.len() as u32;

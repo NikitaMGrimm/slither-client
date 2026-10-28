@@ -356,6 +356,31 @@ invalid-name fixture passes without a production acquirer change. These results
 establish authored domain and wire consistency, not native editing, sanitization,
 digit policy, actual profile HTTP, browser or server acceptance.
 
+## Appearance nickname tint
+
+Tint and controller integration passes 637 native all-target and 1337 Node tests.
+Formatting,
+doctests and strict native/Wasm Clippy pass. Native tests check the authored
+example `[8,99,250]` with units `[0,0.5,largest below 1]`, producing
+`[132,182,255]`. They also cover all 256 base bytes with each of the 20 jitters
+against a half-up mean, independent channel units, saturation, the
+intermediate-2 to 129 case and rejected units. Retained tests cover culling,
+death continuation, duplicate and reused IDs, ordered Setup, neutral legacy and
+untinted resolvers, and whole-frame rollback with nicknames on or off.
+
+A fresh build passes the full real-Wasm suite. The nickname recorder checks exact
+text `fillStyle` through the antenna, face and accessory ordinary apply lanes,
+all four target-aware ordered Setup lanes and same/changed-size resizes. The
+default HUD lane is checked through the stock HUD helper. Resolver counts stay
+at one per appearance across draws and resizes. Thirteen malformed or out-of-range
+records and one accessor reject without model change. Node tests cover the local
+host's three draws and the optional stock palette table: selected first-palette
+channels, consistency/revision handling and bounded own-data validation.
+
+All inputs are authored synthetic values. These results establish the Rust
+arithmetic and glue, not original palette values, a stock nickname palette
+capture, browser pixels, font equivalence or server acceptance.
+
 ## Semantic HUD view and passive renderer
 
 The integrated view/renderer revision passes 786 Node tests, including 11 pure

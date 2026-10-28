@@ -1,10 +1,50 @@
 //! Draw-clock nickname fading and backend-neutral text placement.
 //!
 //! Retain one state per appearance, independently of wire-ID reuse. The caller
-//! supplies admitted text and a resolved light color; this module neither filters
-//! text nor selects a palette. Submit eligible names before snake bodies.
+//! supplies admitted text and either a resolved light color or tint inputs; this
+//! module neither filters text nor selects a palette. Submit eligible names
+//! before snake bodies.
 
 use crate::{presentation::PresentationError, state::Point};
+
+/// Authored neutral light color used when an appearance supplies no tint metadata.
+pub const NEUTRAL_NICKNAME_COLOR: [u8; 3] = [238, 238, 238];
+
+/// Caller-owned appearance-time inputs for one nickname light color.
+///
+/// The base is the selected skin's first resolved palette color. The three
+/// units are independent red, green and blue draws, consumed once per appearance.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NicknameTint {
+    /// Base palette channels in red, green and blue order.
+    pub base_rgb: [u8; 3],
+    /// One unit in `0..1` per channel, in red, green and blue order.
+    pub random_units: [f64; 3],
+}
+
+impl NicknameTint {
+    /// Resolve the light color, or reject any unit outside finite `0..1`.
+    ///
+    /// Each channel adds `floor(unit * 20)` and saturates at 255. The light value
+    /// is `(256 + channel) / 2` with integer division, which equals rounding
+    /// `(255 + channel) / 2` half up for every byte-valued channel.
+    pub fn light_color(&self) -> Result<[u8; 3], PresentationError> {
+        if !self
+            .random_units
+            .iter()
+            .all(|unit| (0. ..1.).contains(unit))
+        {
+            return Err(PresentationError);
+        }
+        let mut color = [0; 3];
+        for ((light, base), unit) in color.iter_mut().zip(self.base_rgb).zip(self.random_units) {
+            // The unit range bounds the jitter to 0..=19 before conversion.
+            let channel = (u16::from(base) + (unit * 20.).floor() as u16).min(255);
+            *light = ((256 + channel) / 2) as u8;
+        }
+        Ok(color)
+    }
+}
 
 /// Existing snake cull rectangle in the corrected head's world coordinate system.
 /// Name culling adds its own horizontal margin and tests the head 40 units down.
