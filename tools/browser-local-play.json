@@ -1,20 +1,272 @@
 {
   "kind": "authored-synthetic",
-  "description": "Own default page and authored zero-profile challenge/scene fixture; no simulator or external reference.",
-  "viewport": { "width": 1280, "height": 800 },
-  "expectedLogins": 1,
+  "description": "Authored current-default local input/death/return/explicit restart; no simulator or external reference. Native Playwright events only; browser acceptance requires a future run.",
+  "fixture": "local-play-lifecycle",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "expectedLogins": 2,
   "steps": [
-    { "op": "assert", "role": "button", "name": "Play", "state": "enabled" },
-    { "op": "screenshot", "name": "ready" },
-    { "op": "fill", "label": "Nickname", "value": "Synthetic browser" },
-    { "op": "click", "role": "button", "name": "Play" },
-    { "op": "advance", "ms": 64 },
-    { "op": "advance", "ms": 64 },
-    { "op": "advance", "ms": 64 },
-    { "op": "screenshot", "name": "playing" },
-    { "op": "disconnect" },
-    { "op": "advance", "ms": 64 },
-    { "op": "assert", "role": "button", "name": "Play", "state": "enabled" },
-    { "op": "screenshot", "name": "returned" }
+    {
+      "op": "assert",
+      "role": "button",
+      "name": "Play",
+      "state": "enabled"
+    },
+    {
+      "op": "screenshot",
+      "name": "ready"
+    },
+    {
+      "op": "fill",
+      "label": "Nickname",
+      "value": "Synthetic browser"
+    },
+    {
+      "op": "click",
+      "role": "button",
+      "name": "Play"
+    },
+    {
+      "op": "advance",
+      "ms": 600
+    },
+    {
+      "op": "assert-peer",
+      "counts": {
+        "connections": 1,
+        "logins": 1
+      }
+    },
+    {
+      "op": "assert",
+      "role": "button",
+      "name": "Play",
+      "state": "hidden"
+    },
+    {
+      "op": "assert-text",
+      "selector": "#slither-client-root div:has(> span:text-is(\"Your length:\")) > b",
+      "equals": "165"
+    },
+    {
+      "op": "remember-text",
+      "selector": "#slither-client-root div:has(> span:text-is(\"Your length:\")) > b",
+      "name": "current-score"
+    },
+    {
+      "op": "move",
+      "x": 1040,
+      "y": 240
+    },
+    {
+      "op": "advance",
+      "ms": 128
+    },
+    {
+      "op": "key-down",
+      "key": "ArrowLeft"
+    },
+    {
+      "op": "advance",
+      "ms": 128
+    },
+    {
+      "op": "key-up",
+      "key": "ArrowLeft"
+    },
+    {
+      "op": "advance",
+      "ms": 128
+    },
+    {
+      "op": "assert-peer",
+      "connection": 1,
+      "counts": {
+        "heading": {
+          "min": 1
+        },
+        "turn": {
+          "min": 1
+        }
+      }
+    },
+    {
+      "op": "key-down",
+      "key": "Space"
+    },
+    {
+      "op": "advance",
+      "ms": 128
+    },
+    {
+      "op": "assert-peer",
+      "counts": {
+        "boostOn": 1
+      }
+    },
+    {
+      "op": "editor",
+      "visible": true
+    },
+    {
+      "op": "focus",
+      "label": "Scenario editor"
+    },
+    {
+      "op": "assert",
+      "label": "Scenario editor",
+      "state": "focused"
+    },
+    {
+      "op": "key-up",
+      "key": "Space"
+    },
+    {
+      "op": "advance",
+      "ms": 128
+    },
+    {
+      "op": "assert-peer",
+      "counts": {
+        "boostOn": 1,
+        "boostOff": 1
+      }
+    },
+    {
+      "op": "mark-peer",
+      "name": "editing"
+    },
+    {
+      "op": "key-down",
+      "key": "Space"
+    },
+    {
+      "op": "key-down",
+      "key": "ArrowLeft"
+    },
+    {
+      "op": "advance",
+      "ms": 128
+    },
+    {
+      "op": "key-up",
+      "key": "ArrowLeft"
+    },
+    {
+      "op": "key-up",
+      "key": "Space"
+    },
+    {
+      "op": "advance",
+      "ms": 128
+    },
+    {
+      "op": "assert-peer",
+      "since": "editing",
+      "counts": {
+        "heading": 0,
+        "turn": 0,
+        "boostOn": 0,
+        "boostOff": 0
+      }
+    },
+    {
+      "op": "editor",
+      "visible": false
+    },
+    {
+      "op": "screenshot",
+      "name": "steered-and-released"
+    },
+    {
+      "op": "packet",
+      "name": "death"
+    },
+    {
+      "op": "assert-text",
+      "selector": "#slither-client-root div:has(> span:text-is(\"Last length:\")) > b",
+      "remember": "current-score"
+    },
+    {
+      "op": "screenshot",
+      "name": "final-score"
+    },
+    {
+      "op": "advance",
+      "ms": 4200
+    },
+    {
+      "op": "assert",
+      "role": "button",
+      "name": "Play",
+      "state": "enabled"
+    },
+    {
+      "op": "assert-peer",
+      "counts": {
+        "connections": 1,
+        "logins": 1,
+        "closed": 1
+      }
+    },
+    {
+      "op": "advance",
+      "ms": 500
+    },
+    {
+      "op": "assert-peer",
+      "counts": {
+        "connections": 1,
+        "logins": 1,
+        "closed": 1
+      }
+    },
+    {
+      "op": "assert-text",
+      "selector": "#slither-client-root div:has(> span:text-is(\"Last length:\")) > b",
+      "remember": "current-score"
+    },
+    {
+      "op": "screenshot",
+      "name": "returned-without-reconnect"
+    },
+    {
+      "op": "click",
+      "role": "button",
+      "name": "Play"
+    },
+    {
+      "op": "advance",
+      "ms": 600
+    },
+    {
+      "op": "assert-peer",
+      "counts": {
+        "connections": 2,
+        "logins": 2
+      }
+    },
+    {
+      "op": "assert",
+      "role": "button",
+      "name": "Play",
+      "state": "hidden"
+    },
+    {
+      "op": "assert-text",
+      "selector": "#slither-client-root div:has(> span:text-is(\"Your length:\")) > b",
+      "equals": "165"
+    },
+    {
+      "op": "remember-text",
+      "selector": "#slither-client-root div:has(> span:text-is(\"Your length:\")) > b",
+      "name": "second-score"
+    },
+    {
+      "op": "screenshot",
+      "name": "explicit-second-play"
+    }
   ]
 }
