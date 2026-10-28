@@ -3,8 +3,17 @@
 use wasm_bindgen::{JsCast, prelude::*};
 use web_sys::{CanvasPattern, CanvasRenderingContext2d, HtmlCanvasElement, HtmlImageElement};
 
+use crate::presentation::BackgroundPlan;
+
 fn error(message: &str) -> JsValue {
     JsValue::from_str(message)
+}
+
+pub(crate) fn validate_background_image(image: &HtmlImageElement) -> Result<(), JsValue> {
+    if !image.complete() || image.natural_width() == 0 || image.natural_height() == 0 {
+        return Err(error("scene background must be a loaded image"));
+    }
+    Ok(())
 }
 
 /// A validated frame whose world-space save is restored when the frame drops.
@@ -59,10 +68,7 @@ fn validate(
             "scene sprites must be nonempty source canvases distinct from target",
         ));
     }
-    if !background.complete() || background.natural_width() == 0 || background.natural_height() == 0
-    {
-        return Err(error("scene background must be a loaded image"));
-    }
+    validate_background_image(background)?;
     Ok(())
 }
 
@@ -85,10 +91,14 @@ impl CanvasPreflight {
         camera_x: f64,
         camera_y: f64,
         zoom: f64,
+        backdrop: Option<&HtmlImageElement>,
     ) -> Result<Self, JsValue> {
         validate(
             target, sprites, background, width, height, camera_x, camera_y, zoom,
         )?;
+        if let Some(backdrop) = backdrop {
+            validate_background_image(backdrop)?;
+        }
         let context = context(target)?;
         let pattern = context
             .create_pattern_with_html_image_element(background, "repeat")?
@@ -104,7 +114,12 @@ impl CanvasPreflight {
         })
     }
 
-    pub(crate) fn begin(self, target: &HtmlCanvasElement) -> Result<CanvasFrame, JsValue> {
+    pub(crate) fn begin(
+        self,
+        target: &HtmlCanvasElement,
+        plan: &BackgroundPlan,
+        backdrop: Option<&HtmlImageElement>,
+    ) -> Result<CanvasFrame, JsValue> {
         if target.width() != self.width || target.height() != self.height {
             target.set_width(self.width);
             target.set_height(self.height);
@@ -114,8 +129,6 @@ impl CanvasPreflight {
         }
         let width = f64::from(self.width);
         let height = f64::from(self.height);
-        self.context.set_fill_style_str("#111820");
-        self.context.fill_rect(0., 0., width, height);
         self.context.save();
         let frame = CanvasFrame {
             context: self.context,
@@ -125,12 +138,58 @@ impl CanvasPreflight {
             camera_y: self.camera_y,
             zoom: self.zoom,
         };
-        frame.paint_background(&self.pattern)?;
+        frame.paint_background_plan(&self.pattern, plan, backdrop)?;
         Ok(frame)
     }
 }
 
 impl CanvasFrame {
+    fn paint_background_plan(
+        &self,
+        pattern: &CanvasPattern,
+        plan: &BackgroundPlan,
+        backdrop: Option<&HtmlImageElement>,
+    ) -> Result<(), JsValue> {
+        let context = &self.context;
+        let [red, green, blue] = plan.clear.color;
+        context.set_fill_style_str(&format!("#{red:02x}{green:02x}{blue:02x}"));
+        context.set_global_alpha(plan.clear.alpha);
+        let [x, y, width, height] = plan.clear.rect;
+        context.fill_rect(x, y, width, height);
+        if let Some(image) = plan.image {
+            let source = backdrop.ok_or_else(|| error("background backdrop source required"))?;
+            let [sx, sy, sw, sh] = image.source;
+            let [dx, dy, dw, dh] = image.destination;
+            context.set_global_alpha(image.alpha);
+            context.draw_image_with_html_image_element_and_sw_and_sh_and_dx_and_dy_and_dw_and_dh(
+                source, sx, sy, sw, sh, dx, dy, dw, dh,
+            )?;
+        }
+        if let Some(layer) = plan.pattern {
+            context.save();
+            let result = (|| {
+                context.translate(layer.center.x, layer.center.y)?;
+                context.scale(layer.zoom, layer.zoom)?;
+                context.translate(layer.translation.x, layer.translation.y)?;
+                context.set_fill_style_canvas_pattern(pattern);
+                context.set_global_alpha(layer.alpha);
+                let [x, y, width, height] = layer.fill;
+                context.fill_rect(x, y, width, height);
+                Ok::<_, JsValue>(())
+            })();
+            context.restore();
+            result?;
+        }
+        context.set_global_alpha(1.);
+        // Background phase must not change entity placement or culling coordinates.
+        context.translate(
+            self.width / 2. - self.camera_x * self.zoom,
+            self.height / 2. - self.camera_y * self.zoom,
+        )?;
+        context.scale(self.zoom, self.zoom)?;
+        Ok(())
+    }
+
     /// Reset the target, paint the borrowed tile, and leave world coordinates active.
     pub(crate) fn new(
         target: &HtmlCanvasElement,

@@ -18,7 +18,7 @@ const gameWebNames = ['stock-client.mjs', 'stock-skin-provider.mjs', 'stock-skin
   'stock-session.mjs', 'stock-hud-contract.mjs', 'stock-hud-state.mjs', 'stock-hud-view.mjs',
   'stock-hud-dom.mjs', 'handshake-session.mjs', 'stock-live-profile.mjs',
   'stock-leaderboard-state.mjs', 'stock-leaderboard-view.mjs',
-  'local-game-host.mjs', 'synthetic-body.mjs', 'synthetic-food.mjs', 'synthetic-prey.mjs', 'loopback-session.mjs'];
+  'local-game-host.mjs', 'client-asset-map.mjs', 'synthetic-body.mjs', 'synthetic-food.mjs', 'synthetic-prey.mjs', 'loopback-session.mjs'];
 const gameSources = [['game-activation.mjs', 'activation.mjs'], ['game-gate.js', 'gate.js'],
   ['game-link.js', 'link.js'], ['game-bootstrap.mjs', 'bootstrap.mjs'], ['game-runtime.mjs', 'runtime.mjs'],
   ['game-owned-hud-ui.mjs', 'owned-hud-ui.mjs'], ['game-owned-play-ui.mjs', 'owned-play-ui.mjs'],
@@ -36,6 +36,7 @@ function syntheticWasm(omit) {
     'animatedscene_apply_frame_and_render_standard_with_face_presentation_and_prey_and_hud',
     'animatedscene_render_standard_with_face_presentation_at_size',
     'animatedscene_control_view', 'animatedscene_advance_with_control', 'animatedscene_reset_lag',
+    'animatedscene_set_background_backdrop',
     'encode_login', 'solve_challenge', 'decode_frame', 'setup_protocol_version'].filter(name => name !== omit);
   return Buffer.from([0, 97, 115, 109, 1, 0, 0, 0,
     ...section(1, [1, 0x60, 0, 0]),
@@ -96,12 +97,15 @@ test('default packages have a closed deterministic inventory and preserve module
     'game/pkg/slither_client.js', 'game/pkg/slither_client_bg.wasm', `game/pkg/${snippetName}`].sort();
   const result = f.build();
   assert.deepEqual(result.files.map(file => file.path), ['chrome', 'firefox'].flatMap(browser => expectedPerBrowser.map(name => `${browser}/${name}`)));
-  assert.equal(result.files.length, 110);
+  assert.equal(result.files.length, 112);
   assert(result.files.every(file => file.bytes > 0 && /^[a-f0-9]{64}$/.test(file.sha256)));
   assert.deepEqual(f.build(), result, 'an identical rerun neither accumulates nor changes files');
   for (const browser of ['chrome', 'firefox']) {
     for (const name of pageNames) {
       assert.deepEqual(fs.readFileSync(path.join(f.output, browser, 'scene', name)), fs.readFileSync(path.join(f.root, 'web', name)));
+    }
+    for (const name of gameWebNames) {
+      assert.deepEqual(fs.readFileSync(path.join(f.output, browser, 'game', name)), fs.readFileSync(path.join(f.root, 'web', name)));
     }
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.output, browser, 'scene/config.json'))), { simulatorUrl: null });
     for (const name of expectedPerBrowser.filter(name => !name.endsWith('.wasm'))) {
@@ -132,7 +136,7 @@ test('generated validator paths remain exact, byte-preserved and independent of 
     output.web_accessible_resources[0].resources.pop();
     assert.deepEqual(output, source, 'all source manifest fields remain intact');
   }
-  assert.equal(result.files.length, 110);
+  assert.equal(result.files.length, 112);
 });
 
 test('changing the authored HUD validator makes the generated pair stale', t => {
@@ -176,7 +180,7 @@ test('MV3 browser differences, explicit activation permissions, closed WAR and o
         'game/stock-gameplay.mjs', 'game/stock-session.mjs', 'game/stock-hud-contract.mjs', 'game/stock-hud-state.mjs',
         'game/stock-hud-view.mjs', 'game/stock-hud-dom.mjs', 'game/handshake-session.mjs', 'game/stock-live-profile.mjs',
         'game/stock-leaderboard-state.mjs', 'game/stock-leaderboard-view.mjs',
-        'game/local-game-host.mjs', 'game/synthetic-body.mjs', 'game/synthetic-food.mjs', 'game/synthetic-prey.mjs', 'game/loopback-session.mjs',
+        'game/local-game-host.mjs', 'game/client-asset-map.mjs', 'game/synthetic-body.mjs', 'game/synthetic-food.mjs', 'game/synthetic-prey.mjs', 'game/loopback-session.mjs',
         'game/pkg/slither_client.js', 'game/pkg/slither_client_bg.wasm', `game/pkg/${snippetName}`],
     }]);
     for (const key of ['host_permissions', 'optional_host_permissions', 'content_scripts', 'background', 'externally_connectable']) {
@@ -263,6 +267,7 @@ for (const [name, change, expected] of [
 }
 
 for (const name of ['animatedscene_control_view', 'animatedscene_advance_with_control', 'animatedscene_reset_lag',
+  'animatedscene_set_background_backdrop',
   'animatedscene_apply_frame_and_render_standard_with_face_presentation_and_prey_and_hud',
   'encode_login', 'solve_challenge', 'decode_frame', 'setup_protocol_version']) {
   test(`missing production gameplay ABI ${name} fails before package output`, t => {
@@ -313,19 +318,19 @@ test('CLI requires unambiguous paths and confines outputs to the ignored extensi
   }
   for (const outputDir of ['dist/elsewhere', '.', 'dist/extension/../../outside']) assert.throws(() => f.build({ outputDir }), /must stay inside/);
   assert.throws(() => f.build({ webDir: 'dist/extension' }), /must be separate/);
-  assert.equal(f.build({ outputDir: 'dist/extension/fresh' }).files.length, 110);
+  assert.equal(f.build({ outputDir: 'dist/extension/fresh' }).files.length, 112);
 });
 
 test('one default package copies the actual bootstrap and all owned UI helpers in both browsers', t => {
   const f = fixture(t), outputDir = 'dist/extension/default';
   const result = f.build({ outputDir });
-  assert.equal(result.files.length, 110);
+  assert.equal(result.files.length, 112);
   for (const browser of ['chrome', 'firefox']) {
     const game = path.join(f.root, outputDir, browser, 'game');
     for (const [source, destination] of gameSources) {
       assert.deepEqual(fs.readFileSync(path.join(game, destination)), fs.readFileSync(path.join(f.root, 'extension', source)));
     }
-    assert.equal(result.files.filter(file => file.path.startsWith(browser + '/')).length, 55);
+    assert.equal(result.files.filter(file => file.path.startsWith(browser + '/')).length, 56);
     assert.deepEqual(fs.readdirSync(game).filter(name => /(?:bootstrap|entry)/.test(name)), ['bootstrap.mjs']);
     const bytes = fs.readFileSync(path.join(game, 'bootstrap.mjs'));
     const stamp = fs.statSync(path.join(game, 'bootstrap.mjs')).mtimeMs;

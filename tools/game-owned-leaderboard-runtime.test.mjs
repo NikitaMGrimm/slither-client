@@ -259,9 +259,12 @@ test('local host selects ready sources and explicit profile; disconnected or ret
       get(){assert.fail('Remote gate observed locally');},
     });
     const endpoint = 'ws://127.0.0.1:19400/slither', events = [];
+    let selectedBackdrop;
+    graph.wasm.api.AnimatedScene.prototype.set_background_backdrop = image => { selectedBackdrop = image; };
     let runtime, active = false, disposed = false, begins = 0, ends = 0, claims = 0, presets = 0, sourceHook;
     const sources = { palettes: [graph.f.canvas(),graph.f.canvas(),graph.f.canvas()],
       background: new graph.f.realm.HTMLImageElement(),
+      backgroundImage: new graph.f.realm.HTMLImageElement(),
       adapter: {
         beginOperation() {
           assert.equal(active,false); assert.equal(runtime.diagnostics().captureHeld,true);
@@ -294,6 +297,7 @@ test('local host selects ready sources and explicit profile; disconnected or ret
     const { startGamePage } = await graph.load('runtime.mjs');
     runtime = await startGamePage({realm,localHost,initialize(){},wasmApi:graph.wasm.api,
       hudReadout:true,ownedHudUi:true,ownedPlayUi:true,ownedLeaderboardUi:true});
+    assert.equal(selectedBackdrop, sources.backgroundImage);
     const seam = (await graph.load('stock-gameplay.mjs')).seam;
     assert.equal(claims,1);assert.equal(presets,1);assert.equal(seam.options.localSession,true);
     assert.equal('liveProfile' in seam.options,false);assert.equal(graph.f.sockets,0);

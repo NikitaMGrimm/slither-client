@@ -1,4 +1,5 @@
 import { loopbackEndpoint } from './loopback-session.mjs';
+import { createClientAssetMap } from './client-asset-map.mjs';
 import { createSyntheticBodyResolver } from './synthetic-body.mjs';
 import { createSyntheticFoodResolver } from './synthetic-food.mjs';
 import { createSyntheticPreyResolver } from './synthetic-prey.mjs';
@@ -149,24 +150,11 @@ export async function createLocalGameHost({ realm = globalThis, endpoint } = {})
   }
   let inputInstalled = false;
 
-  // Generated flat sources are authored demonstrations, not official skin mappings.
   const sourceRealm = { HTMLCanvasElement: realm.HTMLCanvasElement, HTMLImageElement: realm.HTMLImageElement,
     document: { createElement: tag => construct.createElement(document, tag) } };
-  const palettes = ['#83d5b0', '#efbb62', '#76b9ed'].map(color => {
-    const canvas = sourceRealm.document.createElement('canvas');
-    canvas.width = 32; canvas.height = 32;
-    const context = canvas.getContext('2d');
-    context.fillStyle = color; context.beginPath(); context.arc(16, 16, 16, 0, Math.PI * 2); context.fill();
-    return canvas;
+  const { palettes, background, backgroundImage } = await createClientAssetMap({
+    realm: { ...sourceRealm, Image: realm.Image },
   });
-  const tile = sourceRealm.document.createElement('canvas');
-  tile.width = 40; tile.height = 40;
-  const context = tile.getContext('2d');
-  context.fillStyle = '#151e27'; context.fillRect(0, 0, 40, 40);
-  context.fillStyle = '#263440'; context.fillRect(0, 0, 1, 1);
-  const background = new realm.Image();
-  background.src = tile.toDataURL();
-  await method(realm.HTMLImageElement?.prototype, 'decode')(background);
   current();
   const resolveBody = createSyntheticBodyResolver(palettes, sourceRealm);
   const resolveFood = createSyntheticFoodResolver(sourceRealm, random);
@@ -223,7 +211,7 @@ export async function createLocalGameHost({ realm = globalThis, endpoint } = {})
     claimed = true;
     return native;
   } });
-  return { gate, sources: { palettes, background, adapter, hostAssets },
+  return { gate, sources: { palettes, background, backgroundImage, adapter, hostAssets },
     // Authored local credentials accepted by the simulator; no profile discovery.
     profile: { clientVersion: 0, password: new Uint8Array(20), protocolVersion: 19 },
     endpoint, isCurrentDocument,

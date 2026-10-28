@@ -4,13 +4,14 @@ use std::{collections::BTreeSet, error::Error, fmt, sync::Arc};
 
 use super::{
     AnchorView, AntennaCullBounds, AntennaDrawInput, AntennaError, AntennaSnapshot, AntennaState,
-    ArenaEdgeView, BodyPaintGeometry, BodyPaintSample, BodyPaintView, BoundaryRadius, CurveOutput,
-    FaceGeometry, FollowCamera, FoodConsume, FoodCullBounds, FoodEaterPose, FoodError, FoodFactory,
-    FoodSpawn, FoodWorld, FrameClock, FrameStep, HudIngressEventKind, HudIngressPlan,
-    HudIngressReport, MAX_CURVE_SAMPLES, OrdinaryAntennaGeometry, PairedFaceGeometry,
-    PairedSideGeometry, PreparedAntenna, PresentationError, PreyError, PreyFactory, PreyWorld,
-    ScoreError, ScoreTables, SnakeMetrics, SnakeObjectToken, SnakePresentation,
-    StandardEyeGeometry, StaticHeadAccessoryGeometry, finite,
+    ArenaEdgeView, BackgroundInput, BackgroundPlan, BackgroundState, BodyPaintGeometry,
+    BodyPaintSample, BodyPaintView, BoundaryRadius, CurveOutput, FaceGeometry, FollowCamera,
+    FoodConsume, FoodCullBounds, FoodEaterPose, FoodError, FoodFactory, FoodSpawn, FoodWorld,
+    FrameClock, FrameStep, HudIngressEventKind, HudIngressPlan, HudIngressReport,
+    MAX_CURVE_SAMPLES, OrdinaryAntennaGeometry, PairedFaceGeometry, PairedSideGeometry,
+    PreparedAntenna, PresentationError, PreyError, PreyFactory, PreyWorld, ScoreError, ScoreTables,
+    SnakeMetrics, SnakeObjectToken, SnakePresentation, StandardEyeGeometry,
+    StaticHeadAccessoryGeometry, finite,
 };
 use crate::{
     protocol::ElapsedHeader,
@@ -563,6 +564,8 @@ pub struct AnimatedClient {
     own_score_adjustment: u8,
     clock: FrameClock,
     camera: FollowCamera,
+    background: BackgroundState,
+    background_camera: Option<Point>,
     boundary: Option<BoundaryRadius>,
     arena_edge_view: ArenaEdgeView,
     connected: bool,
@@ -603,6 +606,8 @@ impl AnimatedClient {
             own_score_adjustment: 0,
             clock: FrameClock::new(start_ms)?,
             camera: FollowCamera::default(),
+            background: BackgroundState::default(),
+            background_camera: None,
             boundary: None,
             arena_edge_view: ArenaEdgeView::default(),
             connected: false,
@@ -624,7 +629,7 @@ impl AnimatedClient {
 
     /// Clear the world and draw corrections, and restore the lag multiplier to one.
     /// Preserve the clock's timestamp and both accumulated phases, boundary and arena-edge view state,
-    /// camera position, caller follow preference and shared body-painter flag history. Use `new`
+    /// camera position, background phase/baseline, caller follow preference and shared body-painter flag history. Use `new`
     /// to start a fresh timeline.
     pub fn reset(&mut self) {
         self.received = ClientState::default();
@@ -2208,6 +2213,30 @@ impl AnimatedClient {
         self.arena_edge_view
     }
 
+    /// Retained background phase. Reset preserves it and its camera baseline.
+    pub fn background(&self) -> &BackgroundState {
+        &self.background
+    }
+
+    /// Plan a background after this draw's camera preparation. The first call
+    /// establishes a camera baseline at zero phase; later calls use camera
+    /// displacement even without an own snake. This authored policy survives
+    /// reset. Input zoom controls projection without changing the camera.
+    pub fn prepare_background(
+        &mut self,
+        input: BackgroundInput,
+    ) -> Result<BackgroundPlan, ClientPresentationError> {
+        let camera = self.camera.position();
+        let mut background = self.background;
+        if let Some(previous) = self.background_camera {
+            background.advance_draw(previous, camera, input.tile_width, input.tile_height)?;
+        }
+        let plan = background.plan(input)?;
+        self.background = background;
+        self.background_camera = Some(camera);
+        Ok(plan)
+    }
+
     /// Prepare a default-style numeric draw and discard its paint data.
     /// This commits the same camera, spacing and eye targets as a real draw;
     /// do not call immediately before another preparation for the same draw.
@@ -2935,6 +2964,112 @@ mod resolved_draw_tests {
     use super::*;
     use crate::presentation::{BodyAsset, BodyAssetStatus, FoodSource, food_palette};
     use std::{cell::RefCell, rc::Rc};
+
+    fn background_input(client: &AnimatedClient, width: u32, height: u32) -> BackgroundInput {
+        BackgroundInput {
+            width,
+            height,
+            zoom: client.camera().zoom(),
+            image_loaded: true,
+            pattern_available: true,
+            quality: crate::presentation::QualityState::new(
+                crate::presentation::QualityMode::High,
+                0.,
+            )
+            .unwrap()
+            .snapshot(),
+            tile_width: 64.,
+            tile_height: 32.,
+        }
+    }
+
+    #[test]
+    fn background_first_draw_resize_and_reset_retain_camera_baseline() {
+        let mut client = AnimatedClient::new(0.).unwrap();
+        client.set_follows(false);
+        client
+            .set_camera_position(Point { x: 100., y: 200. })
+            .unwrap();
+        client.set_zoom(2.).unwrap();
+        client.prepare_draw(801, 603).unwrap();
+        let first = client
+            .prepare_background(background_input(&client, 801, 603))
+            .unwrap();
+        assert_eq!(first.pattern.unwrap().translation, Point::default());
+
+        client
+            .set_camera_position(Point { x: 116., y: 192. })
+            .unwrap();
+        client.prepare_draw(801, 603).unwrap();
+        let moved = client
+            .prepare_background(background_input(&client, 801, 603))
+            .unwrap();
+        assert_eq!(moved.pattern.unwrap().translation, Point { x: 48., y: 8. });
+        let phase = *client.background();
+        client.advance(8., false).unwrap();
+        assert_eq!(*client.background(), phase);
+
+        client.set_zoom(0.5).unwrap();
+        client.prepare_draw(1280, 720).unwrap();
+        let resized = client
+            .prepare_background(background_input(&client, 1280, 720))
+            .unwrap();
+        assert_eq!(resized.pattern.unwrap().center, Point { x: 640., y: 360. });
+        assert_eq!(
+            resized.pattern.unwrap().translation,
+            moved.pattern.unwrap().translation
+        );
+        assert_eq!(resized.image.unwrap().destination, [0., 0., 1280., 720.]);
+        assert_eq!(*client.background(), phase);
+
+        client.reset();
+        assert_eq!(*client.background(), phase);
+        client
+            .set_camera_position(Point { x: 132., y: 200. })
+            .unwrap();
+        client.prepare_draw(1280, 720).unwrap();
+        let reset = client
+            .prepare_background(background_input(&client, 1280, 720))
+            .unwrap();
+        assert_eq!(reset.pattern.unwrap().translation, Point { x: 32., y: 0. });
+        assert_eq!(reset.pattern.unwrap().zoom, client.camera().zoom());
+    }
+
+    #[test]
+    fn background_ordered_setup_draws_freeze_each_camera_and_viewport() {
+        let mut client = AnimatedClient::new(3.).unwrap();
+        let clock = client.clock.clone();
+        let mut plans = Vec::new();
+        client
+            .apply_frame_with_factories_and_setup(
+                &bundle(&[setup(), setup()]),
+                ElapsedHeader::Absent,
+                |_| panic!("no appearance"),
+                |_, _| panic!("no food"),
+                |stage, _| {
+                    let (camera, width, height) = if plans.is_empty() {
+                        (Point { x: 100., y: 200. }, 801, 603)
+                    } else {
+                        (Point { x: 116., y: 192. }, 1280, 720)
+                    };
+                    stage.set_camera_position(camera)?;
+                    stage.prepare_draw(width, height)?;
+                    plans.push(stage.prepare_background(background_input(stage, width, height))?);
+                    Ok::<_, ClientPresentationError>(())
+                },
+            )
+            .unwrap();
+        assert_eq!(plans.len(), 2);
+        assert_eq!(plans[0].clear.rect, [0., 0., 801., 603.]);
+        assert_eq!(plans[0].pattern.unwrap().translation, Point::default());
+        assert_eq!(plans[1].clear.rect, [0., 0., 1280., 720.]);
+        assert_eq!(
+            plans[1].pattern.unwrap().translation,
+            Point { x: 48., y: 8. }
+        );
+        assert_eq!(client.background().phase(), Point { x: 0.75, y: 0.25 });
+        assert_eq!(client.clock, clock);
+    }
 
     #[test]
     fn score_cache_shares_equal_setup_and_reset_but_replaces_changed_parameter() {

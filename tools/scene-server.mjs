@@ -22,7 +22,7 @@ const routes = new Map([
     'stock-food-provider', 'stock-prey-provider', 'stock-asset-sources', 'skin-provider',
     'desktop-layout', 'client-input', 'stock-gameplay', 'stock-session', 'stock-hud-contract',
     'stock-hud-state', 'stock-hud-view', 'stock-hud-dom', 'handshake-session', 'stock-live-profile',
-    'stock-leaderboard-state', 'stock-leaderboard-view', 'local-game-host',
+    'stock-leaderboard-state', 'stock-leaderboard-view', 'local-game-host', 'client-asset-map',
     'synthetic-body', 'synthetic-food', 'synthetic-prey', 'loopback-session']
     .map(name => [`/game/${name}.mjs`, [`web/${name}.mjs`, 'text/javascript; charset=utf-8']]),
   ['/game/pkg/slither_client.js', ['dist/web/slither_client.js', 'text/javascript; charset=utf-8']],
