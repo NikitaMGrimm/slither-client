@@ -30,14 +30,14 @@ function fixture({ href = 'http://127.0.0.1:18884/game', decode } = {}) {
     constructor() { super('canvas'); }
     getContext(kind) {
       assert.equal(kind, '2d');
-      return { beginPath() {}, arc() {}, fill() {}, fillRect() {} };
+      return { beginPath() {}, arc() {}, moveTo() {}, lineTo() {}, closePath() {}, fill() {}, fillRect() {} };
     }
     toDataURL() { return `data:image/png;base64,synthetic-local-${this.width}x${this.height}`; }
   }
   class Image extends dom.hud.HTMLElement {
     constructor() { super('img'); }
     get naturalWidth() { return this.complete ? Number(this.src.match(/-(\d+)x/)[1]) : 0; }
-    get naturalHeight() { return this.naturalWidth; }
+    get naturalHeight() { return this.complete ? Number(this.src.match(/x(\d+)$/)[1]) : 0; }
     get complete() { return this.ready === true; }
     async decode() { calls.push('decode'); await decode?.(); this.ready = true; }
   }
@@ -86,11 +86,11 @@ test('local host supplies authored sources/profile and one claim without startin
   assert.equal(host.sources.palettes.length, 3);
   assert(host.sources.palettes.every(value => value instanceof f.realm.HTMLCanvasElement));
   assert(host.sources.background instanceof f.realm.HTMLImageElement);
-  assert.equal(host.sources.background.src, 'data:image/png;base64,synthetic-local-40x40');
+  assert.equal(host.sources.background.src, 'data:image/png;base64,synthetic-local-108x64');
   assert(host.sources.backgroundImage instanceof f.realm.HTMLImageElement);
   assert.equal(host.sources.backgroundImage.src, 'data:image/png;base64,synthetic-local-512x512');
   assert.equal(host.sources.background.complete, true); assert.equal(host.sources.backgroundImage.complete, true);
-  assert.equal(host.sources.background.naturalWidth, 40); assert.equal(host.sources.backgroundImage.naturalWidth, 512);
+  assert.equal(host.sources.background.naturalWidth, 108); assert.equal(host.sources.backgroundImage.naturalWidth, 512);
   assert.deepEqual(f.calls, ['decode', 'decode']);
   assert.equal(f.sockets.length, 0); assert.equal(f.listeners.size, 0);
   const metadata = host.gate.metadata();
