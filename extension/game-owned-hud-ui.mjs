@@ -108,9 +108,9 @@ export function createOwnedHudUi(input) {
       };
       ownedMount = element('div');
       const readout = freeze({ root: element('div'), lengthLine: element('div'), rankLine: element('div'),
-        lengthLabel: atom('span', 'Length: '), lengthValue: atom('b', ''),
-        rankLabel: atom('span', 'Place: '), rankValue: atom('span', ''),
-        separator: atom('span', ' / '), populationValue: atom('span', '') });
+        lengthLabel: atom('span', 'Your length: '), lengthValue: atom('b', ''),
+        rankLabel: atom('span', 'Your rank: '), rankValue: atom('span', ''),
+        separator: atom('span', ' of '), populationValue: atom('span', '') });
       const final = freeze({ root: element('div'), label: atom('span', 'Last length: '), value: atom('b', '') });
       for (const [target, children] of [
         [readout.lengthLine, [readout.lengthLabel.element, readout.lengthValue.element]],
@@ -132,13 +132,16 @@ export function createOwnedHudUi(input) {
         ['width', '34ch'], ['display', 'block'], ['color', '#eee'], ['font-family', 'monospace'],
         ['font-size', '12px'], ['white-space', 'pre'], ['pointer-events', 'none'],
         ['border', '0'], ['border-radius', '0'], ['background', 'none']]);
+      layout(readout.root, [['font-family', 'Arial, sans-serif']]);
       for (const line of [readout.lengthLine, readout.rankLine, final.root]) layout(line, [['display', 'block']]);
-      for (const [value, width, bold] of [[readout.lengthValue, '17ch', true],
-        [readout.rankValue, '5ch', false], [readout.populationValue, '5ch', false], [final.value, '18ch', true]]) {
-        layout(value.element, [['display', 'inline-block'], ['box-sizing', 'content-box'],
-          ['text-align', 'right'], ['font-family', 'monospace'], ['font-variant-numeric', 'tabular-nums'],
-          ['width', width], ...(bold ? [['font-weight', 'bold']] : [])]);
+      for (const [value, bold] of [[readout.lengthValue, true], [readout.rankValue, false],
+        [readout.populationValue, false]]) {
+        layout(value.element, [['display', 'inline'], ['font-family', 'inherit'],
+          ['font-variant-numeric', 'tabular-nums'], ...(bold ? [['font-weight', 'bold']] : [])]);
       }
+      layout(final.value.element, [['display', 'inline-block'], ['box-sizing', 'content-box'],
+        ['text-align', 'right'], ['font-family', 'monospace'], ['font-variant-numeric', 'tabular-nums'],
+        ['width', '18ch'], ['font-weight', 'bold']]);
       const nodes = freeze({ schema: 1, document, mount: ownedMount, textPolicy: 'authored', readout, final });
       requireCurrent();
       requireParent();
