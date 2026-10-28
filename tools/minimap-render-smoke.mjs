@@ -138,6 +138,13 @@ export function minimapRenderSmoke(wasm) {
     own.apply_frame(syntheticSetup(), false);
     own.advance(408, false).free();
     eq(view(own).widget.marker, retainedMarker, 'reset without a new own object retains marker coordinates');
+    const beforeInvalidToggle = view(own);
+    throws(() => own.apply_frame(bundle(syntheticSetup(), [86, 255]), false));
+    eq(view(own), beforeInvalidToggle, 'dimension-dependent V validation rejects the whole frame');
+    own.apply_frame(bundle([76, 255, 2, 0]), false);
+    eq(view(own).dimension, 512, 'empty L payload does not charge unreachable advertised layers');
+    own.apply_frame(bundle([76, 255, 2, 0, 64]), false);
+    eq(pixel(view(own).alternateRgba, 512 * 512 - 1), [255, 255, 255, 255]);
   } finally {
     own.free();
     scene.free();
