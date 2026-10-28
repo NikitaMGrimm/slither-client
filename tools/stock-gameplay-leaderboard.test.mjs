@@ -1,6 +1,7 @@
+import { LeaderboardHistoryDouble } from './leaderboard-history-double.mjs';
 import { HudHistoryDouble } from './hud-history-double.mjs';
 // Authored integration: actual gameplay/session/controller/state, with native,
-// socket, source and numeric-projector doubles. No Wasm, DOM or network execution.
+// socket, source and numeric-projector doubles. Flagged runs select real history ABIs only.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createStockGameplay } from '../web/stock-gameplay.mjs';
@@ -109,7 +110,7 @@ function harness({ configure, callback, rows = true } = {}) {
   };
   const options = { scene, quality, controller: routed, hudReadout: true, leaderboardRows: rows,
     leaderboardProjector: projector,
-    wasm: { HudHistory: HudHistoryDouble,
+    wasm: { LeaderboardHistory: LeaderboardHistoryDouble, HudHistory: HudHistoryDouble,
       encode_login(_version, _password, nickname) { hit('encode'); faults.encodedNickname = nickname; return Uint8Array.of(115); },
       solve_challenge() { return new Uint8Array(27); }, setup_protocol_version() { return 19; },
       decode_frame(bytes) {

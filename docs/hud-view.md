@@ -164,11 +164,11 @@ restoration. The passive renderer's own unbind/dispose still removes no nodes.
 
 The default gameplay subscription uses schema-2 HUD reports, retaining raw rows
 in the same command-time transaction. `LeaderboardScoreProjector` supplies Rust
-score arithmetic after ingress and held-source release. Separate JavaScript
-board state and copied views retain ordered board/setup history and text,
-color and opacity policy. These are existing
-[Rust migration debt](architecture.md#ownership-decision), not a model for new
-JavaScript game logic.
+score arithmetic after ingress and held-source release. The browser-free Rust
+[leaderboard owner](leaderboard-state.md) retains ordered board/setup history,
+text/color/opacity policy and top-ten projection. JavaScript admits copied
+records and exact issued/scene identities, then combines native semantic
+availability with the current DOM binding observation.
 
 `createOwnedLeaderboardUi` constructs and renders the heading and row columns
 through captured DOM operations. Names are written through Text nodes; markup

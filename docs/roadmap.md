@@ -5,6 +5,11 @@ protocol-19 scene with a Rust/Wasm Canvas2D preview. Synthetic browser rendering
 borrowed-asset integration and a local simulator connection have been demonstrated.
 See [verification](verification.md) for scope.
 
+Future clients will target browser extensions, native desktop and Android, with
+planned support for official servers. No iOS app is planned; sideloading may be
+considered. These plans do not establish current official-server acceptance or
+authorize connections.
+
 ## 1. Received scene slice (implemented)
 
 Setup, snake appearance/motion/removal and food state apply atomically with
@@ -77,7 +82,8 @@ and composes authored input, session, update and rendering. Explicit Play APIs
 exist; activation alone starts neither profile acquisition nor a game connection.
 
 One default bootstrap now selects Play controls, score tracking, current/final
-readouts and a visible schema-2 leaderboard with Rust score projection. The
+readouts and a visible schema-2 leaderboard with Rust-owned history, row policy
+and score projection. The
 packager accepts only the default entry; the former owned entry variants are
 removed. The [local game page](local-play.md) uses that same runtime and session
 with generated stand-ins, a selected loopback endpoint and the challenge
@@ -95,7 +101,7 @@ victory/save/replay flows. Follow the
 [Rust ownership decision](architecture.md#ownership-decision) when moving the
 remaining JavaScript game/HUD/presentation state and policy; keep browser/DOM
 glue, extension plumbing and host capability capture in JavaScript. Existing
-JavaScript lifecycle, input, HUD and board policy remains migration debt;
+JavaScript lifecycle, input and gameplay orchestration remain migration debt;
 local-host work must not add game-domain logic there.
 
 Installed Chrome/Firefox/CSP behavior, native input/layout/pixels, loading

@@ -1,5 +1,5 @@
-// Authored copied view; no DOM, native, scene or clock capabilities.
-import { requireLeaderboardState } from './stock-leaderboard-state.mjs';
+// Authored binding and issued-identity shell around copied Rust leaderboard output.
+import { requireLeaderboardState, leaderboardSemanticView } from './stock-leaderboard-state.mjs';
 import { hudReadoutRequired } from './stock-hud-state.mjs';
 
 const freeze = Object.freeze;
@@ -49,7 +49,9 @@ function project(state, hudSnapshot, observation) {
   }
   const observed = binding(observation);
   if (!disabled && state.sceneIdentity !== observed.sceneIdentity) invalid();
-  const boardPresent = !disabled && state.board !== null;
+  const semantic = disabled ? null : leaderboardSemanticView(state,
+    hudSnapshot.requestedOpacity.header, hudSnapshot.requestedOpacity.rows);
+  const boardPresent = !disabled && semantic.boardPresent;
   let readiness, reason;
   if (observed.state === 'unavailable') {
     readiness = observed.state;
@@ -60,22 +62,17 @@ function project(state, hudSnapshot, observation) {
   } else if (observed.state === 'pending') {
     readiness = observed.state;
     reason = observed.reason;
-  } else if (!boardPresent) {
-    readiness = 'pending';
-    reason = 'no-board';
   } else {
-    readiness = 'ready';
-    reason = null;
+    readiness = semantic.readiness;
+    reason = semantic.reason;
   }
-  // The HUD shows the top ten; larger valid wire boards stay in packet history.
-  const rows = freeze(boardPresent ? state.board.rows.slice(0, 10).map(row => freeze({ ...row })) : []);
+  const rows = disabled ? freeze([]) : semantic.rows;
   const view = freeze({ schema: 1, bindingIdentity: observed.bindingIdentity,
     documentIdentity: observed.documentIdentity, sceneIdentity: observed.sceneIdentity,
-    revision: disabled ? null : state.revision,
+    revision: disabled ? null : semantic.revision,
     binding: freeze({ state: observed.state, reason: observed.reason }), readiness, reason,
-    setupSeen: !disabled && state.setupSeen, boardPresent,
-    requestedOpacity: disabled ? null : freeze({ heading: hudSnapshot.requestedOpacity.header,
-      rows: hudSnapshot.requestedOpacity.rows }), rows });
+    setupSeen: !disabled && semantic.setupSeen, boardPresent,
+    requestedOpacity: disabled ? null : semantic.requestedOpacity, rows });
   issued.add(view);
   return view;
 }
