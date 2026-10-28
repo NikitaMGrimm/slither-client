@@ -40,6 +40,9 @@ test('actual default graph mounts HUD, Play and leaderboard with one claim, scen
     release(); const runtime = await entry.gamePageRuntime;
     assert.deepEqual(Object.keys(runtime).sort(), ['diagnostics', 'play', 'playWithLiveProfile', 'bindNicknameField', 'bindHudReadout', 'dispose'].sort());
     assert.equal(graph.wasm.calls.filter(value => value === 'scene').length, 1);
+    assert.equal(graph.wasm.calls.filter(value => value === 'enable-nicknames').length, 1);
+    assert.ok(graph.wasm.calls.indexOf('enable-nicknames') > graph.wasm.calls.indexOf('scene'));
+    assert.equal(graph.wasm.calls.includes('packet'), false, 'nickname selection precedes ingress');
     assert.equal(graph.wasm.calls.filter(value => value === 'quality').length, 1);
     assert.equal(graph.f.raf.size, 1); assert.equal(graph.f.intervals.size, 0);
     assert.equal(graph.f.sockets, 0); assert.equal(graph.f.original, 0);

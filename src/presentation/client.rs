@@ -8,10 +8,10 @@ use super::{
     BodyPaintSample, BodyPaintView, BoundaryRadius, CurveOutput, FaceGeometry, FollowCamera,
     FoodConsume, FoodCullBounds, FoodEaterPose, FoodError, FoodFactory, FoodSpawn, FoodWorld,
     FrameClock, FrameStep, HudIngressEventKind, HudIngressPlan, HudIngressReport,
-    MAX_CURVE_SAMPLES, OrdinaryAntennaGeometry, PairedFaceGeometry, PairedSideGeometry,
-    PreparedAntenna, PresentationError, PreyError, PreyFactory, PreyWorld, ScoreError, ScoreTables,
-    SnakeMetrics, SnakeObjectToken, SnakePresentation, StandardEyeGeometry,
-    StaticHeadAccessoryGeometry, finite,
+    MAX_CURVE_SAMPLES, NicknameCullBounds, NicknameDraw, NicknameInput, NicknameState,
+    OrdinaryAntennaGeometry, PairedFaceGeometry, PairedSideGeometry, PreparedAntenna,
+    PresentationError, PreyError, PreyFactory, PreyWorld, ScoreError, ScoreTables, SnakeMetrics,
+    SnakeObjectToken, SnakePresentation, StandardEyeGeometry, StaticHeadAccessoryGeometry, finite,
 };
 use crate::{
     protocol::ElapsedHeader,
@@ -341,6 +341,8 @@ pub enum ClientPresentationError {
     FinalScoreUnavailable(ScoreStatus),
     /// Score admission must start before packets or after reset.
     ScoreModeRequiresReset,
+    /// Nickname retention must start before packets or after reset.
+    NicknameModeRequiresReset,
     /// Canonical R requires an original own object at its event position.
     ScoreOwnRequired,
     /// Score-table construction failed without changing the cache or world.
@@ -398,6 +400,9 @@ impl fmt::Display for ClientPresentationError {
             }
             Self::ScoreModeRequiresReset => {
                 f.write_str("enable score tracking before packets or after reset")
+            }
+            Self::NicknameModeRequiresReset => {
+                f.write_str("enable nicknames before packets or after reset")
             }
             Self::ScoreOwnRequired => {
                 f.write_str("score adjustment requires retained original own")
@@ -462,6 +467,7 @@ impl Error for ClientPresentationError {
             | Self::FinalScoreUnavailable(_)
             | Self::Limit
             | Self::ScoreModeRequiresReset
+            | Self::NicknameModeRequiresReset
             | Self::ScoreOwnRequired
             | Self::AppearanceModeRequiresReset
             | Self::AppearanceResolverRequired
@@ -529,6 +535,13 @@ struct Entry {
     snake: SnakePresentation,
     antenna: Option<AntennaState>,
     accessory: Option<StaticHeadAccessoryGeometry>,
+    nickname: Option<RetainedNickname>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct RetainedNickname {
+    text: String,
+    state: NicknameState,
 }
 
 impl Entry {
@@ -558,6 +571,8 @@ impl Entry {
 #[derive(Clone, Debug, PartialEq)]
 pub struct AnimatedClient {
     received: ClientState,
+    nicknames_enabled: bool,
+    nickname_draws: Vec<NicknameDraw>,
     score_enabled: bool,
     // Immutable sharing keeps equal-N caches intact across disposable transaction clones.
     score_tables: Option<Arc<ScoreTables>>,
@@ -601,6 +616,8 @@ impl AnimatedClient {
     pub fn new(start_ms: f64) -> Result<Self, ClientPresentationError> {
         Ok(Self {
             received: ClientState::default(),
+            nicknames_enabled: false,
+            nickname_draws: Vec::new(),
             score_enabled: false,
             score_tables: None,
             own_score_adjustment: 0,
@@ -637,9 +654,27 @@ impl AnimatedClient {
         self.reset_camera();
         self.connected = false;
         self.entries.clear();
+        self.nickname_draws.clear();
         self.own_score_adjustment = 0;
         self.foods.clear();
         self.preys.clear();
+    }
+
+    /// Enable appearance-owned nicknames before ingress; idempotent once enabled.
+    /// Reset preserves enablement. The default playable runtime always enables it.
+    /// Initial opacity one and neutral light RGB are authored local visual policy.
+    pub fn enable_nicknames(&mut self) -> Result<(), ClientPresentationError> {
+        if !self.nicknames_enabled && self.received.frames_applied != 0 {
+            return Err(ClientPresentationError::NicknameModeRequiresReset);
+        }
+        self.nicknames_enabled = true;
+        Ok(())
+    }
+
+    /// Frozen name commands from the latest preparation, independently of body culling.
+    /// Reading these commands advances no fade, camera or update clock.
+    pub fn nickname_draws(&self) -> &[NicknameDraw] {
+        &self.nickname_draws
     }
 
     /// Opt into canonical R and ordered Setup score tables before packets or after reset.
@@ -1883,6 +1918,15 @@ impl AnimatedClient {
                             snake,
                             antenna,
                             accessory: resolved.accessory,
+                            nickname: if next.nicknames_enabled {
+                                Some(RetainedNickname {
+                                    text: appearance.name.clone(),
+                                    state: NicknameState::new(1.)
+                                        .map_err(ClientPresentationError::from)?,
+                                })
+                            } else {
+                                None
+                            },
                         });
                         next.check_limits()?;
                         if own {
@@ -2623,6 +2667,42 @@ impl AnimatedClient {
         let top = camera.y - half_height;
         let bottom = camera.y + half_height;
         finite(&[left, right, top, bottom]).map_err(ClientPresentationError::from)?;
+        next.nickname_draws.clear();
+        for entry in next.entries.iter_mut().filter(|entry| entry.drawn) {
+            let Some(nickname) = &mut entry.nickname else {
+                continue;
+            };
+            let metrics = entry.snake.metrics();
+            if let Some(draw) = nickname
+                .state
+                .draw(NicknameInput {
+                    text: &nickname.text,
+                    // Authored neutral local policy; stock light-color/filter fidelity
+                    // is deliberately unresolved rather than inferred from skin IDs.
+                    color: [238, 238, 238],
+                    corrected_head: metrics.corrected_head,
+                    camera,
+                    viewport_half: Point {
+                        x: f64::from(width) / 2.,
+                        y: f64::from(height) / 2.,
+                    },
+                    zoom: next.camera.zoom(),
+                    scale: metrics.scale,
+                    spawn_progress: metrics.spawn_progress,
+                    death_progress: metrics.death_progress,
+                    own: entry.own,
+                    bounds: NicknameCullBounds {
+                        left,
+                        right,
+                        top,
+                        bottom,
+                    },
+                })
+                .map_err(ClientPresentationError::from)?
+            {
+                next.nickname_draws.push(draw);
+            }
+        }
         for entry in next.entries.iter_mut().filter(|entry| entry.drawn) {
             let visible = entry.snake.body().points().iter().any(|point| {
                 let position = point.position();

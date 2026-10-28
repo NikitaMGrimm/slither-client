@@ -37,6 +37,7 @@ function syntheticWasm(omit) {
     'animatedscene_render_standard_with_face_presentation_at_size',
     'animatedscene_control_view', 'animatedscene_advance_with_control', 'animatedscene_reset_lag',
     'animatedscene_set_background_backdrop',
+    'animatedscene_enable_nicknames',
     'encode_login', 'solve_challenge', 'decode_frame', 'setup_protocol_version'].filter(name => name !== omit);
   return Buffer.from([0, 97, 115, 109, 1, 0, 0, 0,
     ...section(1, [1, 0x60, 0, 0]),
@@ -268,6 +269,7 @@ for (const [name, change, expected] of [
 
 for (const name of ['animatedscene_control_view', 'animatedscene_advance_with_control', 'animatedscene_reset_lag',
   'animatedscene_set_background_backdrop',
+  'animatedscene_enable_nicknames',
   'animatedscene_apply_frame_and_render_standard_with_face_presentation_and_prey_and_hud',
   'encode_login', 'solve_challenge', 'decode_frame', 'setup_protocol_version']) {
   test(`missing production gameplay ABI ${name} fails before package output`, t => {
