@@ -13,6 +13,10 @@ include = ["/src", "/Cargo.lock", "/README.md", "/LICENSE"]
 [lib]
 crate-type = ["rlib", "cdylib"]
 
+[[bench]]
+name = "draw_list"
+harness = false
+
 [dependencies]
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
