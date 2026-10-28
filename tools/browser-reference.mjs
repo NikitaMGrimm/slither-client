@@ -130,7 +130,8 @@ try {
   receipt.trace = await trace.stop(path.join(output, 'private-chrome-trace.json'), receipt.worldLayers); trace = null;
   receipt.gpuTraceVerified = receipt.trace.hasGpuRasterPresentation && !receipt.trace.completion.dataLossOccurred;
   receipt.blockedRequests = blocked.length; receipt.pageErrors = pageErrors;
-  if (data.dropped || pageErrors || blocked.length || !receipt.foreground || receipt.adapterVerification.accepted !== true) throw new Error('Private capture gates rejected');
+  if (data.dropped || pageErrors || blocked.length || !receipt.foreground || !receipt.gpuTraceVerified
+    || receipt.adapterVerification.accepted !== true) throw new Error('Private capture gates rejected');
   if (reference) receipt.comparison = { reference: path.resolve(v.reference), metadataOnly: v['metadata-only'],
     screenshots: screenshots.map(s => ({ frame: s.frame, exactPngMatch: reference.screenshots.find(r => r.frame === s.frame)?.sha256 === s.sha256 })),
     canvasLogHashEqual: reference.canvasSha256 === receipt.canvasSha256,

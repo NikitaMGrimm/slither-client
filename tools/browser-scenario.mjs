@@ -5,7 +5,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { pathToFileURL } from 'node:url';
-import { root, freshOutput, json, fence, hash, cleanupResources } from './browser-common.mjs';
+import { root, freshOutput, json, fence, hash, cleanupResources, readConfinedFile } from './browser-common.mjs';
 import { syntheticPeer } from './browser-session-fixture.mjs';
 import { installProbe } from './browser-probe.mjs';
 
@@ -32,7 +32,7 @@ try {
   server.on('request', async (req, res) => {
     if (req.url !== '/assets/logo.svg') { for (const handler of handlers) handler(req, res); return; }
     if (req.method !== 'GET' || req.headers.host !== `127.0.0.1:${server.address().port}`) { res.writeHead(403); res.end(); return; }
-    try { const bytes = await readFile(path.join(repo, 'assets/logo.svg')); res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(bytes); }
+    try { const bytes = await readConfinedFile(repo, 'assets/logo.svg'); res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(bytes); }
     catch { res.writeHead(503); res.end(); }
   });
   server.listen(0, '127.0.0.1'); await once(server, 'listening');

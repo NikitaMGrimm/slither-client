@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, readFile, rm, realpath } from 'node:fs/promises';
+import { mkdtemp, mkdir, symlink, writeFile, readFile, rm, realpath } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import { root, freshOutput, within, syntheticServer, temporaryProfile, json, fence, cleanupResources } from './browser-common.mjs';
+import { root, freshOutput, within, syntheticServer, temporaryProfile, json, fence, cleanupResources, readConfinedFile } from './browser-common.mjs';
 import { summarizeTrace, assessGraphics } from './browser-trace.mjs';
 import { syntheticPeer } from './browser-session-fixture.mjs';
 import { WebSocket } from 'ws';
@@ -53,6 +53,25 @@ test('owned temporary profile cleanup is confined and removes only its profile',
   await writeFile(path.join(profile.path, 'synthetic.txt'), 'synthetic');
   await profile.remove();
   await assert.rejects(readFile(path.join(profile.path, 'synthetic.txt')), { code: 'ENOENT' });
+});
+
+test('static reads reject an assets junction escaping the selected repository', async () => {
+  const temp = await mkdtemp(path.join(os.tmpdir(), 'browser-confined-file-test-'));
+  try {
+    const repo = path.join(temp, 'repo'), outside = path.join(temp, 'outside');
+    await mkdir(repo); await mkdir(outside);
+    await writeFile(path.join(repo, 'owned.txt'), 'authored owned marker');
+    await writeFile(path.join(outside, 'logo.svg'), 'authored outside marker');
+    assert.equal((await readConfinedFile(repo, 'owned.txt')).toString(), 'authored owned marker');
+    await symlink(outside, path.join(repo, 'assets'), process.platform === 'win32' ? 'junction' : 'dir');
+    await assert.rejects(readConfinedFile(repo, 'assets/logo.svg'), /Escaped root/);
+    await assert.rejects(readConfinedFile(repo, '../outside/logo.svg'), /Escaped root/);
+  } finally {
+    const actual = await realpath(temp);
+    assert.ok(within(await realpath(os.tmpdir()), actual));
+    assert.match(path.basename(actual), /^browser-confined-file-test-/);
+    await rm(actual, { recursive: true });
+  }
 });
 
 test('loopback server admits exact authored routes and rejects host/path/method drift', async () => {

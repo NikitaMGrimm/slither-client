@@ -12,6 +12,11 @@ export const within = (base, file) => {
   const r = path.relative(base, file);
   return r === '' || (r !== '..' && !r.startsWith(`..${path.sep}`) && !path.isAbsolute(r));
 };
+export async function readConfinedFile(base, relative) {
+  const file = await realpath(path.resolve(base, relative));
+  if (!within(await realpath(base), file)) throw new Error('Escaped root');
+  return readFile(file);
+}
 export async function freshOutput(selected, otherRoots = []) {
   if (!selected) throw new Error('An explicit fresh --output directory is required');
   const target = path.resolve(selected);
@@ -52,9 +57,7 @@ export async function syntheticServer() {
     const entry = routes.get(req.url) ?? (snippet ? [`dist/web/${snippet[1]}`, 'text/javascript'] : null);
     if (!entry) return send(404, 'text/plain', 'No route');
     try {
-      const file = await realpath(path.join(root, entry[0]));
-      if (!within(await realpath(root), file)) throw new Error('Escaped root');
-      send(200, entry[1], await readFile(file));
+      send(200, entry[1], await readConfinedFile(root, entry[0]));
     } catch { send(503, 'text/plain', 'Resource unavailable'); }
   });
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
