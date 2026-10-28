@@ -86,11 +86,11 @@ test('local host supplies authored sources/profile and one claim without startin
   assert.equal(host.sources.palettes.length, 3);
   assert(host.sources.palettes.every(value => value instanceof f.realm.HTMLCanvasElement));
   assert(host.sources.background instanceof f.realm.HTMLImageElement);
-  assert.equal(host.sources.background.src, 'data:image/png;base64,synthetic-local-108x64');
+  assert.equal(host.sources.background.src, 'data:image/png;base64,synthetic-local-324x192');
   assert(host.sources.backgroundImage instanceof f.realm.HTMLImageElement);
   assert.equal(host.sources.backgroundImage.src, 'data:image/png;base64,synthetic-local-512x512');
   assert.equal(host.sources.background.complete, true); assert.equal(host.sources.backgroundImage.complete, true);
-  assert.equal(host.sources.background.naturalWidth, 108); assert.equal(host.sources.backgroundImage.naturalWidth, 512);
+  assert.equal(host.sources.background.naturalWidth, 324); assert.equal(host.sources.backgroundImage.naturalWidth, 512);
   assert.deepEqual(f.calls, ['decode', 'decode']);
   assert.equal(f.sockets.length, 0); assert.equal(f.listeners.size, 0);
   const metadata = host.gate.metadata();
