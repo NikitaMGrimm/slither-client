@@ -15,8 +15,9 @@ Accepted custom data takes precedence over built-in special features. Skin 27
 uses the single-image face family; skin 40 uses the mouth-face family. The stock
 rules also select ordinary/custom body recipes, paired side images and ordinary
 antennas from ready borrowed sources. The controller can explicitly select the
-existing accessory APIs; stock accessory selection remains unintegrated and
-active host accessories are rejected. Ready-source support does
+existing accessory APIs. External complete bundles may bind one explicitly
+supplied ready accessory through the [selected-source contract](static-accessory.md#explicit-ready-stock-source-binding).
+The live host snapshot still rejects active accessories. Ready-source support does
 not establish pending-source/loading equivalence.
 
 A snapshot may include caller-owned `nicknamePaletteRgb`: 42 own-data

@@ -199,8 +199,48 @@ mistakes and all candidate attempts remain retained outside Git.
 
 These checks use authored synthetic metadata and a logical Canvas recorder.
 They do not establish native Canvas pixels, original artwork, stock lazy loading,
-installed-host behavior or gameplay/server acceptance. The stock no-accessory
-guard remains. See [static accessories](static-accessory.md).
+installed-host behavior or gameplay/server acceptance. These historical checks
+precede the explicit ready stock binding below. See [static accessories](static-accessory.md).
+
+### Explicit ready stock binding
+
+The selected-source adapter slice uses authored synthetic source/realm doubles
+to check explicit own projection, own/remote selection with identical cosmetics,
+Paired/Mouth recipe and numeric coherence, custom-overrides-special eligibility,
+selected SingleImage rejection, positive-zero full crops, source aliases/content
+revisions, immutable selection and pending/error cleanup. Default face-mode
+appearance shapes and no-selection SingleImage remain unchanged. The shared
+validator is listed in both extension manifests, the package/VM fixture graphs
+and the exact local game route; package checks use synthetic Wasm metadata.
+
+The focused command passes 178 tests with zero skips on Node 24.15.0:
+
+```sh
+node --test tools/stock-skin-provider.test.mjs tools/stock-entity-assets.test.mjs tools/skin-provider.test.mjs tools/build-extension.test.mjs
+```
+
+The existing `staticAccessoryRenderSmoke` helper remains the real-Wasm recorder
+for retained own/death/ID reuse, crop submission, ordering, alpha and rollback;
+this slice introduces no rendering math. This worker checkout has no generated
+`dist/web` bindings. A direct helper invocation stops at `ERR_MODULE_NOT_FOUND`
+for `dist/web/slither_client.js` before recorder execution. Reproduction:
+
+```sh
+node --input-type=module -e "import { loadWasm } from './tools/reference-context.mjs'; import { staticAccessoryRenderSmoke } from './tools/static-accessory-render-smoke.mjs'; console.log(await staticAccessoryRenderSmoke(await loadWasm()));"
+```
+
+Combined full checks, builds, independent review and private browser comparison belong
+to integration. No browser, server, simulator, original art or network is used
+by the focused adapter checks. The first binding requires explicitly supplied
+full geometry, including forward; automatic stock chooser/policy selection,
+lazy loading and live host direct-image readiness remain separate scope.
+
+The reviewed index guard passes. The history guard still rejects
+`tools/build-extension.test.mjs: embedded source-map contents` in pre-existing
+checkpoint blobs (including `dbb5311`, `c3c0929` and `6e94227`). Checking the same
+path at parent `368c9c0` is clean. No guard change or history rewrite is included.
+The local route's HTTP test is left to integration because this worker scope
+permits no services or network.
 
 ## Bootstrap cleanup failures
 

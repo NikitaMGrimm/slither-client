@@ -1,5 +1,6 @@
 import { createSkinProvider } from './skin-provider.mjs';
 import { normalCustomPalette, ownData, resolveStockSkin, stockInteger } from './stock-skin-rules.mjs';
+import { assertStockAccessorySource, readStockAccessorySelection, sameStockAccessorySelection } from './stock-accessory-selection.mjs';
 
 // Original live-slot adapter. Host sources are borrowed, never loaded or painted.
 const freeze = Object.freeze;
@@ -39,10 +40,9 @@ function sourceShape(source, realm) {
   return freeze([width, height, complete]);
 }
 
-function capture(raw, realm) {
+function capture(raw, realm, appearanceMode) {
   const version = revision(ownData(raw, 'revision'));
   if (ownData(raw, 'normalGameplay') !== true) throw new TypeError('Ordinary desktop gameplay commitment required');
-  if (ownData(raw, 'ownAccessory') !== -1) throw new TypeError('Static accessory unsupported');
   const host = ownData(raw, 'host');
   const nsr = ownData(host, 'nsr');
   if (typeof nsr !== 'boolean') throw new TypeError('Explicit nsr required');
@@ -70,6 +70,12 @@ function capture(raw, realm) {
     const prior = commitments.get(source);
     if (prior && (prior.state !== state || !Object.is(prior.revision, contentRevision))) throw new TypeError('Conflicting source readiness');
     commitments.set(source, freeze({ state, revision: contentRevision }));
+  }
+  const accessory = readStockAccessorySelection(raw, realm, commitments);
+  if (accessory && appearanceMode !== 'accessory') {
+    const error = new TypeError('Selected stock accessory unsupported in face mode');
+    error.status = 'unsupported';
+    throw error;
   }
   const catalog = [];
   const shapes = [];
@@ -112,12 +118,26 @@ function capture(raw, realm) {
   const nicknamePaletteRgb = rawNickname === undefined ? null : freeze(list(rawNickname, 42, 'nickname palette table')
     .map(color => freeze(list(color, 3, 'nickname palette color')
       .map(channel => stockInteger(channel, 0, 255, 'nickname palette channel')))));
-  return freeze({ revision: version, nsr, palettes: freeze(palettes), slots: freeze(slots),
+  const accessoryAsset = accessory ? borrow(accessory.source) : null;
+  return freeze({ revision: version, nsr, palettes: freeze(palettes), slots: freeze(slots), accessory, accessoryAsset,
     assetCatalog: freeze(catalog), shapes: freeze(shapes), nicknamePaletteRgb });
 }
 
-function hostRecipe(rule, snapshot) {
+function selectedAccessory(request, rule, snapshot) {
+  const own = ownData(request, 'own');
+  if (Object.hasOwn(request, 'own') && typeof own !== 'boolean') throw new TypeError('Explicit own must be boolean');
+  const selected = own === true ? snapshot.accessory : null;
+  if (selected && !['standard', 'mouth-face'].includes(rule.eyes.kind)) {
+    const error = new TypeError('Selected stock accessory unsupported for this face family');
+    error.status = 'unsupported';
+    throw error;
+  }
+  return selected;
+}
+
+function hostRecipe(request, rule, snapshot) {
   if (rule.unsupportedFeatures.length) return { status: 'unsupported' };
+  const accessory = selectedAccessory(request, rule, snapshot);
   const selected = new Map();
   const palettes = [];
   const referenced = new Set();
@@ -151,6 +171,10 @@ function hostRecipe(rule, snapshot) {
       baseImage: { ...use(snapshot.slots[rule.eyes.baseImage.source]), sourceRect: rule.eyes.baseImage.sourceRect },
       pupilImage: { ...use(snapshot.slots[rule.eyes.pupilImage.source]), sourceRect: rule.eyes.pupilImage.sourceRect } }
     : rule.eyes;
+  const attachment = accessory ? { kind: 'static-head-image', ...use(snapshot.accessoryAsset),
+    sourceMode: 'crop', sourceRect: [0, 0, accessory.width, accessory.height], anchor: 'head',
+    forward: accessory.geometry.forward, scale: accessory.geometry.imageScale,
+    pivotX: accessory.geometry.pivotX, pivotY: accessory.geometry.pivotY, opacity: 1 } : null;
   const states = [...referenced].map(id => snapshot.assetCatalog[id].state);
   // The generic provider may infer an image's native readiness. Explicit host
   // commitments still gate this adapter, including committed canvas painting.
@@ -158,11 +182,12 @@ function hostRecipe(rule, snapshot) {
   if (status !== 'ready') return { status };
   return { status, basePalette, custom: rule.custom, runs, palettes,
     variantMode: rule.variantMode, variantPeriod: rule.variantPeriod, eyes,
-    effects, bodyStyle, faceDecoration, antenna, attachment: null, unsupportedFeatures: [] };
+    effects, bodyStyle, faceDecoration, antenna, attachment, unsupportedFeatures: [] };
 }
 
 /** Trusted main-world borrowing seam; see the private controller binding API. */
-export function createStockSkinAdapter({ realm, readSnapshot, random }) {
+export function createStockSkinAdapter({ realm, readSnapshot, random, appearanceMode = 'face' }) {
+  if (!['face', 'accessory'].includes(appearanceMode)) throw new TypeError('Invalid stock appearance mode');
   const constructors = freeze({ HTMLCanvasElement: ownData(realm, 'HTMLCanvasElement'),
     HTMLImageElement: ownData(realm, 'HTMLImageElement') });
   if (typeof constructors.HTMLCanvasElement !== 'function' || typeof constructors.HTMLImageElement !== 'function'
@@ -170,8 +195,9 @@ export function createStockSkinAdapter({ realm, readSnapshot, random }) {
   let active = null;
   let busy = false;
   let policy;
-  // Numeric signatures retain no source objects between operations. Pixel/content
-  // changes still require the trusted owner's explicit revision commitment.
+  let selection;
+  // Only the fixed accessory binding retains a source between operations.
+  // Pixel changes require the trusted owner's explicit content revision.
   const identities = new WeakMap();
   let nextIdentity = 0;
   let previousSignature;
@@ -186,7 +212,7 @@ export function createStockSkinAdapter({ realm, readSnapshot, random }) {
     return JSON.stringify([sources, selection, Object.values(snapshot.slots), snapshot.nicknamePaletteRgb]);
   }
   const provider = createSkinProvider({ trusted: true, realm: constructors,
-    resolveHostRecipe: request => hostRecipe(resolveStockSkin(request, active.nsr), active),
+    resolveHostRecipe: request => hostRecipe(request, resolveStockSkin(request, active.nsr), active),
     normalizeHostRecipe: value => value });
 
   function guarded(callback) {
@@ -202,13 +228,17 @@ export function createStockSkinAdapter({ realm, readSnapshot, random }) {
     beginOperation() {
       return guarded(() => {
         if (active) throw new Error('Stock operation already active');
-        const snapshot = capture(readSnapshot(), constructors);
+        const snapshot = capture(readSnapshot(), constructors, appearanceMode);
         if (policy !== undefined && policy !== snapshot.nsr) throw new Error('Appearance policy changed; reset with a new adapter');
+        if (selection !== undefined && !sameStockAccessorySelection(selection, snapshot.accessory)) {
+          throw new Error('Accessory selection changed; reset with a new adapter');
+        }
         const fingerprint = signature(snapshot);
         if (previousSignature !== undefined && Object.is(previousRevision, snapshot.revision) && previousSignature !== fingerprint) {
           throw new Error('Source or readiness changed without a new revision');
         }
         policy = snapshot.nsr;
+        selection = snapshot.accessory;
         previousSignature = fingerprint;
         previousRevision = snapshot.revision;
         active = snapshot;
@@ -224,20 +254,26 @@ export function createStockSkinAdapter({ realm, readSnapshot, random }) {
         }
         const rule = resolveStockSkin(request, snapshot.nsr);
         if (rule.unsupportedFeatures.length) throw new TypeError(`Unsupported stock appearance: ${rule.unsupportedFeatures.join(', ')}`);
+        assertStockAccessorySource(snapshot.accessory, constructors);
+        const accessory = selectedAccessory(request, rule, snapshot);
         const face = ['single-image', 'mouth-face'].includes(rule.eyes.kind)
           ? freeze({ kind: rule.eyes.kind, geometry: rule.eyes.geometry })
           : freeze({ kind: 'paired', eyes: rule.eyes, decoration: rule.faceDecoration
             ? freeze({ kind: rule.faceDecoration.kind, geometry: rule.faceDecoration.geometry }) : freeze({ kind: 'none' }) });
         const palette = snapshot.nicknamePaletteRgb;
         // Rust validates the units and resolves the color once for this appearance.
-        return freeze({ face, antenna: rule.antenna?.geometry ?? null,
+        const appearance = freeze({ face, antenna: rule.antenna?.geometry ?? null,
+          ...(appearanceMode === 'accessory' ? { accessory: accessory?.geometry ?? null } : {}),
           ...(palette ? { nicknameTint: freeze({ baseRgb: palette[rule.basePalette],
             randomUnits: freeze([random(), random(), random()]) }) } : {}) });
+        assertStockAccessorySource(snapshot.accessory, constructors);
+        return appearance;
       });
     },
     resolveRecipe(request) {
       return guarded(() => {
         const snapshot = current();
+        assertStockAccessorySource(snapshot.accessory, constructors);
         for (let i = 0; i < snapshot.assetCatalog.length; i++) {
           const { source } = snapshot.assetCatalog[i];
           if (source === null) continue;
