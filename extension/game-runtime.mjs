@@ -561,6 +561,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
       const capture = localHost ? localHost.sources : reader.capture();
       if (context && (capture.background !== context.background
         || capture.backgroundImage !== context.backgroundImage
+        || (capture.appearanceMode ?? 'face') !== context.appearanceMode
         || capture.palettes.some((source, index) => source !== context.palettes[index]))) {
         const error = new Error('Renderer context sources changed; reload required'); error.status = 'unsupported'; throw error;
       }
@@ -615,6 +616,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
       } });
     const startMs = native.now();
     context = { palettes: initial.palettes, background: initial.background,
+      appearanceMode: initial.appearanceMode ?? 'face',
       backgroundImage: initial.backgroundImage };
     scene = new wasmApi.AnimatedScene(startMs);
     scene.enable_nicknames();
@@ -624,6 +626,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     quality = new wasmApi.DesktopQuality(1, startMs);
     const backing = size();
     controller = createStockClient({ scene, quality, adapter: wrapped, hostAssets, target,
+      appearanceMode: context.appearanceMode,
       palettes: initial.palettes, background: initial.background, ...backing });
     initial = undefined;
     // The captured context objects cannot silently switch while the scene retains their uses.

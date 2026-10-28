@@ -219,7 +219,7 @@ test('owned leaderboard startup, deferred publication and resource ownership', a
   });
 });
 
-test('local host selects ready sources and explicit profile; disconnected or returned-victory idle publication enables Play again', async () => {
+test('local host selects explicit accessory dispatch, ready sources and profile; idle publication enables Play again', async () => {
   await runGameModuleTest(async ({ assert, createGraph }) => {
     const graph = createGraph({ hudNative: true, ownedHudNative: true, ownedPlayNative: true,
       leaderboardNative: true, prepareWasm(api, run) {
@@ -262,9 +262,20 @@ test('local host selects ready sources and explicit profile; disconnected or ret
     const endpoint = 'ws://127.0.0.1:19400/slither', events = [];
     let selectedBackdrop;
     graph.wasm.api.AnimatedScene.prototype.set_background_backdrop = image => { selectedBackdrop = image; };
+    const prototype = graph.wasm.api.AnimatedScene.prototype;
+    let accessoryDraws = 0;
+    for (const family of ['apply_frame_and_render_standard_with_', 'render_standard_with_']) {
+      const suffix = family.startsWith('apply') ? '_presentation_and_prey' : '_presentation_at_size';
+      const original = prototype[family + 'face' + suffix];
+      prototype[family + 'accessory' + suffix] = function (...args) {
+        if (family.startsWith('render')) accessoryDraws++;
+        return Reflect.apply(original, this, args);
+      };
+      prototype[family + 'face' + suffix] = () => assert.fail('Local accessory mode used the face API');
+    }
     let runtime, active = false, disposed = false, begins = 0, ends = 0, claims = 0, presets = 0, sourceHook;
     let initialized = false, skinBindings = 0;
-    const sources = { palettes: [graph.f.canvas(),graph.f.canvas(),graph.f.canvas()],
+    const sources = { appearanceMode: 'accessory', palettes: [graph.f.canvas(),graph.f.canvas(),graph.f.canvas()],
       background: new graph.f.realm.HTMLImageElement(),
       backgroundImage: new graph.f.realm.HTMLImageElement(),
       adapter: {
@@ -325,6 +336,7 @@ test('local host selects ready sources and explicit profile; disconnected or ret
     assert.equal(request.endpoint,endpoint);assert.equal(request.profile,localHost.profile);
     assert.equal(request.nickname,' Local ');assert.equal(request.skin,0);assert.equal(request.customSkin.length,0);
     graph.f.frame(8);assert.equal(begins,1);assert.equal(ends,1);assert.equal(runtime.diagnostics().captureHeld,false);
+    assert.equal(accessoryDraws, 1, 'The explicit source-bundle mode reaches the actual controller');
     seam.disconnect();
     assert.equal(graph.f.edit.ownedPlay.buttonState(button).disabled,true,'status stack never unlocks');
     graph.f.flush();assert.equal(graph.f.edit.ownedPlay.buttonState(button).disabled,false);
