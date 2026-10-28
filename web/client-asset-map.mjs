@@ -1,5 +1,14 @@
-/** Original Canvas stand-ins for the default local client; no external artwork. */
-export async function createClientAssetMap({ realm = globalThis } = {}) {
+/** Default authored artwork, or an explicitly supplied private comparison pack. */
+export async function createClientAssetMap({ realm = globalThis, sourceFactory, random } = {}) {
+  if (sourceFactory !== undefined) {
+    if (typeof sourceFactory !== 'function') throw new TypeError('Comparison source factory required');
+    const sources = await sourceFactory({ realm, random });
+    if (!Array.isArray(sources?.palettes) || sources.palettes.length !== 3
+      || !sources.background || !sources.adapter || !sources.hostAssets) {
+      throw new TypeError('Complete comparison source bundle required');
+    }
+    return sources;
+  }
   const createElement = realm.document.createElement.bind(realm.document);
   const decode = realm.HTMLImageElement.prototype.decode;
   const palettes = ['#83d5b0', '#efbb62', '#76b9ed'].map(color => {

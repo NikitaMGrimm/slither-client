@@ -2,6 +2,27 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createClientAssetMap } from '../web/client-asset-map.mjs';
 
+test('comparison asset map awaits the explicit factory and preserves its source identities', async () => {
+  const realm = {}, random = () => 0.25;
+  const sources = { palettes: [{}, {}, {}], background: {}, backgroundImage: {}, adapter: {}, hostAssets: {} };
+  let release;
+  const ready = new Promise(resolve => { release = resolve; });
+  const pending = createClientAssetMap({ realm, random, sourceFactory: async options => {
+    assert.equal(options.realm, realm); assert.equal(options.random, random);
+    await ready;
+    return sources;
+  } });
+  release();
+  assert.equal(await pending, sources);
+});
+
+test('an explicit broken comparison pack fails instead of creating replacement artwork', async () => {
+  await assert.rejects(createClientAssetMap({ realm: {}, sourceFactory: null }), /factory required/);
+  await assert.rejects(createClientAssetMap({ realm: {}, sourceFactory: () => ({}) }), /Complete comparison/);
+  const failure = new Error('Synthetic private pack unavailable');
+  await assert.rejects(createClientAssetMap({ realm: {}, sourceFactory: () => { throw failure; } }), error => error === failure);
+});
+
 // Original synthetic Canvas/image doubles record drawing, not browser pixels.
 function fixture({ decode } = {}) {
   const canvases = [], images = [], encoded = new Map();
