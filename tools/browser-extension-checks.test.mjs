@@ -87,3 +87,28 @@ test('unsupported native Chrome installation closes its owned context without fa
   await assert.rejects(installedChrome({ root: '/authored-package' }, { path: '/authored-temp-profile' }, { origin: 'http://127.0.0.1:1234' }, bounded, browserType), /unsupported native installation/);
   assert.deepEqual(calls, ['Extensions.loadUnpacked']); assert.equal(closed, 1);
 });
+test('stalled native Chrome attachment preserves deadlines and primary failure', async () => {
+  for (const cleanupFails of [false, true]) {
+    let closed = 0, primary;
+    const labels = [];
+    const context = { browser() { return { newBrowserCDPSession() { return new Promise(() => {}); } }; },
+      async close() { closed++; if (cleanupFails) throw new Error('Authored cleanup failure'); } };
+    const browserType = { async launchPersistentContext() { return context; } };
+    const shortDeadline = async (operation, ms, label) => {
+      labels.push([label, ms]);
+      try { return await bounded(operation, label === 'Native CDP attachment' ? 5 : ms, label); }
+      catch (error) { if (label === 'Native CDP attachment') primary = error; throw error; }
+    };
+    await assert.rejects(installedChrome({ root: '/authored-package' }, { path: '/authored-temp-profile' },
+      { origin: 'http://127.0.0.1:1234' }, shortDeadline, browserType), error => {
+      assert.match(primary.message, /Native CDP attachment deadline exceeded/);
+      if (cleanupFails) {
+        assert.equal(error.cause, primary); assert.equal(error.errors[0], primary);
+        assert.match(error.errors[1].message, /Authored cleanup failure/);
+      } else assert.equal(error, primary);
+      assert.equal(error.message, primary.message); return true;
+    });
+    assert.equal(closed, 1);
+    assert.deepEqual(labels, [['Native CDP attachment', 15000], ['Failed installation context close', 20000]]);
+  }
+});

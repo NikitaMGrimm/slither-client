@@ -8,7 +8,8 @@ export async function installedChrome(audit, profile, fixture, bounded, browserT
     ignoreDefaultArgs: ['--disable-extensions', '--disable-component-extensions-with-background-pages', '--disable-gpu', '--enable-unsafe-swiftshader'],
     args: ['--enable-unsafe-extension-debugging', '--no-first-run', '--no-default-browser-check'], timeout: 30000 });
   try {
-    const browser = context.browser(), cdp = await browser.newBrowserCDPSession();
+    const browser = context.browser();
+    const cdp = await bounded(() => browser.newBrowserCDPSession(), 15000, 'Native CDP attachment');
     const { id } = await bounded(() => cdp.send('Extensions.loadUnpacked', { path: audit.root }), 15000, 'Extension installation');
     const listing = await bounded(() => cdp.send('Extensions.getExtensions'), 15000, 'Native extension inventory');
     const installed = listing.extensions.find(extension => extension.id === id && extension.enabled);
@@ -29,5 +30,9 @@ export async function installedChrome(audit, profile, fixture, bounded, browserT
       async findPage(url) { return context.pages().find(page => page.url() === url) ?? null; },
       async screenshot(page, file) { await page.screenshot({ path: file }); },
       async close() { await context.close(); } };
-  } catch (error) { await bounded(() => context.close(), 20000, 'Failed installation context close'); throw error; }
+  } catch (error) {
+    try { await bounded(() => context.close(), 20000, 'Failed installation context close'); }
+    catch (cleanupError) { throw new AggregateError([error, cleanupError], error.message, { cause: error }); }
+    throw error;
+  }
 }

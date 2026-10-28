@@ -91,6 +91,11 @@ Synthetic mocks, package/route audits and fresh ABI success are not installed
 acceptance. Firefox and Chrome-specific installation paths may fail on an
 unsupported browser/driver version; that is reported, not silently replaced.
 
+Firefox's empty error/request arrays are placeholders, not observed native
+error/request silence. Its evidence is limited to command outcomes, the preview
+report/resource snapshot and deny-proxy records. Resource timing is a snapshot;
+this harness does not claim an OS-wide egress or denied-connect CSP probe.
+
 ## Primary API references
 
 - [Playwright extension support and removed branded-Chrome flags](https://playwright.dev/docs/chrome-extensions)
