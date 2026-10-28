@@ -123,6 +123,7 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, g
     'animatedscene_render_standard_with_face_presentation_at_size',
     'animatedscene_control_view', 'animatedscene_advance_with_control', 'animatedscene_reset_lag',
     'animatedscene_set_background_backdrop',
+    'animatedscene_enable_nicknames',
     'encode_login', 'solve_challenge', 'decode_frame', 'setup_protocol_version',
     ...Array.from(glue.matchAll(/\bwasm\.([A-Za-z_]\w*)/g), match => match[1])]) {
     if (!exports.has(name)) throw new Error(`Wasm/glue export mismatch: ${name}`);

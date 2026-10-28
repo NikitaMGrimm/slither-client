@@ -187,6 +187,7 @@ function wasmDouble(f) {
   const request = { skin: 24, id: 1, cosmetic: 255, x: 0, y: 0, customBytes: new Uint8Array(), own: true, drawOrdinal: 0 };
   class AnimatedScene {
     constructor() { calls.push('scene'); this.connected = false; this.own = null; this.borrowed = false; }
+    enable_nicknames() { this.outside(); calls.push('enable-nicknames'); }
     outside() { assert.equal(this.borrowed, false, 'no native reentry'); }
     control_view() { this.outside(); controlReads++; f.faults.control?.(); return { own: this.own, camera: { x: 100, y: 200 }, zoom: 1, follows: true, connected: this.connected }; }
     reset_lag() { this.outside(); calls.push('reset_lag'); }
@@ -1393,7 +1394,7 @@ test('true startup preserves exact score-enable primaries and dispose-only start
     h.failures.set('scene.free', new Error('secondary')); h.failures.set('status:csp-or-module-unavailable', false);
     const result = await rejected(() => h.start());
     assert.equal(result.thrown, true); assert(Object.is(result.error, primary));
-    assert.deepEqual(h.wasm.calls, ['scene', 'enable-score']);
+    assert.deepEqual(h.wasm.calls, ['scene', 'enable-nicknames', 'enable-score']);
     assert.deepEqual(h.wasm.counts(), { sceneFrees: 1, qualityFrees: 0, stepFrees: 0 });
   }
   const h = hudOwnerHarness();

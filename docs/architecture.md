@@ -28,6 +28,14 @@ policy remain migration debt under the Rust ownership target. New local-host
 work is browser/DOM/capability glue; it must not introduce new game-domain logic.
 See the [roadmap](roadmap.md) for remaining work.
 
+The default runtime enables Rust-owned nickname presentation before ingress.
+Each retained snake appearance owns its text and fade state, independently of
+wire-ID reuse. Rust prepares screen-space text commands; a scoped Canvas pass
+submits them before bodies for ordinary, Setup and resize draws. The current
+authored policy uses initial opacity 1, neutral light RGB `[238,238,238]` and
+plain admitted Latin1 text. Skin-specific light colors, text policy and browser
+font equivalence remain incomplete.
+
 ## Protocol boundary
 
 The extension's optional [private nickname-edit gate](extension.md#private-nickname-edit-defaults)

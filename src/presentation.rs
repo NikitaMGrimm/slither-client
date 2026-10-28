@@ -29,6 +29,7 @@ mod hud;
 mod leaderboard_score;
 mod length;
 mod mouth_face;
+mod nickname;
 mod prey;
 mod prey_painter;
 mod quality;
@@ -90,6 +91,10 @@ pub use leaderboard_score::{
 };
 pub use length::LengthPresentation;
 pub use mouth_face::{MouthFaceGeometry, MouthFaceLayout, MouthImageLayout};
+pub use nickname::{
+    NicknameAlignment, NicknameBaseline, NicknameCullBounds, NicknameDraw, NicknameInput,
+    NicknameState,
+};
 pub use prey::{
     MAX_PREY_FAMILY_SOURCES, MAX_RETAINED_PREYS, PreyCorrections, PreyEaterPose, PreyError,
     PreyFactory, PreyFactoryInput, PreyInstance, PreyPalette, PreyPresentation, PreySnapshot,
