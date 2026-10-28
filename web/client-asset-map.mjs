@@ -10,9 +10,11 @@ export async function createClientAssetMap({ realm = globalThis } = {}) {
     return canvas;
   });
   const tile = createElement('canvas');
-  tile.width = 108; tile.height = 64;
+  const cellScale = 3;
+  tile.width = 108 * cellScale; tile.height = 64 * cellScale;
   const context = tile.getContext('2d');
   function hexagon(x, y, radius, color) {
+    x *= cellScale; y *= cellScale; radius *= cellScale;
     context.fillStyle = color;
     context.beginPath();
     context.moveTo(x + radius, y + radius / 4);

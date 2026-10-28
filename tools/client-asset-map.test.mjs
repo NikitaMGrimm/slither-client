@@ -60,7 +60,7 @@ test('asset map preserves the authored palettes and returns ready tile and 512-s
   }
   assert.notEqual(assets.background, assets.backgroundImage);
   assert.notEqual(assets.background.src, assets.backgroundImage.src);
-  for (const [image, width, height] of [[assets.background, 108, 64], [assets.backgroundImage, 512, 512]]) {
+  for (const [image, width, height] of [[assets.background, 324, 192], [assets.backgroundImage, 512, 512]]) {
     assert(image instanceof f.realm.HTMLImageElement);
     assert.equal(image.complete, true);
     assert.deepEqual([image.naturalWidth, image.naturalHeight], [width, height]);
@@ -113,7 +113,7 @@ test('asset map waits for both generated images before publishing sources', asyn
   let ready = false;
   const pending = createClientAssetMap({ realm: f.realm }).then(assets => { ready = true; return assets; });
   assert.equal(releases.size, 2);
-  releases.get(108)();
+  releases.get(324)();
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(ready, false);
   assert.equal(f.images[0].complete, true); assert.equal(f.images[1].complete, false);
@@ -123,7 +123,7 @@ test('asset map waits for both generated images before publishing sources', asyn
 });
 
 test('a failed tile or backdrop decode rejects the map', async () => {
-  for (const size of [108, 512]) {
+  for (const size of [324, 512]) {
     const failure = new Error(`Synthetic decode failure: ${size}`);
     const f = fixture({ decode(canvas) { if (canvas.width === size) throw failure; } });
     await assert.rejects(createClientAssetMap({ realm: f.realm }), error => error === failure);
