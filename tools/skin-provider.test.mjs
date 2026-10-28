@@ -636,6 +636,23 @@ test('optional cosmetic request metadata is bounded and copied without changing 
   assert.equal(Object.hasOwn(f.calls.at(-1)[1], 'cosmetic'), false);
 });
 
+test('optional own projects exact booleans and preserves absent legacy requests before callbacks', () => {
+  const f = fixture(); f.resolve({ skin: 7 });
+  assert.deepEqual(f.calls.at(-1)[1], { skin: 7, customBytes: undefined, x: undefined, y: undefined, attachmentId: undefined });
+  for (const own of [true, false]) {
+    f.resolve({ skin: 7, own, cosmetic: 71 });
+    assert.equal(f.calls.at(-1)[1].own, own); assert(Object.isFrozen(f.calls.at(-1)[1]));
+  }
+  const count = f.calls.length;
+  for (const own of [undefined, null, 0, 1, 'true', {}, Promise.resolve(true)]) {
+    assert.throws(() => f.resolve({ skin: 7, own }), /own/);
+  }
+  assert.throws(() => f.resolve({ skin: 7, get own() { assert.fail('own getter'); } }), /Accessor/);
+  assert.equal(f.calls.length, count);
+  const inherited = Object.assign(Object.create({ own: true }), { skin: 7 });
+  f.resolve(inherited); assert(!Object.hasOwn(f.calls.at(-1)[1], 'own'));
+});
+
 test('absent and null body style preserve the exact legacy shape and feature tags', () => {
   const f = fixture();
   f.metadata.effects = [{ kind: 'boost-glow', asset: 0, opacity: 0.25 }];

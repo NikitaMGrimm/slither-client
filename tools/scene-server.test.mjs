@@ -35,7 +35,7 @@ test('scene server is local, allowlisted and requires no reference or socket', a
   const policy = page.headers['content-security-policy'];
   assert.match(policy, /connect-src 'self';/); assert.doesNotMatch(policy, /ws:|'unsafe-inline'|'unsafe-eval'/);
   for (const resource of ['/anchors', '/game/bootstrap.mjs', '/game/runtime.mjs', '/game/host.css',
-    '/game/local-game-host.mjs', '/game/client-asset-map.mjs', '/game/owned-minimap-ui.mjs', '/game/stock-gameplay.mjs', '/game/stock-leaderboard-state.mjs',
+    '/game/local-game-host.mjs', '/game/client-asset-map.mjs', '/game/stock-accessory-selection.mjs', '/game/owned-minimap-ui.mjs', '/game/stock-gameplay.mjs', '/game/stock-leaderboard-state.mjs',
     '/animated', '/scene/animated.mjs', '/scene/desktop-layout.mjs', '/scene/synthetic-body.mjs', '/scene/synthetic-food.mjs', '/scene/synthetic-prey.mjs', '/scene/skin-provider.mjs', '/benchmark', '/scene/benchmark.mjs', '/scene/dense-scene.mjs', '/scene/scene.css', '/scene/scene.mjs', '/scene/synthetic-scene.mjs', '/scene/loopback-session.mjs']) {
     assert.equal((await request(resource)).status, 200);
   }
