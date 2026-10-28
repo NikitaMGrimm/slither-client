@@ -321,6 +321,38 @@ test('unregistration during the final captured keyboard getter cannot retain nat
   assert.equal(reads, 2); f.flush(); assert.equal(f.calls.scheduled, 0);
 });
 
+for (const [name, invalidate] of [
+  ['detached', (f, h) => h.mount.removeChild(h.button)],
+  ['disabled', (f, h) => { f.dom.state(h.button).disabled = true; }],
+  ['unfocused', (f, h) => { f.dom.state(f.document).active = h.endpoint; }],
+]) test(`final captured keyboard getter cannot allow the ${name} Play button default`, () => {
+  let hook = () => {};
+  const f = fixture({ prepare(dom) {
+    const original = Object.getOwnPropertyDescriptor(dom.Keyboard.prototype, 'shiftKey');
+    Object.defineProperty(dom.Keyboard.prototype, 'shiftKey', { ...original, get() {
+      hook(); return Reflect.apply(original.get, this, []);
+    } });
+  } });
+  const h = controls(f); h.bind(); f.dom.state(f.document).active = h.button;
+  let reads = 0; hook = () => { if (++reads === 2) invalidate(f, h); };
+  assert.equal(f.edit.dispatch('keydown', { target: h.button, key: 'Enter' }).defaultPrevented, true);
+  assert.equal(reads, 2); f.flush(); assert.equal(f.calls.scheduled, 0);
+});
+
+test('final captured Tab getter cannot retain an unregistered nickname member', () => {
+  let hook = () => {};
+  const f = fixture({ prepare(dom) {
+    const original = Object.getOwnPropertyDescriptor(dom.Keyboard.prototype, 'key');
+    Object.defineProperty(dom.Keyboard.prototype, 'key', { ...original, get() {
+      hook(); return Reflect.apply(original.get, this, []);
+    } });
+  } });
+  const h = controls(f); h.bind(); f.dom.state(f.document).active = h.nickname;
+  let reads = 0; hook = () => { if (++reads === 3) h.nicknameLease.unregister(); };
+  assert.equal(f.edit.dispatch('keydown', { target: h.nickname, key: 'Tab' }).defaultPrevented, true);
+  assert.equal(reads, 3); f.flush(); assert.equal(f.calls.scheduled, 0);
+});
+
 test('genuine exact primary click queues only after fence/routing unwind, once while pending', () => {
   let count = 0;
   const f = fixture({ scheduler(callback, queued) {

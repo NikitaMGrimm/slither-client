@@ -606,8 +606,13 @@
     const key = editing.key(event);
     const allow = key === 'Tab' || target === controls.button && !editing.shift(event)
       && (key === 'Enter' || key === ' ' || editing.code(event) === 'NumpadEnter');
-    return allow && controlsLease === controls && current(controls.generation)
-      && controlsLease === controls;
+    if (!allow || controlsLease !== controls || !current(controls.generation)) return false;
+    // Keyboard getters can revoke a member or change its focus/DOM eligibility.
+    const eligibleNow = target === controls.button ? eligibleButton(controls)
+      : (member === controls.edit || lease === member) && eligible(member, true)
+        && (member === controls.edit || lease === member);
+    return eligibleNow && editing.active(editing.initialDocument) === target
+      && controlsLease === controls && current(controls.generation) && controlsLease === controls;
   }
   function sameDocument(target) {
     return target === editing.initialDocument || editing.ownerDocument(target) === editing.initialDocument;
