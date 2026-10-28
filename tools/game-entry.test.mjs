@@ -2,6 +2,26 @@
 import { test } from 'node:test';
 import { runGameModuleTest } from './game-module-test-fixture.mjs';
 
+test('local setup failures are visible and retain their original rejection', async () => {
+  await runGameModuleTest(async ({ assert, createGraph }) => {
+    const graph = createGraph({ armed: false });
+    const entry = await graph.load('bootstrap.mjs');
+    const primary = Error('Local configuration fetch failed');
+    for (const fetch of [async () => { throw primary; },
+      async () => ({ ok: false }), async () => ({ ok: true, json: async () => ({ simulatorUrl: null }) })]) {
+      const status = { textContent: 'Loading local client…' };
+      const realm = { location: { href: 'http://127.0.0.1:18884/' }, fetch,
+        document: { getElementById: () => status } };
+      await assert.rejects(entry.startGamePage({ realm }), /configuration|simulator-port/);
+      assert.notEqual(status.textContent, 'Loading local client…');
+    }
+    const realm = { location: { href: 'http://127.0.0.1:18884/' },
+      fetch: async () => { throw primary; }, document: { getElementById: () => null } };
+    await assert.rejects(entry.startGamePage({ realm }), error => error === primary);
+    assert.equal(graph.counts.initialize, 0);
+  });
+});
+
 test('actual default graph mounts HUD, Play and leaderboard with one claim, scene and RAF', async () => {
   await runGameModuleTest(async ({ assert, createGraph }) => {
     let release;
