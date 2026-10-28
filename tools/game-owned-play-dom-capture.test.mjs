@@ -239,7 +239,7 @@ test('endpoint notifications stay local, raw records deliver once, and nickname 
 
 test('one gesture selects the actual member; forbidden keys/defaults remain denied', () => {
   const f = fixture(), h = controls(f); h.bind(); f.dom.state(f.document).active = h.endpoint;
-  for (const key of ['Enter', 'Tab', 'Escape', 'F1']) assert.equal(f.edit.dispatch('keydown', { target: h.endpoint, key }).defaultPrevented, true);
+  for (const key of ['Enter', 'Escape', 'F1']) assert.equal(f.edit.dispatch('keydown', { target: h.endpoint, key }).defaultPrevented, true);
   assert.equal(f.edit.dispatch('beforeinput', { target: h.endpoint, inputType: 'formatBold' }).defaultPrevented, true);
   assert.equal(f.edit.dispatch('beforeinput', { target: h.endpoint, inputType: 'insertText' }).defaultPrevented, false);
   assert.equal(f.edit.dispatch('mousedown', { target: h.endpoint, button: 0 }).defaultPrevented, false);
@@ -249,6 +249,108 @@ test('one gesture selects the actual member; forbidden keys/defaults remain deni
   assert.equal(f.edit.dispatch('mousemove', { target: h.mount, buttons: 1 }).defaultPrevented, false);
   f.edit.dispatch('mouseup', { target: h.mount, button: 0 });
   assert.equal(f.edit.dispatch('mousemove', { target: h.mount, buttons: 1 }).defaultPrevented, true);
+});
+
+test('current owned controls allow native Tab traversal and native button keys without scheduling a Play', () => {
+  const f = fixture(); let plays = 0;
+  const h = controls(f, () => { plays++; }), lease = h.bind();
+  for (const target of [h.endpoint, h.nickname, h.button]) {
+    f.dom.state(f.document).active = target;
+    for (const type of ['keydown', 'keyup', 'keypress']) for (const shiftKey of [false, true]) {
+      assert.equal(f.edit.dispatch(type, { target, key: 'Tab', code: 'Tab', shiftKey }).defaultPrevented, false);
+    }
+  }
+  f.dom.state(f.document).active = h.button;
+  for (const type of ['keydown', 'keyup', 'keypress']) for (const [key, code] of [['Enter', 'Enter'], [' ', 'Space'], ['Enter', 'NumpadEnter']]) {
+    assert.equal(f.edit.dispatch(type, { target: h.button, key, code }).defaultPrevented, false);
+  }
+  f.flush(); assert.equal(plays, 0, 'only a subsequent native trusted click may request Play');
+  h.click(); f.flush(); assert.equal(plays, 1);
+  lease.unregister();
+  assert.equal(f.edit.dispatch('keydown', { target: h.button, key: 'Enter' }).defaultPrevented, true);
+});
+
+test('owned keyboard defaults remain confined by focus, modifiers, availability and current topology', () => {
+  for (const change of [
+    (f, h) => { f.dom.state(f.document).active = h.endpoint; },
+    (f, h) => { f.dom.state(h.button).disabled = true; },
+    (f, h) => { f.dom.state(h.mount).inert = true; },
+    (f, h) => { f.dom.state(h.button).visible = false; },
+    (f, h) => { Reflect.apply(f.dom.Node.prototype.removeChild, h.mount, [h.button]); },
+  ]) {
+    const f = fixture(), h = controls(f); h.bind(); f.dom.state(f.document).active = h.button;
+    change(f, h);
+    assert.equal(f.edit.dispatch('keydown', { target: h.button, key: 'Enter' }).defaultPrevented, true);
+    f.flush(); assert.equal(f.calls.sockets, 0);
+  }
+  const f = fixture(), h = controls(f); h.bind();
+  for (const target of [h.endpoint, h.nickname, h.button]) {
+    f.dom.state(f.document).active = target;
+    for (const modifiers of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }, { isComposing: true }]) {
+      assert.equal(f.edit.dispatch('keydown', { target, key: 'Tab', ...modifiers }).defaultPrevented, true);
+    }
+    if (target !== h.button) assert.equal(f.edit.dispatch('keydown', { target, key: 'Enter' }).defaultPrevented, true);
+  }
+  f.dom.state(f.document).active = h.mount;
+  assert.equal(f.edit.dispatch('keydown', { target: h.mount, key: 'Tab' }).defaultPrevented, true);
+});
+
+test('owned button keyboard defaults reject a non-synchronous router and post-router replacement', () => {
+  for (const route of [() => Promise.resolve(), (f, h) => {
+    Reflect.apply(f.dom.Node.prototype.removeChild, h.mount, [h.button]);
+  }]) {
+    const f = fixture(), h = controls(f);
+    f.native.setInput(() => route(f, h)); h.bind(); f.dom.state(f.document).active = h.button;
+    if (route.length === 0) assert.throws(() => f.edit.dispatch('keydown', { target: h.button, key: 'Enter' }), /undefined synchronously/);
+    else assert.equal(f.edit.dispatch('keydown', { target: h.button, key: 'Enter' }).defaultPrevented, true);
+    f.flush(); assert.equal(f.calls.scheduled, 0);
+  }
+});
+
+test('unregistration during the final captured keyboard getter cannot retain native-default permission', () => {
+  let hook = () => {};
+  const f = fixture({ prepare(dom) {
+    const original = Object.getOwnPropertyDescriptor(dom.Keyboard.prototype, 'key');
+    Object.defineProperty(dom.Keyboard.prototype, 'key', { ...original, get() {
+      hook(); return Reflect.apply(original.get, this, []);
+    } });
+  } });
+  const h = controls(f), lease = h.bind(); f.dom.state(f.document).active = h.button;
+  let reads = 0; hook = () => { if (++reads === 2) lease.unregister(); };
+  assert.equal(f.edit.dispatch('keydown', { target: h.button, key: 'Tab' }).defaultPrevented, true);
+  assert.equal(reads, 2); f.flush(); assert.equal(f.calls.scheduled, 0);
+});
+
+for (const [name, invalidate] of [
+  ['detached', (f, h) => h.mount.removeChild(h.button)],
+  ['disabled', (f, h) => { f.dom.state(h.button).disabled = true; }],
+  ['unfocused', (f, h) => { f.dom.state(f.document).active = h.endpoint; }],
+]) test(`final captured keyboard getter cannot allow the ${name} Play button default`, () => {
+  let hook = () => {};
+  const f = fixture({ prepare(dom) {
+    const original = Object.getOwnPropertyDescriptor(dom.Keyboard.prototype, 'shiftKey');
+    Object.defineProperty(dom.Keyboard.prototype, 'shiftKey', { ...original, get() {
+      hook(); return Reflect.apply(original.get, this, []);
+    } });
+  } });
+  const h = controls(f); h.bind(); f.dom.state(f.document).active = h.button;
+  let reads = 0; hook = () => { if (++reads === 2) invalidate(f, h); };
+  assert.equal(f.edit.dispatch('keydown', { target: h.button, key: 'Enter' }).defaultPrevented, true);
+  assert.equal(reads, 2); f.flush(); assert.equal(f.calls.scheduled, 0);
+});
+
+test('final captured Tab getter cannot retain an unregistered nickname member', () => {
+  let hook = () => {};
+  const f = fixture({ prepare(dom) {
+    const original = Object.getOwnPropertyDescriptor(dom.Keyboard.prototype, 'key');
+    Object.defineProperty(dom.Keyboard.prototype, 'key', { ...original, get() {
+      hook(); return Reflect.apply(original.get, this, []);
+    } });
+  } });
+  const h = controls(f); h.bind(); f.dom.state(f.document).active = h.nickname;
+  let reads = 0; hook = () => { if (++reads === 3) h.nicknameLease.unregister(); };
+  assert.equal(f.edit.dispatch('keydown', { target: h.nickname, key: 'Tab' }).defaultPrevented, true);
+  assert.equal(reads, 3); f.flush(); assert.equal(f.calls.scheduled, 0);
 });
 
 test('genuine exact primary click queues only after fence/routing unwind, once while pending', () => {

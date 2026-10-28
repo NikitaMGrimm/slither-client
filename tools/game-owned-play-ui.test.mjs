@@ -5,6 +5,8 @@ import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 import { createOwnedPlayUi } from '../extension/game-owned-play-ui.mjs';
 import { createGateTestDom } from './game-gate-test-fixture.mjs';
+import { projectStartPageDouble } from './start-page-view-double.mjs';
+import { startPageLayout } from '../extension/start-page-layout.mjs';
 
 const primaries = [undefined, null, false, 0, '', Symbol('synthetic primary'), new Error('synthetic primary')];
 const domNames = ['nodeType', 'ownerDocument', 'parentNode', 'firstChild',
@@ -103,7 +105,7 @@ function fixture() {
       assert.equal(typeof value, 'boolean'); brand(buttons, receiver).disabled = value;
     }),
   };
-  const input = { document, parent, dom, construct, controls,
+  const input = { document, parent, dom, construct, controls, projectStartPage: projectStartPageDouble,
     isCurrentDocument: operation('current', () => fresh) };
   tripwires(document); tripwires(parent);
   return { input, native, document, parent, dom, construct, controls, calls, created,
@@ -121,14 +123,14 @@ function fixture() {
 
 test('actual import and exact factory are inert; disposed lease is permanently quiet', async () => {
   const source = await readFile(new URL('../extension/game-owned-play-ui.mjs', import.meta.url), 'utf8');
-  assert.doesNotMatch(source, /\bimport\s*(?:[({*'"`]|[\w]+\s+from)/);
+  assert.match(source, /import \{ startPageLayout \} from '.\/start-page-layout.mjs'/);
   const prior = Object.getOwnPropertyDescriptor(globalThis, 'document');
   Object.defineProperty(globalThis, 'document', { configurable: true, get() { throw new Error('global Document read'); } });
   try {
     const imported = await import('../extension/game-owned-play-ui.mjs?synthetic-inert-import');
     assert.deepEqual(Object.keys(imported), ['createOwnedPlayUi']);
     const f = fixture(), lease = imported.createOwnedPlayUi(f.input);
-    assert.deepEqual(Object.keys(lease), ['mount', 'setStatus', 'lock', 'unlock', 'dispose']);
+    assert.deepEqual(Object.keys(lease), ['mount', 'setStatus', 'setPlaying', 'lock', 'unlock', 'dispose']);
     assert.equal(Object.isFrozen(lease), true); assert.equal(f.calls.length, 0);
     lease.dispose(); lease.dispose(); lease.setStatus('ready'); lease.lock(); lease.unlock();
     assert.throws(lease.mount, /consumed/); assert.equal(f.calls.length, 0);
@@ -164,11 +166,12 @@ test('eleven fresh nodes, closed frozen result, exact tree and bounded original 
   assert.equal(f.calls.filter(c => c.name === 'inputValue').length, 2);
   assert.equal(f.calls.filter(c => c.name === 'inputMaxLength').length, 2);
   assert.equal(f.calls.filter(c => c.name === 'inputAutocompleteOff').length, 2);
-  assert.deepEqual(Object.fromEntries(f.style(nodes.mount)), { position: 'absolute', left: '8px', top: '56px',
-    width: '48ch', display: 'block', color: '#eee', 'font-family': 'monospace', 'font-size': '12px',
-    'font-variant-numeric': 'tabular-nums', border: '0', 'border-radius': '0', background: 'none' });
+  assert.deepEqual(Object.fromEntries(f.style(nodes.mount)), Object.fromEntries(startPageLayout.panel));
+  assert.equal(f.style(nodes.mount).get('left'), '50%');
+  assert.equal(f.style(nodes.mount).get('width'), 'min(420px, calc(100% - 32px))');
+  assert.match(f.style(nodes.mount).get('background-image'), /\/assets\/logo\.svg"\)$/);
   assert.equal(f.style(button).get('position'), 'static', 'override existing absolute root-button rule');
-  assert.equal(f.style(status).get('width'), '48ch'); assert.equal(f.style(status).get('height'), '2em');
+  assert.equal(f.style(status).get('width'), '100%'); assert.equal(f.style(status).get('min-height'), '3em');
   for (const value of [nodes.mount, endpointLabel, nicknameLabel, nodes.endpoint, nodes.nickname, button, status]) {
     const style = f.style(value);
     assert.equal(style.get('display'), 'block');
@@ -181,7 +184,7 @@ test('eleven fresh nodes, closed frozen result, exact tree and bounded original 
   lease.dispose(); assert.deepEqual(f.parent.children, []);
 });
 
-test('ten fixed statuses never format values, read fields, change focus, or unlock', () => {
+test('fixed Rust-projected statuses never read fields, change focus, or release the admission lock', () => {
   const f = fixture(), lease = f.lease(), nodes = lease.mount(), status = nodes.mount.children[3].children[0];
   f.field(nodes.endpoint).value = 'synthetic private endpoint'; f.field(nodes.nickname).value = 'private nickname';
   let before = f.calls.length;
@@ -189,8 +192,8 @@ test('ten fixed statuses never format values, read fields, change focus, or unlo
     assert.equal(lease.setStatus(state), undefined); assert.equal(f.text(status), label);
   }
   const updates = f.calls.slice(before);
-  assert.equal(updates.filter(c => c.name === 'setText').length, 10);
-  assert.equal(updates.some(c => controlNames.includes(c.name)), false);
+  assert.equal(updates.filter(c => c.name === 'setText').length, 20);
+  assert.equal(updates.some(c => controlNames.includes(c.name) && c.name !== 'buttonDisabled'), false);
   for (const value of [undefined, null, false, 0, {}, [], new String('ready'), 'then', 'toString', '__proto__', 'READY', '']) {
     before = f.calls.length; assert.throws(() => lease.setStatus(value), /Invalid/); assert.equal(f.calls.length, before);
   }
@@ -198,9 +201,29 @@ test('ten fixed statuses never format values, read fields, change focus, or unlo
   before = f.calls.length; lease.lock(); assert.equal(f.calls.length, before);
   for (const state of Object.keys(statusLabels)) lease.setStatus(state);
   assert.equal(f.button(nodes.button).disabled, true);
-  assert.deepEqual(f.calls.filter(c => c.name === 'buttonDisabled').map(c => c.args[1]), [false, true]);
+  const changes = f.calls.filter(c => c.name === 'buttonDisabled');
+  assert.equal(changes.at(-1).args[1], true);
   assert.equal(f.field(nodes.endpoint).value, 'synthetic private endpoint');
   assert.equal(f.field(nodes.nickname).value, 'private nickname');
+  lease.dispose();
+});
+
+test('active gameplay hides all start controls; return preserves native field values and the explicit admission lock', () => {
+  const f = fixture(), lease = f.lease(), nodes = lease.mount();
+  f.field(nodes.nickname).value = 'Synthetic player';
+  lease.lock(); lease.setStatus('preparing');
+  assert.equal(f.text(nodes.button.children[0]), 'Connecting…');
+  assert.equal(f.style(nodes.mount).get('cursor'), 'progress');
+  lease.setStatus('connected'); lease.setPlaying(true);
+  assert.equal(f.style(nodes.mount).get('display'), 'none');
+  assert.equal(f.button(nodes.button).disabled, true);
+  lease.setStatus('not-connected'); lease.setPlaying(false);
+  assert.equal(f.style(nodes.mount).get('display'), 'block');
+  assert.equal(f.button(nodes.button).disabled, true, 'remote attempt cannot renew itself');
+  lease.unlock();
+  assert.equal(f.button(nodes.button).disabled, false, 'only the existing local replay owner unlocks');
+  assert.equal(f.field(nodes.nickname).value, 'Synthetic player');
+  assert.equal(f.text(nodes.button.children[0]), 'Play');
   lease.dispose();
 });
 
@@ -284,12 +307,12 @@ test('all operation records are closed own-data, ordinary or null-prototype; raw
   for (let i = 0; i < 65; i++) prototype = Object.create(prototype);
   Object.setPrototypeOf(long, prototype); callbacks.push(long);
   const repeated = new Proxy(() => {}, { getPrototypeOf() { return repeated; } }); callbacks.push(repeated);
-  for (const group of ['dom', 'construct', 'controls', 'checker']) {
+  for (const group of ['dom', 'construct', 'controls', 'checker', 'projector']) {
     const names = group === 'dom' ? domNames : group === 'construct' ? constructNames
-      : group === 'controls' ? controlNames : ['isCurrentDocument'];
+      : group === 'controls' ? controlNames : [group === 'projector' ? 'projectStartPage' : 'isCurrentDocument'];
     for (const name of names) for (const callback of callbacks) {
       const f = fixture();
-      const input = group === 'checker' ? { ...f.input, [name]: callback }
+      const input = group === 'checker' || group === 'projector' ? { ...f.input, [name]: callback }
         : { ...f.input, [group]: { ...f.input[group], [name]: callback } };
       assert.throws(() => createOwnedPlayUi(input), /Invalid/); assert.equal(f.calls.length, 0);
     }
