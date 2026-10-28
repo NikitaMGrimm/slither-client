@@ -19,7 +19,7 @@ const gameWebNames = ['stock-client.mjs', 'stock-skin-provider.mjs', 'stock-skin
   'stock-hud-dom.mjs', 'handshake-session.mjs', 'stock-live-profile.mjs'];
 const gameSources = [['game-activation.mjs', 'activation.mjs'], ['game-gate.js', 'gate.js'],
   ['game-link.js', 'link.js'], ['game-bootstrap.mjs', 'bootstrap.mjs'], ['game-runtime.mjs', 'runtime.mjs'],
-  ['game-owned-hud-ui.mjs', 'owned-hud-ui.mjs'], ['game-host.css', 'host.css']];
+  ['game-owned-hud-ui.mjs', 'owned-hud-ui.mjs'], ['game-owned-play-ui.mjs', 'owned-play-ui.mjs'], ['game-host.css', 'host.css']];
 const snippetName = 'snippets/slither-client-0000000000000000/web/stock-hud-contract.mjs';
 
 // Original synthetic Wasm with empty constructor exports, never a playable fixture.
@@ -64,7 +64,7 @@ function fixture(t) {
   write('LICENSE', fs.readFileSync(path.join(projectRoot, 'LICENSE')));
   for (const name of pageNames) write(`web/${name}`, fs.readFileSync(path.join(projectRoot, 'web', name)));
   for (const name of gameWebNames) write(`web/${name}`, fs.readFileSync(path.join(projectRoot, 'web', name)));
-  for (const name of ['manifest.chrome.json', 'manifest.firefox.json', 'launcher.html', 'launcher.js', 'game-owned-hud-entry.mjs', ...gameSources.map(value => value[0])]) {
+  for (const name of ['manifest.chrome.json', 'manifest.firefox.json', 'launcher.html', 'launcher.js', 'game-owned-hud-entry.mjs', 'game-owned-play-entry.mjs', ...gameSources.map(value => value[0])]) {
     write(`extension/${name}`, fs.readFileSync(path.join(projectRoot, 'extension', name)));
   }
   write('dist/web/slither_client.js', syntheticGlue);
@@ -82,6 +82,12 @@ function fixture(t) {
   return { root, write, output: path.join(root, 'dist/extension'), build: options => buildExtension({ projectRoot: root, ...options }) };
 }
 
+test('owned-play is a genuine third package selection with 94 files', t => {
+  const f = fixture(t);
+  const result = f.build({ gameEntry: 'owned-play' });
+  assert.equal(result.files.length, 94);
+});
+
 test('default packages have a closed deterministic inventory and preserve module inputs byte for byte', t => {
   const f = fixture(t);
   f.write('web/unselected.mjs', 'throw new Error("must never be copied");');
@@ -93,7 +99,7 @@ test('default packages have a closed deterministic inventory and preserve module
     'game/pkg/slither_client.js', 'game/pkg/slither_client_bg.wasm', `game/pkg/${snippetName}`].sort();
   const result = f.build();
   assert.deepEqual(result.files.map(file => file.path), ['chrome', 'firefox'].flatMap(browser => expectedPerBrowser.map(name => `${browser}/${name}`)));
-  assert.equal(result.files.length, 92);
+  assert.equal(result.files.length, 94);
   assert(result.files.every(file => file.bytes > 0 && /^[a-f0-9]{64}$/.test(file.sha256)));
   assert.deepEqual(f.build(), result, 'an identical rerun neither accumulates nor changes files');
   for (const browser of ['chrome', 'firefox']) {
@@ -129,7 +135,7 @@ test('generated validator paths remain exact, byte-preserved and independent of 
     output.web_accessible_resources[0].resources.pop();
     assert.deepEqual(output, source, 'all source manifest fields remain intact');
   }
-  assert.equal(result.files.length, 92);
+  assert.equal(result.files.length, 94);
 });
 
 test('changing the authored HUD validator makes the generated pair stale', t => {
@@ -167,7 +173,7 @@ test('MV3 browser differences, explicit activation permissions, closed WAR and o
     assert.deepEqual(manifest.permissions, ['activeTab', 'scripting']);
     assert.deepEqual(manifest.web_accessible_resources, [{
       matches: ['http://slither.io/*', 'https://slither.io/*', 'http://www.slither.io/*', 'https://www.slither.io/*'],
-      resources: ['game/bootstrap.mjs', 'game/runtime.mjs', 'game/owned-hud-ui.mjs', 'game/stock-host-snapshot.mjs', 'game/stock-client.mjs', 'game/stock-skin-provider.mjs',
+      resources: ['game/bootstrap.mjs', 'game/runtime.mjs', 'game/owned-hud-ui.mjs', 'game/owned-play-ui.mjs', 'game/stock-host-snapshot.mjs', 'game/stock-client.mjs', 'game/stock-skin-provider.mjs',
         'game/stock-skin-rules.mjs', 'game/skin-provider.mjs', 'game/stock-food-provider.mjs', 'game/stock-prey-provider.mjs',
         'game/stock-asset-sources.mjs', 'game/desktop-layout.mjs', 'game/client-input.mjs',
         'game/stock-gameplay.mjs', 'game/stock-session.mjs', 'game/stock-hud-contract.mjs', 'game/stock-hud-state.mjs',
@@ -308,23 +314,25 @@ test('CLI requires unambiguous paths and confines outputs to the ignored extensi
   }
   for (const outputDir of ['dist/elsewhere', '.', 'dist/extension/../../outside']) assert.throws(() => f.build({ outputDir }), /must stay inside/);
   assert.throws(() => f.build({ webDir: 'dist/extension' }), /must be separate/);
-  assert.equal(f.build({ outputDir: 'dist/extension/fresh' }).files.length, 92);
+  assert.equal(f.build({ outputDir: 'dist/extension/fresh' }).files.length, 94);
 });
 
-for (const gameEntry of ['default', 'owned-hud']) {
-  test(`${gameEntry} packages select exact entry bytes with only two added helpers in both browsers`, t => {
+for (const gameEntry of ['default', 'owned-hud', 'owned-play']) {
+  test(`${gameEntry} packages select exact entry bytes with the three exact helpers in both browsers`, t => {
     const f = fixture(t), outputDir = `dist/extension/${gameEntry}`;
     const result = f.build({ gameEntry, outputDir });
-    assert.equal(result.files.length, 92);
-    const source = gameEntry === 'default' ? 'game-bootstrap.mjs' : 'game-owned-hud-entry.mjs';
+    assert.equal(result.files.length, 94);
+    const source = {default: 'game-bootstrap.mjs', 'owned-hud': 'game-owned-hud-entry.mjs', 'owned-play': 'game-owned-play-entry.mjs'}[gameEntry];
     for (const browser of ['chrome', 'firefox']) {
       const game = path.join(f.root, outputDir, browser, 'game');
       assert.deepEqual(fs.readFileSync(path.join(game, 'bootstrap.mjs')), fs.readFileSync(path.join(f.root, 'extension', source)));
-      for (const [file, packaged] of [['game-runtime.mjs', 'runtime.mjs'], ['game-owned-hud-ui.mjs', 'owned-hud-ui.mjs']]) {
+      for (const [file, packaged] of [['game-runtime.mjs', 'runtime.mjs'], ['game-owned-hud-ui.mjs', 'owned-hud-ui.mjs'], ['game-owned-play-ui.mjs', 'owned-play-ui.mjs']]) {
         assert.deepEqual(fs.readFileSync(path.join(game, packaged)), fs.readFileSync(path.join(f.root, 'extension', file)));
       }
-      assert.equal(result.files.filter(file => file.path.startsWith(`${browser}/`)).length, 46);
+      assert.equal(result.files.filter(file => file.path.startsWith(`${browser}/`)).length, 47);
       assert.equal(fs.existsSync(path.join(game, 'game-owned-hud-entry.mjs')), false);
+      assert.equal(fs.existsSync(path.join(game, 'game-owned-play-entry.mjs')), false);
+      assert.equal(fs.existsSync(path.join(game, 'play-entry.mjs')), false);
       assert.equal(fs.existsSync(path.join(game, 'owned-entry.mjs')), false);
       assert.equal(fs.existsSync(path.join(game, 'game-bootstrap.mjs')), false);
       const names = new Set(result.files.map(file => file.path));
@@ -356,10 +364,29 @@ test('game entry API and CLI reject ambiguous and nonstring selection before out
     assert.throws(() => extensionArguments(args), /Usage:|gameEntry must be/);
     assert.equal(fs.existsSync(f.output), false);
   }
-  for (const gameEntry of ['default', 'owned-hud']) {
+  for (const gameEntry of ['default', 'owned-hud', 'owned-play']) {
     assert.deepEqual(extensionArguments(['--game-entry', gameEntry]), { gameEntry });
     assert.deepEqual(extensionArguments(['--web-dir', 'trusted', '--game-entry', gameEntry, '--output-dir', 'dist/extension/fresh']),
       { webDir: 'trusted', gameEntry, outputDir: 'dist/extension/fresh' });
+  }
+});
+
+test('all three selections preserve all 282 inventory entries and differ only at the two bootstrap destinations', t => {
+  const f = fixture(t);
+  const results = ['default','owned-hud','owned-play'].map(gameEntry => f.build({ gameEntry, outputDir: `dist/extension/matrix-${gameEntry}` }));
+  assert.equal(results.flatMap(result => result.files).length, 282);
+  for (const selected of results.slice(1)) {
+    assert.deepEqual(selected.files.map(file => file.path), results[0].files.map(file => file.path));
+    const differences = [];
+    for (let i = 0; i < selected.files.length; i++) {
+      const actual = selected.files[i], baseline = results[0].files[i];
+      if (actual.sha256 !== baseline.sha256) differences.push(actual.path);
+      else {
+        assert.equal(actual.bytes, baseline.bytes);
+        assert.deepEqual(fs.readFileSync(path.join(selected.outputDir, actual.path)), fs.readFileSync(path.join(results[0].outputDir, baseline.path)));
+      }
+    }
+    assert.deepEqual(differences, ['chrome/game/bootstrap.mjs','firefox/game/bootstrap.mjs']);
   }
 });
 

@@ -3,7 +3,7 @@ import { startGamePage as startRuntime } from './runtime.mjs';
 
 /** Default entry preserves legacy startup and explicit dependency overrides. */
 export async function startGamePage({ realm = globalThis, initialize = init, wasmApi = wasm, hudReadout = false } = {}) {
-  return startRuntime({ realm, initialize, wasmApi, hudReadout, ownedHudUi: false });
+  return startRuntime({ realm, initialize, wasmApi, hudReadout, ownedHudUi: false, ownedPlayUi: false });
 }
 
 // Trusted MAIN modules share the selected entry's single local startup promise.

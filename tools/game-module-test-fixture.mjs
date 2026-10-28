@@ -12,7 +12,8 @@ const webNames = ['stock-skin-provider.mjs', 'stock-client.mjs', 'stock-food-pro
   'skin-provider.mjs', 'client-input.mjs', 'stock-session.mjs', 'stock-hud-contract.mjs',
   'stock-hud-state.mjs', 'handshake-session.mjs', 'stock-live-profile.mjs'];
 const entryNames = { 'bootstrap.mjs': 'game-bootstrap.mjs', 'runtime.mjs': 'game-runtime.mjs',
-  'owned-entry.mjs': 'game-owned-hud-entry.mjs', 'owned-hud-ui.mjs': 'game-owned-hud-ui.mjs' };
+  'owned-entry.mjs': 'game-owned-hud-entry.mjs', 'owned-hud-ui.mjs': 'game-owned-hud-ui.mjs',
+  'play-entry.mjs': 'game-owned-play-entry.mjs', 'owned-play-ui.mjs': 'game-owned-play-ui.mjs' };
 const origin = 'https://authored-package.invalid/game/';
 
 export async function runGameModuleTest(scenario) {
@@ -30,7 +31,7 @@ export async function runGameModuleTest(scenario) {
   });
 }
 
-function createGraph({ armed = true, hudNative = false, ownedHudNative = false, initialize, prepare } = {}) {
+function createGraph({ armed = true, hudNative = false, ownedHudNative = false, ownedPlayNative = false, initialize, prepare } = {}) {
   // Reuse authored native/Wasm fixture definitions, never transform a product module.
   const testSource = readFileSync(new URL('tools/game-bootstrap.test.mjs', root), 'utf8');
   const definitions = testSource.slice(testSource.indexOf('function fixture('), testSource.indexOf("\ntest('an unarmed"));
@@ -38,7 +39,7 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
     ${definitions}\nreturn {fixture,wasmDouble};})`).runInThisContext();
   const nativeSource = readFileSync(new URL('extension/game-gate.js', root), 'utf8');
   const { fixture, wasmDouble } = makeFixture(nativeSource, vm.Script, vm.createContext, vm.runInContext, assert,
-    options => { const dom = createGateTestDom({ ...options, ownedHud: ownedHudNative }); prepare?.(dom); return dom; }, attachGateTestRealm);
+    options => { const dom = createGateTestDom({ ...options, ownedHud: ownedHudNative, ownedPlay: ownedPlayNative }); prepare?.(dom); return dom; }, attachGateTestRealm);
   const f = fixture({ armed, hudNative });
   if (hudNative) {
     // The legacy native boundary must create HTML-branded borrowed root/status nodes too.
@@ -100,6 +101,53 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
       }) });
       Object.defineProperty(realm, 'top', { value: realm });
       return realm;
+    },
+    profileNative() {
+      // Authored inert bytes and a labelled native digest/fetch boundary DOUBLE.
+      // This does not establish a production source pin, HTTP or game acceptance.
+      const counts = { fetch: 0, digest: 0, cancel: 0, release: 0, abort: 0 };
+      let respond, reject, delivered = false, clearHook;
+      const response = new Promise((yes, no) => { respond = yes; reject = no; });
+      const buffers = [], body = {}, reader = {};
+      const route = 'https://slither.io/s/game1107249518.js';
+      const capabilities = Object.freeze({ __proto__: null,
+        fetch(url, options) {
+          assert.equal(url, route); assert.equal(options.credentials, 'omit');
+          assert.equal(options.redirect, 'error'); assert.equal(options.cache, 'no-store');
+          counts.fetch++; return response;
+        },
+        async digest(algorithm, bytes) {
+          assert.equal(algorithm, 'SHA-256'); assert.equal(bytes.length, 224092); counts.digest++;
+          const value = Uint8Array.from('5ad8aa8f06d1e71bad2945001bab077f8d4d279c093a046d19b6f26ac6b62095'.match(/../g), x => parseInt(x, 16));
+          buffers.push(value); return value;
+        },
+        createAbort: () => Object.freeze({ __proto__: null, signal: {}, abort() { counts.abort++; } }),
+        setTimeout: () => 9999, clearTimeout() {}, now: () => 0,
+        environment: () => Object.freeze({ __proto__: null, origin: 'https://slither.io', topLevel: true, secureContext: true }),
+        responseInfo: () => Object.freeze({ __proto__: null, status: 200, type: 'basic', url: route, redirected: false, body }),
+        getReader(value) { assert.equal(value, body); return reader; },
+        read(value) {
+          assert.equal(value, reader);
+          if (delivered) return Promise.resolve({ __proto__: null, done: true, value: undefined });
+          delivered = true;
+          const valueBytes = new Uint8Array(224092).fill(32);
+          valueBytes.set(new TextEncoder().encode('var v=17;'), 181647);
+          valueBytes.set(new TextEncoder().encode('var k=[' + Array.from({length:20}, (_, i) => i).join(',') + '];'), 181670);
+          buffers.push(valueBytes); return Promise.resolve({ __proto__: null, done: false, value: valueBytes });
+        },
+        cancelReader(value) { assert.equal(value, reader); counts.cancel++; return Promise.resolve(); },
+        releaseReader(value) { assert.equal(value, reader); counts.release++; },
+        bytes: Object.freeze({ __proto__: null,
+          allocate(length) { const bytes = new Uint8Array(length); buffers.push(bytes); return bytes; },
+          length: bytes => bytes.length, copy: (to, from, at) => to.set(from, at),
+          clear(bytes) { bytes.fill(0); clearHook?.(bytes); },
+        }),
+      });
+      return { capabilities, counts, buffers, respond: () => respond({ synthetic: true }), reject,
+        setClearHook(hook) { clearHook = hook; },
+        async settle() { for (let i = 0; i < 40; i++) await Promise.resolve(); },
+        assertWiped() { for (const bytes of buffers) assert(bytes.every(value => value === 0)); },
+      };
     },
     hudWasm() {
       const counts = { tracking: 0, scoreReads: 0, packets: 0 };

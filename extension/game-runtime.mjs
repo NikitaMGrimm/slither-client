@@ -7,6 +7,8 @@ import { createStockGameplay } from './stock-gameplay.mjs';
 import { bindStockHudDom } from './stock-hud-dom.mjs';
 import { projectHudView } from './stock-hud-view.mjs';
 import { createOwnedHudUi } from './owned-hud-ui.mjs';
+import { createOwnedPlayUi } from './owned-play-ui.mjs';
+import { stockEndpoint } from './stock-session.mjs';
 
 // Gate-only notifications must not add gameplay control/source observations.
 const editNotifications = new Set(['keypress', 'beforeinput', 'input', 'compositionstart', 'compositionupdate', 'compositionend',
@@ -16,13 +18,16 @@ const editNotifications = new Set(['keypress', 'beforeinput', 'input', 'composit
   'dragstart', 'drag', 'dragenter', 'dragleave', 'dragover', 'drop', 'dragend']);
 
 /** Local runtime factory. Importing this module performs no page ownership work. */
-export async function startGamePage({ realm = globalThis, initialize, wasmApi, hudReadout = false, ownedHudUi = false } = {}) {
+export async function startGamePage({ realm = globalThis, initialize, wasmApi, hudReadout = false, ownedHudUi = false, ownedPlayUi = false } = {}) {
   if (typeof hudReadout !== 'boolean') throw new TypeError('Explicit hudReadout boolean required');
   if (typeof initialize !== 'function' || wasmApi === null || typeof wasmApi !== 'object') {
     throw new TypeError('Explicit initialize function and wasmApi object required');
   }
   if (typeof ownedHudUi !== 'boolean' || (ownedHudUi && !hudReadout)) {
     throw new TypeError('Explicit ownedHudUi boolean requires hudReadout');
+  }
+  if (typeof ownedPlayUi !== 'boolean' || (ownedPlayUi && (!hudReadout || !ownedHudUi))) {
+    throw new TypeError('Explicit ownedPlayUi boolean requires hudReadout and ownedHudUi');
   }
   const gate = realm[Symbol.for('slither.client.gate.v1')];
   if (!gate || gate.metadata().code !== 'held') throw new Error('Armed document-start gate required');
@@ -32,20 +37,36 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
   let disposed = false;
   let nickname, bindingOperation, handlingNickname, routing = 0;
   let hud, ownedUi, constructCapabilities, hudOperation, nativeOperation, sourceOperation, hudCapabilities, cleanupActive = false;
+  let playUi, controlsLease, playCapabilities, playOperation, playNodes;
+  let playAccepted = false, playAvailable = false, playGeneration = 0;
   const documentIdentity = hudReadout ? Symbol('HUD document') : undefined;
   const ownKeys = Reflect.ownKeys, apply = Reflect.apply, prototype = Object.getPrototypeOf;
   const descriptor = Object.getOwnPropertyDescriptor, hasOwn = Object.hasOwn;
   const recordPrototype = Object.prototype, freeze = Object.freeze;
   function synchronous(callback) {
     if (typeof callback !== 'function') return false;
-    if ([prototype(async function () {}), prototype(function* () {}), prototype(async function* () {})]
-      .includes(prototype(callback))) return false;
+    const asynchronous = [prototype(async function () {}), prototype(function* () {}), prototype(async function* () {})];
+    const seen = new Set();
+    let current = callback;
+    for (let visits = 0; visits < 64; visits++) {
+      current = prototype(current);
+      if (current === null) break;
+      if (seen.has(current) || asynchronous.includes(current)) return false;
+      if (ownedPlayUi) {
+        // Foreign bound functions retain their kind on a different realm's prototype.
+        const kind = descriptor(current, Symbol.toStringTag);
+        if (kind && hasOwn(kind, 'value')
+          && ['AsyncFunction', 'GeneratorFunction', 'AsyncGeneratorFunction'].includes(kind.value)) return false;
+      }
+      seen.add(current);
+    }
+    if (current !== null) return false;
     return !/^(?:\*|function\s*\*|async(?:\s+function\b|\s+[$\w]+|\s*\([^]*?\)\s*=>))/
       .test(apply(Function.prototype.toString, callback, []));
   }
   function nicknameBusy() {
-    const operation = bindingOperation ?? handlingNickname ?? hudOperation ?? nativeOperation ?? sourceOperation;
-    const error = new Error(hudOperation || nativeOperation || sourceOperation ? 'HUD owner operation active' : 'Nickname owner operation active');
+    const operation = bindingOperation ?? handlingNickname ?? hudOperation ?? nativeOperation ?? sourceOperation ?? playOperation;
+    const error = new Error(playOperation ? 'Play owner operation active' : hudOperation || nativeOperation || sourceOperation ? 'HUD owner operation active' : 'Nickname owner operation active');
     if (operation) {
       // A caller trap may catch the error; publication must still fail afterward.
       if (!operation.failed) { operation.failed = true; operation.primary = error; }
@@ -54,10 +75,23 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     throw error;
   }
   function guardNicknameOperation() {
-    if (bindingOperation || handlingNickname || hudOperation || nativeOperation || sourceOperation) nicknameBusy();
+    if (bindingOperation || handlingNickname || hudOperation || nativeOperation || sourceOperation || playOperation) nicknameBusy();
   }
   function checkHudOperation() {
     if (hudOperation?.failed) throw hudOperation.primary;
+    if (playOperation?.failed) throw playOperation.primary;
+    if (ownedPlayUi && nativeOperation?.failed) throw nativeOperation.primary;
+  }
+  function runPlay(callback) {
+    hudIdle();
+    const operation = { failed: false, primary: undefined };
+    playOperation = operation;
+    try {
+      const result = callback();
+      if (operation.failed) throw operation.primary;
+      return result;
+    } catch (error) { throw operation.failed ? operation.primary : error; }
+    finally { playOperation = undefined; operation.primary = undefined; }
   }
   function copyRecord(value, fields) {
     if (value === null || typeof value !== 'object'
@@ -242,6 +276,8 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     guardNicknameOperation();
     disposed = true;
     cleanupActive = true;
+    playGeneration++;
+    playNodes = undefined;
     let failed = false, primary;
     const cleanup = callback => {
       try { callback(); } catch (error) {
@@ -250,7 +286,15 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
       }
     };
     cleanup(() => detachNickname(nickname));
+    if (controlsLease !== undefined) {
+      const lease = controlsLease; controlsLease = undefined;
+      cleanup(() => apply(lease.unregister, undefined, []));
+    }
     cleanup(() => detachHud(hud));
+    if (playUi !== undefined) {
+      const lease = playUi; playUi = undefined;
+      cleanup(() => lease.dispose());
+    }
     if (ownedUi !== undefined) {
       const lease = ownedUi; ownedUi = undefined;
       cleanup(() => lease.dispose());
@@ -290,10 +334,26 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
   if (!reload) { reload = realm.document.createElement('button'); reload.id = 'slither-client-reload';
     reload.textContent = 'Reload ordinary page'; root.appendChild(reload); }
   const target = realm.document.createElement('canvas'); target.tabIndex = 0; root.appendChild(target);
-  const report = code => { output.textContent = `SlitherClient: ${code}`; native.status(code); };
+  const report = code => {
+    if (!ownedPlayUi) { output.textContent = `SlitherClient: ${code}`; native.status(code); return; }
+    const labels = { __proto__: null, loading: 'Loading', 'waiting-assets': 'Loading',
+      'ready-not-connected': 'Ready', connected: 'Connected', disconnected: 'Not connected',
+      'host-unavailable': 'Unavailable', 'csp-or-module-unavailable': 'Unavailable',
+      'client-failed': 'Failed', disposed: 'Not connected' };
+    output.textContent = `SlitherClient: ${code === 'ready-not-connected' && !playAvailable ? 'Unavailable' : labels[code] ?? 'Unavailable'}`;
+    checkHudOperation();
+    if (playUi && !disposed) {
+      const states = { __proto__: null, 'ready-not-connected': 'ready', connected: 'connected',
+        disconnected: 'not-connected', 'host-unavailable': 'unavailable', 'client-failed': 'failed' };
+      if (states[code]) playUi.setStatus(code === 'ready-not-connected' && !playAvailable ? 'unavailable' : states[code]);
+      checkHudOperation();
+    }
+    native.status(code);
+    checkHudOperation();
+  };
   const size = () => desktopBackingSize(realm.innerWidth, realm.innerHeight);
   native.setInput(event => {
-    if (hudReadout && (hudOperation || nativeOperation || sourceOperation)) guardNicknameOperation();
+    if (hudReadout && (hudOperation || nativeOperation || sourceOperation || playOperation)) guardNicknameOperation();
     if (event.type === 'click' && event.target === reload) { native.ordinaryReload(); return; }
     guardNicknameOperation();
     routing++;
@@ -361,6 +421,21 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
         }
         for (const name of names) construct[name] = guarded(construct[name]);
         constructCapabilities = freeze(construct);
+      }
+      if (ownedPlayUi) {
+        const captured = descriptor(native, 'ownedPlayDom')?.value;
+        if (captured === undefined) throw new TypeError('Complete native owned Play DOM group required');
+        const group = copyRecord(captured, ['schema', 'document', 'dom', 'createControlsLease']);
+        const names = ['inputValue', 'inputMaxLength', 'inputAutocompleteOff', 'buttonType', 'buttonDisabled'];
+        const controls = copyRecord(group.dom, names);
+        if (group.schema !== 1 || group.document !== document || !Object.isFrozen(captured)
+          || !Object.isFrozen(group.dom) || !synchronous(group.createControlsLease)
+          || names.some(name => !synchronous(controls[name]))) {
+          throw new TypeError('Complete synchronous native owned Play DOM group required');
+        }
+        for (const name of names) controls[name] = guarded(controls[name]);
+        playCapabilities = { controls: freeze(controls), createControlsLease: guarded(group.createControlsLease) };
+        playAvailable = native.liveProfile !== undefined;
       }
     }
     report('loading');
@@ -504,7 +579,85 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
       // Binding has its own idle protocol and takes the one genuine initial snapshot.
       runtime.bindHudReadout({ schema: 1, scope: 'readout-and-final', nodes });
     }
-    report('ready-not-connected');
+    if (ownedPlayUi) {
+      const generation = playGeneration;
+      const settle = state => {
+        if (disposed || generation !== playGeneration) return;
+        try { runPlay(() => playUi.setStatus(state)); }
+        catch (error) { fail(error); }
+      };
+      const onPlay = () => {
+        if (disposed || cleanupActive || generation !== playGeneration) return;
+        let request, promise;
+        try {
+          runPlay(() => {
+            if (playAccepted) return;
+            let endpoint, nickname;
+            try {
+              endpoint = playCapabilities.controls.inputValue(playNodes.endpoint);
+              nickname = playCapabilities.controls.inputValue(playNodes.nickname);
+              if (endpoint === '') { playUi.setStatus('empty-endpoint'); return; }
+              if (typeof endpoint !== 'string' || endpoint.length > 128) { playUi.setStatus('invalid-endpoint'); return; }
+              try { endpoint = stockEndpoint(endpoint); }
+              catch { playUi.setStatus('invalid-endpoint'); return; }
+              if (typeof nickname !== 'string' || nickname.length > 24 || /[^\x20-\x7f]/.test(nickname)) {
+                playUi.setStatus('invalid-nickname'); return;
+              }
+              playAccepted = true;
+              playUi.lock();
+              playUi.setStatus('preparing');
+              request = { endpoint, nickname, skin: 0, customSkin: new Uint8Array() };
+            } finally { endpoint = nickname = undefined; }
+          });
+          // The existing native/profile owner may run only after the Play guard unwinds.
+          if (request !== undefined) {
+            promise = runtime.playWithLiveProfile(request);
+            promise.then(() => settle('connecting'), () => settle('failed')).catch(() => {});
+          }
+        } catch (error) { fail(error); }
+        finally { request = promise = undefined; }
+      };
+      runPlay(() => {
+        playUi = createOwnedPlayUi({ document: hudCapabilities.document, parent: root,
+          dom: hudCapabilities.dom, construct: constructCapabilities,
+          controls: playCapabilities.controls, isCurrentDocument: hudCapabilities.isCurrentDocument });
+        checkHudOperation();
+        const mounted = playUi.mount();
+        checkHudOperation();
+        const nodes = copyRecord(mounted, ['schema', 'document', 'mount', 'endpoint', 'endpointParent',
+          'nickname', 'nicknameParent', 'button', 'buttonParent']);
+        if (nodes.schema !== 1 || nodes.document !== document || !Object.isFrozen(mounted)
+          || nodes.buttonParent !== nodes.mount
+          || new Set([document, root, nodes.mount, nodes.endpoint, nodes.endpointParent,
+            nodes.nickname, nodes.nicknameParent, nodes.button]).size !== 8) {
+          throw new TypeError('Exact owned Play nodes required');
+        }
+        for (const [node, parent] of [[nodes.mount, root], [nodes.endpointParent, nodes.mount],
+          [nodes.nicknameParent, nodes.mount], [nodes.endpoint, nodes.endpointParent],
+          [nodes.nickname, nodes.nicknameParent], [nodes.button, nodes.mount]]) {
+          if (hudCapabilities.dom.parentNode(node) !== parent) throw new TypeError('Exact owned Play parents required');
+        }
+        checkHudOperation();
+        playNodes = nodes;
+      });
+      runtime.bindNicknameField({ schema: 1, element: playNodes.nickname, parent: playNodes.nicknameParent });
+      runPlay(() => {
+        const raw = playCapabilities.createControlsLease({ schema: 1,
+          endpoint: playNodes.endpoint, endpointParent: playNodes.endpointParent,
+          button: playNodes.button, buttonParent: playNodes.buttonParent, onPlay });
+        // Retain cleanup authority before binding can publish native effects.
+        controlsLease = copyRecord(raw, ['bind', 'unregister']);
+        if (!Object.isFrozen(raw) || !synchronous(controlsLease.bind) || !synchronous(controlsLease.unregister)) {
+          throw new TypeError('Frozen owned Play control lease required');
+        }
+        checkHudOperation();
+        if (apply(controlsLease.bind, undefined, []) !== undefined) throw new TypeError('Synchronous owned Play binding required');
+        checkHudOperation();
+      });
+      if (!playAvailable) runPlay(() => { playAccepted = true; playUi.lock(); });
+    }
+    if (ownedPlayUi) runPlay(() => report('ready-not-connected'));
+    else report('ready-not-connected');
     frame = native.requestAnimationFrame(tick);
     return runtime ?? createRuntime();
   } catch (error) {

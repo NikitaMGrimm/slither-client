@@ -145,8 +145,11 @@ holds the original scheduling/socket paths and binds authored presentation to
 existing ready source objects. A trusted local caller can explicitly supply a
 profile or request bounded pinned profile acquisition on canonical HTTPS before
 Play, with a selected endpoint. Activation starts neither acquisition nor a game
-connection; a Play UI remains pending. Live host/CSP compatibility, actual profile
-acquisition and end-to-end gameplay remain unverified.
+connection. An explicit `owned-play` package selection adds empty server-address
+and nickname fields with a Play button. It starts acquisition only after an
+admitted user click; the default and owned-HUD selections keep their existing
+behavior. Live host/CSP compatibility, actual profile acquisition and end-to-end
+gameplay remain unverified.
 
 ## Source and license
 
