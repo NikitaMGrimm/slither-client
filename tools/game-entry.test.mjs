@@ -48,7 +48,7 @@ test('actual default graph mounts HUD, Play and leaderboard with one claim, scen
     assert.equal(graph.f.sockets, 0); assert.equal(graph.f.original, 0);
     assert.equal(hud.tracking, 1); assert.equal(hud.scoreReads, 0); assert.equal(projector.created, 1);
     const root = graph.f.document.getElementById('slither-client-root');
-    assert.equal(root.children.length, 7, 'existing scene nodes plus HUD, Play, leaderboard and minimap mounts');
+    assert.equal(root.children.length, 8, 'existing scene nodes plus HUD, Play, leaderboard, minimap and end-screen mounts');
     const [hudMount, playMount, leaderboardMount, minimapMount] = root.children.slice(3);
     assert.equal(hudMount.children.length, 2); assert.equal(playMount.children.length, 4);
     assert.equal(leaderboardMount.children.length, 4);
@@ -136,7 +136,7 @@ test('default wrapper honors explicit dependencies and always selects all owned 
     assert.equal(initialized, 1); assert.equal(graph.counts.initialize, 0);
     assert.equal(hud.tracking, 1); assert.equal(projectors, 1);
     assert.equal(typeof runtime.bindHudReadout, 'function');
-    assert.equal(graph.f.document.getElementById('slither-client-root').children.length, 7);
+    assert.equal(graph.f.document.getElementById('slither-client-root').children.length, 8);
     assert.equal(graph.f.raf.size, 1); assert.equal(graph.f.sockets, 0); runtime.dispose();
   });
 });

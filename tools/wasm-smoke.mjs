@@ -19,9 +19,11 @@ import { stockHudSmoke } from './stock-hud-smoke.mjs';
 import { leaderboardScoreSmoke } from './leaderboard-score-smoke.mjs';
 import { minimapRenderSmoke } from './minimap-render-smoke.mjs';
 import { skinPolicySmoke } from './skin-policy-smoke.mjs';
+import { endScreenSmoke } from './end-screen-smoke.mjs';
 
 // Entirely synthetic ABI integration; no reference files or network are used.
 const wasm = await loadWasm();
+endScreenSmoke(wasm);
 console.log('Synthetic Rust skin policy ABI passed:', skinPolicySmoke(wasm));
 leaderboardScoreSmoke(wasm);
 console.log('Synthetic native minimap view ABI passed:', minimapRenderSmoke(wasm));
