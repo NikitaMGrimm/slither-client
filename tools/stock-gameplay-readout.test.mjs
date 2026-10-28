@@ -43,6 +43,7 @@ function harness({ mode = true, callback, configure } = {}) {
     reset_lag() { outside(); hit('reset-lag'); },
     enable_score_tracking() { assert.fail('score tracking remains explicit caller ownership'); },
     score_view() { outside(); scoreReads++; hit('score'); return observedView; },
+    observe_minimap_ui_fraction(value) { outside(); trace.push(['minimap-ui-fraction', value]); },
     advance() { assert.fail('one same-step native clock only'); },
     set_gaze_heading() { assert.fail('gaze must return through native control'); },
     advance_with_control(nowMs, lagging, callback) {
@@ -52,7 +53,7 @@ function harness({ mode = true, callback, configure } = {}) {
         const request = { nowMs, wholeSteps: faults.wholeSteps ?? 1, delta: faults.delta ?? 1, control: controlView() };
         hit('before-control');
         const actions = callback(request);
-        assert(Object.keys(actions).every(key => ['gazeHeading', 'resetWorld', 'resetLag', 'connected'].includes(key)));
+        assert(Object.keys(actions).every(key => ['gazeHeading', 'resetWorld', 'resetLag', 'connected', 'minimapUiFraction'].includes(key)));
         trace.push(['actions', actions]); hit('after-control');
         if (actions.resetWorld) { currentOwn = null; nativeConnected = false; hit('reset-world'); }
         if (actions.connected !== undefined) nativeConnected = actions.connected;
@@ -399,6 +400,35 @@ for (const victory of [0, 1]) test(`completing actual lifecycle ${victory} retai
   assert.deepEqual(completed.current, history.current); assert.deepEqual(completed.final, history.final);
   const reads = h.scoreReads; h.gameplay.render(); h.gameplay.frame(2300); assert.equal(h.scoreReads, reads);
   if (victory) { h.sockets[0].message(header(1, 99)); h.flush(); assert.equal(h.gameplay.hudSnapshot().rank, 7); }
+  h.gameplay.dispose();
+});
+
+test('minimap forwards existing UI ticks and return fractions without another clock or native reentry', () => {
+  const h = harness({ configure(options) { options.minimapTracking = true; } });
+  h.connected();
+  const clockCount = () => h.trace.filter(value => Array.isArray(value) && value[0] === 'clock').length;
+  const clocks = clockCount();
+  assert.equal(h.intervals.size, 1);
+  h.interval(100);
+  const fractions = () => h.trace.filter(value => Array.isArray(value) && value[0] === 'minimap-ui-fraction');
+  assert.equal(fractions().at(-1)[1], h.gameplay.diagnostics().session.returnFraction);
+  h.interval(500);
+  assert.equal(fractions().at(-1)[1], 1);
+  assert.equal(clockCount(), clocks, 'the existing UI timer adds no world update');
+  assert.equal(h.intervals.size, 0);
+  h.at(600); h.sockets[0].message([118, 1]); h.flush();
+  h.faults.delta = 5;
+  h.gameplay.frame(2200);
+  assert(!Object.hasOwn(h.trace.filter(value => Array.isArray(value) && value[0] === 'actions').at(-1)[1], 'minimapUiFraction'));
+  h.gameplay.frame(2201);
+  let actions = h.trace.filter(value => Array.isArray(value) && value[0] === 'actions').at(-1)[1];
+  assert.equal(actions.minimapUiFraction, h.gameplay.diagnostics().session.returnFraction);
+  for (let index = 1; index <= 50; index++) h.gameplay.frame(2201 + index);
+  actions = h.trace.filter(value => Array.isArray(value) && value[0] === 'actions'
+    && Object.hasOwn(value[1], 'minimapUiFraction')).at(-1)[1];
+  assert.equal(actions.minimapUiFraction, 0);
+  assert.equal(fractions().length, 2, 'return observations travel through native control actions');
+  assert.equal(h.gameplay.diagnostics().session.playing, false);
   h.gameplay.dispose();
 });
 

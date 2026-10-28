@@ -3,6 +3,7 @@
 use std::fmt;
 
 pub mod hud;
+pub mod minimap;
 
 /// Maximum frame bytes, including any elapsed header.
 pub const MAX_FRAME_BYTES: usize = 1 << 20;

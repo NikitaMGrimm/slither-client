@@ -54,6 +54,81 @@ export async function createLocalGameHost({ realm = globalThis, endpoint } = {})
     createTextNode: method(realm.Document?.prototype, 'createTextNode'),
     appendChild: method(node, 'appendChild'), removeChild: method(node, 'removeChild'),
   });
+  function captureMinimapDom() {
+    try {
+      const canvas = realm.HTMLCanvasElement.prototype, context = realm.CanvasRenderingContext2D.prototype;
+      const getContext = method(canvas, 'getContext'), contextCanvas = accessor(context, 'canvas');
+      const width = Object.getOwnPropertyDescriptor(canvas, 'width')?.set, height = Object.getOwnPropertyDescriptor(canvas, 'height')?.set;
+      const ImageData = realm.ImageData, Clamped = realm.Uint8ClampedArray;
+      if (typeof width !== 'function' || typeof height !== 'function'
+        || typeof ImageData !== 'function' || typeof Clamped !== 'function') return;
+      const methods = Object.create(null), setters = Object.create(null), issued = new WeakMap();
+      for (const name of ['save', 'restore', 'setTransform', 'clearRect', 'beginPath', 'arc',
+        'moveTo', 'lineTo', 'closePath', 'fill', 'stroke', 'putImageData']) methods[name] = method(context, name);
+      for (const name of ['fillStyle', 'strokeStyle', 'lineWidth', 'shadowColor', 'shadowBlur',
+        'shadowOffsetX', 'shadowOffsetY']) {
+        const setter = Object.getOwnPropertyDescriptor(context, name)?.set;
+        if (typeof setter !== 'function') return;
+        setters[name] = (receiver, value) => apply(setter, receiver, [value]);
+      }
+      const current = () => {
+        if (!isCurrentDocument()) throw new Error('Current minimap document required');
+      };
+      function owned(value) {
+        current();
+        if (dom.nodeType(value) !== 1 || dom.ownerDocument(value) !== document
+          || dom.namespaceURI(value) !== 'http://www.w3.org/1999/xhtml'
+          || dom.localName(value) !== 'canvas') throw new TypeError('Current HTML minimap canvas required');
+        current();
+      }
+      function target(value) {
+        current();
+        const canvas = issued.get(value);
+        if (!canvas || contextCanvas(value) !== canvas) throw new TypeError('Issued minimap context required');
+        owned(canvas);
+        return canvas;
+      }
+      const size = (value, limit) => {
+        if (!Number.isInteger(value) || value < 0 || value > limit) throw new TypeError('Minimap dimension required');
+      };
+      return freeze({ schema: 1, document, canvas: freeze({
+        context(value) {
+          owned(value);
+          const result = getContext(value, '2d');
+          owned(value);
+          if (!result || contextCanvas(result) !== value) throw new TypeError('Minimap 2d context required');
+          issued.set(result, value);
+          return result;
+        },
+        resize(value, x, y) {
+          size(x, 512 + 24); size(y, 512 + 24); owned(value);
+          apply(width, value, [x]); owned(value);
+          apply(height, value, [y]); owned(value);
+        },
+        set(value, name, entry) {
+          target(value);
+          if (!Object.hasOwn(setters, name)) throw new TypeError('Unsupported minimap property');
+          setters[name](value, entry); target(value);
+        },
+        call(value, name, ...args) {
+          target(value);
+          if (name === 'putImageData' || !Object.hasOwn(methods, name)) throw new TypeError('Unsupported minimap method');
+          methods[name](value, ...args); target(value);
+        },
+        upload(value, dimension, rgba) {
+          size(dimension, 512); target(value);
+          if (!(rgba instanceof Uint8Array) || rgba.length !== dimension * dimension * 4) {
+            throw new TypeError('Minimap RGBA square required');
+          }
+          if (dimension !== 0) {
+            const image = new ImageData(new Clamped(rgba), dimension, dimension);
+            target(value); methods.putImageData(value, image, 0, 0); target(value);
+          }
+        },
+      }) });
+    } catch { return; }
+  }
+  const minimapDom = captureMinimapDom();
   const inputValue = accessor(input, 'value'), setInputValue = accessor(input, 'value', 'set');
   const Input = realm.HTMLInputElement, TextArea = realm.HTMLTextAreaElement;
   const autocomplete = accessor(input, 'autocomplete', 'set'), buttonType = accessor(button, 'type', 'set');
@@ -194,6 +269,7 @@ export async function createLocalGameHost({ realm = globalThis, endpoint } = {})
   });
   const native = freeze({ ...scheduling, now, random, setInput, registerNicknameEditField,
     hudDom: freeze({ schema: 1, document, dom, isCurrentDocument }),
+    ...(minimapDom ? { minimapDom } : {}),
     ownedHudDom: freeze({ schema: 1, document, dom: construct }),
     ownedPlayDom: freeze({ schema: 1, document, dom: controls, createControlsLease }),
     leaderboardDom: freeze({ schema: 1, document, properties: freeze({ setTranslate }) }),

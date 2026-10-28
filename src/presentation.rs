@@ -28,6 +28,7 @@ mod food_painter;
 mod hud;
 mod leaderboard_score;
 mod length;
+mod minimap;
 mod mouth_face;
 mod nickname;
 mod prey;
@@ -90,6 +91,11 @@ pub use leaderboard_score::{
     LeaderboardRowScore, LeaderboardScoreError, LeaderboardScoreInput, LeaderboardScoreProjector,
 };
 pub use length::LengthPresentation;
+pub use minimap::{
+    MinimapBackgroundPlan, MinimapComposite, MinimapError, MinimapImageLayer, MinimapLabelPlan,
+    MinimapLayout, MinimapMarkerPlan, MinimapRenderPlan, MinimapState, MinimapUpdateInput,
+    MinimapView, MinimapWidgetPlan, plan_minimap,
+};
 pub use mouth_face::{MouthFaceGeometry, MouthFaceLayout, MouthImageLayout};
 pub use nickname::{
     NicknameAlignment, NicknameBaseline, NicknameCullBounds, NicknameDraw, NicknameInput,

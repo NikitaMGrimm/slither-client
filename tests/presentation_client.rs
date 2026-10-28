@@ -2,8 +2,9 @@
 
 use slither_client::{
     presentation::{
-        AnimatedClient, CAMERA_SAMPLES, ClientPresentationError, INITIAL_ZOOM, MAX_RETAINED_SNAKES,
-        MAX_RETAINED_TOTAL_BODY_POINTS, StandardEyeGeometry,
+        AnimatedClient, CAMERA_SAMPLES, ClientPresentationError, FacePresentation, HudCommandGuard,
+        HudIngressEventKind, HudIngressPlan, INITIAL_ZOOM, MAX_RETAINED_SNAKES,
+        MAX_RETAINED_TOTAL_BODY_POINTS, MinimapLayout, ScoreStatus, StandardEyeGeometry,
     },
     protocol::ElapsedHeader,
     state::{Point, StateError},
@@ -957,4 +958,398 @@ fn input_own_lifecycle_cannot_be_revived_by_wire_id_reuse() {
             assert!(c.own_snake().is_some());
         }
     }
+}
+
+// The minimap packets and name/world schedules below are authored synthetic inputs.
+fn minimap_pixel(plane: &[u8], index: usize) -> [u8; 4] {
+    plane[4 * index..4 * index + 4].try_into().unwrap()
+}
+
+#[test]
+fn successful_minimap_updates_preserve_existing_names_geometry_and_world_cadence() {
+    let mut legacy = AnimatedClient::new(0.).unwrap();
+    let mut tracked = AnimatedClient::new(0.).unwrap();
+    legacy.enable_nicknames().unwrap();
+    tracked.enable_nicknames().unwrap();
+    tracked.enable_minimap_tracking().unwrap();
+    let mut named = appearance(7, 2000, 12);
+    named.splice(22..23, [9].into_iter().chain(b"Synthetic".iter().copied()));
+    let frame = bundle(&[
+        setup(),
+        named,
+        vec![b'M', 0, 3, 64],
+        anchor(None, 2020, 1000, false),
+        vec![b'V', 64],
+    ]);
+    let ordinary_report = legacy.apply_frame(&frame, ElapsedHeader::Absent).unwrap();
+    let tracked_report = tracked.apply_frame(&frame, ElapsedHeader::Absent).unwrap();
+    assert_eq!((ordinary_report.ignored, tracked_report.ignored), (2, 0));
+    for now in [8., 151., 159.] {
+        assert_eq!(
+            legacy.advance(now, false).unwrap(),
+            tracked.advance(now, false).unwrap()
+        );
+        legacy.prepare_draw(800, 600).unwrap();
+        tracked.prepare_draw(800, 600).unwrap();
+        assert_eq!(tracked.own_snake(), legacy.own_snake());
+        assert_eq!(tracked.received().snakes, legacy.received().snakes);
+        assert_eq!(tracked.nickname_draws(), legacy.nickname_draws());
+        assert_eq!(tracked.camera(), legacy.camera());
+        assert_eq!(tracked.boundary(), legacy.boundary());
+        assert_eq!(tracked.background(), legacy.background());
+        assert_eq!(tracked.draw_serial(), legacy.draw_serial());
+    }
+}
+
+#[test]
+fn disabled_minimap_and_public_received_wrappers_remain_opaque() {
+    let malformed_map = *b"M";
+    let mut client = AnimatedClient::new(0.).unwrap();
+    let report = client
+        .apply_frame(&malformed_map, ElapsedHeader::Absent)
+        .unwrap();
+    assert_eq!((report.commands, report.ignored), (1, 1));
+    assert!(!client.minimap_tracking_enabled());
+    assert_eq!(client.minimap_view().dimension, None);
+    assert_eq!(
+        client.enable_minimap_tracking(),
+        Err(ClientPresentationError::MinimapModeRequiresReset)
+    );
+    let mut received = slither_client::state::ClientState::default();
+    assert_eq!(
+        received
+            .apply_frame(&malformed_map, ElapsedHeader::Absent)
+            .unwrap()
+            .ignored,
+        1
+    );
+    assert_eq!(
+        received
+            .apply_frame_with_events(&malformed_map, ElapsedHeader::Absent)
+            .unwrap()
+            .report
+            .ignored,
+        1
+    );
+    client.reset();
+    client.enable_minimap_tracking().unwrap();
+    client.enable_minimap_tracking().unwrap();
+    assert!(client.minimap_tracking_enabled());
+}
+
+#[test]
+fn map_only_admission_supports_all_families_without_enabling_score_r() {
+    let mut client = AnimatedClient::new(0.).unwrap();
+    client.enable_minimap_tracking().unwrap();
+    let report = client
+        .apply_frame(
+            &bundle(&[
+                setup(),
+                vec![b'M', 0, 2, 64],
+                vec![b'V', 64],
+                vec![b'U', 0, 2, 32],
+                vec![b'L', 2, 0, 1, 64, 64],
+                vec![b'u', 64],
+                vec![b'R'],
+                vec![b'R', 3],
+            ]),
+            ElapsedHeader::Absent,
+        )
+        .unwrap();
+    assert_eq!((report.commands, report.ignored), (8, 2));
+    assert_eq!(client.received().ignored_commands, 2);
+    assert_eq!(client.score_view().status, ScoreStatus::Disabled);
+    assert_eq!(client.minimap_view().dimension, Some(80));
+    assert_eq!(minimap_pixel(client.minimap_view().base_rgba, 0), [255; 4]);
+    assert!(client.minimap_view().alternate_rgba.iter().all(|&v| v == 0));
+    assert!(client.minimap_view().toggles.iter().all(|&v| v == 0));
+}
+
+#[test]
+fn mixed_setup_map_world_events_and_setup_hooks_keep_wire_positions() {
+    let mut client = AnimatedClient::new(0.).unwrap();
+    client.enable_minimap_tracking().unwrap();
+    let mut shifted_setup = setup();
+    shifted_setup[1..4].copy_from_slice(&u24(1200));
+    let mut observations = Vec::new();
+    let report = client
+        .apply_frame_with_face_presentation_and_factories_and_setup(
+            &bundle(&[
+                setup(),
+                vec![b'M', 0, 3, 64],
+                appearance(7, 2000, 12),
+                shifted_setup,
+                vec![b'V', 64],
+                anchor(None, 2020, 1000, false),
+            ]),
+            ElapsedHeader::Absent,
+            |_| Ok(FacePresentation::default()),
+            |_, _| panic!("no synthetic food"),
+            |stage, setup| {
+                let view = stage.minimap_view();
+                observations.push((
+                    view.dimension,
+                    view.image_revision,
+                    view.base_rgba.iter().all(|&v| v == 0),
+                    view.alternate_rgba.iter().all(|&v| v == 0),
+                    stage.own_snake().map(|snake| snake.metrics().raw_head.x),
+                    setup.grid_center,
+                ));
+                Ok::<_, ClientPresentationError>(())
+            },
+        )
+        .unwrap();
+    assert_eq!(report.ignored, 0);
+    assert_eq!(
+        observations,
+        [
+            (Some(24), 1, true, true, None, 1000.),
+            (Some(24), 3, true, true, Some(2000.), 1200.)
+        ]
+    );
+    assert_eq!(client.minimap_view().dimension, Some(24));
+    assert_eq!(client.minimap_view().toggles[575], 1);
+    assert_eq!(client.own_snake().unwrap().metrics().raw_head.x, 2020.);
+    assert_eq!(client.received().snakes[&7].head.x, 820.);
+    assert_eq!(client.score_view().status, ScoreStatus::Disabled);
+    assert_eq!(client.minimap_view().fade, 0.);
+    assert_eq!(client.minimap_view().last_marker_ms, 0.);
+}
+
+#[test]
+fn marker_uses_shared_timestamp_eased_radius_and_pre_prediction_raw_head() {
+    let mut client = AnimatedClient::new(0.).unwrap();
+    client.enable_minimap_tracking().unwrap();
+    apply(
+        &mut client,
+        &[setup(), appearance(7, 2000, 12), vec![b'M', 0, 2, 64]],
+    );
+    let mut radius = vec![b'z'];
+    radius.extend(u24(500));
+    apply(&mut client, &[radius]);
+    let revision = client.minimap_view().image_revision;
+    let raw = client.own_snake().unwrap().metrics().raw_head;
+    let mut expected_boundary = client.boundary().unwrap().clone();
+    expected_boundary.advance(5, true);
+    let displayed = expected_boundary.displayed();
+    let step = client.advance(151., false).unwrap();
+    let view = client.minimap_view();
+    let project = |head: f64| (10_f64 * (1. + 12. + (head - 1000.) / displayed - 7.)).round() / 10.;
+    assert_eq!(step.whole_steps, 5);
+    assert_eq!(
+        client.boundary().unwrap().displayed().to_bits(),
+        displayed.to_bits()
+    );
+    assert_ne!(displayed, 500.);
+    assert_eq!(view.marker.x.to_bits(), project(raw.x).to_bits());
+    assert_eq!(view.marker.y.to_bits(), project(raw.y).to_bits());
+    assert_eq!(view.last_marker_ms, 151.);
+    assert_eq!(view.image_revision, revision);
+    assert_ne!(client.own_snake().unwrap().metrics().raw_head.x, raw.x);
+    assert_eq!(view.transition, step.delta / 230.);
+    client.observe_minimap_ui_fraction(0.5).unwrap();
+    assert_eq!(
+        client.minimap_view().holder_opacity,
+        0.5 * client.minimap_view().fade
+    );
+    assert_eq!(client.minimap_view().image_revision, revision);
+}
+
+#[test]
+fn marker_retains_original_own_through_removal_death_expiry_and_id_reuse() {
+    for flag in [0, 1] {
+        let mut client = AnimatedClient::new(0.).unwrap();
+        client.enable_minimap_tracking().unwrap();
+        apply(
+            &mut client,
+            &[setup(), appearance(7, 2000, 12), vec![b'M', 0, 2, 64]],
+        );
+        let own = client.own_token().unwrap();
+        apply(&mut client, &[remove(7, flag), appearance(7, 4000, 12)]);
+        let retained_head = client.own_snake().unwrap().metrics().raw_head;
+        client.set_connected(false);
+        let revision = client.minimap_view().image_revision;
+        for index in 1..=25 {
+            client.advance(f64::from(index) * 160., false).unwrap();
+        }
+        let view = client.minimap_view();
+        let expected = (10_f64 * (1. + 12. + (retained_head.x - 1000.) / 980. - 7.)).round() / 10.;
+        assert_eq!(client.own_token(), Some(own));
+        assert!(client.active_own_snake().is_none());
+        assert!(client.drawn_own_snake().is_none());
+        assert_eq!(view.marker.x.to_bits(), expected.to_bits());
+        assert_eq!(view.last_marker_ms, 4000.);
+        assert_eq!(view.fade, 0.);
+        assert_eq!(view.image_revision, revision);
+        assert!(client.snake(7).unwrap().metrics().raw_head.x > 4000.);
+    }
+}
+
+#[test]
+fn normal_reset_preserves_selection_timeline_and_marker_but_requires_setup() {
+    let mut client = AnimatedClient::new(0.).unwrap();
+    client.enable_minimap_tracking().unwrap();
+    apply(
+        &mut client,
+        &[setup(), appearance(7, 2000, 12), vec![b'M', 0, 2, 64]],
+    );
+    client.advance(200., false).unwrap();
+    let marker = client.minimap_view().marker;
+    let revision = client.minimap_view().image_revision;
+    client.reset();
+    assert!(client.minimap_tracking_enabled());
+    assert_eq!(client.minimap_view().image_revision, revision + 1);
+    assert_eq!(client.minimap_view().marker, marker);
+    assert_eq!(client.minimap_view().last_marker_ms, 200.);
+    assert_eq!(client.minimap_view().fade, 0.);
+    assert_eq!(client.minimap_view().toggles, [0, 0, 0, 1]);
+    assert!(client.minimap_view().base_rgba.iter().all(|&v| v == 0));
+    let before = client.clone();
+    assert_eq!(
+        client.apply_frame(&[b'V', 64], ElapsedHeader::Absent),
+        Err(ClientPresentationError::State(StateError::MissingSetup))
+    );
+    assert_eq!(client, before);
+    apply(&mut client, &[setup()]);
+    assert_eq!(client.minimap_view().dimension, Some(24));
+    assert!(client.minimap_view().toggles.iter().all(|&v| v == 0));
+    assert_eq!(client.advance(208., false).unwrap().delta, 1.);
+    assert_eq!(client.minimap_view().marker, marker);
+}
+
+#[test]
+fn later_bad_map_or_team_setup_preserves_world_names_and_map() {
+    let mut client = AnimatedClient::new(0.).unwrap();
+    client.enable_minimap_tracking().unwrap();
+    client.enable_nicknames().unwrap();
+    let mut named = appearance(7, 2000, 12);
+    named.splice(22..23, [9].into_iter().chain(b"Synthetic".iter().copied()));
+    apply(&mut client, &[setup(), named, vec![b'M', 0, 3, 64]]);
+    client.advance(200., false).unwrap();
+    client.prepare_draw(800, 600).unwrap();
+    assert_eq!(client.nickname_draws()[0].text, "Synthetic");
+    let before = client.clone();
+    assert!(
+        client
+            .apply_frame(
+                &bundle(&[vec![b'M', 0, 3, 32], mass(7, 123), vec![b'V', 64, 255]]),
+                ElapsedHeader::Absent
+            )
+            .is_err()
+    );
+    assert_eq!(client, before);
+    let mut team = setup();
+    team.extend(1_u16.to_be_bytes());
+    team.extend(u24(900));
+    team.extend([2, 0]);
+    assert_eq!(
+        client.apply_frame(
+            &bundle(&[vec![b'U', 0, 2, 64], team]),
+            ElapsedHeader::Absent
+        ),
+        Err(ClientPresentationError::UnsupportedMode(2))
+    );
+    assert_eq!(client, before);
+}
+
+#[test]
+fn minimaps_share_hud_command_boundaries_for_both_schemas() {
+    for schema in [1, 2] {
+        let mut client = AnimatedClient::new(0.).unwrap();
+        client.enable_minimap_tracking().unwrap();
+        client.enable_score_tracking().unwrap();
+        let mut server_setup = setup();
+        server_setup.extend(1_u16.to_be_bytes());
+        let commands = [
+            server_setup.clone(),
+            vec![b'M', 0, 2, 64],
+            appearance(7, 2000, 12),
+            vec![b'l', 0, 0, 1, 0, 2],
+            vec![b'V', 64],
+            server_setup,
+            vec![b'u', 64],
+        ];
+        let guards = vec![
+            HudCommandGuard {
+                playing: true,
+                close_requested: false,
+                death_pending: false
+            };
+            commands.len()
+        ];
+        let mut setups = Vec::new();
+        let report = client
+            .apply_frame_with_face_presentation_and_all_factories_and_setup_and_hud(
+                &bundle(&commands),
+                ElapsedHeader::Absent,
+                |_| Ok(FacePresentation::default()),
+                |_, _| panic!("no synthetic food"),
+                |_, _| panic!("no synthetic prey"),
+                |stage, _| {
+                    setups.push(stage.minimap_view().image_revision);
+                    Ok::<_, ClientPresentationError>(())
+                },
+                HudIngressPlan {
+                    schema,
+                    command_count: commands.len(),
+                    guards: &guards,
+                    final_capture_indices: &[],
+                },
+            )
+            .unwrap();
+        assert_eq!(report.frame_report().ignored, 0);
+        assert_eq!(setups, [1, 4]);
+        let indices: Vec<_> = report
+            .events()
+            .iter()
+            .filter_map(|event| {
+                matches!(event.kind, HudIngressEventKind::Setup { .. })
+                    .then_some(event.command_index)
+            })
+            .collect();
+        assert_eq!(indices, [0, 5]);
+        assert_eq!(client.minimap_view().dimension, Some(80));
+        assert_eq!(client.received().snakes.len(), 1);
+        assert!(matches!(client.score_view().status, ScoreStatus::Ready(_)));
+        assert_eq!(
+            client
+                .minimap_render_plan(MinimapLayout::default())
+                .unwrap()
+                .widget
+                .unwrap()
+                .label
+                .text,
+            "server 1"
+        );
+    }
+}
+
+#[test]
+fn minimap_session_fraction_precedes_the_connected_fade_writer() {
+    let mut client = AnimatedClient::new(0.).unwrap();
+    client.enable_minimap_tracking().unwrap();
+    apply(&mut client, &[setup(), vec![b'M', 0, 24, 64]]);
+    client.advance(40., false).unwrap();
+    client
+        .advance_with_control::<ClientPresentationError, _>(80., false, |_, _| {
+            Ok(slither_client::presentation::ClientControlActions {
+                minimap_ui_fraction: Some(0.5),
+                ..Default::default()
+            })
+        })
+        .unwrap();
+    assert_eq!(client.minimap_view().holder_opacity, 0.05);
+    for index in 3..=40 {
+        client.advance(f64::from(index) * 40., false).unwrap();
+    }
+    assert_eq!(client.minimap_view().fade, 1.);
+    client
+        .advance_with_control::<ClientPresentationError, _>(1640., false, |_, _| {
+            Ok(slither_client::presentation::ClientControlActions {
+                minimap_ui_fraction: Some(0.5),
+                ..Default::default()
+            })
+        })
+        .unwrap();
+    assert_eq!(client.minimap_view().holder_opacity, 0.5);
 }
