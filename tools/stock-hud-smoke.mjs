@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { Path2D, recordPatternPath } from './pattern-path-fixture.mjs';
 import { announcementSmoke } from './announcement-smoke.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -88,7 +89,7 @@ export function stockHudSmoke(wasm) {
     stroke() { this.throwIf('stroke'); this.trace.push({ op: 'stroke', path: this.path.slice(), commands: this.pathCommands.slice(), color: this.strokeStyle,
       width: this.lineWidth, alpha: this.alpha, blend: this.blend, transforms: this.transforms.slice(),
       lineCap: this.lineCap, lineJoin: this.lineJoin }); }
-    fill(...args) { this.throwIf('fill'); this.trace.push({ op: 'fill', args, path: this.path.slice(), commands: this.pathCommands.slice(),
+    fill(...args) { this.throwIf('fill'); if (recordPatternPath(this, args[0])) return; this.trace.push({ op: 'fill', args, path: this.path.slice(), commands: this.pathCommands.slice(),
       color: this.fillStyle, alpha: this.alpha, blend: this.blend, transforms: this.transforms.slice() }); }
     drawImage(source, ...args) {
       this.throwIf('drawImage');
@@ -108,7 +109,7 @@ export function stockHudSmoke(wasm) {
 
   const denied = () => { networkAttempts++; throw new Error('HUD smoke forbids network'); };
   for (const key of ['fetch', 'WebSocket', 'XMLHttpRequest', 'EventSource', 'WebTransport']) install(key, denied);
-  for (const [key, value] of Object.entries({ HTMLCanvasElement, HTMLImageElement, CanvasRenderingContext2D })) install(key, value);
+  for (const [key, value] of Object.entries({ HTMLCanvasElement, HTMLImageElement, CanvasRenderingContext2D, Path2D })) install(key, value);
   const appearance = unpackCommands(wasm.decode_frame(syntheticScene(), false)).find(c => c[0] === 115);
   const setup = n => { const bytes = syntheticSetup(); bytes.set(word(n), 4); return bytes; };
   const spawn = id => { const bytes = Uint8Array.from(appearance); bytes.set(word(id), 1); return bytes; };

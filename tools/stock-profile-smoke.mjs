@@ -1,6 +1,7 @@
 // Authored synthetic profile/Play composition. No captured source, actual fetch,
 // original profile values, disk-backed fetch fixture or real socket is used.
 import assert from 'node:assert/strict';
+import { Path2D } from './pattern-path-fixture.mjs';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -116,7 +117,7 @@ export async function stockProfileSmoke(wasm) {
     get naturalHeight() { return 48; }
     get complete() { return true; }
   }
-  const realm = { HTMLCanvasElement, HTMLImageElement, CanvasRenderingContext2D };
+  const realm = { HTMLCanvasElement, HTMLImageElement, CanvasRenderingContext2D, Path2D };
   const setup = syntheticSetup();
   let appearance, challenge;
 

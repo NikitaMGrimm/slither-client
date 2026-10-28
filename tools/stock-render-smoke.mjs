@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { Path2D, recordPatternPath } from './pattern-path-fixture.mjs';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -140,7 +141,7 @@ export function stockRenderSmoke(wasm, { control = true } = {}) {
     moveTo(...args) { this.path.push(['move', ...args]); }
     lineTo(...args) { this.path.push(['line', ...args]); }
     closePath() { this.path.push(['close']); }
-    fill() { this.trace.push({ op: 'fill', path: this.path.slice(), ...this.state() }); }
+    fill(path) { if (recordPatternPath(this, path)) return; this.trace.push({ op: 'fill', path: this.path.slice(), ...this.state() }); }
     stroke() { this.trace.push({ op: 'stroke', path: this.path.slice(), ...this.state() }); }
     drawImage(source, ...args) {
       if (source === this.failSource) throw new Error('Authored stock Canvas image fault');
@@ -170,7 +171,7 @@ export function stockRenderSmoke(wasm, { control = true } = {}) {
     get naturalHeight() { return this.#height; }
     get complete() { return this.#complete; }
   }
-  const realm = { HTMLCanvasElement, HTMLImageElement, CanvasRenderingContext2D };
+  const realm = { HTMLCanvasElement, HTMLImageElement, CanvasRenderingContext2D, Path2D };
   const globals = new Map(Object.entries(realm).map(([key, value]) => {
     const descriptor = Object.getOwnPropertyDescriptor(globalThis, key);
     Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });

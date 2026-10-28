@@ -402,7 +402,7 @@ export function setupRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, o
         eq([count.target.width, count.target.height], [960, 540], 'entry size differs from charged desired size');
         eq(count.apply(bundle(...setups(accepted)), { width: size, height: size }), accepted);
         eq(observed.calls, { getContext: accepted, createPattern: accepted, reset: accepted + 1,
-          fillRect: accepted * 2, fill: accepted, stroke: accepted, drawImage: 0 });
+          fillRect: accepted, fill: accepted * 2, stroke: accepted, drawImage: 0 });
         eq(observed.assignments, [['width', size], ['height', size],
           ...Array.from({ length: accepted - 1 }, () => ['width', size])],
         'first changed-size draw assigns both sizes, then every draw isolates once');

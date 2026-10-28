@@ -1276,6 +1276,7 @@ pub(super) fn submit_plans(
             plan.camera.y - plan.context.center,
             plan.zoom,
             backdrop,
+            &plan.background,
         )?);
     }
     entry.validate_entry(target)?;

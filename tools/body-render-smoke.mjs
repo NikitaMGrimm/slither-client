@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { Path2D, recordPatternPath } from './pattern-path-fixture.mjs';
+import { patternRenderSmoke } from './pattern-render-smoke.mjs';
 import { pathToFileURL } from 'node:url';
 import { createSkinProvider } from '../web/skin-provider.mjs';
 import { createLocalBodyResolver } from '../web/synthetic-body.mjs';
@@ -64,7 +66,7 @@ export function bodyRenderSmoke(wasm) {
     stroke() { this.throwIf('stroke'); this.trace.push({ op: 'stroke', path: this.path.slice(), commands: this.pathCommands.slice(), color: this.strokeStyle,
       width: this.lineWidth, alpha: this.alpha, blend: this.blend, transforms: this.transforms.slice(),
       lineCap: this.lineCap, lineJoin: this.lineJoin }); }
-    fill(...args) { this.throwIf('fill'); this.trace.push({ op: 'fill', args, path: this.path.slice(), commands: this.pathCommands.slice(),
+    fill(...args) { this.throwIf('fill'); if (recordPatternPath(this, args[0])) return; this.trace.push({ op: 'fill', args, path: this.path.slice(), commands: this.pathCommands.slice(),
       color: this.fillStyle, alpha: this.alpha, blend: this.blend, transforms: this.transforms.slice() }); }
     fillText(text, x, y) { this.throwIf('fillText'); this.trace.push({ op: 'text', text, x, y,
       ...this.savedState() }); }
@@ -84,7 +86,7 @@ export function bodyRenderSmoke(wasm) {
   }
   class HTMLImageElement { complete = true; naturalWidth = 64; naturalHeight = 64; constructor(name = 'image') { this.name = name; } }
   const realm = { HTMLCanvasElement, HTMLImageElement };
-  const globals = new Map(Object.entries({ ...realm, CanvasRenderingContext2D }).map(([key, value]) => {
+  const globals = new Map(Object.entries({ ...realm, CanvasRenderingContext2D, Path2D }).map(([key, value]) => {
     const prior = Object.getOwnPropertyDescriptor(globalThis, key);
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
     return [key, prior];
@@ -171,7 +173,7 @@ export function bodyRenderSmoke(wasm) {
       f.render();
       const trace = f.target.context.trace;
       const image = trace.find(value => value.op === 'image' && value.source === backdrop);
-      const fills = trace.filter(value => value.op === 'fillRect');
+      const fills = trace.filter(value => value.op === 'fillRect' || value.op === 'patternFill');
       eq([fills[0].color, fills[0].alpha, fills[0].args], ['#000000', 1, [0, 0, 960, 540]],
         'background clears black in screen coordinates');
       eq([image.args, image.alpha, image.transforms], [[0, 0, 640, 360, 0, 0, 960, 540], .3, []],
@@ -201,6 +203,7 @@ export function bodyRenderSmoke(wasm) {
         'fully applied low quality omits the backdrop');
       f.scene.set_background_backdrop(null);
     } finally { backgroundLayers.close(); }
+    patternRenderSmoke(wasm, { fixture, eq, ok, rejects });
     faceRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok, rejects, checkAtomic, bodyImages });
     nicknameRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok, rejects });
     foodRenderSmoke(wasm, { fixture, appearance, vanillaEyes, eq, ok, rejects });
