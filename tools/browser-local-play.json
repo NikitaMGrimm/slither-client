@@ -1,0 +1,20 @@
+{
+  "kind": "authored-synthetic",
+  "description": "Own default page and authored zero-profile challenge/scene fixture; no simulator or external reference.",
+  "viewport": { "width": 1280, "height": 800 },
+  "expectedLogins": 1,
+  "steps": [
+    { "op": "assert", "role": "button", "name": "Play", "state": "enabled" },
+    { "op": "screenshot", "name": "ready" },
+    { "op": "fill", "label": "Nickname", "value": "Synthetic browser" },
+    { "op": "click", "role": "button", "name": "Play" },
+    { "op": "advance", "ms": 64 },
+    { "op": "advance", "ms": 64 },
+    { "op": "advance", "ms": 64 },
+    { "op": "screenshot", "name": "playing" },
+    { "op": "disconnect" },
+    { "op": "advance", "ms": 64 },
+    { "op": "assert", "role": "button", "name": "Play", "state": "enabled" },
+    { "op": "screenshot", "name": "returned" }
+  ]
+}

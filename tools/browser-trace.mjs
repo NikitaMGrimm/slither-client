@@ -1,0 +1,74 @@
+import { writeFile } from 'node:fs/promises';
+import { correlateWorldTrace } from './browser-layers.mjs';
+
+export const traceCategories = ['toplevel', 'devtools.timeline', 'disabled-by-default-devtools.timeline',
+  'cc', 'viz', 'gpu', 'benchmark', 'disabled-by-default-gpu.service', 'disabled-by-default-cc.debug'];
+export function assessGraphics(gpu) {
+  const software = value => typeof value === 'string' && /swiftshader|llvmpipe|software|microsoft basic render|\bwarp\b/i.test(value);
+  const renderer = gpu.auxAttributes?.glRenderer;
+  return { featureStatus: gpu.featureStatus,
+    softwareRendererDetected: typeof renderer === 'string' && renderer.length > 0 ? software(renderer) : null,
+    softwareAdapterAdvertised: gpu.devices.some(x => software(x.deviceString)),
+    rendererIdentificationAvailable: typeof renderer === 'string' && renderer.length > 0,
+    limit: 'Feature status and renderer metadata describe this process; an advertised software adapter need not be the active renderer, and trace event names alone cannot prove hardware execution.' };
+}
+export function summarizeTrace(events) {
+  const categories = {}, names = {}, tracks = new Set();
+  const threadNames = new Map(), processNames = new Map();
+  let gpu = 0, raster = 0, presentation = 0;
+  for (const e of events) {
+    if (e.ph === 'M' && e.name === 'thread_name') threadNames.set(`${e.pid}:${e.tid}`, e.args?.name);
+    if (e.ph === 'M' && e.name === 'process_name') processNames.set(e.pid, e.args?.name);
+    for (const c of (e.cat ?? '').split(',').filter(Boolean)) categories[c] = (categories[c] ?? 0) + 1;
+    if (/gpu/i.test(e.cat ?? '')) gpu++;
+    if (/raster/i.test(e.name ?? '')) raster++;
+    if (/FramePresented|SwapBuffers|PresentationFeedback/i.test(e.name ?? '')) presentation++;
+    if (/gpu|raster|DrawFrame|SwapBuffers/i.test(`${e.cat} ${e.name}`)) {
+      names[e.name] = (names[e.name] ?? 0) + 1; tracks.add(`${e.pid}:${e.tid}`);
+    }
+  }
+  return { eventCount: events.length, categories, relevantNames: names,
+    relevantTracks: [...tracks].map(id => ({ id, thread: threadNames.get(id) ?? null,
+      process: processNames.get(Number(id.split(':')[0])) ?? null })),
+    gpuEvents: gpu, rasterEvents: raster, presentationEvents: presentation,
+    hasGpuRasterPresentation: gpu > 0 && raster > 0 && presentation > 0,
+    limit: 'CDP event presence is not a GPU completion duration or hardware acceleration proof.' };
+}
+export async function startTrace(browser) {
+  const cdp = await browser.newBrowserCDPSession();
+  const graphics = await cdp.send('SystemInfo.getInfo');
+  const version = await cdp.send('Browser.getVersion');
+  const commandLine = await cdp.send('Browser.getBrowserCommandLine');
+  if (commandLine.arguments.some(x => /^--disable-gpu(?:=|$)/.test(x))) throw new Error('GPU disabled in actual Chrome command line');
+  const available = await cdp.send('Tracing.getCategories');
+  const events = [];
+  cdp.on('Tracing.dataCollected', ({ value }) => { for (const event of value) events.push(event); });
+  await cdp.send('Tracing.start', { categories: traceCategories.join(','), options: 'record-as-much-as-possible', transferMode: 'ReportEvents' });
+  let stopped = false;
+  return { metadata: { version, commandLine, requestedCategories: traceCategories,
+    graphicsAssessment: assessGraphics(graphics.gpu),
+    availableRelevantCategories: available.categories.filter(x => /gpu|raster|viz|^cc$/.test(x)), graphics },
+  async stop(file, world) {
+    if (stopped) throw new Error('Trace already stopped'); stopped = true;
+    let timeout, completed;
+    const complete = new Promise(resolve => {
+      completed = resolve;
+      cdp.once('Tracing.tracingComplete', completed);
+    });
+    const deadline = new Promise((resolve, reject) => {
+      timeout = setTimeout(() => reject(new Error('CDP trace completion deadline')), 20000);
+    });
+    try {
+      const [, completion] = await Promise.race([
+        Promise.all([cdp.send('Tracing.end'), complete]), deadline,
+      ]);
+      await writeFile(file, JSON.stringify({ traceEvents: events }), { flag: 'wx' });
+      await cdp.detach();
+      return { ...summarizeTrace(events), completion,
+        ...(world ? { worldCorrelation: correlateWorldTrace(events, world) } : {}) };
+    } finally {
+      clearTimeout(timeout);
+      cdp.off('Tracing.tracingComplete', completed);
+    }
+  } };
+}
