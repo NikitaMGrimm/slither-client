@@ -25,6 +25,11 @@ test('default announcement publication uses Rust views without a second draw or 
     const [id, callback] = graph.f.raf.entries().next().value; graph.f.raf.delete(id); callback(16);
     assert.equal(graph.announcements.reads, 2); assert.equal(runtime.diagnostics().draws, 1);
     assert.equal(style(holder).get('display'), 'block'); assert.equal(style(holder).get('opacity'), '0.4');
+    const diagnostic = graph.f.document.getElementById('slither-client-status');
+    assert.ok(Number.parseFloat(style(diagnostic).get('top'))
+      >= graph.announcements.view.top + graph.announcements.view.height,
+    'the visible diagnostic status is below the announcement rectangle');
+    assert.notEqual(diagnostic.hidden, true, 'diagnostic text remains available');
     assert.equal(graph.f.edit.hud.character(holder.children[0].children[0]).data, '"<tag> & text"');
     assert.equal(style(end).get('display'), 'block');
     assert.deepEqual(end.children.map(node => graph.f.edit.hud.character(node.children[0]).data),

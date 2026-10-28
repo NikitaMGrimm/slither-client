@@ -924,6 +924,11 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
           isCurrentDocument: hudCapabilities.isCurrentDocument });
         announcementUi.mount();
         checkHudOperation();
+        // Keep the diagnostic status below the reserved 300 by 228 announcement box.
+        const statusStyle = hudCapabilities.dom.style(output);
+        checkHudOperation();
+        hudCapabilities.dom.setStyle(statusStyle, 'top', '240px');
+        checkHudOperation();
         const view = apply(readAnnouncementView, scene, []);
         checkHudOperation();
         announcementUi.render(view);
