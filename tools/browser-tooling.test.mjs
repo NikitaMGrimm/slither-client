@@ -106,6 +106,11 @@ test('GPU trace verification uses real event categories, raster work and present
   assert.equal(actual.hasGpuRasterPresentation, true);
   assert.equal(actual.gpuEvents, 1); assert.equal(actual.rasterEvents, 1);
   assert.deepEqual(actual.relevantTracks, [{ id: '7:9', thread: 'CrGpuMain', process: 'GPU Process' }]);
+  for (const name of ['DirectRenderer::DrawFrame', 'Display::DrawAndSwap']) {
+    const drawOnly = summarizeTrace([{ name: 'RasterTask', cat: 'gpu,cc' }, { name, cat: 'viz' }]);
+    assert.equal(drawOnly.presentationEvents, 0);
+    assert.equal(drawOnly.hasGpuRasterPresentation, false);
+  }
 });
 
 test('a rejected trace end releases its pending completion handler and deadline', async t => {
@@ -123,6 +128,30 @@ test('a rejected trace end releases its pending completion handler and deadline'
   assert.equal(cdp.listenerCount('Tracing.tracingComplete'), 0);
   t.mock.timers.tick(20001);
   await new Promise(resolve => setImmediate(resolve));
+});
+
+test('one trace-stop deadline bounds an unanswered end command even after completion arrives', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  for (const completionArrives of [false, true]) {
+    const cdp = new EventEmitter();
+    cdp.send = async method => {
+      if (method === 'SystemInfo.getInfo') return { gpu: { devices: [] } };
+      if (method === 'Browser.getBrowserCommandLine') return { arguments: [] };
+      if (method === 'Tracing.getCategories') return { categories: [] };
+      if (method === 'Tracing.end') return new Promise(() => {});
+      return {};
+    };
+    const trace = await startTrace({ newBrowserCDPSession: async () => cdp });
+    let outcome = 'pending';
+    const stopping = trace.stop('unwritten-trace.json').then(() => { outcome = 'unexpected success'; },
+      error => { outcome = error.message; });
+    if (completionArrives) cdp.emit('Tracing.tracingComplete', { dataLossOccurred: false });
+    t.mock.timers.tick(20001);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.match(outcome, /CDP trace completion deadline/);
+    await stopping;
+    assert.equal(cdp.listenerCount('Tracing.tracingComplete'), 0);
+  }
 });
 
 test('an advertised software adapter does not label the active hardware renderer as software', () => {

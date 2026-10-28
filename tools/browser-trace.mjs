@@ -22,7 +22,7 @@ export function summarizeTrace(events) {
     for (const c of (e.cat ?? '').split(',').filter(Boolean)) categories[c] = (categories[c] ?? 0) + 1;
     if (/gpu/i.test(e.cat ?? '')) gpu++;
     if (/raster/i.test(e.name ?? '')) raster++;
-    if (/DrawFrame|Display::DrawAndSwap|FramePresented|SwapBuffers|PresentationFeedback/i.test(e.name ?? '')) presentation++;
+    if (/FramePresented|SwapBuffers|PresentationFeedback/i.test(e.name ?? '')) presentation++;
     if (/gpu|raster|DrawFrame|SwapBuffers/i.test(`${e.cat} ${e.name}`)) {
       names[e.name] = (names[e.name] ?? 0) + 1; tracks.add(`${e.pid}:${e.tid}`);
     }
@@ -51,15 +51,17 @@ export async function startTrace(browser) {
   async stop(file, world) {
     if (stopped) throw new Error('Trace already stopped'); stopped = true;
     let timeout, completed;
-    const complete = new Promise((resolve, reject) => {
-      timeout = setTimeout(() => reject(new Error('CDP trace completion deadline')), 20000);
-      completed = result => { clearTimeout(timeout); resolve(result); };
+    const complete = new Promise(resolve => {
+      completed = resolve;
       cdp.once('Tracing.tracingComplete', completed);
     });
-    // The completion deadline can reject while Tracing.end is still pending.
-    complete.catch(() => {});
+    const deadline = new Promise((resolve, reject) => {
+      timeout = setTimeout(() => reject(new Error('CDP trace completion deadline')), 20000);
+    });
     try {
-      await cdp.send('Tracing.end'); const completion = await complete;
+      const [, completion] = await Promise.race([
+        Promise.all([cdp.send('Tracing.end'), complete]), deadline,
+      ]);
       await writeFile(file, JSON.stringify({ traceEvents: events }), { flag: 'wx' });
       await cdp.detach();
       return { ...summarizeTrace(events), completion,
