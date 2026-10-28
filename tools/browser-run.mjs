@@ -4,6 +4,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
+import os from 'node:os';
 import { freshOutput, syntheticServer, hash, json, fence, temporaryProfile, root } from './browser-common.mjs';
 import { installProbe } from './browser-probe.mjs';
 import { startTrace } from './browser-trace.mjs';
@@ -13,6 +14,7 @@ const { values } = parseArgs({ options: { output: { type: 'string' }, mode: { ty
 if (!['regression', 'performance'].includes(values.mode)) throw new Error('Unknown mode');
 const output = await freshOutput(values.output);
 const manifest = { kind: 'authored-synthetic', mode: values.mode, platform: process.platform,
+  os: { release: os.release(), version: os.version() },
   arch: process.arch, playwright: createRequire(import.meta.url)('playwright/package.json').version,
   node: process.version, frames: 24, keyframes: [1, 12, 24], viewport: { width: 640, height: 480 },
   status: 'running', browsers: [], cleanup: [] };
@@ -97,7 +99,7 @@ try {
       result.baseline = baseline;
       if (expected && JSON.stringify(expected[`${process.platform}-${process.arch}`]?.[name]) !== JSON.stringify(baseline)) throw new Error('Synthetic baseline mismatch; outputs retained, no expectation updated');
       result.status = 'passed';
-    } catch (error) { result.status = 'failed'; result.error = error.message; throw error; }
+    } catch (error) { result.status = 'failed'; result.error = error.message; }
     finally {
       if (trace) { try { result.partialTrace = await trace.stop(path.join(output, 'chrome-trace-partial.json')); } catch (e) { result.traceCleanupError = e.message; } }
       try { if (context) await context.close(); } finally { if (browser) await browser.close(); }
@@ -105,8 +107,9 @@ try {
       manifest.cleanup.push(`${name}: browser/context closed${profile ? ', owned temporary profile removed' : ''}`);
     }
   }
-  manifest.status = 'passed';
-  if (values.candidate) await json(path.join(output, 'baseline-candidate.json'), {
+  manifest.status = manifest.browsers.every(b => b.status === 'passed') ? 'passed' : 'failed';
+  if (manifest.status === 'failed') { manifest.error = 'One or more browser jobs failed; inspect run.json'; process.exitCode = 1; }
+  if (values.candidate && manifest.status === 'passed') await json(path.join(output, 'baseline-candidate.json'), {
     [`${process.platform}-${process.arch}`]: Object.fromEntries(manifest.browsers.map(b => [b.name, b.baseline])) });
 } catch (error) { manifest.status = 'failed'; manifest.error = error.message; process.exitCode = 1; }
 finally {
