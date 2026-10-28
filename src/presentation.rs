@@ -74,9 +74,10 @@ pub use food_painter::{
     FoodCullBounds, FoodImageCommand, FoodImageDraw, FoodPaintCounts, FoodPaintError,
     FoodPaintInput, FoodPaintPass, FoodPaintPlan, MAX_FOOD_PAINT_COMMANDS, plan_food,
 };
+pub(crate) use hud::HudLeaderboardRowsBudget;
 pub use hud::{
     HudCommandGuard, HudIngressError, HudIngressEvent, HudIngressEventKind, HudIngressPlan,
-    HudIngressReport,
+    HudIngressReport, HudLeaderboardRow, HudLeaderboardRows,
 };
 pub use length::LengthPresentation;
 pub use mouth_face::{MouthFaceGeometry, MouthFaceLayout, MouthImageLayout};

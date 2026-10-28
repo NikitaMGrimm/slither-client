@@ -1,8 +1,8 @@
 # Opt-in command-indexed HUD journal
 
 The packet journal connects native score state to the caller-owned session. It
-reports command-time semantic data; it draws no HUD and retains no packet, row,
-name or report queue. Default packet APIs retain their existing behavior.
+reports command-time semantic data; it draws no HUD and retains no packet or
+report queue in the client. Default packet APIs retain their existing behavior.
 
 ## Native transaction
 
@@ -12,7 +12,7 @@ accepts the existing face, food, prey and Setup callbacks followed by a borrowed
 `HudIngressPlan`. It returns `HudIngressReport` with read-only `schema()`,
 `command_count()`, `setup_draws()`, `events()` and `frame_report()` accessors.
 
-The plan has schema 1, a command count in 1..=4096, exactly one
+The plan selects schema 1 or 2, a command count in 1..=4096, exactly one
 `HudCommandGuard { playing, close_requested, death_pending }` per original wire
 command and sorted exhaustive final-capture indices. These guards are supplied
 session decisions. Native code does not reconstruct the session lifecycle.
@@ -35,7 +35,7 @@ Object tokens retain original-own identity through death, expiry and wire-ID
 reuse. Normal anchors, remote targets, removals and `R` do not create length
 markers. Every leaderboard tail validates even when not playing: this is stricter
 opt-in admission. Default and score-only leaderboard handling, and all public
-announcements, remain opaque. No rows or text are copied into the journal.
+announcements, remain opaque. Schema 1 copies only the leaderboard header.
 
 `StateError::Hud` describes plan/control/leaderboard admission failures.
 `ClientPresentationError::ScoreTrackingRequired` rejects implicit enablement;
@@ -52,7 +52,7 @@ It shares staging, resolvers, actual Setup planning, budgets and source commit.
 Actual planned draws must match the journal's count. Complete report conversion,
 copying and recursive freezing finish before Canvas submission and model commit.
 
-The immediate report is `{schema: 1, commandCount, setupDraws, events}`. Each
+The schema-1 report is `{schema: 1, commandCount, setupDraws, events}`. Each
 event has `commandIndex` and one of the kinds `setup`, `setup-draw`,
 `own-length-scheduled`, `leaderboard` or `final-score`. Score views use the
 existing [score-state schema](score-state.md), preserving BigInt tokens and
@@ -61,9 +61,60 @@ integer Number scores without JSON, clamping, recomputation or narrowing.
 `createStockClient.packetWithHud(bytes, elapsedHeader, plan)` requires an explicit
 boolean header flag. It validates the copied plan under its reentry guard before
 capture, lazily requires the new native capability, then performs one held
-operation and one native call. It validates the report, charges successful Setup
+operation and one native call. It requires the report's schema to match the
+selected plan, validates the report, charges successful Setup
 draws once and returns only after source release succeeds. It advances no step,
 quality or statistics phase.
+
+## Explicit raw leaderboard rows
+
+Schema 2 adds `leaderboardRows` to the report without changing its semantic
+events. Native `HudIngressReport::leaderboard_rows()` returns owned
+`HudLeaderboardRows` entries with `command_index()` and `rows()` accessors.
+There is one entry per playing leaderboard command, including empty boards and
+repeated equal commands, in original command order. A false playing guard still
+validates the complete packet tail but produces no entry. Close-request and
+death-pending guards do not suppress a playing board.
+
+Each `HudLeaderboardRow` exposes `ordinal()`, `count()`, `fractional_mass()`,
+`raw_color()`, `palette_index()` and `name()`. The ordinal is one-based packet
+order, independent of rank or snake identity. Count is the unadjusted u16;
+fractional mass retains the existing u24 division by 16777215 in f64. Color is
+the original byte and its modulo-nine leaderboard palette index. Name is an
+owned copy of the original bytes, with no text decoding, sanitation or row-score
+calculation. Later packets, Setup and reset cannot rewrite an earlier report.
+
+The copied JavaScript shape is:
+
+```js
+{
+  schema: 2, commandCount, setupDraws, events,
+  leaderboardRows: [{ commandIndex, rows: [
+    { ordinal, count, fractionalMass, rawColor, paletteIndex, name }
+  ] }]
+}
+```
+
+Names are dense plain arrays of Number bytes, rather than Wasm memory views.
+Every record and array is copied and frozen before Canvas submission or model
+commit. Schema 1 retains exactly its four original report keys.
+
+There is no ten-row or snake-body limit. The frame bounds imply at most 149795
+rows, names of at most 255 bytes, and at most 1 MiB of represented leaderboard
+wire bytes across all emitted boards. Native allocation failure reports
+`HudIngressError::LeaderboardRowsResource`; invalid copied JavaScript data
+throws `TypeError('Invalid HUD data')`. These bounds limit accepted structure,
+not measured engine memory usage. Validation and allocation failure cannot
+return a partial row report or commit a partial native transaction.
+
+`session.subscribeWithLeaderboardRows({packet, hud, state, error})` explicitly
+selects schema 2. It shares the single subscription owner and lifetime with
+`subscribe` and `subscribeWithHud`; unsubscribe does not renew that owner.
+The controller releases its held source operation before returning the report.
+The session validates it before committing staged controls, then calls the
+synchronous `hud` callback before the state notification. Post-commit failure
+terminates without replay. Existing gameplay, runtime, HUD and Play entries
+continue to select schema 1. This API does not render leaderboard rows.
 
 An optional synchronous `createStockGameplay` callback, `onHudPacket(report)`,
 selects `subscribeWithHud` and this controller route. It must return `undefined`
@@ -105,8 +156,7 @@ only actions. Both share one step/commit latch; do not call both for one step.
 The result is an observation of existing effects, not a transaction spanning
 later native or observer failure. Reducer publication remains caller-owned.
 
-Visible length/rank/final UI, leaderboard rows,
-announcements and full login UI remain separate. Synthetic native, Node and
+Visible leaderboard rows and announcements remain separate. Synthetic native, Node and
 real-Wasm recorder evidence does not establish browser pixels, installed-host
 compatibility or server acceptance. See [verification](verification.md).
 

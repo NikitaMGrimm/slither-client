@@ -38,6 +38,33 @@ pull requests, and manual dispatch. Normal tests and CI require no external
 reference and do not connect to game servers. Dependency and toolchain setup may
 access package sources. Release-plz remains dormant.
 
+## Raw leaderboard row ingress
+
+The explicit schema-2 row path passes 1,211 Node tests with zero skips and 545
+native Rust tests. Formatting, doctests and strict native/Wasm Clippy pass. A
+fresh matching-bindgen web build passes the complete real-Wasm smoke matrix;
+its HUD recorder checks 918 assertions, including raw row/name/f64 delivery,
+pre-Canvas conversion failure, rollback and actual Rust/controller/session
+composition after held-source release. Socket, asset and Canvas operations use
+labelled authored doubles; no real network is exercised.
+
+The unchanged native schema-1 data-loss witness remains retained: different raw
+names produce equal header-only reports. Schema 2 preserves the difference;
+schema 1 remains header-only. Native cases cover a complete 1 MiB bare frame
+with 149795 rows, legal aggregate frame boundaries, 4096 empty boards, arbitrary
+name bytes and command-time lifecycle order. Copied JavaScript data validates
+aggregate bounds before row/name enumeration and output copying. The row-only
+callback admission also rejects natural foreign bound asynchronous/generator
+kinds without invoking callbacks or tag getters. Allocator exhaustion and
+engine memory overhead remain unmeasured.
+
+All three production package selections contain 94 files across Chrome and
+Firefox. All 282 files verify; the shared validator snippet is byte-exact, and
+only the two selected bootstrap copies differ between modes. Permissions,
+hosts and CSP remain unchanged. This adds raw row delivery through an explicit
+session API; it establishes no leaderboard UI, minimap, installed-browser,
+profile HTTP, game connection or server acceptance.
+
 ## Owned Play entry and controls
 
 The initial frozen runtime integration passes 277 focused Node tests with zero

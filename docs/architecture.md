@@ -32,7 +32,11 @@ wasm-bindgen 0.2.129 and web-sys 0.3.106.
 announcement projections. It validates complete bounded commands before
 exposing their fields and iterates rows without allocation. Raw text bytes,
 score calculations and lifecycle policy remain separate. Generic framing and
-state admission do not invoke these decoders automatically; see
+state admission do not invoke these decoders automatically. Explicit schema-2
+HUD ingress copies raw leaderboard rows through the transactional Wasm report
+and a synchronous session callback; the existing runtime entries retain their
+header-only schema-1 selection. No leaderboard-row renderer or text policy is
+selected by this API. See [HUD ingress](hud-ingress.md) and
 [HUD packet projections](hud-packets.md).
 
 `ClientState::apply_frame` validates framing, applies supported commands to a

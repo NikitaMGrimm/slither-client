@@ -136,6 +136,7 @@ export function createStockClient({ scene, quality, adapter, hostAssets, target,
           resolveAppearance, resolveFood, resolvePrey, target, ...contextPalettes, background, backingWidth,
           backingHeight, resolveRecipe, resolveRandom, quality, copiedPlan]);
         const report = copyHudIngressReport(nativeReport, copiedPlan.commandCount);
+        if (report.schema !== copiedPlan.schema) throw new TypeError('Invalid HUD data');
         countDraws(report.setupDraws);
         return report;
       }, true, () => {
