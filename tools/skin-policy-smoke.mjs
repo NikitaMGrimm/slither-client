@@ -1,5 +1,6 @@
+import { stockSkinCutoverSmoke } from './stock-skin-cutover-smoke.mjs';
 import assert from 'node:assert/strict';
-import { resolveStockSkin } from '../web/stock-skin-rules.mjs';
+import { resolveStockSkin } from './stock-skin-policy-oracle.mjs';
 import { createLocalBodyResolver } from '../web/synthetic-body.mjs';
 
 // Authored numeric differential witnesses only; no artwork, browser or network.
@@ -124,5 +125,5 @@ export function skinPolicySmoke(wasm) {
   for (const skin of [27, 40, 41]) {
     equal(wasm.stock_accessory_forward(skin, custom([2, 1])), 6, 'custom override precedes accessory face eligibility');
   }
-  return assertions;
+  return assertions + stockSkinCutoverSmoke(wasm);
 }

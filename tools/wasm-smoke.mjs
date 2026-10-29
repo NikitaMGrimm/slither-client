@@ -28,6 +28,8 @@ import { desktopLayoutSmoke } from './desktop-layout-smoke.mjs';
 import { sessionPolicySmoke } from './session-policy-smoke.mjs';
 import { sessionPolicyRecordSmoke } from './session-policy-record-smoke.mjs';
 import { sessionPolicyLifetimeSmoke } from './session-policy-lifetime-smoke.mjs';
+import { profileLiteralsSmoke } from './profile-literals-smoke.mjs';
+import { playAdmissionSmoke } from './play-admission-smoke.mjs';
 import { desktopInputSmoke } from './desktop-input-smoke.mjs';
 import { desktopInputLifetimeSmoke } from './desktop-input-lifetime-smoke.mjs';
 
@@ -42,7 +44,21 @@ const sessionRequirements = execFileSync(process.execPath,
   { encoding: 'utf8', env: { ...process.env, SLITHER_SESSION_WASM: '1' }, maxBuffer: 8 * 1024 * 1024 });
 console.log('Synthetic real-Wasm session requirements passed:',
   sessionRequirements.split(/\r?\n/).filter(line => /^# (tests|pass|fail|skipped) /.test(line)).join(', '));
+console.log('Synthetic closed profile literal/ownership ABI passed:', await profileLiteralsSmoke(wasm));
+const profileLiteralResult = execFileSync(process.execPath,
+  ['--test', '--test-reporter=tap', ...['stock-live-profile', 'stock-profile-gameplay']
+    .map(name => fileURLToPath(new URL(`./${name}.test.mjs`, import.meta.url)))],
+  { encoding: 'utf8', env: { ...process.env, SLITHER_PROFILE_LITERALS_WASM: '1' }, maxBuffer: 4 * 1024 * 1024 });
+console.log('Synthetic real-Wasm profile/acquirer lifetime requirements passed:',
+  profileLiteralResult.split(/\r?\n/).filter(line => /^# (tests|pass|fail|skipped) /.test(line)).join(', '));
 menuPreferencesSmoke(wasm);
+playAdmissionSmoke(wasm);
+const playAdmissionResult = execFileSync(process.execPath,
+  ['--test', '--test-reporter=tap', ...['game-play-admission', 'game-owned-play-runtime', 'game-menu-preferences',
+    'game-owned-leaderboard-runtime'].map(name => fileURLToPath(new URL(`./${name}.test.mjs`, import.meta.url)))],
+  { encoding: 'utf8', env: { ...process.env, SLITHER_PLAY_ADMISSION_WASM: '1' }, maxBuffer: 4 * 1024 * 1024 });
+console.log('Synthetic runtime Play requirements with real Rust admission passed:',
+  playAdmissionResult.split(/\r?\n/).filter(line => /^# (tests|pass|fail|skipped) /.test(line)).join(', '));
 console.log('Synthetic real-Wasm desktop input equivalence passed:', desktopInputSmoke(wasm));
 console.log('Synthetic real-Wasm desktop input release passed:', desktopInputLifetimeSmoke(wasm));
 const inputRequirements = execFileSync(process.execPath,

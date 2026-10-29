@@ -59,7 +59,7 @@ function reportAdditionalFailures(message, failures) {
 export async function stockProfileSmoke(wasm) {
   if (running) throw new Error('Profile smoke already active');
   for (const name of ['AnimatedScene', 'DesktopQuality', 'encode_login', 'solve_challenge',
-    'decode_frame', 'setup_protocol_version']) {
+    'decode_frame', 'setup_protocol_version', 'ProfileLiteralParser']) {
     if (typeof wasm?.[name] !== 'function') throw new TypeError(`Real Wasm capability required: ${name}`);
   }
   if (typeof wasm.AnimatedScene.prototype.advance_with_control !== 'function') {
@@ -271,7 +271,7 @@ export async function stockProfileSmoke(wasm) {
       'movbulb', 'bonkbulb', 'sest', 'jsebi', 'jsepi']) host[slot] = source;
     const raw = { revision: 1, normalGameplay: true, ownAccessory: -1, host,
       readiness: [{ source, state: 'ready', revision: 'authored-flat-source' }] };
-    const actualAdapter = createStockSkinAdapter({ realm, random: () => 0.25, readSnapshot() {
+    const actualAdapter = createStockSkinAdapter({ resolveSkin: wasm.resolve_skin, validateCustomPaletteMask: wasm.stock_custom_palette_mask_valid, realm, random: () => 0.25, readSnapshot() {
       eq(held, false); held = true; captures++; return raw;
     } });
     const adapter = {

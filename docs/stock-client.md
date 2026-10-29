@@ -9,7 +9,11 @@ remains unverified.
 ## Capture and source ownership
 
 `createStockSkinAdapter` in `web/stock-skin-provider.mjs` captures one explicit
-host snapshot per operation. Appearance callbacks retain numeric face and antenna
+host snapshot per operation. Its required resolveSkin and validateCustomPaletteMask
+capabilities bind the generated Rust resolve_skin and stock_custom_palette_mask_valid
+exports; no JavaScript numeric fallback is available. Request records and typed
+bytes validate/copy before Rust calls. The stock-skin-rules module retains only
+that browser-boundary admission. Appearance callbacks retain numeric face and antenna
 geometry; draw callbacks borrow the selected body, effect, face and bulb objects.
 Accepted custom data takes precedence over built-in special features. Skin 27
 uses the single-image face family; skin 40 uses the mouth-face family. The stock
@@ -17,8 +21,9 @@ rules also select ordinary/custom body recipes, paired side images and ordinary
 antennas from ready borrowed sources. The controller can explicitly select the
 existing accessory APIs. External complete bundles may bind one explicitly
 supplied ready accessory through the [selected-source contract](static-accessory.md#explicit-ready-stock-source-binding).
-The live host snapshot still rejects active accessories. Ready-source support does
-not establish pending-source/loading equivalence.
+The live host snapshot can also borrow one already-ready selected cached image
+through the bounded trusted-load contract documented there. Ready-source support
+does not establish pending-source/loading equivalence.
 
 A snapshot may include caller-owned `nicknamePaletteRgb`: 42 own-data
 `[red, green, blue]` byte triples indexed by stock palette. It joins the
