@@ -34,6 +34,7 @@
   let input;
   let routerGeneration = {}, lease, gesture, registering = false, routing = 0, deciding = false;
   let controlsLease, pendingPlay, controlsOperation, playFence;
+  let ownedPlayCallback = false, profileIssued = false;
   let ended = false, gateRecord, delivery, sinking = 0;
   const apply = Reflect.apply, descriptor = Object.getOwnPropertyDescriptor;
   const ownKeys = Reflect.ownKeys, prototype = Object.getPrototypeOf, recordPrototype = Object.prototype;
@@ -548,7 +549,11 @@
           if (check.failed) throw check.primary;
         } catch (error) { controlFailure(error); throw check.primary; }
         finally { playFence = undefined; pendingPlay = undefined; }
-        if (callback && callback() !== undefined) throw new TypeError('Owned Play callback must return undefined synchronously');
+        if (callback) {
+          ownedPlayCallback = action === value;
+          try { if (callback() !== undefined) throw new TypeError('Owned Play callback must return undefined synchronously'); }
+          finally { ownedPlayCallback = false; }
+        }
       });
       if (operation.failed) throw operation.primary;
       if (pendingPlay !== ticket || !validControls(value) || controlsLease !== value) {
@@ -880,6 +885,43 @@
       });
     } catch { return; }
   }
+  function captureExtensionProfile() {
+    if (arm.profileBroker !== true || url.href !== 'http://slither.com/io') return;
+    try {
+      const Bytes = realm.Uint8Array, typed = prototype(Bytes.prototype);
+      const length = descriptor(typed, 'length').get, tag = descriptor(typed, Symbol.toStringTag).get;
+      const buffer = descriptor(typed, 'buffer').get, capacity = descriptor(realm.ArrayBuffer.prototype, 'byteLength').get;
+      const copy = typed.set, clear = typed.fill, post = realm.postMessage.bind(realm);
+      const isArray = realm.Array.isArray, integer = realm.Number.isInteger;
+      const own = realm.Object.hasOwn, text = realm.String;
+      const bytes = freeze({
+        allocate: size => new Bytes(size),
+        length(value) {
+          if (apply(tag, value, []) !== 'Uint8Array') throw new TypeError('Native bytes required');
+          apply(capacity, apply(buffer, value, []), []);
+          return apply(length, value, []);
+        },
+        copy: (target, source, offset) => apply(copy, target, [source, offset]),
+        clear: value => apply(clear, value, [0]),
+      });
+      return freeze({ bytes, freeze, now: native.now, setTimeout: native.setTimeout, clearTimeout: native.clearTimeout,
+        octets(value, size) {
+          if (!isArray(value) || descriptor(value, 'length')?.value !== size) return false;
+          for (let i = 0; i < size; i++) {
+            const field = descriptor(value, text(i));
+            if (!field || !own(field, 'value') || !integer(field.value) || field.value < 0 || field.value > 255) return false;
+          }
+          return true;
+        },
+        authorize() {
+          if (!ownedPlayCallback || profileIssued || ended || !claimed) throw new Error('Owned Play required');
+          profileIssued = true;
+        },
+        wake: () => post({ type: 'slither-client-profile-wake', schema: 1, activationId: arm.id }, url.origin),
+        cancel: () => post({ type: 'slither-client-profile-cancel', schema: 1, activationId: arm.id }, url.origin),
+      });
+    } catch { return; }
+  }
   // The URL remains inside this one-entry native capability, never a caller argument.
   function captureSelectedAccessoryRequest(readAccessory) {
     try {
@@ -1028,6 +1070,8 @@
     if (menuPreferences !== undefined) native.menuPreferences = menuPreferences;
     const liveProfile = captureLiveProfile();
     if (liveProfile !== undefined) native.liveProfile = liveProfile;
+    const extensionProfile = captureExtensionProfile();
+    if (extensionProfile !== undefined) native.extensionProfile = extensionProfile;
     const storage = realm.localStorage;
     const getItem = realm.Storage?.prototype.getItem;
     if (!storage || typeof getItem !== 'function') throw new Error('Native storage reader unavailable');
@@ -1216,6 +1260,7 @@
       status(phase);
     });
     gateRecord = Object.freeze({
+      verifyExtensionProfile: value => claimed && value === native.extensionProfile && value !== undefined,
       metadata: () => Object.freeze({ schema: 1, id: arm.id, code: phase }),
       claim(id) {
         if (id !== arm.id || claimed) throw new Error('Game document already claimed');

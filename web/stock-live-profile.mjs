@@ -206,6 +206,18 @@ export async function verifyAndConsumeProfileBytes(options) {
 
 /** One explicit Play acquisition; all browser authority is privately captured by the gate. */
 export function createStockLiveProfileAcquirer(options) {
+  return createBoundedAcquirer(options, false, DEADLINE_MS);
+}
+
+/** Extension-origin transport only; canonical document admission is not relabelled. */
+export function createExtensionLiveProfileAcquirer(options) {
+  const args = data(options, ['capabilities', 'isCurrentDocument', 'literalParser', 'remainingMs']);
+  if (!Number.isFinite(args.remainingMs) || args.remainingMs <= 0 || args.remainingMs > DEADLINE_MS) throw failure('deadline');
+  const { remainingMs, ...bounded } = args;
+  return createBoundedAcquirer(bounded, true, remainingMs);
+}
+
+function createBoundedAcquirer(options, extension, deadlineMs) {
   const args = data(options, ['capabilities', 'isCurrentDocument', 'literalParser']);
   const policy = literalPolicy(args.literalParser);
   if (typeof args.isCurrentDocument !== 'function') throw failure('unavailable-native');
@@ -221,7 +233,8 @@ export function createStockLiveProfileAcquirer(options) {
     let info;
     try { info = data(caps.environment(), ['origin', 'topLevel', 'secureContext']); }
     catch { throw failure('unsupported-origin'); }
-    if (info.origin !== ORIGIN || info.topLevel !== true || info.secureContext !== true) throw failure('unsupported-origin');
+    if (extension ? !/^chrome-extension:\/\/[a-p]{32}$/.test(info.origin) || info.topLevel !== false || info.secureContext !== true
+      : info.origin !== ORIGIN || info.topLevel !== true || info.secureContext !== true) throw failure('unsupported-origin');
   }
   function cleanup(op, abort) {
     if (op.timer !== undefined) {
@@ -254,7 +267,7 @@ export function createStockLiveProfileAcquirer(options) {
     if (active !== op || op.done || generation !== op.generation) throw failure('cancelled');
     if (typeof now !== 'number' || !Number.isFinite(now) || now < op.previousNow) throw failure('clock-invalid');
     op.previousNow = now;
-    if (now - op.start >= DEADLINE_MS) throw failure('deadline');
+    if (now - op.start >= deadlineMs) throw failure('deadline');
     if (current !== true) throw failure('stale-document');
     return now;
   }
@@ -268,7 +281,7 @@ export function createStockLiveProfileAcquirer(options) {
   }
   async function run(op, consumer) {
     try {
-      const request = freeze({ method: 'GET', mode: 'same-origin', credentials: 'omit', redirect: 'error',
+      const request = freeze({ method: 'GET', mode: extension ? 'cors' : 'same-origin', credentials: 'omit', redirect: 'error',
         cache: 'no-store', referrerPolicy: 'no-referrer', keepalive: false, signal: op.controller.signal });
       let response;
       try { response = await caps.fetch(URL, request); } catch { throw failure('request-failed'); }
@@ -277,7 +290,8 @@ export function createStockLiveProfileAcquirer(options) {
       let info;
       try { info = data(caps.responseInfo(response), ['status', 'type', 'url', 'redirected', 'body']); }
       catch { throw failure('bad-response'); }
-      if (info.status !== 200 || info.type !== 'basic' || info.url !== URL || info.redirected !== false || info.body == null) throw failure('bad-response');
+      if (info.status !== 200 || (extension ? !['basic', 'cors'].includes(info.type) : info.type !== 'basic')
+        || info.url !== URL || info.redirected !== false || info.body == null) throw failure('bad-response');
       try { op.reader = caps.getReader(info.body); } catch { throw failure('bad-response'); }
       let count = 0, reads = 0;
       for (;;) {
@@ -331,7 +345,7 @@ export function createStockLiveProfileAcquirer(options) {
         check(op);
         op.controller = data(caps.createAbort(), ['signal', 'abort']);
         if (typeof op.controller.abort !== 'function') throw failure('unavailable-native');
-        const remaining = DEADLINE_MS - (check(op) - op.start);
+        const remaining = deadlineMs - (check(op) - op.start);
         op.timer = caps.setTimeout(() => stop(op, 'deadline'), remaining);
         check(op);
         op.source = op.owned.own(bytes.allocate(PIN.expectedBytes));

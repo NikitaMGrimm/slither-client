@@ -57,7 +57,7 @@ function connect(f, runtime) {
   runtime.play(playRequest()); f.frame(); f.socket.open(); f.socket.message([54, 1]); f.socket.message(setup); f.flush();
 }
 
-function fixture({ armed = true, late = false, sourcePending = false, href = 'https://slither.io/',
+function fixture({ armed = true, late = false, sourcePending = false, href = 'https://slither.io/', profileBroker = false,
   missingEdit = false, missingFence = false, missingNative, hudNative = false, accessoryNative = false, accessoryRequestNative = false } = {}) {
   const dimensions = new WeakMap(), images = new WeakMap();
   const log = [], messages = [], raf = new Map(), timers = new Map(), intervals = new Map(), microtasks = [], faults = {};
@@ -124,7 +124,7 @@ function fixture({ armed = true, late = false, sourcePending = false, href = 'ht
   };
   const sessionStorage = new Storage();
   if (armed) sessionStorage.setItem('__slitherClientArmV1', JSON.stringify({ schema: 1, build: 'gamepage-v1',
-    id: 'a'.repeat(32), url: href, expires: Date.now() + 25000 }));
+    id: 'a'.repeat(32), url: href, expires: Date.now() + 25000, ...(profileBroker ? { profileBroker: true } : {}) }));
   let socket;
   const realm = { document, location: { href, reload() { reloads++; } },
     sessionStorage, localStorage: new Storage(), Storage, HTMLCanvasElement: SceneCanvas,

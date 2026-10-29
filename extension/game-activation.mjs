@@ -60,6 +60,7 @@ export async function activateGamePage(api, { now = Date.now, random = bytes => 
   random(bytes);
   const id = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
   const record = { schema: 1, build: gateBuild, id, url, expires: now() + 30000 };
+  if (api.runtime?.getManifest?.().background?.service_worker === 'game/profile-worker.mjs') record.profileBroker = true;
   const results = await api.scripting.executeScript({ target: { tabId: tab.id, frameIds: [0] }, world: 'MAIN',
     func: armDocument, args: [record] });
   if (results.length !== 1 || results[0].frameId !== 0 || results[0].error

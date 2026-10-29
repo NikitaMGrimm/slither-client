@@ -45,6 +45,14 @@
     'disconnected', 'host-unavailable', 'csp-or-module-unavailable', 'client-failed', 'gate-unavailable', 'disposed']);
   function receive(event) {
     const data = event.data;
+    if (event.source === window && event.origin === url.origin && url.href === 'http://slither.com/io'
+      && activation !== undefined && data && Object.keys(data).length === 3 && data.schema === 1
+      && data.activationId === activation && ['slither-client-profile-wake', 'slither-client-profile-cancel'].includes(data.type)
+      && api.runtime.getManifest?.().background?.service_worker === 'game/profile-worker.mjs') {
+      // A public wake is not acquisition authority; the worker must claim a private owned-Play intent.
+      try { api.runtime.sendMessage(data).catch(() => {}); } catch { /* MAIN retains its own deadline. */ }
+      return;
+    }
     if (event.source !== window || event.origin !== url.origin || data === null || typeof data !== 'object'
       || Object.keys(data).length !== 4 || data.type !== 'slither-client-status' || data.schema !== 1
       || !/^[a-f0-9]{32}$/.test(data.id) || !codes.has(data.code)) return;

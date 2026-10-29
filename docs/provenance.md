@@ -43,18 +43,30 @@ cancellation, unsupported capabilities or malformed data stop the attempt
 without a game socket, default profile, fallback request or automatic retry.
 External caller profiles remain an explicit separate path.
 
-Activation admission for exactly `http://slither.com/io` does not expand this
-acquisition exception. That HTTP entry has neither the required secure context
-nor the canonical profile origin; its gate exposes no live-profile capability.
-The pinned URL, same-origin request mode, no-redirect rule and one-attempt budget
-remain unchanged. The default Play control stays unavailable there unless a
-separate authorized capability design is implemented; the existing private
-trusted-caller profile API does not provide a normal-user credential source.
+Chrome additionally permits one explicit owned Play on exact `http://slither.com/io`
+to use an extension-owned background acquisition of the SAME pinned HTTPS URL.
+This is a separate privileged transport, not a secure/same-origin HTTP document.
+The extension declares HTTPS-io host permission (origin-wide at the browser level)
+and restricts authored fetch to the one fixed path, omitting credentials and
+rejecting redirects. Complete EOF/size/hash and the same closed Rust parser,
+1024-read bound and total 5000 ms deadline still apply. Firefox has no broker
+owner or new host permission; its HTTP-com default Play stays unavailable.
+
+Only the parsed version/protocol and 20 borrowed password bytes may cross
+browser-controlled scripting IPC into the exact pending MAIN document. A private
+one-use token binds delivery to the gate-issued owned-Play intent; public wake
+hints carry no profile authority. No source bytes cross IPC. Raw source and
+credentials never traverse the page-visible status/message bridge or DOM, globals,
+storage or diagnostics. Worker and MAIN owned buffers clear explicitly, including
+serialized mutable copies. Browser-internal IPC copies, temporaries and forcibly
+terminated process storage cannot be guaranteed overwritten. Background activation,
+worker restart or failed delivery does not permit another acquisition attempt.
 
 The owned source and digest buffers clear before the private synchronous
 authored consumer runs; its borrowed password clears afterward, including on
 failure. Source/profile values must not be persisted, logged, exposed through
-messages/globals/diagnostics or returned from acquisition. Browser/native
+page-visible messages/globals/diagnostics or returned from acquisition. The
+explicit privileged parsed-profile IPC exception above does not expose source. Browser/native
 internal copies cannot be guaranteed erased. A matching fetch identifies only
 the returned bytes, not the executed page program, asset compatibility, server
 freshness or acceptance.

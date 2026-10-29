@@ -117,7 +117,8 @@ export function createStockGameplay(options) {
   }
   if (hudReadout && typeof scene.score_view !== 'function') throw new TypeError('Gameplay capability required: score_view');
   const profileOptions = liveProfile === undefined ? undefined
-    : ownRecord(liveProfile, ['capabilities', 'isCurrentDocument']);
+    : Object.hasOwn(liveProfile, 'acquirer') ? ownRecord(liveProfile, ['acquirer', 'bytes', 'isCurrentDocument'])
+      : ownRecord(liveProfile, ['capabilities', 'isCurrentDocument']);
   if (profileOptions && typeof profileOptions.isCurrentDocument !== 'function') throw new TypeError('Current-document checker required');
   const input = createClientInput({ protocolVersion: 19, InputPolicy: wasm.DesktopInput });
   let session, gameplayOwner, policyMethods, policyStatics;
@@ -208,7 +209,7 @@ export function createStockGameplay(options) {
   }
   function clearRequest(intent) {
     if (!intent?.request) return;
-    try { profileOptions.capabilities.bytes.clear(intent.request.customSkin); }
+    try { (profileOptions.bytes ?? profileOptions.capabilities.bytes).clear(intent.request.customSkin); }
     finally { intent.request = undefined; }
   }
   function cancelProfile(intent) {
@@ -507,7 +508,7 @@ export function createStockGameplay(options) {
         const data = ownRecord(request, ['endpoint', 'nickname', 'skin', 'customSkin']);
         const endpoint = stockEndpoint(data.endpoint);
         if (typeof data.nickname !== 'string' || !Number.isInteger(data.skin)) throw new TypeError('Invalid gameplay login shape');
-        const bytes = profileOptions.capabilities.bytes;
+        const bytes = profileOptions.bytes ?? profileOptions.capabilities.bytes;
         const length = bytes.length(data.customSkin);
         // Bound the owned async intent copy to the wire's one-byte custom length.
         if (!Number.isInteger(length) || length < 0 || length > 255) throw new TypeError('Custom intent exceeds byte budget');
@@ -516,7 +517,7 @@ export function createStockGameplay(options) {
         bytes.copy(customSkin, data.customSkin, 0);
         if (!current(intent)) throw profileError('stale-intent');
         policy('profile_started');
-        intent.acquirer = createStockLiveProfileAcquirer({ capabilities: profileOptions.capabilities,
+        intent.acquirer = profileOptions.acquirer ?? createStockLiveProfileAcquirer({ capabilities: profileOptions.capabilities,
           literalParser: wasm.ProfileLiteralParser,
           isCurrentDocument: () => current(intent) });
         await intent.acquirer.acquireForPlay(profile => {

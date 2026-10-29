@@ -77,7 +77,8 @@ test('com entry: manifest exposure follows exact origins while activation reject
     assert.deepEqual(manifest.permissions, ['activeTab', 'scripting']);
     assert.deepEqual(manifest.web_accessible_resources[0].matches, ['http://slither.io/*', 'https://slither.io/*',
       'http://www.slither.io/*', 'https://www.slither.io/*', 'http://slither.com/*']);
-    assert.equal(manifest.host_permissions, undefined); assert.equal(manifest.content_scripts, undefined);
+    assert.deepEqual(manifest.host_permissions, browser === 'chrome' ? ['https://slither.io/*'] : undefined);
+    assert.equal(manifest.content_scripts, undefined);
     assert.throws(() => gamePage('http://slither.com/')); assert.throws(() => gamePage('http://slither.com/index.html'));
   }
 });

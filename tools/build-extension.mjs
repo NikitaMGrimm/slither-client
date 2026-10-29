@@ -18,7 +18,7 @@ const gameWebFiles = ['stock-client.mjs', 'stock-skin-provider.mjs', 'stock-skin
   'stock-hud-dom.mjs', 'handshake-session.mjs', 'stock-live-profile.mjs',
   'stock-leaderboard-state.mjs', 'stock-leaderboard-view.mjs',
   'local-game-host.mjs', 'client-asset-map.mjs', 'authored-source-recipes.mjs', 'synthetic-body.mjs', 'synthetic-food.mjs', 'synthetic-prey.mjs', 'loopback-session.mjs'];
-const gameFiles = [['game-activation.mjs', 'activation.mjs'], ['game-gate.js', 'gate.js'],
+const gameFiles = [['profile-receiver.mjs', 'profile-receiver.mjs'], ['game-activation.mjs', 'activation.mjs'], ['game-gate.js', 'gate.js'],
   ['game-link.js', 'link.js'], ['game-runtime.mjs', 'runtime.mjs'], ['game-owned-hud-ui.mjs', 'owned-hud-ui.mjs'],
   ['game-owned-play-ui.mjs', 'owned-play-ui.mjs'],
   ['game-owned-appearance-ui.mjs', 'owned-appearance-ui.mjs'],
@@ -67,7 +67,12 @@ function validateModules(files) {
   for (const [name, bytes] of files) {
     if (!/\.(?:mjs|js)$/.test(name)) continue;
     const source = bytes.toString('utf8');
-    if (/\bimport\s*\(/.test(source)) throw new Error(`Dynamic imports require package review: ${name}`);
+    const dynamic = [...source.matchAll(/\bimport\s*\(/g)];
+    if (dynamic.length && !(name === 'game/profile-transport.mjs' && dynamic.length === 1
+      && source.includes('const receiver = await import(receiverURL);')
+      && source.includes("globalThis.location.href !== 'http://slither.com/io'"))) {
+      throw new Error(`Dynamic imports require package review: ${name}`);
+    }
     for (const match of source.matchAll(/^\s*(?:import|export)\s+(?:[^'";]*?\sfrom\s*)?['"]([^'"]+)['"]/gm)) {
       const specifier = match[1];
       if (!specifier.startsWith('./') && !specifier.startsWith('../')) throw new Error(`Nonlocal module import: ${name}: ${specifier}`);
@@ -193,7 +198,7 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, g
     const errors = checkEntry('manifest.json', manifestBytes);
     if (errors.length) throw new Error(errors.join('\n'));
     const manifest = JSON.parse(manifestBytes);
-    const expected = new Set(['game/bootstrap.mjs', 'game/runtime.mjs', 'game/owned-hud-ui.mjs', 'game/owned-play-ui.mjs',
+    const expected = new Set(['game/profile-receiver.mjs', 'game/bootstrap.mjs', 'game/runtime.mjs', 'game/owned-hud-ui.mjs', 'game/owned-play-ui.mjs',
       'game/owned-appearance-ui.mjs', 'game/appearance-preview.mjs', 'game/game-owned-loading-ui.mjs', 'game/start-page-layout.mjs', 'assets/logo.svg',
       'game/owned-leaderboard-ui.mjs', 'game/owned-minimap-ui.mjs', 'game/owned-end-screen-ui.mjs', 'game/owned-announcement-ui.mjs', ...gameWebFiles.map(name => `game/${name}`),
       ...bindingFiles.map(name => `game/pkg/${name}`)]);
@@ -207,8 +212,28 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, g
     }
     // Source manifests declare fixed resources; bind the generated import to its exact path.
     declarations[0].resources.push(`game/pkg/${snippetName}`);
+    if (browser === 'chrome') {
+      if (JSON.stringify(manifest.host_permissions) !== '["https://slither.io/*"]'
+        || JSON.stringify(manifest.background) !== '{"service_worker":"game/profile-worker.mjs","type":"module"}'
+        || manifest.content_security_policy.extension_pages !== "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://slither.io; object-src 'none'; base-uri 'none'; form-action 'none'") {
+        throw new Error('Expected the closed Chrome profile broker permission and background contract');
+      }
+    } else if (manifest.host_permissions !== undefined || manifest.background !== undefined) {
+      throw new Error('Firefox must retain its existing fail-closed profile behavior');
+    }
+    const browserFiles = new Map(common);
+    if (browser === 'chrome') for (const name of ['profile-worker.mjs', 'profile-broker.mjs', 'profile-transport.mjs']) {
+      browserFiles.set(`game/${name}`, readFile(path.join(projectRoot, 'extension', name)));
+    }
+    validateModules(browserFiles);
+    for (const [name, bytes] of browserFiles) {
+      if (!name.endsWith('.wasm')) {
+        const errors = checkEntry(name, bytes);
+        if (errors.length) throw new Error(errors.join('\n'));
+      }
+    }
     files.set(`${browser}/manifest.json`, Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`));
-    for (const [name, bytes] of common) files.set(`${browser}/${name}`, bytes);
+    for (const [name, bytes] of browserFiles) files.set(`${browser}/${name}`, bytes);
   }
   const inventory = [...files.keys()].sort();
   const result = { outputDir, files: inventory.map(name => ({

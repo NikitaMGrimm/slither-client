@@ -19,7 +19,8 @@ const gameWebNames = ['stock-client.mjs', 'stock-skin-provider.mjs', 'stock-skin
   'stock-hud-dom.mjs', 'handshake-session.mjs', 'stock-live-profile.mjs',
   'stock-leaderboard-state.mjs', 'stock-leaderboard-view.mjs',
   'local-game-host.mjs', 'client-asset-map.mjs', 'authored-source-recipes.mjs', 'synthetic-body.mjs', 'synthetic-food.mjs', 'synthetic-prey.mjs', 'loopback-session.mjs'];
-const gameSources = [['game-activation.mjs', 'activation.mjs'], ['game-gate.js', 'gate.js'],
+const brokerSources = ['profile-worker.mjs', 'profile-broker.mjs', 'profile-transport.mjs'];
+const gameSources = [['profile-receiver.mjs', 'profile-receiver.mjs'], ['game-activation.mjs', 'activation.mjs'], ['game-gate.js', 'gate.js'],
   ['game-link.js', 'link.js'], ['game-bootstrap.mjs', 'bootstrap.mjs'], ['game-runtime.mjs', 'runtime.mjs'],
   ['game-owned-hud-ui.mjs', 'owned-hud-ui.mjs'], ['game-owned-play-ui.mjs', 'owned-play-ui.mjs'],
   ['game-owned-appearance-ui.mjs', 'owned-appearance-ui.mjs'],
@@ -102,7 +103,7 @@ function fixture(t) {
   write('assets/logo.svg', fs.readFileSync(path.join(projectRoot, 'assets/logo.svg')));
   for (const name of pageNames) write(`web/${name}`, fs.readFileSync(path.join(projectRoot, 'web', name)));
   for (const name of gameWebNames) write(`web/${name}`, fs.readFileSync(path.join(projectRoot, 'web', name)));
-  for (const name of ['manifest.chrome.json', 'manifest.firefox.json', 'launcher.html', 'launcher.js', ...gameSources.map(value => value[0])]) {
+  for (const name of ['manifest.chrome.json', 'manifest.firefox.json', 'launcher.html', 'launcher.js', ...gameSources.map(value => value[0]), ...brokerSources]) {
     write(`extension/${name}`, fs.readFileSync(path.join(projectRoot, 'extension', name)));
   }
   write('dist/web/slither_client.js', syntheticGlue);
@@ -130,8 +131,8 @@ test('default packages have a closed deterministic inventory and preserve module
     ...gameWebNames.map(name => `game/${name}`), ...gameSources.map(value => `game/${value[1]}`),
     'game/pkg/slither_client.js', 'game/pkg/slither_client_bg.wasm', `game/pkg/${snippetName}`].sort();
   const result = f.build();
-  assert.deepEqual(result.files.map(file => file.path), ['chrome', 'firefox'].flatMap(browser => expectedPerBrowser.map(name => `${browser}/${name}`)));
-  assert.equal(result.files.length, 140);
+  assert.deepEqual(result.files.map(file => file.path), ['chrome', 'firefox'].flatMap(browser => [...expectedPerBrowser, ...(browser === 'chrome' ? brokerSources.map(name => `game/${name}`) : [])].sort().map(name => `${browser}/${name}`)));
+  assert.equal(result.files.length, 145);
   assert(result.files.every(file => file.bytes > 0 && /^[a-f0-9]{64}$/.test(file.sha256)));
   assert.deepEqual(f.build(), result, 'an identical rerun neither accumulates nor changes files');
   for (const browser of ['chrome', 'firefox']) {
@@ -170,7 +171,7 @@ test('generated validator paths remain exact, byte-preserved and independent of 
     output.web_accessible_resources[0].resources.pop();
     assert.deepEqual(output, source, 'all source manifest fields remain intact');
   }
-  assert.equal(result.files.length, 140);
+  assert.equal(result.files.length, 145);
 });
 
 test('changing the authored HUD validator makes the generated pair stale', t => {
@@ -198,8 +199,10 @@ test('MV3 browser differences, explicit activation permissions, closed WAR and o
   assert.deepEqual(firefox.browser_specific_settings, {
     gecko: { id: 'slither-client@nikitamgrimm', data_collection_permissions: { required: ['authenticationInfo'] } },
   });
-  const { version_name, ...sharedChrome } = chrome;
-  const { browser_specific_settings, ...sharedFirefox } = firefox;
+  const { version_name, description, host_permissions, background, content_security_policy, ...sharedChrome } = chrome;
+  const { browser_specific_settings, description: firefoxDescription, content_security_policy: firefoxCsp, ...sharedFirefox } = firefox;
+  assert.deepEqual(host_permissions, ['https://slither.io/*']);
+  assert.deepEqual(background, { service_worker: 'game/profile-worker.mjs', type: 'module' });
   assert.deepEqual(sharedChrome, sharedFirefox);
   for (const manifest of [chrome, firefox]) {
     assert.equal(manifest.manifest_version, 3);
@@ -208,7 +211,7 @@ test('MV3 browser differences, explicit activation permissions, closed WAR and o
     assert.deepEqual(manifest.permissions, ['activeTab', 'scripting']);
     assert.deepEqual(manifest.web_accessible_resources, [{
       matches: ['http://slither.io/*', 'https://slither.io/*', 'http://www.slither.io/*', 'https://www.slither.io/*', 'http://slither.com/*'],
-      resources: ['game/bootstrap.mjs', 'game/runtime.mjs', 'game/owned-hud-ui.mjs', 'game/owned-play-ui.mjs', 'game/owned-appearance-ui.mjs', 'game/appearance-preview.mjs', 'game/game-owned-loading-ui.mjs', 'game/start-page-layout.mjs', 'assets/logo.svg', 'game/owned-leaderboard-ui.mjs', 'game/owned-minimap-ui.mjs', 'game/owned-end-screen-ui.mjs', 'game/owned-announcement-ui.mjs', 'game/stock-host-snapshot.mjs', 'game/stock-client.mjs', 'game/stock-skin-provider.mjs',
+      resources: ['game/profile-receiver.mjs', 'game/bootstrap.mjs', 'game/runtime.mjs', 'game/owned-hud-ui.mjs', 'game/owned-play-ui.mjs', 'game/owned-appearance-ui.mjs', 'game/appearance-preview.mjs', 'game/game-owned-loading-ui.mjs', 'game/start-page-layout.mjs', 'assets/logo.svg', 'game/owned-leaderboard-ui.mjs', 'game/owned-minimap-ui.mjs', 'game/owned-end-screen-ui.mjs', 'game/owned-announcement-ui.mjs', 'game/stock-host-snapshot.mjs', 'game/stock-client.mjs', 'game/stock-skin-provider.mjs',
         'game/stock-skin-rules.mjs', 'game/stock-accessory-selection.mjs', 'game/stock-cached-accessory.mjs', 'game/stock-accessory-load.mjs', 'game/stock-accessory-request.mjs', 'game/skin-provider.mjs', 'game/stock-food-provider.mjs', 'game/stock-prey-provider.mjs',
         'game/stock-asset-sources.mjs', 'game/desktop-layout.mjs', 'game/client-input.mjs',
         'game/stock-gameplay.mjs', 'game/stock-session.mjs', 'game/stock-hud-contract.mjs', 'game/stock-hud-state.mjs',
@@ -217,7 +220,7 @@ test('MV3 browser differences, explicit activation permissions, closed WAR and o
         'game/local-game-host.mjs', 'game/client-asset-map.mjs', 'game/authored-source-recipes.mjs', 'game/synthetic-body.mjs', 'game/synthetic-food.mjs', 'game/synthetic-prey.mjs', 'game/loopback-session.mjs',
         'game/pkg/slither_client.js', 'game/pkg/slither_client_bg.wasm', `game/pkg/${snippetName}`],
     }]);
-    for (const key of ['host_permissions', 'optional_host_permissions', 'content_scripts', 'background', 'externally_connectable']) {
+    for (const key of ['optional_host_permissions', 'content_scripts', 'externally_connectable', ...(manifest === firefox ? ['host_permissions', 'background'] : [])]) {
       assert.equal(Object.hasOwn(manifest, key), false, key);
     }
     const directives = Object.fromEntries(manifest.content_security_policy.extension_pages.split(';').filter(value => value.trim()).map(value => {
@@ -227,9 +230,9 @@ test('MV3 browser differences, explicit activation permissions, closed WAR and o
     assert.deepEqual(directives['default-src'], ["'none'"]);
     assert.deepEqual(directives['script-src'], ["'self'", "'wasm-unsafe-eval'"]);
     assert.deepEqual(directives['img-src'], ["'self'", 'data:']);
-    assert.deepEqual(directives['connect-src'], ["'self'"]);
+    assert.deepEqual(directives['connect-src'], manifest === chrome ? ["'self'", 'https://slither.io'] : ["'self'"]);
     assert.deepEqual(directives['object-src'], ["'none'"]);
-    assert.doesNotMatch(manifest.content_security_policy.extension_pages, /https?:|wss?:|\*|'unsafe-inline'|'unsafe-eval'/);
+    assert.doesNotMatch(manifest.content_security_policy.extension_pages.replace(' https://slither.io;', ';'), /https?:|wss?:|\*|'unsafe-inline'|'unsafe-eval'/);
   }
 });
 
@@ -400,19 +403,19 @@ test('CLI requires unambiguous paths and confines outputs to the ignored extensi
   }
   for (const outputDir of ['dist/elsewhere', '.', 'dist/extension/../../outside']) assert.throws(() => f.build({ outputDir }), /must stay inside/);
   assert.throws(() => f.build({ webDir: 'dist/extension' }), /must be separate/);
-  assert.equal(f.build({ outputDir: 'dist/extension/fresh' }).files.length, 140);
+  assert.equal(f.build({ outputDir: 'dist/extension/fresh' }).files.length, 145);
 });
 
 test('one default package copies the actual bootstrap and all owned UI helpers in both browsers', t => {
   const f = fixture(t), outputDir = 'dist/extension/default';
   const result = f.build({ outputDir });
-  assert.equal(result.files.length, 140);
+  assert.equal(result.files.length, 145);
   for (const browser of ['chrome', 'firefox']) {
     const game = path.join(f.root, outputDir, browser, 'game');
     for (const [source, destination] of gameSources) {
       assert.deepEqual(fs.readFileSync(path.join(game, destination)), fs.readFileSync(path.join(f.root, 'extension', source)));
     }
-    assert.equal(result.files.filter(file => file.path.startsWith(browser + '/')).length, 70);
+    assert.equal(result.files.filter(file => file.path.startsWith(browser + '/')).length, browser === 'chrome' ? 74 : 71);
     assert.deepEqual(fs.readdirSync(game).filter(name => /(?:bootstrap|entry)/.test(name)), ['bootstrap.mjs']);
     const bytes = fs.readFileSync(path.join(game, 'bootstrap.mjs'));
     const stamp = fs.statSync(path.join(game, 'bootstrap.mjs')).mtimeMs;

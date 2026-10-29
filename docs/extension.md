@@ -11,7 +11,7 @@ and prey adapters to the stock packet/update/draw controller, reporting
 The local trusted runtime also composes the authored session and desktop input
 through the native pre-motion control seam. Play requires a selected endpoint
 and either an explicit external profile or an explicit request for bounded
-pinned profile acquisition on canonical HTTPS. Activation supplies neither and
+pinned profile acquisition on canonical HTTPS or through the Chrome HTTP-com broker. Activation supplies neither and
 starts no acquisition. The sole default bootstrap mounts Play controls, score
 readouts and leaderboard rows as described below. Minimap, unsupported
 appearances/modes, native Play interaction, live acquisition/host/CSP and server
@@ -547,10 +547,34 @@ There is no hard pong timeout. Native numeric rollback cannot roll back input
 attempts, sends or closes; a failure is terminal with no replay. This composition
 does not establish full original UI phase parity or any network acceptance.
 
+## Chrome HTTP-com profile broker
+
+Exact `http://slither.com/io` uses the existing owned Play control and Rust
+admission/session stages. Chrome activation arms a dedicated broker capability;
+activation and forged public wake hints alone start no acquisition. The background
+checks browser sender identity, top frame and exact document, then claims one
+private gate-issued pending Play. It fetches only the existing pinned HTTPS-io
+profile with omitted credentials, rejected redirects, exact EOF/size/hash and the
+existing Rust literal parser. The original five-second deadline includes worker
+initialization and IPC. Cancellation, navigation, timeout and worker restart never
+retry or select a different URL. Canonical secure HTTPS-io acquisition is unchanged.
+
+Source/chunk/digest and parser scratch clear in the extension before parsed
+profile delivery. Only a one-use authenticated privileged scripting call delivers
+the parsed fields to the existing private synchronous gameplay consumer. Borrowed
+password/IPC arrays clear before completion releases the acquiring draw fence;
+the normal complete reset/controller operation still precedes socket construction.
+Nothing secret is returned through runtime messages, public status or diagnostics.
+Chrome's host grant is origin-wide `https://slither.io/*`, while authored fetch is
+one-path-only. Its module worker and private transport are not web-accessible.
+Firefox retains its old permissions and fails closed for HTTP-com live Play.
+This source/synthetic contract does not establish installed CSP, live response
+fingerprint/freshness or game-server acceptance; those need separate evidence.
+
 ## CSP and verification
 
 Extension pages allow scripts `'self' 'wasm-unsafe-eval'`, styles `'self'`, images
-`'self' data:` and connections `'self'`, under `default-src 'none'`. The data URL
+`'self' data:` and connections `'self'` (plus HTTPS-io for the Chrome broker), under `default-src 'none'`. The data URL
 supports the generated offline background. MAIN loading/imports/Wasm fetch and
 compilation instead obey the page's applicable CSP/Trusted Types. Web accessibility
 is not a CSP bypass. Load/compile/deadline failures give explicit status and retain

@@ -18,6 +18,7 @@ import { createOwnedAnnouncementUi } from './owned-announcement-ui.mjs';
 import { createOwnedEndScreenUi } from './owned-end-screen-ui.mjs';
 import { projectLeaderboardView } from './stock-leaderboard-view.mjs';
 import { stockEndpoint } from './stock-session.mjs';
+import { createExtensionProfileReceiver } from './profile-receiver.mjs';
 
 // Gate-only notifications must not add gameplay control/source observations.
 const editNotifications = new Set(['keypress', 'beforeinput', 'input', 'compositionstart', 'compositionupdate', 'compositionend',
@@ -676,7 +677,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
           throw new TypeError('Captured Rust Play admission required');
         }
         playPolicyMethods = freeze(Object.fromEntries(policyNames.map(name => [name, descriptor(policyPrototype, name).value])));
-        playCapabilityObservation = [Boolean(localHost), localHost ? false : native.liveProfile !== undefined];
+        playCapabilityObservation = [Boolean(localHost), localHost ? false : native.liveProfile !== undefined || native.extensionProfile !== undefined];
         if (ownedMenuUi) {
           const raw = descriptor(native, 'menuPreferences')?.value;
           const group = copyRecord(raw, ['schema', 'document', 'read', 'write', 'setNickname']);
@@ -911,7 +912,8 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
           return runNative(() => apply(projectScores, projector, [tableMax, counts, fractionalMasses]));
         },
       }) } : {}),
-      ...(localHost || native.liveProfile === undefined ? {} : { liveProfile: { capabilities: native.liveProfile, isCurrentDocument } }) });
+      ...(localHost ? {} : native.liveProfile !== undefined ? { liveProfile: { capabilities: native.liveProfile, isCurrentDocument } }
+        : native.extensionProfile !== undefined ? { liveProfile: createExtensionProfileReceiver(native.extensionProfile, isCurrentDocument) } : {}) });
     const tick = now => {
       frame = undefined;
       if (disposed) return;
