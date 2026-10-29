@@ -219,7 +219,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
         const view = apply(projectEndScreen, endScreenProjector,
           [session.phase, session.playing, session.lifeEnded, Boolean(localHost), snapshot?.final?.score]);
         checkHudOperation();
-        endScreenUi.render(view);
+        endScreenUi.render(view, session.playing);
         checkHudOperation();
       }
       if (localHost && playUi && playFlag('accepted')) {
@@ -1146,6 +1146,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
       hudOperation = operation;
       try {
         endScreenUi = createOwnedEndScreenUi({ document: hudCapabilities.document, parent: root,
+          menuParent: playNodes?.mount,
           dom: hudCapabilities.dom, construct: constructCapabilities,
           isCurrentDocument: hudCapabilities.isCurrentDocument });
         endScreenUi.mount();
