@@ -41,4 +41,3 @@ export function stockSkinSourceFixture(appearanceMode, policy = stockSkinPolicyD
     set random(value) { random = value; }, set read(value) { read = value; },
     resolve(request) { adapter.beginOperation(); try { return adapter.resolveRecipe(request); } finally { adapter.endOperation(); } } };
 }
-
