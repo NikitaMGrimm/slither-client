@@ -37,8 +37,9 @@ export function createStockCachedAccessory({ realm, readAccessory, resolveId, na
         pivotX: ownData(cached, 'px'), pivotY: ownData(cached, 'py') }),
       source, width: ownData(cached, 'ww'), height: ownData(cached, 'hh') });
       const snapshot = { ownAccessory: id, ownCachedAccessorySelection: input };
+      // A changed pinned binding cannot become initial pending metadata again.
+      if (selected && !sameStockAccessorySelection(selected, { ...input, appearanceForward: true })) unavailable('unsupported', 'Accessory binding changed; new session required');
       const metadata = readStockAccessoryMetadata(snapshot, realm);
-      if (selected && !sameStockAccessorySelection(selected, metadata)) unavailable('unsupported', 'Accessory binding changed; new session required');
       if (!lease) {
         selected = metadata; entry = cached;
         try { lease = createStockAccessoryLoadLease(source, native); }
