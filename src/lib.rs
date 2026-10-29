@@ -12,6 +12,7 @@ mod math;
 mod accessory_browser;
 
 pub mod challenge;
+pub mod desktop_input;
 pub mod desktop_layout;
 pub mod menu_preferences;
 pub mod presentation;
@@ -30,6 +31,9 @@ mod desktop_layout_browser;
 
 #[cfg(target_arch = "wasm32")]
 mod browser;
+
+#[cfg(target_arch = "wasm32")]
+mod desktop_input_browser;
 
 #[cfg(target_arch = "wasm32")]
 mod canvas_browser;

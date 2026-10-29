@@ -1,3 +1,4 @@
+import { TestDesktopInput } from './fixtures/client-input-fixture.mjs';
 import { desktopBackingOracle } from './fixtures/desktop-layout-fixture.mjs';
 import { createLeaderboardHistoryDouble } from './leaderboard-history-double.mjs';
 import { createHudHistoryDouble } from './hud-history-double.mjs';
@@ -48,12 +49,12 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
   // Reuse authored native/Wasm fixture definitions, never transform a product module.
   const testSource = readFileSync(new URL('tools/game-bootstrap.test.mjs', root), 'utf8');
   const definitions = testSource.slice(testSource.indexOf('function fixture('), testSource.indexOf("\ntest('an unarmed"));
-  const makeFixture = new vm.Script(`(function(gateSource,Script,createContext,runInContext,assert,createGateTestDom,attachGateTestRealm,createHudHistoryDouble,createLeaderboardHistoryDouble,desktopBackingOracle){
+  const makeFixture = new vm.Script(`(function(gateSource,Script,createContext,runInContext,assert,createGateTestDom,attachGateTestRealm,createHudHistoryDouble,createLeaderboardHistoryDouble,TestDesktopInput,desktopBackingOracle){
     ${definitions}\nreturn {fixture,wasmDouble};})`).runInThisContext();
   const nativeSource = readFileSync(new URL('extension/game-gate.js', root), 'utf8');
   const { fixture, wasmDouble } = makeFixture(nativeSource, vm.Script, vm.createContext, vm.runInContext, assert,
     options => { const dom = createGateTestDom({ ...options, ownedHud: ownedHudNative, ownedPlay: ownedPlayNative,
-      leaderboard: leaderboardNative, minimap: minimapNative }); prepare?.(dom); return dom; }, attachGateTestRealm, createHudHistoryDouble, createLeaderboardHistoryDouble,desktopBackingOracle);
+      leaderboard: leaderboardNative, minimap: minimapNative }); prepare?.(dom); return dom; }, attachGateTestRealm, createHudHistoryDouble, createLeaderboardHistoryDouble, TestDesktopInput,desktopBackingOracle);
   const f = fixture({ armed, hudNative });
   if (hudNative) {
     // The legacy native boundary must create HTML-branded borrowed root/status nodes too.
