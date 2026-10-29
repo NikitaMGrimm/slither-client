@@ -66,6 +66,42 @@ export async function createLocalGameHost({ realm = globalThis, endpoint, source
     createTextNode: method(realm.Document?.prototype, 'createTextNode'),
     appendChild: method(node, 'appendChild'), removeChild: method(node, 'removeChild'),
   });
+  function captureAppearancePreviewDom() {
+    try {
+      const canvas = realm.HTMLCanvasElement.prototype, context = realm.CanvasRenderingContext2D.prototype;
+      const getContext = method(canvas, 'getContext'), contextCanvas = accessor(context, 'canvas');
+      const width = Object.getOwnPropertyDescriptor(canvas, 'width')?.set, height = Object.getOwnPropertyDescriptor(canvas, 'height')?.set;
+      const save = method(context, 'save'), restore = method(context, 'restore');
+      if (typeof width !== 'function' || typeof height !== 'function') return;
+      function owned(value) {
+        if (!isCurrentDocument()) throw new Error('Current appearance preview document required');
+        if (dom.nodeType(value) !== 1 || dom.ownerDocument(value) !== document || !dom.isConnected(value)
+          || dom.namespaceURI(value) !== 'http://www.w3.org/1999/xhtml' || dom.localName(value) !== 'canvas') {
+          throw new TypeError('Current HTML appearance preview canvas required');
+        }
+        if (!isCurrentDocument()) throw new Error('Current appearance preview document required');
+      }
+      return freeze({ schema: 1, document: document, prepare(value, x, y) {
+        if (![x, y].every(size => Number.isInteger(size) && size > 0 && size <= 1024)) {
+          throw new TypeError('Bounded appearance preview dimensions required');
+        }
+        owned(value); apply(width, value, [x]); owned(value); apply(height, value, [y]); owned(value);
+        const result = getContext(value, '2d'); owned(value);
+        if (!result || contextCanvas(result) !== value) throw new TypeError('Appearance preview 2d context required');
+        let finished = false;
+        const finish = () => {
+          if (finished) throw new Error('Appearance preview frame consumed');
+          finished = true;
+          // Restore even if document freshness was lost during submission.
+          restore(result); owned(value);
+        };
+        try { save(result); owned(value); }
+        catch (error) { try { finish(); } catch { /* Preserve the first thrown value, including undefined. */ } throw error; }
+        return freeze({ context: result, finish });
+      } });
+    } catch { return; }
+  }
+  const appearancePreviewDom = captureAppearancePreviewDom();
   function captureMinimapDom() {
     try {
       const canvas = realm.HTMLCanvasElement.prototype, context = realm.CanvasRenderingContext2D.prototype;
@@ -357,6 +393,7 @@ export async function createLocalGameHost({ realm = globalThis, endpoint, source
   });
   const native = freeze({ ...scheduling, now, random, setInput, registerNicknameEditField, menuPreferences,
     hudDom: freeze({ schema: 1, document, dom, isCurrentDocument }),
+    ...(appearancePreviewDom ? { appearancePreviewDom } : {}),
     ...(minimapDom ? { minimapDom } : {}),
     ownedHudDom: freeze({ schema: 1, document, dom: construct }),
     ownedPlayDom: freeze({ schema: 1, document, dom: controls, createControlsLease }),

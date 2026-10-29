@@ -25,6 +25,7 @@ import { skinPolicySmoke } from './skin-policy-smoke.mjs';
 import { startPageSmoke } from './start-page-smoke.mjs';
 import { endScreenSmoke } from './end-screen-smoke.mjs';
 import { menuPreferencesSmoke } from './menu-preferences-smoke.mjs';
+import { appearancePreviewSmoke } from './appearance-preview-smoke.mjs';
 import { desktopLayoutSmoke } from './desktop-layout-smoke.mjs';
 import { sessionPolicySmoke } from './session-policy-smoke.mjs';
 import { sessionPolicyRecordSmoke } from './session-policy-record-smoke.mjs';
@@ -61,6 +62,7 @@ const playAdmissionResult = execFileSync(process.execPath,
   { encoding: 'utf8', env: { ...process.env, SLITHER_PLAY_ADMISSION_WASM: '1' }, maxBuffer: 4 * 1024 * 1024 });
 console.log('Synthetic runtime Play requirements with real Rust admission passed:',
   playAdmissionResult.split(/\r?\n/).filter(line => /^# (tests|pass|fail|skipped) /.test(line)).join(', '));
+console.log('Synthetic appearance preview ABI passed:', appearancePreviewSmoke(wasm));
 console.log('Synthetic real-Wasm desktop input equivalence passed:', desktopInputSmoke(wasm));
 console.log('Synthetic real-Wasm desktop input release passed:', desktopInputLifetimeSmoke(wasm));
 const inputRequirements = execFileSync(process.execPath,

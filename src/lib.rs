@@ -8,6 +8,11 @@
 
 mod math;
 
+pub mod appearance_preview;
+
+#[cfg(target_arch = "wasm32")]
+mod appearance_preview_browser;
+
 #[cfg(target_arch = "wasm32")]
 mod accessory_browser;
 
