@@ -227,12 +227,14 @@ impl GameplayPolicy {
         self.dirty = false;
         true
     }
-    /// Status comes from the original captured snapshot, not a post-callback session read.
-    pub fn status(ready: bool, connected: bool) -> u8 {
-        if ready {
+    /// Project the captured session phase without replacing pending connection presentation.
+    pub fn status(phase: &str, connected: bool) -> u8 {
+        if phase == "ready" {
             1
         } else if connected {
             2
+        } else if matches!(phase, "opening" | "challenge" | "setup") {
+            4
         } else {
             3
         }

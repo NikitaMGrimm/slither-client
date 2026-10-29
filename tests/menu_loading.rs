@@ -37,3 +37,16 @@ fn terminal_surface_reuses_start_page_labels_without_granting_admission() {
         assert!(project_menu_loading(code, false).is_err());
     }
 }
+
+#[test]
+fn connection_busy_uses_the_existing_label_without_reviving_completed_loading() {
+    let before_handoff = project_menu_loading("connecting", false).unwrap();
+    assert!(before_handoff.visible && before_handoff.busy);
+    assert_eq!(before_handoff.text, "Connecting.");
+    let after_handoff = project_menu_loading("connecting", true).unwrap();
+    assert!(!after_handoff.visible && !after_handoff.busy);
+    assert_eq!(after_handoff.text, before_handoff.text);
+    let play = project_start_page("connecting", true, false).unwrap();
+    assert!(play.busy && play.disabled);
+    assert_eq!(play.button, "Connecting…");
+}

@@ -481,7 +481,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
   function statusText(code) {
     if (!ownedPlayUi) return `SlitherClient: ${code}`;
     const labels = { __proto__: null, loading: 'Loading', 'waiting-assets': 'Loading',
-      'ready-not-connected': 'Ready', connected: 'Connected', disconnected: 'Not connected',
+      'ready-not-connected': 'Ready', connecting: 'Connecting', connected: 'Connected', disconnected: 'Not connected',
       'host-unavailable': 'Unavailable', 'csp-or-module-unavailable': 'Unavailable',
       'client-failed': 'Failed', disposed: 'Not connected' };
     return `SlitherClient: ${code === 'ready-not-connected' && !playFlag('available') ? 'Unavailable' : labels[code] ?? 'Unavailable'}`;
@@ -512,7 +512,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     } else output.textContent = statusText(code);
     checkHudOperation();
     if (playUi && !disposed) {
-      const states = { __proto__: null, 'ready-not-connected': 'ready', connected: 'connected',
+      const states = { __proto__: null, 'ready-not-connected': 'ready', connecting: 'connecting', connected: 'connected',
         disconnected: 'not-connected', 'host-unavailable': 'unavailable', 'client-failed': 'failed' };
       if (states[code]) playUi.setStatus(code === 'ready-not-connected' && !playFlag('available') ? 'unavailable' : states[code]);
       checkHudOperation();
