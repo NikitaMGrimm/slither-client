@@ -63,6 +63,14 @@ The former authored JavaScript policy is a tools-only differential oracle.
 This cutover does not expand the local stand-ins or establish stock artwork,
 loading or installed-host acceptance.
 
+Browser-free authored_sources owns the numeric plans for the existing local
+RGB families, shaded body/effect sprites, hexagon tile, backdrop and food/prey
+sources. The pure authored_source_recipes Wasm export returns fresh copied
+operands. JavaScript admits own-data output, allocates/paints the same native
+Canvas objects and performs the two existing generated-image decodes; there is
+no JavaScript numeric fallback. Local skin selection and the source adapter
+lease stay separate, and the diagnostic flat body resolver is unchanged.
+
 The default runtime enables Rust-owned nickname presentation before ingress.
 Each retained snake appearance owns its text and fade state, independently of
 wire-ID reuse. Rust prepares screen-space text commands; a scoped Canvas pass

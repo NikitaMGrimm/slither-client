@@ -10,7 +10,7 @@ const routes = new Map([
   ['/animated', ['web/animated.html', 'text/html; charset=utf-8']],
   ['/benchmark', ['web/benchmark.html', 'text/html; charset=utf-8']],
   ['/scene/scene.css', ['web/scene.css', 'text/css; charset=utf-8']],
-  ...['scene', 'animated', 'desktop-layout', 'synthetic-scene', 'synthetic-body', 'synthetic-food', 'synthetic-prey', 'skin-provider', 'loopback-session', 'dense-scene', 'benchmark'].map(name => [`/scene/${name}.mjs`, [`web/${name}.mjs`, 'text/javascript; charset=utf-8']]),
+  ...['scene', 'authored-source-recipes', 'animated', 'desktop-layout', 'synthetic-scene', 'synthetic-body', 'synthetic-food', 'synthetic-prey', 'skin-provider', 'loopback-session', 'dense-scene', 'benchmark'].map(name => [`/scene/${name}.mjs`, [`web/${name}.mjs`, 'text/javascript; charset=utf-8']]),
   ['/scene/pkg/slither_client.js', ['dist/web/slither_client.js', 'text/javascript; charset=utf-8']],
   ['/scene/pkg/slither_client_bg.wasm', ['dist/web/slither_client_bg.wasm', 'application/wasm']],
   ['/game/host.css', ['extension/game-host.css', 'text/css; charset=utf-8']],
@@ -27,7 +27,7 @@ const routes = new Map([
     'stock-food-provider', 'stock-prey-provider', 'stock-asset-sources', 'skin-provider',
     'desktop-layout', 'client-input', 'stock-gameplay', 'stock-session', 'stock-hud-contract',
     'stock-hud-state', 'stock-hud-view', 'stock-hud-dom', 'handshake-session', 'stock-live-profile',
-    'stock-leaderboard-state', 'stock-leaderboard-view', 'local-game-host', 'client-asset-map',
+    'stock-leaderboard-state', 'stock-leaderboard-view', 'local-game-host', 'client-asset-map', 'authored-source-recipes',
     'synthetic-body', 'synthetic-food', 'synthetic-prey', 'loopback-session']
     .map(name => [`/game/${name}.mjs`, [`web/${name}.mjs`, 'text/javascript; charset=utf-8']]),
   ['/game/pkg/slither_client.js', ['dist/web/slither_client.js', 'text/javascript; charset=utf-8']],

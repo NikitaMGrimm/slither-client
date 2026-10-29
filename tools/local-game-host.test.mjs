@@ -1,6 +1,11 @@
+import { readFileSync } from 'node:fs';
+import { Script } from 'node:vm';
+import { loopbackEndpoint } from '../web/loopback-session.mjs';
+import { readAuthoredSourceRecipes } from '../web/authored-source-recipes.mjs';
+import { authoredSourceRecipesDouble } from './fixtures/authored-source-fixture.mjs';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createLocalGameHost } from '../web/local-game-host.mjs';
+import { captureLocalGameDocument, createLocalGameHost } from '../web/local-game-host.mjs';
 import { createGateTestDom, issuedMinimapViewDouble } from './game-gate-test-fixture.mjs';
 import { createOwnedMinimapUi } from '../extension/game-owned-minimap-ui.mjs';
 import { createClientInput } from './fixtures/client-input-fixture.mjs';
@@ -94,7 +99,7 @@ function fixture({ href = 'http://127.0.0.1:18884/game', decode, minimap = false
 }
 
 const endpoint = 'ws://127.0.0.1:8766/slither';
-const create = f => createLocalGameHost({ realm: f.realm, endpoint });
+const create = f => createLocalGameHost({ realm: f.realm, endpoint, sourceRecipes: authoredSourceRecipesDouble() });
 const claim = host => host.gate.claim(host.gate.metadata().id);
 
 test('local menu captures fixed-key bounded storage and schema2 buttons without automatic Play', async () => {
@@ -467,4 +472,93 @@ test('document, top and URL changes invalidate the host, including navigation du
   for (const release of releases) release();
   await assert.rejects(pending, /Current local/);
   assert.equal(f.listeners.size, 0); assert.equal(f.sockets.length, 0);
+});
+
+// Actual default bootstrap and local host with the existing authored native realm.
+// The runtime sink below observes initialization/source handoff, not browser gameplay.
+const defaultBootstrap = readFileSync(new URL('../extension/game-bootstrap.mjs', import.meta.url), 'utf8')
+  .split('// Trusted MAIN modules')[0].replace(/^import .+;\r?$/gm, '').replace(/^export /gm, '');
+const bootstrapFactory = new Script(`(function(startRuntime,createLocalGameHost,captureLocalGameDocument,loopbackEndpoint,readAuthoredSourceRecipes){
+  ${defaultBootstrap}\nreturn startGamePage;})`).runInThisContext();
+const startDefault = runtime => bootstrapFactory(runtime, createLocalGameHost, captureLocalGameDocument, loopbackEndpoint, readAuthoredSourceRecipes);
+const localConfig = f => { f.realm.fetch = async () => ({ ok: true, json: async () => ({ simulatorUrl: endpoint }) }); };
+
+test('default local bootstrap initializes once before sources and shares the exact settled promise', async () => {
+  const f = fixture(); localConfig(f); let initialized = false, calls = 0, release, runtimeHost;
+  const ready = new Promise(resolve => { release = resolve; });
+  const originalCreate = f.realm.Document.prototype.createElement;
+  f.realm.Document.prototype.createElement = function (tag) {
+    if (tag === 'canvas') assert.equal(initialized, true, 'Wasm must precede authored sources');
+    return Reflect.apply(originalCreate, this, [tag]);
+  };
+  const start = startDefault(async options => {
+    runtimeHost = options.localHost;
+    assert.equal(options.initialize(), ready); assert.equal(options.initialize(), ready);
+    await options.initialize();
+    runtimeHost.bindSkinPolicy(localRuleDouble);
+    const adapter = runtimeHost.sources.adapter;
+    adapter.beginOperation();
+    try { assert.equal(adapter.resolveRecipe({ skin: 0, customBytes: new Uint8Array(), own: false, cosmetic: 0 }).status, 'ready'); }
+    finally { adapter.endOperation(); }
+    return 'authored runtime result';
+  });
+  const pending = start({ realm: f.realm, initialize() { calls++; return ready; },
+    wasmApi: { authored_source_recipes: authoredSourceRecipesDouble } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls, 1); assert.equal(f.canvases.length, 0);
+  initialized = true; release();
+  assert.equal(await pending, 'authored runtime result'); assert.equal(calls, 1);
+  assert.equal(f.canvases.length, 335); assert.equal(f.calls.filter(v => v === 'decode').length, 2);
+  assert.equal(f.calls.filter(v => v === 'random').length, 0, 'preview recipe consumes no appearance randomness');
+  runtimeHost.dispose();
+});
+
+test('default local initialization failures preserve even undefined without retry or source allocation', async () => {
+  for (const primary of [undefined, new Error('authored initialization rejected')]) for (const sync of [false, true]) {
+    const f = fixture(); localConfig(f); let calls = 0, caught = false;
+    const status = { textContent: '' }; f.document.getElementById = () => status;
+    const start = startDefault(() => assert.fail('runtime after initialization failure'));
+    try {
+      await start({ realm: f.realm, initialize() { calls++; if (sync) throw primary; return Promise.reject(primary); },
+        wasmApi: { get authored_source_recipes() { assert.fail('recipe before initialization'); } } });
+    } catch (error) { caught = true; assert.equal(error, primary); }
+    assert(caught); assert.equal(calls, 1); assert.equal(f.canvases.length, 0); assert.equal(f.sockets.length, 0);
+    assert.equal(status.textContent, 'SlitherClient: ' + (primary?.message ?? 'Local startup failed'));
+  }
+});
+
+test('default local invalid config, endpoint or document rejects before initialization', async () => {
+  for (const value of [undefined, null, {}, { simulatorUrl: '' }, { simulatorUrl: 'ws://localhost:8766/slither' },
+    { simulatorUrl: 'ws://127.0.0.1:8766/other' }, { get simulatorUrl() { assert.fail('config getter'); } }]) {
+    const f = fixture(); f.realm.fetch = async () => ({ ok: true, json: async () => value });
+    const start = startDefault(() => assert.fail('runtime after invalid config'));
+    await assert.rejects(start({ realm: f.realm, initialize() { assert.fail('initialization before config admission'); }, wasmApi: {} }),
+      error => error.code !== 'ERR_ASSERTION');
+    assert.equal(f.canvases.length, 0);
+  }
+  const f = fixture(); localConfig(f); f.realm.top = {};
+  await assert.rejects(startDefault(() => assert.fail('runtime'))({ realm: f.realm,
+    initialize() { assert.fail('initialization'); }, wasmApi: {} }), /Literal top-level/);
+  assert.equal(f.canvases.length, 0);
+});
+
+test('default local async initialization cannot continue after document replacement', async () => {
+  const f = fixture(); localConfig(f); let calls = 0;
+  await assert.rejects(startDefault(() => assert.fail('stale runtime'))({ realm: f.realm,
+    async initialize() { calls++; f.realm.document = new f.dom.Document(); },
+    wasmApi: { get authored_source_recipes() { assert.fail('stale recipe getter'); } } }), /Current local game document/);
+  assert.equal(calls, 1); assert.equal(f.canvases.length, 0);
+});
+
+test('default local decode failure retains its primary and supplied host bypasses early initialization', async () => {
+  const primary = new Error('authored tile decode'); const f = fixture({ decode() { throw primary; } });
+  localConfig(f); let calls = 0;
+  await assert.rejects(startDefault(() => assert.fail('decode failure runtime'))({ realm: f.realm,
+    initialize() { calls++; }, wasmApi: { authored_source_recipes: authoredSourceRecipesDouble } }), error => error === primary);
+  assert.equal(calls, 1); assert.equal(f.canvases.length, 5);
+  const supplied = { authored: true }, initialize = () => assert.fail('early supplied-host initialization');
+  const g = fixture(); g.realm.fetch = () => assert.fail('supplied host fetch');
+  const marker = {};
+  const result = await startDefault(options => { assert.equal(options.initialize, initialize); assert.equal(options.localHost, supplied); return marker; })({ realm: g.realm, localHost: supplied, initialize, wasmApi: {} });
+  assert.equal(result, marker); assert.equal(g.canvases.length, 0);
 });

@@ -6,7 +6,7 @@ import { checkEntry } from './repository-policy.mjs';
 
 const defaultRoot = fileURLToPath(new URL('..', import.meta.url));
 const pageFiles = [
-  'animated.html', 'scene.css', 'animated.mjs', 'desktop-layout.mjs',
+  'authored-source-recipes.mjs', 'animated.html', 'scene.css', 'animated.mjs', 'desktop-layout.mjs',
   'synthetic-scene.mjs', 'synthetic-body.mjs', 'synthetic-food.mjs',
   'synthetic-prey.mjs', 'skin-provider.mjs', 'loopback-session.mjs',
 ];
@@ -17,7 +17,7 @@ const gameWebFiles = ['stock-client.mjs', 'stock-skin-provider.mjs', 'stock-skin
   'stock-session.mjs', 'stock-hud-contract.mjs', 'stock-hud-state.mjs', 'stock-hud-view.mjs',
   'stock-hud-dom.mjs', 'handshake-session.mjs', 'stock-live-profile.mjs',
   'stock-leaderboard-state.mjs', 'stock-leaderboard-view.mjs',
-  'local-game-host.mjs', 'client-asset-map.mjs', 'synthetic-body.mjs', 'synthetic-food.mjs', 'synthetic-prey.mjs', 'loopback-session.mjs'];
+  'local-game-host.mjs', 'client-asset-map.mjs', 'authored-source-recipes.mjs', 'synthetic-body.mjs', 'synthetic-food.mjs', 'synthetic-prey.mjs', 'loopback-session.mjs'];
 const gameFiles = [['game-activation.mjs', 'activation.mjs'], ['game-gate.js', 'gate.js'],
   ['game-link.js', 'link.js'], ['game-runtime.mjs', 'runtime.mjs'], ['game-owned-hud-ui.mjs', 'owned-hud-ui.mjs'],
   ['game-owned-play-ui.mjs', 'owned-play-ui.mjs'],
@@ -107,6 +107,7 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, g
   const glue = bindings.get('slither_client.js').toString('utf8');
   if (!/export class AnimatedScene\b/.test(glue) || !/export class DesktopQuality\b/.test(glue)
     || !/export class DesktopInput\b/.test(glue)
+    || !/export function authored_source_recipes\b/.test(glue)
     || !/export function desktop_backing_size\b/.test(glue)
     || !/new URL\(['"]slither_client_bg\.wasm['"], import\.meta\.url\)/.test(glue)
     || !/export\s*\{[^}]*\b__wbg_init as default\s*\}/.test(glue)) {
@@ -134,7 +135,7 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, g
     'animatedscene_enable_announcement_tracking', 'animatedscene_announcement_view',
     'animatedscene_enable_minimap_tracking', 'animatedscene_observe_minimap_ui_fraction', 'animatedscene_minimap_view',
     'encode_login', 'solve_challenge', 'decode_frame', 'setup_protocol_version',
-    'resolve_skin', 'resolve_local_skin', 'stock_custom_palette_mask_valid', 'stock_accessory_id', 'stock_accessory_forward', 'start_page_view', 'desktop_backing_size',
+    'resolve_skin', 'resolve_local_skin', 'stock_custom_palette_mask_valid', 'authored_source_recipes', 'stock_accessory_id', 'stock_accessory_forward', 'start_page_view', 'desktop_backing_size',
     'endscreenprojector_new', 'endscreenprojector_project', '__wbg_endscreenprojector_free',
     ...Array.from(glue.matchAll(/\bwasm\.([A-Za-z_]\w*)/g), match => match[1])]) {
     if (!exports.has(name)) throw new Error(`Wasm/glue export mismatch: ${name}`);

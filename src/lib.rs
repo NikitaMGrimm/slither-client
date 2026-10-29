@@ -11,6 +11,10 @@ mod math;
 #[cfg(target_arch = "wasm32")]
 mod accessory_browser;
 
+#[cfg(target_arch = "wasm32")]
+mod authored_sources_browser;
+
+pub mod authored_sources;
 pub mod challenge;
 pub mod desktop_input;
 pub mod desktop_layout;

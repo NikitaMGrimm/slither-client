@@ -1,6 +1,9 @@
+import { authoredSourceRecipesDouble } from './fixtures/authored-source-fixture.mjs';
+const authoredPaletteRgb = authoredSourceRecipesDouble().paletteRgb;
+Object.freeze(authoredPaletteRgb); authoredPaletteRgb.forEach(Object.freeze);
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { authoredPaletteRgb, createClientAssetMap } from '../web/client-asset-map.mjs';
+import { createClientAssetMap } from '../web/client-asset-map.mjs';
 
 test('comparison asset map awaits the explicit factory and preserves its source identities', async () => {
   const realm = {}, random = () => 0.25;
@@ -77,7 +80,7 @@ function fixture({ decode } = {}) {
 }
 
 test('asset map preserves the authored palettes and returns ready tile and 512-square backdrop images', async () => {
-  const f = fixture(), assets = await createClientAssetMap({ realm: f.realm });
+  const f = fixture(), assets = await createClientAssetMap({ realm: f.realm, sourceRecipes: authoredSourceRecipesDouble() });
   assert.deepEqual(Object.keys(assets).sort(), ['background', 'backgroundImage', 'bodySources', 'palettes']);
   assert.equal(assets.palettes.length, 3);
   assert.equal(new Set(assets.palettes).size, 3);
@@ -104,7 +107,7 @@ test('asset map preserves the authored palettes and returns ready tile and 512-s
 });
 
 test('body sources provide three authored seven-variant families and distinct shared effects', async () => {
-  const f = fixture(), assets = await createClientAssetMap({ realm: f.realm });
+  const f = fixture(), assets = await createClientAssetMap({ realm: f.realm, sourceRecipes: authoredSourceRecipesDouble() });
   const { palettes, effects } = assets.bodySources;
   assert.deepEqual(Object.keys(assets.bodySources).sort(), ['effects', 'palettes']);
   assert.equal(palettes.length, 3);
@@ -138,7 +141,7 @@ test('body sources provide three authored seven-variant families and distinct sh
 });
 
 test('body shading has finite contained gradients, bounded color/alpha and transparent soft edges', async () => {
-  const f = fixture(), { bodySources } = await createClientAssetMap({ realm: f.realm });
+  const f = fixture(), { bodySources } = await createClientAssetMap({ realm: f.realm, sourceRecipes: authoredSourceRecipesDouble() });
   const sources = bodySources.palettes.flatMap(palette => [...palette.variants, palette.boostGlow])
     .concat(Object.values(bodySources.effects));
   for (const source of sources) {
@@ -176,7 +179,7 @@ test('body sources need only local Canvas artwork and the two existing generated
   for (const capability of ['fetch', 'WebSocket', 'XMLHttpRequest']) {
     Object.defineProperty(f.realm, capability, { get() { assert.fail(`Unexpected network capability: ${capability}`); } });
   }
-  const assets = await createClientAssetMap({ realm: f.realm });
+  const assets = await createClientAssetMap({ realm: f.realm, sourceRecipes: authoredSourceRecipesDouble() });
   assert.equal(f.canvases.length, 32);
   assert.equal(f.images.length, 2);
   assert.equal(f.encoded.size, 2);
@@ -185,7 +188,7 @@ test('body sources need only local Canvas artwork and the two existing generated
 });
 
 test('hex tile uses finite closed polygons and repeats matching artwork across both seams', async () => {
-  const f = fixture(), assets = await createClientAssetMap({ realm: f.realm });
+  const f = fixture(), assets = await createClientAssetMap({ realm: f.realm, sourceRecipes: authoredSourceRecipesDouble() });
   const tile = f.encoded.get(assets.background.src), paths = [];
   let points, closed;
   for (const [operation, ...args] of tile.commands) {
@@ -224,7 +227,7 @@ test('asset map waits for both generated images before publishing sources', asyn
   const releases = new Map();
   const f = fixture({ decode: canvas => new Promise(resolve => releases.set(canvas.width, resolve)) });
   let ready = false;
-  const pending = createClientAssetMap({ realm: f.realm }).then(assets => { ready = true; return assets; });
+  const pending = createClientAssetMap({ realm: f.realm, sourceRecipes: authoredSourceRecipesDouble() }).then(assets => { ready = true; return assets; });
   assert.equal(releases.size, 2);
   releases.get(324)();
   await new Promise(resolve => setImmediate(resolve));
@@ -239,15 +242,15 @@ test('a failed tile or backdrop decode rejects the map', async () => {
   for (const size of [324, 512]) {
     const failure = new Error(`Synthetic decode failure: ${size}`);
     const f = fixture({ decode(canvas) { if (canvas.width === size) throw failure; } });
-    await assert.rejects(createClientAssetMap({ realm: f.realm }), error => error === failure);
+    await assert.rejects(createClientAssetMap({ realm: f.realm, sourceRecipes: authoredSourceRecipesDouble() }), error => error === failure);
     assert.equal(f.images.length, 2);
   }
 });
 
 test('asset maps create independent source objects for separate local hosts', async () => {
   const f = fixture();
-  const first = await createClientAssetMap({ realm: f.realm });
-  const second = await createClientAssetMap({ realm: f.realm });
+  const first = await createClientAssetMap({ realm: f.realm, sourceRecipes: authoredSourceRecipesDouble() });
+  const second = await createClientAssetMap({ realm: f.realm, sourceRecipes: authoredSourceRecipesDouble() });
   assert(first.palettes.every((source, index) => source !== second.palettes[index]));
   assert.notEqual(first.background, second.background);
   assert.notEqual(first.backgroundImage, second.backgroundImage);
