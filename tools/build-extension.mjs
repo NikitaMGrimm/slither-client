@@ -11,7 +11,7 @@ const pageFiles = [
   'synthetic-prey.mjs', 'skin-provider.mjs', 'loopback-session.mjs',
 ];
 const bindingFiles = ['slither_client.js', 'slither_client_bg.wasm'];
-const gameWebFiles = ['stock-client.mjs', 'stock-skin-provider.mjs', 'stock-skin-rules.mjs', 'stock-accessory-selection.mjs',
+const gameWebFiles = ['stock-client.mjs', 'stock-skin-provider.mjs', 'stock-skin-rules.mjs', 'stock-accessory-selection.mjs', 'stock-cached-accessory.mjs', 'stock-accessory-load.mjs',
   'stock-host-snapshot.mjs', 'stock-food-provider.mjs', 'stock-prey-provider.mjs', 'stock-asset-sources.mjs',
   'skin-provider.mjs', 'desktop-layout.mjs', 'client-input.mjs', 'stock-gameplay.mjs',
   'stock-session.mjs', 'stock-hud-contract.mjs', 'stock-hud-state.mjs', 'stock-hud-view.mjs',
@@ -21,6 +21,7 @@ const gameWebFiles = ['stock-client.mjs', 'stock-skin-provider.mjs', 'stock-skin
 const gameFiles = [['game-activation.mjs', 'activation.mjs'], ['game-gate.js', 'gate.js'],
   ['game-link.js', 'link.js'], ['game-runtime.mjs', 'runtime.mjs'], ['game-owned-hud-ui.mjs', 'owned-hud-ui.mjs'],
   ['game-owned-play-ui.mjs', 'owned-play-ui.mjs'],
+  ['game-owned-appearance-ui.mjs', 'owned-appearance-ui.mjs'],
   ['start-page-layout.mjs', 'start-page-layout.mjs'],
   ['game-owned-leaderboard-ui.mjs', 'owned-leaderboard-ui.mjs'],
   ['game-owned-announcement-ui.mjs', 'owned-announcement-ui.mjs'],
@@ -106,6 +107,7 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, g
   const glue = bindings.get('slither_client.js').toString('utf8');
   if (!/export class AnimatedScene\b/.test(glue) || !/export class DesktopQuality\b/.test(glue)
     || !/export class DesktopInput\b/.test(glue)
+    || !/export function desktop_backing_size\b/.test(glue)
     || !/new URL\(['"]slither_client_bg\.wasm['"], import\.meta\.url\)/.test(glue)
     || !/export\s*\{[^}]*\b__wbg_init as default\s*\}/.test(glue)) {
     throw new Error('Expected the generated web entrypoint for slither_client');
@@ -132,7 +134,7 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, g
     'animatedscene_enable_announcement_tracking', 'animatedscene_announcement_view',
     'animatedscene_enable_minimap_tracking', 'animatedscene_observe_minimap_ui_fraction', 'animatedscene_minimap_view',
     'encode_login', 'solve_challenge', 'decode_frame', 'setup_protocol_version',
-    'resolve_skin', 'resolve_local_skin', 'start_page_view',
+    'resolve_skin', 'resolve_local_skin', 'stock_accessory_id', 'stock_accessory_forward', 'start_page_view', 'desktop_backing_size',
     'endscreenprojector_new', 'endscreenprojector_project', '__wbg_endscreenprojector_free',
     ...Array.from(glue.matchAll(/\bwasm\.([A-Za-z_]\w*)/g), match => match[1])]) {
     if (!exports.has(name)) throw new Error(`Wasm/glue export mismatch: ${name}`);
@@ -170,7 +172,7 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, g
     if (errors.length) throw new Error(errors.join('\n'));
     const manifest = JSON.parse(manifestBytes);
     const expected = new Set(['game/bootstrap.mjs', 'game/runtime.mjs', 'game/owned-hud-ui.mjs', 'game/owned-play-ui.mjs',
-      'game/start-page-layout.mjs', 'assets/logo.svg',
+      'game/owned-appearance-ui.mjs', 'game/start-page-layout.mjs', 'assets/logo.svg',
       'game/owned-leaderboard-ui.mjs', 'game/owned-minimap-ui.mjs', 'game/owned-end-screen-ui.mjs', 'game/owned-announcement-ui.mjs', ...gameWebFiles.map(name => `game/${name}`),
       ...bindingFiles.map(name => `game/pkg/${name}`)]);
     const declarations = manifest.web_accessible_resources;

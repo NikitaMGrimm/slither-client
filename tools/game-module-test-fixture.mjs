@@ -1,6 +1,8 @@
 import { TestDesktopInput } from './fixtures/client-input-fixture.mjs';
+import { desktopBackingOracle } from './fixtures/desktop-layout-fixture.mjs';
 import { createLeaderboardHistoryDouble } from './leaderboard-history-double.mjs';
 import { createHudHistoryDouble } from './hud-history-double.mjs';
+import { createMenuPreferencesDouble } from './menu-preferences-double.mjs';
 // Authored Node-only full ESM graph boundary. No browser or production Wasm proof.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -12,13 +14,14 @@ import { projectStartPageDouble } from './start-page-view-double.mjs';
 const root = new URL('../', import.meta.url);
 const webNames = ['stock-skin-provider.mjs', 'stock-client.mjs', 'stock-food-provider.mjs',
   'stock-host-snapshot.mjs', 'desktop-layout.mjs', 'stock-gameplay.mjs', 'stock-hud-dom.mjs',
-  'stock-hud-view.mjs', 'stock-skin-rules.mjs', 'stock-accessory-selection.mjs', 'stock-prey-provider.mjs', 'stock-asset-sources.mjs',
+  'stock-hud-view.mjs', 'stock-skin-rules.mjs', 'stock-accessory-selection.mjs', 'stock-cached-accessory.mjs', 'stock-accessory-load.mjs', 'stock-prey-provider.mjs', 'stock-asset-sources.mjs',
   'skin-provider.mjs', 'client-input.mjs', 'stock-session.mjs', 'stock-hud-contract.mjs',
   'stock-hud-state.mjs', 'handshake-session.mjs', 'stock-live-profile.mjs',
   'stock-leaderboard-state.mjs', 'stock-leaderboard-view.mjs',
   'local-game-host.mjs', 'client-asset-map.mjs', 'synthetic-body.mjs', 'synthetic-food.mjs', 'synthetic-prey.mjs', 'loopback-session.mjs'];
 const entryNames = { 'bootstrap.mjs': 'game-bootstrap.mjs', 'runtime.mjs': 'game-runtime.mjs',
   'owned-hud-ui.mjs': 'game-owned-hud-ui.mjs', 'owned-play-ui.mjs': 'game-owned-play-ui.mjs',
+  'owned-appearance-ui.mjs': 'game-owned-appearance-ui.mjs',
   'start-page-layout.mjs': 'start-page-layout.mjs',
   'owned-leaderboard-ui.mjs': 'game-owned-leaderboard-ui.mjs',
   'owned-announcement-ui.mjs': 'game-owned-announcement-ui.mjs',
@@ -46,12 +49,12 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
   // Reuse authored native/Wasm fixture definitions, never transform a product module.
   const testSource = readFileSync(new URL('tools/game-bootstrap.test.mjs', root), 'utf8');
   const definitions = testSource.slice(testSource.indexOf('function fixture('), testSource.indexOf("\ntest('an unarmed"));
-  const makeFixture = new vm.Script(`(function(gateSource,Script,createContext,runInContext,assert,createGateTestDom,attachGateTestRealm,createHudHistoryDouble,createLeaderboardHistoryDouble,TestDesktopInput){
+  const makeFixture = new vm.Script(`(function(gateSource,Script,createContext,runInContext,assert,createGateTestDom,attachGateTestRealm,createHudHistoryDouble,createLeaderboardHistoryDouble,TestDesktopInput,desktopBackingOracle){
     ${definitions}\nreturn {fixture,wasmDouble};})`).runInThisContext();
   const nativeSource = readFileSync(new URL('extension/game-gate.js', root), 'utf8');
   const { fixture, wasmDouble } = makeFixture(nativeSource, vm.Script, vm.createContext, vm.runInContext, assert,
     options => { const dom = createGateTestDom({ ...options, ownedHud: ownedHudNative, ownedPlay: ownedPlayNative,
-      leaderboard: leaderboardNative, minimap: minimapNative }); prepare?.(dom); return dom; }, attachGateTestRealm, createHudHistoryDouble, createLeaderboardHistoryDouble, TestDesktopInput);
+      leaderboard: leaderboardNative, minimap: minimapNative }); prepare?.(dom); return dom; }, attachGateTestRealm, createHudHistoryDouble, createLeaderboardHistoryDouble, TestDesktopInput,desktopBackingOracle);
   const f = fixture({ armed, hudNative });
   if (hudNative) {
     // The legacy native boundary must create HTML-branded borrowed root/status nodes too.
@@ -71,6 +74,7 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
     announcement_view() { announcements.reads++; return announcements.view; },
   });
   wasm.api.start_page_view = vm.runInContext('(' + projectStartPageDouble.toString() + ')', f.context);
+  wasm.api.MenuPreferences = vm.runInContext('(' + createMenuPreferencesDouble.toString() + ')()', f.context);
   const minimap = { enabled: 0, reads: [], fractions: [], view: {
     schema: 1, enabled: true, imageRevision: 0n, dimension: null,
     baseRgba: new Uint8Array(), alternateRgba: new Uint8Array(), widget: null,

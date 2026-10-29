@@ -15,7 +15,6 @@ the following exceptions:
 | `web/handshake-session.mjs` | Challenge/login/setup state machine and frame limits; Rust already owns encoding, decoding and challenge arithmetic. |
 | `web/stock-hud-view.mjs` | Binding/readiness composition around Rust-formatted current/final HUD values. |
 | `web/stock-skin-rules.mjs` | Appearance selection and numeric recipe policy; borrowed DOM source capture remains separate. |
-| `web/desktop-layout.mjs` | Numeric viewport-to-backing-size policy. |
 | `extension/game-runtime.mjs` | Mixed entry/DOM/capability plumbing and Play admission/availability state. |
 
 The browser-free Rust leaderboard owner retains command-ordered Setup/table and
@@ -33,6 +32,19 @@ before returning to synchronous host callbacks. `web/client-input.mjs` retains
 scalar/record admission, arbitrary `Object.is` token identity and callback order;
 it contains no numeric policy fallback. Session ping remains between keyboard
 and boost, and callbacks can update public input setters between phases.
+The default [player menu](menu-preferences.md) keeps appearance selection, custom
+run editing and bounded preference restore in Rust. Captured DOM/storage glue
+restores nickname/appearance and passes their copied bytes to explicit Play.
+`desktop_layout::desktop_backing_size` owns desktop viewport arithmetic in
+browser-free Rust. Its pure Wasm export returns a fresh copied width/height
+record; `web/desktop-layout.mjs` admits primitive inputs and copies that output
+without a JavaScript numeric fallback. The default runtime and the separate
+animated diagnostic both use initialized Wasm. JavaScript still reads the actual
+viewport and performs existing resize/DOM/Canvas effects. The policy retains
+positive finite inputs, ceiled dimensions, squared-sum diagonal overflow
+rejection, ceiled 1800 scaling and sequential ceiled 1500 dimension caps, without
+DPR multiplication, UI insets, clocks or renderer changes. Authored native and
+real-Wasm oracle checks cover arithmetic and boundary admission, not browser pixels.
 See the [roadmap](roadmap.md) for remaining work.
 
 Local rendering binds a pure Rust skin resolver after Wasm initialization. Rust

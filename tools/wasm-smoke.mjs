@@ -22,11 +22,15 @@ import { minimapRenderSmoke } from './minimap-render-smoke.mjs';
 import { skinPolicySmoke } from './skin-policy-smoke.mjs';
 import { startPageSmoke } from './start-page-smoke.mjs';
 import { endScreenSmoke } from './end-screen-smoke.mjs';
+import { menuPreferencesSmoke } from './menu-preferences-smoke.mjs';
+import { desktopLayoutSmoke } from './desktop-layout-smoke.mjs';
 import { desktopInputSmoke } from './desktop-input-smoke.mjs';
 import { desktopInputLifetimeSmoke } from './desktop-input-lifetime-smoke.mjs';
 
 // Entirely synthetic ABI integration; no reference files or network are used.
 const wasm = await loadWasm();
+desktopLayoutSmoke(wasm);
+menuPreferencesSmoke(wasm);
 console.log('Synthetic real-Wasm desktop input equivalence passed:', desktopInputSmoke(wasm));
 console.log('Synthetic real-Wasm desktop input release passed:', desktopInputLifetimeSmoke(wasm));
 const inputRequirements = execFileSync(process.execPath,

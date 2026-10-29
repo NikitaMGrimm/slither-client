@@ -12,6 +12,7 @@ import { createStockSkinAdapter } from '../web/stock-skin-provider.mjs';
 import { createStockClient } from '../web/stock-client.mjs';
 import { createStockEntityAssets } from '../web/stock-food-provider.mjs';
 import { desktopBackingSize } from '../web/desktop-layout.mjs';
+import { desktopBackingOracle } from './fixtures/desktop-layout-fixture.mjs';
 import { createStockGameplay } from '../web/stock-gameplay.mjs';
 import { bindStockHudDom } from '../web/stock-hud-dom.mjs';
 import { projectHudView } from '../web/stock-hud-view.mjs';
@@ -45,7 +46,7 @@ function connect(f, runtime) {
 }
 
 function fixture({ armed = true, late = false, sourcePending = false, href = 'https://slither.io/',
-  missingEdit = false, missingFence = false, missingNative, hudNative = false } = {}) {
+  missingEdit = false, missingFence = false, missingNative, hudNative = false, accessoryNative = false } = {}) {
   const dimensions = new WeakMap(), images = new WeakMap();
   const log = [], messages = [], raf = new Map(), timers = new Map(), intervals = new Map(), microtasks = [], faults = {};
   const events = new EventTarget();
@@ -61,11 +62,14 @@ function fixture({ armed = true, late = false, sourcePending = false, href = 'ht
     getContext() { return new Context(this); }
     getBoundingClientRect() { return { left: 0, top: 0, width: 960, height: 540 }; }
   }
-  class Image {
-    constructor() { images.set(this, { width: 40, height: 40, complete: true }); }
+  class Image extends EventTarget {
+    constructor() { super(); images.set(this, { width: 40, height: 40, complete: true, src: 'authored-image', currentSrc: 'authored-image' }); }
     get naturalWidth() { return images.get(this).width; }
     get naturalHeight() { return images.get(this).height; }
     get complete() { return images.get(this).complete; }
+    get src() { return images.get(this).src; }
+    get currentSrc() { return images.get(this).currentSrc; }
+    decode() { return images.get(this).decode ?? Promise.resolve(); }
   }
   class Context {
     constructor(canvas) { this.target = canvas; }
@@ -131,6 +135,7 @@ function fixture({ armed = true, late = false, sourcePending = false, href = 'ht
   runInContext('window = globalThis; top = globalThis;', context);
   actualRealm = runInContext('globalThis', context);
   const edit = attachGateTestRealm(dom, realm, document, actualRealm);
+  if (accessoryNative) { realm.EventTarget = EventTarget; realm.Promise = Promise; }
   if (missingEdit) delete dom.Element.prototype.checkVisibility;
   if (missingFence) delete dom.FenceEvent.prototype.stopImmediatePropagation;
   if (missingNative) {
@@ -177,6 +182,7 @@ function fixture({ armed = true, late = false, sourcePending = false, href = 'ht
   }
   function complete() { document.readyState = 'interactive'; document.dispatchEvent(new Event('DOMContentLoaded')); }
   return { realm: actualRealm, context, document, edit, messages, log, raf, timers, intervals, faults, host, canvas, complete,
+    imageState: source => images.get(source),
     get gate() { return actualRealm[Symbol.for('slither.client.gate.v1')]; },
     get sockets() { return sockets; }, get original() { return original; }, get reloads() { return reloads; }, nativeRaf,
     get socket() { return socket; },
@@ -246,6 +252,7 @@ function wasmDouble(f) {
     free() { qualityFrees++; f.faults.cleanup?.('quality.free'); }
   }
   const api = { DesktopInput: TestDesktopInput, AnimatedScene, DesktopQuality, HudHistory: createHudHistoryDouble(), LeaderboardHistory: createLeaderboardHistoryDouble(),
+    desktop_backing_size: desktopBackingOracle,
     encode_login() { return Uint8Array.of(115, 1); }, solve_challenge() { return new Uint8Array(27); },
     setup_protocol_version() { return 19; },
     decode_frame(bytes) {
@@ -390,7 +397,7 @@ test('host snapshot preserves full source identities/metrics and revisions witho
   assert.notEqual(commitment(afterPaint, other).revision, commitment(beforePaint, other).revision);
   assert.equal(commitment(afterPaint, bodySource).revision, commitment(beforePaint, bodySource).revision);
   f.realm.localStorage.setItem('cosmetic', '0');
-  assert.throws(() => reader.capture(), /Static accessory/);
+  assert.throws(() => reader.capture(), error => error.status === 'unsupported');
   assert.equal(f.original, 0); assert.equal(f.sockets, 0);
 });
 
@@ -1916,3 +1923,81 @@ test('actual captured native HUD group composes with explicit bootstrap in the s
     ticket.unbind(); runtime.dispose(); assert.equal(wasm.counts().sceneFrees, 1);
     assert.equal(wasm.counts().qualityFrees, 1); assert.equal(f.original, 0);
   });
+
+// Actual gate-to-snapshot-to-adapter/controller composition; inert native/scene
+// doubles only. The ABI policy double below is separate from native Rust tests.
+test('ready cached accessory composes native load commitment with appearance-forward and controller mode', async () => {
+  const f = fixture({ accessoryNative: true }); f.host(); f.complete();
+  const native = f.gate.claim(f.gate.metadata().id);
+  assert(native.accessorySource);
+  const source = new f.realm.HTMLImageElement();
+  let resolve; f.imageState(source).decode = new Promise(done => { resolve = done; });
+  f.realm.a_ct = 1;
+  f.realm.a_imgs = [{ loaded: true, img: source, ww: 40, hh: 40, sc: .25, px: 3, py: 7 }];
+  f.realm.localStorage.setItem('cosmetic', '0');
+  const reader = createStockHostSnapshot({ realm: f.realm, observer: native,
+    readAccessory: native.readAccessory, accessorySource: native.accessorySource,
+    resolveAccessoryId(raw, count) { assert.equal(raw, '0'); assert.equal(count, 1); return 0; } });
+  assert.throws(() => reader.capture(), error => error.status === 'pending');
+  resolve(); await Promise.resolve();
+  const snapshot = reader.capture();
+  assert.equal(snapshot.appearanceMode, 'accessory');
+  assert.equal(snapshot.ownAccessory, 0);
+  assert.equal(snapshot.ownCachedAccessorySelection.source, source);
+  assert.equal('forward' in snapshot.ownCachedAccessorySelection.geometry, false);
+  const revision = snapshot.readiness.find(entry => entry.source === source).revision;
+  assert(revision.startsWith('trusted-accessory-load/'));
+  let held, rendered = 0;
+  const adapter = createStockSkinAdapter({ realm: f.realm, appearanceMode: 'accessory',
+    readSnapshot() { held = reader.capture(); return held; }, random: () => .25,
+    resolveAccessoryForward(skin) { return skin === 41 ? 34 : 6; } });
+  const request = { skin: 41, own: true, id: 7, cosmetic: 255, customBytes: new Uint8Array() };
+  const scene = { advance() { return { free() {} }; }, set_gaze_heading() {},
+    apply_frame_and_render_standard_with_accessory_presentation_and_prey(...args) {
+      assert.equal(args[2](request).accessory.forward, 34);
+      const recipe = args[12](request).recipe;
+      assert.equal(recipe.attachment.forward, 34);
+      assert.equal(recipe.attachment.asset.source, source);
+      assert.equal(recipe.attachment.asset.revision, revision);
+      assert.equal(args[2]({ ...request, own: false }).accessory, null);
+      assert.equal(args[2]({ ...request, skin: 40 }).accessory.forward, 6);
+      assert.throws(() => args[2]({ ...request, skin: 27 }), /face/);
+      const custom = Uint8Array.of(0,0,0,0,0,0,0,0,2,1);
+      assert.equal(args[2]({ ...request, skin: 27, customBytes: custom }).accessory.forward, 6);
+      return 1;
+    },
+    render_standard_with_accessory_presentation_at_size(...args) {
+      assert.equal(args[7](request).recipe.attachment.asset.source, source); rendered++;
+    },
+  };
+  const client = createStockClient({ scene, adapter, appearanceMode: snapshot.appearanceMode,
+    quality: { advance() {}, update_statistics() { return false; } },
+    hostAssets: { resolveFood() {}, resolvePrey() {} }, target: f.canvas(),
+    palettes: snapshot.palettes, background: snapshot.background, width: 960, height: 540 });
+  assert.equal(client.packet(Uint8Array.of(0)), 1); client.frame(16); assert.equal(rendered, 1);
+  assert(held);
+  source.dispatchEvent(new Event('load'));
+  assert.throws(() => reader.capture(), error => error.status === 'unsupported');
+  assert.throws(() => client.frame(32), error => error.status === 'unsupported');
+  reader.dispose(); client.dispose();
+  assert.equal(f.timers.size, 0);
+});
+
+test('cached selected entry rejects incomplete, replaced or drifting sources without a fallback', async () => {
+  for (const mode of ['incomplete', 'extent', 'replacement', 'geometry', 'entry']) {
+    const f = fixture({ accessoryNative: true }); f.host(); f.complete();
+    const native = f.gate.claim(f.gate.metadata().id), source = new f.realm.HTMLImageElement();
+    f.realm.a_ct = 1; f.realm.a_imgs = [{ loaded: true, img: source, ww: 40, hh: 40, sc: .25, px: 3, py: 7 }];
+    f.realm.localStorage.setItem('cosmetic', '0');
+    const reader = createStockHostSnapshot({ realm:f.realm, observer:native, readAccessory:native.readAccessory,
+      accessorySource:native.accessorySource, resolveAccessoryId:()=>0 });
+    assert.throws(()=>reader.capture(), error=>error.status==='pending'); await Promise.resolve(); reader.capture();
+    if(mode==='incomplete') f.imageState(source).complete=false;
+    if(mode==='extent') f.imageState(source).width=41;
+    if(mode==='replacement') f.realm.a_imgs[0].img=new f.realm.HTMLImageElement();
+    if(mode==='geometry') f.realm.a_imgs[0].px=4;
+    if(mode==='entry') f.realm.a_imgs[0]={...f.realm.a_imgs[0]};
+    assert.throws(()=>reader.capture(), error=>error.status==='unsupported');
+    reader.dispose(); assert.equal(f.timers.size,0);
+  }
+});

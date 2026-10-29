@@ -143,6 +143,8 @@ pub use skin::{
 };
 pub use snake::{AnchorView, SnakeMetrics, SnakePresentation};
 pub use static_accessory::{StaticHeadAccessoryGeometry, StaticHeadAccessoryLayout};
+mod accessory_selection;
+pub use accessory_selection::{stock_accessory_forward, stock_accessory_id};
 
 /// Number of samples in each head position/fraction correction channel.
 pub const HEAD_SAMPLES: usize = 53;

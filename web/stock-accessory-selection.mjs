@@ -2,6 +2,7 @@ import { ownData, stockInteger } from './stock-skin-rules.mjs';
 
 const freeze = Object.freeze;
 const geometryKeys = freeze(['forward', 'imageScale', 'pivotX', 'pivotY']);
+const cachedGeometryKeys = freeze(['imageScale', 'pivotX', 'pivotY']);
 
 function unavailable(status, message) {
   const error = new TypeError(`Stock accessory ${status}: ${message}`);
@@ -47,11 +48,28 @@ export function assertStockAccessorySource(selection, realm) {
   if (nativeWidth !== width || nativeHeight !== height) unavailable('unsupported', 'selected cached extent differs from native source');
 }
 
-/** One explicit selected source, never a cosmetic/catalog lookup or a loader. */
-export function readStockAccessorySelection(raw, realm, commitments) {
+function geometry(input, cached) {
+  const keys = cached ? cachedGeometryKeys : geometryKeys;
+  closed(input, keys);
+  const result = {};
+  for (const key of keys) {
+    const value = ownData(input, key);
+    const min = key === 'imageScale' ? Number.MIN_VALUE : key === 'forward' ? 0 : -65535;
+    const max = key === 'imageScale' ? 256 : key === 'forward' ? 4096 : 65535;
+    if (!Number.isFinite(value) || value < min || value > max) throw new RangeError(`Invalid accessory ${key}`);
+    result[key] = value;
+  }
+  return freeze(result);
+}
+
+/** Structural/native admission shared by explicit and cached ready selections. */
+export function readStockAccessoryMetadata(raw, realm) {
   try {
     const id = ownData(raw, 'ownAccessory');
-    const input = ownData(raw, 'ownAccessorySelection');
+    const explicit = ownData(raw, 'ownAccessorySelection');
+    const cached = ownData(raw, 'ownCachedAccessorySelection');
+    if (explicit != null && cached != null) unavailable('unsupported', 'conflicting selection forms');
+    const input = explicit ?? cached;
     if (id === -1) {
       if (input != null) unavailable('unsupported', 'selection requires its explicit ownAccessory ID');
       return null;
@@ -60,33 +78,38 @@ export function readStockAccessorySelection(raw, realm, commitments) {
     if (input == null) unavailable('pending', 'selected record missing');
     closed(input, ['id', 'geometry', 'source', 'width', 'height']);
     if (!Object.is(ownData(input, 'id'), id)) unavailable('unsupported', 'selected ID mismatch');
-    const numeric = ownData(input, 'geometry');
-    closed(numeric, geometryKeys);
-    const geometry = {};
-    for (const key of geometryKeys) {
-      const value = ownData(numeric, key);
-      const min = key === 'imageScale' ? Number.MIN_VALUE : key === 'forward' ? 0 : -65535;
-      const max = key === 'imageScale' ? 256 : key === 'forward' ? 4096 : 65535;
-      if (!Number.isFinite(value) || value < min || value > max) throw new RangeError(`Invalid accessory ${key}`);
-      geometry[key] = value;
-    }
+    const numeric = geometry(ownData(input, 'geometry'), cached != null);
     const source = ownData(input, 'source');
     const width = stockInteger(ownData(input, 'width'), 0, 65535, 'accessory width');
     const height = stockInteger(ownData(input, 'height'), 0, 65535, 'accessory height');
-    const selection = { id, geometry: freeze(geometry), source, width, height };
+    const selection = { id, geometry: numeric, source, width, height,
+      ...(cached != null ? { appearanceForward: true } : {}) };
     assertStockAccessorySource(selection, realm);
-    const commitment = commitments.get(source);
-    if (commitment?.state !== 'ready') unavailable(commitment?.state ?? 'pending', 'selected source commitment required');
-    return freeze({ ...selection, revision: commitment.revision });
+    return freeze(selection);
   } catch (error) {
     if (error?.name === 'StockAccessorySelectionError') throw error;
     unavailable('unsupported', error.message);
   }
 }
 
+/** One selected ready source with its exact content commitment. */
+export function readStockAccessorySelection(raw, realm, commitments) {
+  const selection = readStockAccessoryMetadata(raw, realm);
+  if (!selection) return null;
+  const commitment = commitments.get(selection.source);
+  if (commitment?.state !== 'ready') unavailable(commitment?.state ?? 'pending', 'selected source commitment required');
+  return freeze({ ...selection, revision: commitment.revision });
+}
+
+/** Bind a Rust-derived appearance forward without changing the cached selection. */
+export function withStockAccessoryForward(selection, forward) {
+  return freeze({ ...selection, geometry: geometry({ ...selection.geometry, forward }, false) });
+}
+
 /** Content may be revised; selection and its numeric/source binding may not. */
 export function sameStockAccessorySelection(left, right) {
   if (left === null || right === null) return left === right;
-  return ['id', 'source', 'width', 'height'].every(key => Object.is(left[key], right[key]))
-    && geometryKeys.every(key => Object.is(left.geometry[key], right.geometry[key]));
+  return ['id', 'source', 'width', 'height', 'appearanceForward'].every(key => Object.is(left[key], right[key]))
+    && (left.appearanceForward ? cachedGeometryKeys : geometryKeys)
+      .every(key => Object.is(left.geometry[key], right.geometry[key]));
 }

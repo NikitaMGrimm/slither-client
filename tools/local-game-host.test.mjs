@@ -59,12 +59,17 @@ function fixture({ href = 'http://127.0.0.1:18884/game', decode, minimap = false
     return Reflect.apply(originalCreate, this, [tag]);
   };
   class Socket { constructor(url) { this.url = url; sockets.push(this); } }
+  class Storage {
+    values = new Map();
+    getItem(key) { return this.values.get(key) ?? null; }
+    setItem(key, value) { this.values.set(key, value); }
+  }
   const realm = { document, location: { href, reload() { calls.push('reload'); } },
     Node: dom.Node, Element: dom.Element, HTMLElement: dom.hud.HTMLElement, Document: dom.Document,
     HTMLInputElement: dom.Input, HTMLTextAreaElement: class {}, HTMLButtonElement: dom.Button,
     CharacterData: dom.hud.CharacterData, CSSStyleDeclaration: dom.hud.CSSStyleDeclaration,
     HTMLCanvasElement: Canvas, HTMLImageElement: Image, Image, EventTarget: Events, Event: LocalEvent,
-    WebSocket: Socket, performance: { now() { assert.equal(this, realm.performance); return 125; } },
+    WebSocket: Socket, Storage, localStorage: new Storage(), performance: { now() { assert.equal(this, realm.performance); return 125; } },
     Math: { random() { assert.equal(this, realm.Math); calls.push('random'); return 0.25; } },
   };
   realm.top = realm;
@@ -91,6 +96,31 @@ function fixture({ href = 'http://127.0.0.1:18884/game', decode, minimap = false
 const endpoint = 'ws://127.0.0.1:8766/slither';
 const create = f => createLocalGameHost({ realm: f.realm, endpoint });
 const claim = host => host.gate.claim(host.gate.metadata().id);
+
+test('local menu captures fixed-key bounded storage and schema2 buttons without automatic Play', async () => {
+  const f = fixture(), host = await create(f), native = claim(host), c = f.controls();
+  const menu = f.document.createElement('div'), action = f.document.createElement('button');
+  c.parent.appendChild(menu); menu.appendChild(action);
+  let presses = 0, plays = 0;
+  const lease = native.ownedPlayDom.createControlsLease({ schema: 2, endpoint: c.field, endpointParent: c.parent,
+    button: c.button, buttonParent: c.parent, onPlay() { plays++; }, actions: [{ button: action, parent: menu, onPress() { presses++; } }] });
+  native.setInput(() => {}); lease.bind();
+  f.dispatch(action, 'click', { isTrusted: false }); assert.equal(presses, 0);
+  f.dispatch(action, 'click'); assert.equal(presses, 1); assert.equal(plays, 0);
+  assert.equal(native.menuPreferences.read(), null);
+  assert.equal(native.menuPreferences.write('1:4e616d65:02:'), true);
+  assert.equal(native.menuPreferences.read(), '1:4e616d65:02:');
+  f.realm.Storage.prototype.getItem = () => { throw Error('late reader'); };
+  assert.equal(native.menuPreferences.read(), '1:4e616d65:02:');
+  f.realm.localStorage.values.set('slither-client.menu.v1', 'x'.repeat(601));
+  assert.equal(native.menuPreferences.read(), null);
+  assert.throws(() => native.menuPreferences.write('x'.repeat(601)), /Bounded/);
+  f.realm.localStorage.values.set = () => { throw Error('synthetic quota'); };
+  assert.equal(native.menuPreferences.write('1::00:'), false);
+  assert.equal(plays, 0); assert.equal(f.sockets.length, 0);
+  lease.unregister(); f.dispatch(action, 'click'); assert.equal(presses, 1);
+  host.dispose(); assert.throws(() => native.menuPreferences.read(), /Current/);
+});
 
 test('local comparison sources enter through the asset map without constructing authored stand-ins', async () => {
   const f = fixture();

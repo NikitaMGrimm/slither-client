@@ -20,7 +20,7 @@ export async function startGamePage({ realm = globalThis, initialize = init, was
     }
   }
   return startRuntime({ realm, initialize, wasmApi, hudReadout: true, diagnosticUi: false,
-    ownedHudUi: true, ownedPlayUi: true, ownedLeaderboardUi: true, ownedMinimapUi: true, ownedAnnouncementUi: true, ownedEndScreenUi: true,
+    ownedHudUi: true, ownedPlayUi: true, ownedMenuUi: true, ownedLeaderboardUi: true, ownedMinimapUi: true, ownedAnnouncementUi: true, ownedEndScreenUi: true,
     ...(localHost ? { localHost } : {}) });
 }
 
