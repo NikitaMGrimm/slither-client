@@ -24,10 +24,17 @@ import { startPageSmoke } from './start-page-smoke.mjs';
 import { endScreenSmoke } from './end-screen-smoke.mjs';
 import { menuPreferencesSmoke } from './menu-preferences-smoke.mjs';
 import { desktopLayoutSmoke } from './desktop-layout-smoke.mjs';
+import { profileLiteralsSmoke } from './profile-literals-smoke.mjs';
 
 // Entirely synthetic ABI integration; no reference files or network are used.
 const wasm = await loadWasm();
 desktopLayoutSmoke(wasm);
+console.log('Synthetic closed profile literal/ownership ABI passed:', await profileLiteralsSmoke(wasm));
+const profileLiteralResult = execFileSync(process.execPath,
+  ['--test', '--test-reporter=tap', 'tools/stock-live-profile.test.mjs', 'tools/stock-profile-gameplay.test.mjs'],
+  { encoding: 'utf8', env: { ...process.env, SLITHER_PROFILE_LITERALS_WASM: '1' }, maxBuffer: 4 * 1024 * 1024 });
+console.log('Synthetic real-Wasm profile/acquirer lifetime requirements passed:',
+  profileLiteralResult.split(/\r?\n/).filter(line => /^# (tests|pass|fail|skipped) /.test(line)).join(', '));
 menuPreferencesSmoke(wasm);
 // Replay existing authored reducer/view/DOM requirements against real Rust history.
 const hudHistoryTests = ['stock-hud-state', 'stock-hud-view', 'stock-hud-dom',

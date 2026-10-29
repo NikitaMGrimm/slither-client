@@ -1,3 +1,4 @@
+import { ProfileLiteralParserDouble } from './fixtures/profile-literals-double.mjs';
 import { desktopBackingOracle } from './fixtures/desktop-layout-fixture.mjs';
 import { createLeaderboardHistoryDouble } from './leaderboard-history-double.mjs';
 import { createHudHistoryDouble } from './hud-history-double.mjs';
@@ -45,7 +46,7 @@ const pending=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resol
 const request=()=>({endpoint:'ws://192.0.2.9:1234/slither',nickname:'Synthetic',skin:24,customSkin:new Uint8Array()});
 
 async function harness() {
-  const f=fixture();f.host();f.complete();const wasm=wasmDouble(f);
+  const f=fixture();f.host();f.complete();const wasm=wasmDouble(f);wasm.api.ProfileLiteralParser=ProfileLiteralParserDouble;
   const counts={fetch:0,digest:0,abort:0,cancel:0,release:0};
   const owned=[],trace=[],endpoints=[],fetching=pending(),digesting=pending();
   let read=false,digestHold,clearHook,runtime;

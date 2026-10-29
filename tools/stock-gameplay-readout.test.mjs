@@ -1,4 +1,5 @@
 import { HudHistoryDouble } from './hud-history-double.mjs';
+import { ProfileLiteralParserDouble } from './fixtures/profile-literals-double.mjs';
 // Authored composition fixtures: actual session/input/controller/reducer, native/source/clock doubles.
 // Scores are explicit observations, never a second score formula or a protocol implementation.
 import assert from 'node:assert/strict';
@@ -110,7 +111,7 @@ function harness({ mode = true, callback, configure } = {}) {
   const routed = Object.fromEntries(['packet', 'packetWithHud', 'frame', 'render', 'resize'].map(name =>
     [name, (...args) => { const result = controller[name](...args); hit(`${name}-return`); return result; }]));
   const options = { scene, quality, controller: routed,
-    wasm: { HudHistory: HudHistoryDouble,
+    wasm: { HudHistory: HudHistoryDouble, ProfileLiteralParser: ProfileLiteralParserDouble,
       encode_login() { return Uint8Array.of(115, 1); }, solve_challenge() { return new Uint8Array(27); },
       setup_protocol_version() { return 19; },
       decode_frame(bytes) {

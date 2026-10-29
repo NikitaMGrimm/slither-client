@@ -1,3 +1,4 @@
+import { ProfileLiteralParserDouble } from './fixtures/profile-literals-double.mjs';
 import { desktopBackingOracle } from './fixtures/desktop-layout-fixture.mjs';
 import { createLeaderboardHistoryDouble } from './leaderboard-history-double.mjs';
 import { createHudHistoryDouble } from './hud-history-double.mjs';
@@ -63,6 +64,7 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
   }
   f.host(); f.complete();
   const wasm = wasmDouble(f), counts = { initialize: 0 };
+  wasm.api.ProfileLiteralParser = ProfileLiteralParserDouble;
   wasm.api.HudHistory = vm.runInContext('(' + createHudHistoryDouble.toString() + ')()', f.context);
   wasm.api.LeaderboardHistory = vm.runInContext('(' + createLeaderboardHistoryDouble.toString() + ')()', f.context);
   const announcements = { enabled: 0, reads: 0, view: {

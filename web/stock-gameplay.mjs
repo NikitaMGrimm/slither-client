@@ -434,6 +434,7 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
         if (!current(intent)) throw profileError('stale-intent');
         intent.started = true;
         intent.acquirer = createStockLiveProfileAcquirer({ capabilities: profileOptions.capabilities,
+          literalParser: wasm.ProfileLiteralParser,
           isCurrentDocument: () => current(intent) });
         await intent.acquirer.acquireForPlay(profile => {
           if (!current(intent)) throw profileError('stale-intent');
