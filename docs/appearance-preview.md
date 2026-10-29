@@ -13,10 +13,16 @@ standard body planner, paired/single-image/mouth face layouts, ordinary antenna
 preparation and browser submission helpers. There is no preview session, clock,
 animation, random stream or JavaScript geometry/palette fallback.
 
-The local route displays its three existing authored families, plain paired
-faces and admitted custom stripes. These are authored stand-ins; they are not
-stock 42-color artwork. The stock route uses the same existing ready borrowed
-provider objects as gameplay, including represented face families and ordinary
+The local route shares gameplay's pure Rust local skin policy: requested built-in
+run counts/order and the cycle seam project over its three existing authored
+families, without merging palette collisions. Built-ins retain seven-variant
+ping-pong shading; admitted custom stripes retain first-variant shading and their
+existing admission/projection rules. Plain paired faces, default body style and
+no antenna or face images remain. The local chooser still admits only its three
+existing selections and custom edits; this slice adds no chooser choices. These
+are authored stand-ins, not stock 42-color artwork. The stock route uses the same
+existing ready borrowed provider objects as gameplay, including represented face
+families and ordinary
 antennas. Stock preview requests `own: true` and cosmetic zero, borrowing the
 already-selected, already-ready current-own static accessory through the same
 trusted adapter. Explicit complete geometry is retained exactly; cached-entry

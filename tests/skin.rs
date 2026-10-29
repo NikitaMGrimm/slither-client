@@ -13,17 +13,36 @@ fn custom(pairs: &[(u8, u8)]) -> Vec<u8> {
 }
 
 #[test]
-fn authored_local_policy_preserves_three_choices_and_plain_faces() {
+fn authored_local_builtin_patterns_preserve_runs_with_plain_local_style() {
     for skin in 0..=255 {
-        let descriptor = resolve_authored_local_skin(skin, &[]).unwrap();
-        let mut expected = selected(skin % 3);
-        expected.skin = skin;
-        assert_eq!(descriptor, expected);
-        assert!(!descriptor.custom);
-        assert_eq!(descriptor.variant_mode, BodyVariantMode::PingPong);
-        assert_eq!(descriptor.variant_period, 7);
-        assert_eq!(descriptor.face, FaceGeometry::default());
-        assert_eq!(descriptor.antenna, None);
+        let stock = selected(skin);
+        for bytes in [
+            vec![],
+            vec![255; 8],
+            vec![255; 9],
+            vec![255; 255],
+            custom(&[(0, 1), (2, 36), (3, 38), (4, 40), (5, 42)]),
+        ] {
+            let descriptor = resolve_authored_local_skin(skin, &bytes).unwrap();
+            assert_eq!(descriptor.skin, skin);
+            assert_eq!(descriptor.runs.len(), stock.runs.len());
+            assert!(descriptor.runs.len() <= 256);
+            assert!(descriptor.runs.iter().map(|run| run.count).sum::<usize>() <= 65_535);
+            for (local, original) in descriptor.runs.iter().zip(&stock.runs) {
+                assert_eq!(local.palette, original.palette % 3);
+                assert_eq!(local.count, original.count);
+                assert!(local.palette < 3 && local.count > 0);
+            }
+            assert_eq!(descriptor.base_palette, descriptor.runs[0].palette);
+            assert!(!descriptor.custom);
+            assert_eq!(descriptor.variant_mode, BodyVariantMode::PingPong);
+            assert_eq!(descriptor.variant_period, 7);
+            assert_eq!(descriptor.face, FaceGeometry::default());
+            assert_eq!(descriptor.face_sources, SkinFaceSources::None);
+            assert_eq!(descriptor.antenna, None);
+            assert_eq!(descriptor.body_style, selected(0).body_style);
+        }
+        assert_eq!(resolve_authored_local_skin(skin, &[0; 256]), Err(SkinError));
     }
 }
 
@@ -63,7 +82,7 @@ fn authored_local_custom_runs_reach_the_three_existing_families() {
 fn authored_local_projection_preserves_admission_counts_collisions_and_cycle_seam() {
     let mut bytes = custom(&[(1, 5), (9, 36), (0, 7), (2, 5), (2, 41), (3, 39), (1, 5)]);
     bytes.push(255);
-    for skin in [24, 27, 40, 41, 60, 255] {
+    for skin in 0..=u8::MAX {
         let descriptor = resolve_authored_local_skin(skin, &bytes).unwrap();
         assert_eq!(descriptor.skin, skin);
         assert!(descriptor.custom);
@@ -542,5 +561,91 @@ fn host_mask_matches_custom_run_admission_for_every_byte_and_rejects_drift() {
     }
     for length in [0, 255, 257, 4096] {
         assert!(!stock_custom_palette_mask_valid(&vec![0; length]));
+    }
+}
+
+#[test]
+fn authored_local_builtin_nine_keeps_head_origin_and_cycle_seam() {
+    assert_eq!(
+        pairs(&resolve_authored_local_skin(9, &[]).unwrap()),
+        [
+            (1, 1),
+            (0, 1),
+            (1, 1),
+            (0, 1),
+            (1, 1),
+            (0, 1),
+            (1, 1),
+            (0, 1),
+            (1, 1),
+            (0, 1),
+            (1, 1),
+            (1, 9),
+        ]
+    );
+}
+
+#[test]
+fn authored_local_builtin_ten_retains_projected_adjacent_collision() {
+    assert_eq!(
+        pairs(&resolve_authored_local_skin(10, &[]).unwrap()),
+        [(0, 5), (1, 5), (1, 5)]
+    );
+}
+
+#[test]
+fn authored_local_builtin_fifteen_repeats_the_three_existing_families() {
+    assert_eq!(
+        pairs(&resolve_authored_local_skin(15, &[]).unwrap()),
+        [
+            (0, 1),
+            (1, 1),
+            (2, 1),
+            (0, 1),
+            (1, 1),
+            (2, 1),
+            (0, 1),
+            (1, 1),
+            (2, 1)
+        ]
+    );
+}
+
+#[test]
+fn authored_local_builtin_twenty_nine_keeps_equal_cycle_endpoints_separate() {
+    assert_eq!(
+        pairs(&resolve_authored_local_skin(29, &[]).unwrap()),
+        [(2, 2), (1, 1), (2, 4), (1, 1), (2, 2)]
+    );
+    assert_eq!(
+        pairs(&resolve_authored_local_skin(20, &[]).unwrap()),
+        [(0, 5), (0, 5)]
+    );
+    assert_eq!(
+        pairs(&resolve_authored_local_skin(30, &[]).unwrap()),
+        [(1, 2), (1, 1), (2, 1), (1, 2), (2, 1), (1, 1)]
+    );
+}
+
+#[test]
+fn authored_local_custom_projection_is_unchanged_across_every_requested_byte() {
+    // Compare admission with the unchanged stock resolver, including counts that
+    // cannot admit a run, all palette bytes, and the first/last positive counts.
+    for skin in 0..=u8::MAX {
+        for palette in 0..=u8::MAX {
+            for count in [0, 1, 255] {
+                let bytes = custom(&[(count, palette)]);
+                let mut expected = resolve_skin(skin % 3, &bytes, false).unwrap();
+                if !expected.custom {
+                    continue;
+                }
+                expected.skin = skin;
+                for run in &mut expected.runs {
+                    run.palette %= 3;
+                }
+                expected.base_palette = expected.runs[0].palette;
+                assert_eq!(resolve_authored_local_skin(skin, &bytes).unwrap(), expected);
+            }
+        }
     }
 }

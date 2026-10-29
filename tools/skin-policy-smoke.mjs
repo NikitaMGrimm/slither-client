@@ -1,6 +1,7 @@
 import { stockSkinCutoverSmoke } from './stock-skin-cutover-smoke.mjs';
 import assert from 'node:assert/strict';
 import { resolveStockSkin } from './stock-skin-policy-oracle.mjs';
+import { resolveLocalSkinDouble } from './stock-skin-policy-double.mjs';
 import { createLocalBodyResolver } from '../web/synthetic-body.mjs';
 
 // Authored numeric differential witnesses only; no artwork, browser or network.
@@ -40,15 +41,22 @@ export function skinPolicySmoke(wasm) {
   for (let offset = 8; offset + 1 < maximum.length; offset += 2) maximum[offset] = 255;
   compare(60, maximum);
 
-  // Explicit choices also cover special stock skins that local stand-ins suppress.
-  for (const [skin, palette] of [[0, 0], [1, 1], [2, 2], [24, 0], [25, 1], [26, 2],
-    [27, 0], [40, 1], [41, 2], [60, 0], [255, 0]]) {
-    const expected = { ...resolveStockSkin({ skin: palette }), skin };
+  // All requested bytes retain built-in counts/order while special source roles
+  // remain suppressed. The authored oracle/double is test-only, never a fallback.
+  for (let skin = 0; skin <= 255; skin++) {
+    const expected = resolveLocalSkinDouble(skin);
     for (const bytes of [new Uint8Array(), new Uint8Array(255).fill(255),
       custom([0, 1], [2, 36], [3, 38], [4, 40], [5, 42])]) {
       equal(wasm.resolve_local_skin(skin, bytes), expected, `authored local skin ${skin}`);
     }
   }
+  for (const [skin, expected] of [
+    [9, [...Array.from({ length: 11 }, (_, index) => ({ palette: index % 2 ? 0 : 1, count: 1 })), { palette: 1, count: 9 }]],
+    [10, [{ palette: 0, count: 5 }, { palette: 1, count: 5 }, { palette: 1, count: 5 }]],
+    [15, Array.from({ length: 9 }, (_, index) => ({ palette: index % 3, count: 1 }))],
+    [29, [{ palette: 2, count: 2 }, { palette: 1, count: 1 }, { palette: 2, count: 4 }, { palette: 1, count: 1 }, { palette: 2, count: 2 }]],
+    [20, [{ palette: 0, count: 5 }, { palette: 0, count: 5 }]],
+  ]) equal(wasm.resolve_local_skin(skin, new Uint8Array()).runs, expected, `local builtin ${skin} stripe boundaries`);
   const projected = Uint8Array.of(...custom([1, 5], [9, 36], [0, 7], [2, 5], [2, 41], [3, 39], [1, 5]), 255);
   const localCustom = { ...resolveStockSkin({ skin: 0, customBytes: custom([3, 2], [2, 2], [3, 0], [1, 2]) }),
     basePalette: 2, runs: [{ palette: 2, count: 3 }, { palette: 2, count: 2 }, { palette: 0, count: 3 }, { palette: 2, count: 1 }] };
@@ -71,6 +79,17 @@ export function skinPolicySmoke(wasm) {
   };
   const bind = createLocalBodyResolver(bodySources,
     { HTMLCanvasElement: Canvas, HTMLImageElement: Image }, wasm.resolve_local_skin);
+  for (const skin of [9, 10, 15, 20, 29, 60]) {
+    const { recipe, status } = bind({ skin });
+    equal(status, 'ready', 'local builtin through actual Wasm/provider');
+    equal(recipe.runs, resolveLocalSkinDouble(skin).runs, 'builtin run boundaries survive source binding');
+    equal([recipe.variantMode, recipe.variantPeriod, recipe.eyes.kind, recipe.attachment],
+      ['ping-pong', 7, 'standard', null], 'local builtin keeps its supported shading/face roles');
+    for (const run of recipe.runs) {
+      equal(recipe.palettes[run.palette].variants.every((use, index) => use.asset.source === bodySources.palettes[run.palette].variants[index]), true,
+        'builtin uses the exact existing seven shaded sources');
+    }
+  }
   const customBytes = custom([2, 0], [3, 1], [4, 2]);
   const { recipe } = bind({ skin: 40, customBytes, cosmetic: 255 });
   equal(recipe.custom, true, 'authored custom selection reaches the production binder');
@@ -99,7 +118,7 @@ export function skinPolicySmoke(wasm) {
   local.runs[0].palette = 99;
   local.eyes.radius = 999;
   equal(wasm.resolve_local_skin(41, new Uint8Array()),
-    { ...resolveStockSkin({ skin: 2 }), skin: 41 }, 'local results are fresh nested records');
+    resolveLocalSkinDouble(41), 'local results are fresh nested records');
   const retainedCustom = wasm.resolve_local_skin(40, projected);
   projected.fill(0);
   equal(retainedCustom, { ...localCustom, skin: 40 }, 'local custom result does not borrow input bytes');

@@ -2,8 +2,54 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { createSkinProvider } from '../web/skin-provider.mjs';
+import { createLocalBodyResolver } from '../web/synthetic-body.mjs';
+import { resolveLocalSkinDouble } from './stock-skin-policy-double.mjs';
 
 // Original synthetic metadata, realm doubles, and assets; no external references.
+test('local provider preserves built-in stripes and projection collisions over exact existing sources', () => {
+  const { realm } = fixture();
+  const source = () => new realm.HTMLCanvasElement();
+  const bodySources = {
+    palettes: Array.from({ length: 3 }, () => ({ variants: Array.from({ length: 7 }, source), boostGlow: source() })),
+    effects: { outline: source(), shadow: source(), deathHighlight: source() },
+  };
+  const calls = [];
+  const resolve = createLocalBodyResolver(bodySources, realm, (skin, bytes) => {
+    calls.push({ skin, bytes }); return resolveLocalSkinDouble(skin, bytes);
+  });
+  for (const [skin, runs] of [
+    [9, [...Array.from({ length: 11 }, (_, index) => ({ palette: index % 2 ? 0 : 1, count: 1 })), { palette: 1, count: 9 }]],
+    [10, [{ palette: 0, count: 5 }, { palette: 1, count: 5 }, { palette: 1, count: 5 }]],
+    [15, Array.from({ length: 9 }, (_, index) => ({ palette: index % 3, count: 1 }))],
+    [29, [{ palette: 2, count: 2 }, { palette: 1, count: 1 }, { palette: 2, count: 4 }, { palette: 1, count: 1 }, { palette: 2, count: 2 }]],
+    [20, [{ palette: 0, count: 5 }, { palette: 0, count: 5 }]],
+  ]) {
+    const { recipe, status } = resolve({ skin, cosmetic: 0 });
+    assert.equal(status, 'ready'); assert.equal(calls.at(-1).skin, skin);
+    assert.deepEqual(recipe.runs, runs); assert.equal(recipe.basePalette, runs[0].palette);
+    assert.equal(recipe.custom, false); assert.equal(recipe.variantMode, 'ping-pong'); assert.equal(recipe.variantPeriod, 7);
+    assert.equal(recipe.eyes.kind, 'standard'); assert.equal(recipe.attachment, null);
+    assert.equal(recipe.faceDecoration, undefined); assert.equal(recipe.antenna, undefined);
+    assert.deepEqual(recipe.bodyStyle, { detailedSegments: false, swell: 0, rotateSegments: true, headFade: null, tailFade: null });
+    for (const run of runs) {
+      const actual = recipe.palettes[run.palette], expected = bodySources.palettes[run.palette];
+      for (const [index, use] of actual.variants.entries()) assert.equal(use.asset.source, expected.variants[index]);
+      assert.equal(actual.boostGlow.asset.source, expected.boostGlow);
+    }
+    assert(Object.isFrozen(recipe.runs)); assert(recipe.runs.every(Object.isFrozen));
+  }
+  const bytes = Uint8Array.of(0, 0, 0, 0, 0, 0, 0, 0, 1, 5, 9, 36, 0, 7, 2, 5, 2, 41, 3, 39, 1, 5, 255);
+  const recipe = resolve({ skin: 60, customBytes: bytes }).recipe;
+  assert.notEqual(calls.at(-1).bytes, bytes);
+  assert.deepEqual(calls.at(-1).bytes, bytes);
+  assert.deepEqual(recipe.runs, [{ palette: 2, count: 3 }, { palette: 2, count: 2 }, { palette: 0, count: 3 }, { palette: 2, count: 1 }]);
+  assert.equal(recipe.custom, true); assert.equal(recipe.variantMode, 'first'); assert.equal(recipe.variantPeriod, 1);
+  bytes.fill(0);
+  assert.equal(recipe.runs[0].count, 3);
+  assert.throws(() => resolve({ skin: 10, customBytes: new Uint8Array(256) }));
+  assert.equal(calls.length, 6, 'invalid custom input fails before the policy callback');
+});
+
 function fixture() {
   class HTMLCanvasElement { width = 20; height = 30; }
   class HTMLImageElement { complete = true; naturalWidth = 40; naturalHeight = 50; }
