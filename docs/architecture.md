@@ -10,9 +10,11 @@ the following exceptions:
 | JavaScript module | State or logic still outside Rust |
 | --- | --- |
 | `web/stock-gameplay.mjs` | Mixed capability/scheduling glue and input/session reconciliation, reset ordering and staged HUD state publication. |
-| `web/stock-client.mjs` | Mixed borrowed-source/Canvas/Wasm glue and update/draw/quality ordering with successful-draw statistics counters. |
+| `web/stock-client.mjs` | Native borrowed-source/Canvas/Wasm effects around the Rust `StockControllerPolicy` staged API; gameplay reconciliation remains the separate R4b exception above. |
 | `web/handshake-session.mjs` | Standalone probe-only challenge/login/setup sequencing; production uses only packed-ABI record admission from this module. |
 | `web/stock-hud-view.mjs` | Binding/readiness composition around Rust-formatted current/final HUD values. |
+
+Browser-free `stock_controller_policy` owns controller operation stages, stop state, successful-draw/statistics counters and committed backing dimensions. The copied `StockControllerPolicy` boundary returns before native callbacks; JS retains source/step leases, dynamic capability lookup and exact error values. Quality math and the single scene clock remain their existing Rust owners. Controller policy cutover alone does not complete gameplay reconciliation/publication migration.
 
 The browser-free Rust leaderboard owner retains command-ordered Setup/table and
 board history, one-use prepared operations, revisions, name/text/style policy and

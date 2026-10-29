@@ -20,6 +20,7 @@ pub mod presentation;
 pub mod profile_literals;
 pub mod protocol;
 pub mod session_policy;
+pub mod stock_controller_policy;
 pub mod start_page;
 pub mod state;
 
@@ -46,6 +47,9 @@ mod desktop_input_browser;
 
 #[cfg(target_arch = "wasm32")]
 mod session_policy_browser;
+
+#[cfg(target_arch = "wasm32")]
+mod stock_controller_policy_browser;
 
 #[cfg(target_arch = "wasm32")]
 mod canvas_browser;

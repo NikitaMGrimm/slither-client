@@ -269,7 +269,7 @@ export function stockRenderSmoke(wasm, { control = true } = {}) {
       assert.equal(steps.at(-1).freed, false); events.push('quality'); return qualityAdvance(step, playing);
     };
     quality.update_statistics = (...args) => { events.push(['statistics', ...args]); return statistics(...args); };
-    const client = createStockClient({ scene, quality, adapter, hostAssets, target,
+    const client = createStockClient({ StockControllerPolicy: wasm.StockControllerPolicy, scene, quality, adapter, hostAssets, target,
       palettes: host.per_color_imgs.slice(0, 3).map(entry => entry.kmcs[0]), background, width: 960, height: 540 });
     return { client, scene, quality, target, host, readiness, shared, recipes, foods, preys, tapes, steps, events,
       get captures() { return captures; }, get ends() { return ends; }, get held() { return held; }, get units() { return units; },

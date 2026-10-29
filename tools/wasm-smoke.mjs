@@ -1,3 +1,4 @@
+import { stockControllerSmoke, stockControllerLifetimeSmoke, stockControllerAdmissionSmoke } from './stock-controller-smoke.mjs';
 import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
@@ -36,6 +37,15 @@ import { desktopInputLifetimeSmoke } from './desktop-input-lifetime-smoke.mjs';
 // Entirely synthetic ABI integration; no reference files or network are used.
 const wasm = await loadWasm();
 desktopLayoutSmoke(wasm);
+console.log('Synthetic real-Wasm stock controller differential passed:', stockControllerSmoke(wasm));
+console.log('Synthetic real-Wasm stock controller lifetime passed:', stockControllerLifetimeSmoke(wasm));
+console.log('Synthetic real-Wasm stock controller injection passed:', stockControllerAdmissionSmoke(wasm));
+const controllerResult = execFileSync(process.execPath,
+  ['--test', '--test-reporter=tap', ...['stock-client', 'stock-client-hud', 'stock-gameplay', 'stock-gameplay-hud', 'stock-gameplay-readout', 'stock-gameplay-leaderboard']
+    .map(name => fileURLToPath(new URL('./' + name + '.test.mjs', import.meta.url)))],
+  { encoding: 'utf8', env: { ...process.env, SLITHER_CONTROLLER_WASM: '1' }, maxBuffer: 4 * 1024 * 1024 });
+console.log('Synthetic real-Wasm controller composition requirements passed:',
+  controllerResult.split(/\r?\n/).filter(line => /^# (tests|pass|fail|skipped) /.test(line)).join(', '));
 console.log('Synthetic real-Wasm session equivalence passed:', sessionPolicySmoke(wasm));
 console.log('Synthetic real-Wasm session lifetime passed:', sessionPolicyLifetimeSmoke(wasm));
 console.log('Synthetic real-Wasm session copied records passed:', sessionPolicyRecordSmoke(wasm));

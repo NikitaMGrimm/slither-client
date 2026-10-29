@@ -1,3 +1,4 @@
+import { TestStockControllerPolicy } from './fixtures/stock-controller-double.mjs';
 import { TestSessionPolicy } from './fixtures/session-policy-double.mjs';
 import { stockSkinPolicyDouble, stockSkinWasmDouble } from './stock-skin-policy-double.mjs';
 import { TestDesktopInput } from './fixtures/client-input-fixture.mjs';
@@ -11,7 +12,7 @@ import { Script, createContext, runInContext } from 'node:vm';
 import { activateGamePage, armDocument, gamePage } from '../extension/game-activation.mjs';
 import { createStockHostSnapshot } from '../web/stock-host-snapshot.mjs';
 import { createStockSkinAdapter } from '../web/stock-skin-provider.mjs';
-import { createStockClient } from '../web/stock-client.mjs';
+import { createStockClient } from './fixtures/stock-client-fixture.mjs';
 import { createStockEntityAssets } from '../web/stock-food-provider.mjs';
 import { desktopBackingSize } from '../web/desktop-layout.mjs';
 import { desktopBackingOracle } from './fixtures/desktop-layout-fixture.mjs';
@@ -253,7 +254,7 @@ function wasmDouble(f) {
     begin_connection() { calls.push('quality.connection'); }
     free() { qualityFrees++; f.faults.cleanup?.('quality.free'); }
   }
-  const api = { ...stockSkinWasmDouble, DesktopInput: TestDesktopInput, SessionPolicy: TestSessionPolicy, AnimatedScene, DesktopQuality, HudHistory: createHudHistoryDouble(), LeaderboardHistory: createLeaderboardHistoryDouble(),
+  const api = { ...stockSkinWasmDouble, DesktopInput: TestDesktopInput, SessionPolicy: TestSessionPolicy, StockControllerPolicy: TestStockControllerPolicy, AnimatedScene, DesktopQuality, HudHistory: createHudHistoryDouble(), LeaderboardHistory: createLeaderboardHistoryDouble(),
     desktop_backing_size: desktopBackingOracle,
     encode_login() { return Uint8Array.of(115, 1); }, solve_challenge() { return new Uint8Array(27); },
     setup_protocol_version() { return 19; },

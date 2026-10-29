@@ -8,7 +8,7 @@ import { HudHistoryDouble } from './hud-history-double.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createStockGameplay } from '../web/stock-gameplay.mjs';
-import { createStockClient } from '../web/stock-client.mjs';
+import { createStockClient } from './fixtures/stock-client-fixture.mjs';
 import { requireLeaderboardState } from '../web/stock-leaderboard-state.mjs';
 
 const login = () => ({ endpoint: 'ws://192.0.2.9:1234/slither',

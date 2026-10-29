@@ -36,7 +36,7 @@ function syntheticWasm(omit) {
   const leb = value => value < 128 ? [value] : [(value & 127) | 128, ...leb(value >>> 7)];
   const section = (id, bytes) => [id, ...leb(bytes.length), ...bytes];
   const entry = (name, kind, index) => [name.length, ...text(name), kind, index];
-  const functions = ['animatedscene_new', 'desktopquality_new', 'desktopinput_new', 'sessionpolicy_new', 'sessionpolicy_prepare_controls', 'sessionpolicy_commit_controls', 'sessionpolicy_commit_control', 'sessionpolicy_protocol_allowed', 'sessionpolicy_negotiation_packet', 'sessionpolicy_commit_ping', 'sessionpolicy_ping_external', 'sessionpolicy_ping_due_elapsed', 'sessionpolicy_commit_opaque_ping', 'sessionpolicy_lag_check_needed', 'sessionpolicy_observe_lag_elapsed', 'sessionpolicy_death_time', 'sessionpolicy_death_elapsed', 'sessionpolicy_advance_step_elapsed', 'sessionpolicy_valid_input', '__wbg_sessionpolicy_free',
+  const functions = ['animatedscene_new', 'desktopquality_new', 'desktopinput_new', 'stockcontrollerpolicy_new', 'stockcontrollerpolicy_validate_size', 'stockcontrollerpolicy_validate_time', 'stockcontrollerpolicy_validate_gaze', 'stockcontrollerpolicy_snapshot', 'stockcontrollerpolicy_stage', 'stockcontrollerpolicy_uses_control', 'stockcontrollerpolicy_playing', 'stockcontrollerpolicy_target_width', 'stockcontrollerpolicy_target_height', 'stockcontrollerpolicy_statistics_count', 'stockcontrollerpolicy_is_stopped', 'stockcontrollerpolicy_begin_packet', 'stockcontrollerpolicy_begin_draw', 'stockcontrollerpolicy_begin_update', 'stockcontrollerpolicy_gaze_done', 'stockcontrollerpolicy_advance_done', 'stockcontrollerpolicy_playing_observed', 'stockcontrollerpolicy_quality_done', 'stockcontrollerpolicy_step_observed', 'stockcontrollerpolicy_step_freed', 'stockcontrollerpolicy_observer_done', 'stockcontrollerpolicy_statistics_result', 'stockcontrollerpolicy_packet_succeeded', 'stockcontrollerpolicy_draw_succeeded', 'stockcontrollerpolicy_finish', 'stockcontrollerpolicy_stop', '__wbg_stockcontrollerpolicy_free', 'sessionpolicy_new', 'sessionpolicy_prepare_controls', 'sessionpolicy_commit_controls', 'sessionpolicy_commit_control', 'sessionpolicy_protocol_allowed', 'sessionpolicy_negotiation_packet', 'sessionpolicy_commit_ping', 'sessionpolicy_ping_external', 'sessionpolicy_ping_due_elapsed', 'sessionpolicy_commit_opaque_ping', 'sessionpolicy_lag_check_needed', 'sessionpolicy_observe_lag_elapsed', 'sessionpolicy_death_time', 'sessionpolicy_death_elapsed', 'sessionpolicy_advance_step_elapsed', 'sessionpolicy_valid_input', '__wbg_sessionpolicy_free',
     'animatedscene_apply_frame_and_render_standard_with_face_presentation_and_prey',
     'animatedscene_apply_frame_and_render_standard_with_face_presentation_and_prey_and_hud',
     'animatedscene_render_standard_with_face_presentation_at_size',
@@ -72,6 +72,7 @@ export class DesktopQuality {}
 export class PlayAdmission {}
 export class ProfileLiteralParser {}
 export class DesktopInput {}
+export class StockControllerPolicy {}
 export class SessionPolicy {}
 export function desktop_backing_size() {}
 const url = new URL('slither_client_bg.wasm', import.meta.url);
@@ -265,6 +266,9 @@ for (const [name, change, expected] of [
   ['non-Wasm bytes', f => f.write('dist/web/slither_client_bg.wasm', Buffer.from('not Wasm')), /valid version-1 WebAssembly/],
   ['truncated Wasm', f => f.write('dist/web/slither_client_bg.wasm', syntheticWasm().subarray(0, 10)), /valid version-1 WebAssembly/],
   ['empty valid Wasm', f => f.write('dist/web/slither_client_bg.wasm', syntheticWasm().subarray(0, 8)), /Wasm\/glue export mismatch/],
+  ['missing JavaScript stock controller policy export',
+    f => f.write('dist/web/slither_client.js', syntheticGlue.replace('export class StockControllerPolicy {}\n', '')),
+    /generated web entrypoint/],
   ['missing JavaScript session policy export',
     f => f.write('dist/web/slither_client.js', syntheticGlue.replace('export class SessionPolicy {}\n', '')),
     /generated web entrypoint/],
@@ -306,7 +310,7 @@ for (const [name, change, expected] of [
   });
 }
 
-for (const name of ['desktopinput_new', 'sessionpolicy_new', 'sessionpolicy_prepare_controls', 'sessionpolicy_commit_controls', 'sessionpolicy_commit_control', 'sessionpolicy_protocol_allowed', 'sessionpolicy_negotiation_packet', 'sessionpolicy_commit_ping', 'sessionpolicy_ping_external', 'sessionpolicy_ping_due_elapsed', 'sessionpolicy_commit_opaque_ping', 'sessionpolicy_lag_check_needed', 'sessionpolicy_observe_lag_elapsed', 'sessionpolicy_death_time', 'sessionpolicy_death_elapsed', 'sessionpolicy_advance_step_elapsed', 'sessionpolicy_valid_input', '__wbg_sessionpolicy_free', 'animatedscene_control_view', 'animatedscene_advance_with_control', 'animatedscene_reset_lag',
+for (const name of ['desktopinput_new', 'stockcontrollerpolicy_new', 'stockcontrollerpolicy_validate_size', 'stockcontrollerpolicy_validate_time', 'stockcontrollerpolicy_validate_gaze', 'stockcontrollerpolicy_snapshot', 'stockcontrollerpolicy_stage', 'stockcontrollerpolicy_uses_control', 'stockcontrollerpolicy_playing', 'stockcontrollerpolicy_target_width', 'stockcontrollerpolicy_target_height', 'stockcontrollerpolicy_statistics_count', 'stockcontrollerpolicy_is_stopped', 'stockcontrollerpolicy_begin_packet', 'stockcontrollerpolicy_begin_draw', 'stockcontrollerpolicy_begin_update', 'stockcontrollerpolicy_gaze_done', 'stockcontrollerpolicy_advance_done', 'stockcontrollerpolicy_playing_observed', 'stockcontrollerpolicy_quality_done', 'stockcontrollerpolicy_step_observed', 'stockcontrollerpolicy_step_freed', 'stockcontrollerpolicy_observer_done', 'stockcontrollerpolicy_statistics_result', 'stockcontrollerpolicy_packet_succeeded', 'stockcontrollerpolicy_draw_succeeded', 'stockcontrollerpolicy_finish', 'stockcontrollerpolicy_stop', '__wbg_stockcontrollerpolicy_free', 'sessionpolicy_new', 'sessionpolicy_prepare_controls', 'sessionpolicy_commit_controls', 'sessionpolicy_commit_control', 'sessionpolicy_protocol_allowed', 'sessionpolicy_negotiation_packet', 'sessionpolicy_commit_ping', 'sessionpolicy_ping_external', 'sessionpolicy_ping_due_elapsed', 'sessionpolicy_commit_opaque_ping', 'sessionpolicy_lag_check_needed', 'sessionpolicy_observe_lag_elapsed', 'sessionpolicy_death_time', 'sessionpolicy_death_elapsed', 'sessionpolicy_advance_step_elapsed', 'sessionpolicy_valid_input', '__wbg_sessionpolicy_free', 'animatedscene_control_view', 'animatedscene_advance_with_control', 'animatedscene_reset_lag',
   'animatedscene_set_background_backdrop',
   'animatedscene_enable_nicknames',
     'animatedscene_enable_announcement_tracking', 'animatedscene_announcement_view',

@@ -1,7 +1,7 @@
 import { stockSkinPolicyDouble } from './stock-skin-policy-double.mjs';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createStockClient } from '../web/stock-client.mjs';
+import { createStockClient } from './fixtures/stock-client-fixture.mjs';
 import { createStockSkinAdapter } from '../web/stock-skin-provider.mjs';
 
 // Authored scene/quality doubles verify dispatch and ownership, not Wasm math.

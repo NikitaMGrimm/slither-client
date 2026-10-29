@@ -770,7 +770,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     if (hudReadout) scene.enable_score_tracking();
     quality = new wasmApi.DesktopQuality(1, startMs);
     const backing = size();
-    controller = createStockClient({ scene, quality, adapter: wrapped, hostAssets, target,
+    controller = createStockClient({ StockControllerPolicy: wasmApi.StockControllerPolicy, scene, quality, adapter: wrapped, hostAssets, target,
       appearanceMode: context.appearanceMode,
       palettes: initial.palettes, background: initial.background, ...backing });
     initial = undefined;

@@ -298,7 +298,7 @@ export async function stockProfileSmoke(wasm) {
     };
     const beginQuality = quality.begin_connection.bind(quality);
     quality.begin_connection = () => { qualityBegins++; return beginQuality(); };
-    client = createStockClient({ scene, quality, adapter,
+    client = createStockClient({ StockControllerPolicy: wasm.StockControllerPolicy, scene, quality, adapter,
       hostAssets: { resolveFood() { assert.fail('No authored food command in this fixture'); },
         resolvePrey() { assert.fail('No authored prey command in this fixture'); } },
       target, palettes: [source, source, source], background: image, width: 960, height: 540 });
