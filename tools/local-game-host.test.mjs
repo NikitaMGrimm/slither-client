@@ -99,7 +99,7 @@ function fixture({ href = 'http://127.0.0.1:18884/game', decode, minimap = false
 }
 
 const endpoint = 'ws://127.0.0.1:8766/slither';
-const create = f => createLocalGameHost({ realm: f.realm, endpoint, sourceRecipes: authoredSourceRecipesDouble() });
+const create = (f, sourceRecipes = authoredSourceRecipesDouble()) => createLocalGameHost({ realm: f.realm, endpoint, sourceRecipes });
 const claim = host => host.gate.claim(host.gate.metadata().id);
 
 test('local preview captures an isolated native frame without changing the shared source adapter', async () => {
@@ -646,4 +646,78 @@ test('default local decode failure retains its primary and supplied host bypasse
   const marker = {};
   const result = await startDefault(options => { assert.equal(options.initialize, initialize); assert.equal(options.localHost, supplied); return marker; })({ realm: g.realm, localHost: supplied, initialize, wasmApi: {} });
   assert.equal(result, marker); assert.equal(g.canvases.length, 0);
+});
+
+// Generated ABI policy DOUBLE with actual local host/provider, no Rust/browser proof.
+import { resolveLocalSkinDouble } from './stock-skin-policy-double.mjs';
+import { resolveStockSkin } from './stock-skin-policy-oracle.mjs';
+test('local paired variants share numeric appearance and body recipes through retained host sources', async () => {
+  const f = fixture(); standardNativeSourceMethods(f);
+  const host = await create(f, standardSourceRecipesDouble()), adapter = host.sources.adapter;
+  host.bindSkinPolicy(resolveLocalSkinDouble);
+  try {
+    adapter.beginOperation();
+    try {
+      for (const skin of [25, 44, 63, 64]) {
+        for (const customBytes of [new Uint8Array(), Uint8Array.of(0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 1, 2)]) {
+          const request = { skin, customBytes, cosmetic: 0, own: false, x: 112, y: 0 };
+          const appearance = adapter.resolveAppearance(request), recipe = adapter.resolveRecipe(request).recipe;
+          const expected = resolveStockSkin({ skin: customBytes.length ? 0 : skin }).eyes;
+          assert.deepEqual(appearance.face.eyes, expected); assert.deepEqual(recipe.eyes, expected);
+          assert.equal(appearance.antenna, null); assert.deepEqual(appearance.face.decoration, { kind: 'none' });
+          assert.equal(recipe.attachment, null); assert.equal(recipe.antenna, undefined);
+          assert.equal(recipe.variantMode, customBytes.length ? 'first' : 'ping-pong');
+          assert.equal(recipe.variantPeriod, customBytes.length ? 1 : 7);
+          const repeated = adapter.resolveRecipe(request).recipe;
+          for (const [i, palette] of recipe.palettes.entries()) {
+            for (const [j, use] of palette.variants.entries()) {
+              assert.equal(use.asset.source, repeated.palettes[i].variants[j].asset.source);
+              assert(f.canvases.includes(use.asset.source));
+            }
+          }
+        }
+      }
+    } finally { adapter.endOperation(); }
+    assert.equal(f.sockets.length, 0);
+  } finally { host.dispose(); }
+});
+
+import { standardSourceRecipesDouble } from './fixtures/standard-source-fixture.mjs';
+import { createMenuPreferencesDouble } from './menu-preferences-double.mjs';
+function standardNativeSourceMethods(f) {
+  const method=f.realm.HTMLCanvasElement.prototype.getContext;
+  f.realm.HTMLCanvasElement.prototype.getContext=function(...args){const ctx=Reflect.apply(method,this,args);
+    return Object.assign(ctx,{createImageData:(w,h)=>({width:w,height:h,data:new Uint8ClampedArray(w*h*4)}),putImageData(){}});};
+}
+test('default local host uses full standard source plans for saved chooser IDs without starting Play', async()=>{
+  const f=fixture();standardNativeSourceMethods(f);const p=standardSourceRecipesDouble(),host=await create(f,p);
+  const Menu=createMenuPreferencesDouble(),saved=new Menu(true,'1:5361766564:0a:');
+  try {
+    host.bindSkinPolicy(resolveLocalSkinDouble);const adapter=host.sources.adapter;adapter.beginOperation();
+    try{
+      const selected=saved.view(),request={skin:selected.skin,customBytes:selected.customSkin,cosmetic:0};
+      const appearance=adapter.resolveAppearance(request),recipe=adapter.resolveRecipe(request).recipe;
+      assert.deepEqual(recipe.runs,[{palette:9,count:5},{palette:1,count:5},{palette:7,count:5}]);
+      assert.deepEqual(appearance.nicknameTint.baseRgb,[255,255,255]);
+      assert.notEqual(recipe.palettes[9].variants[0].asset.source,recipe.palettes[0].variants[0].asset.source);
+      saved.action('next-skin');assert.equal(saved.view().skin,11);assert.equal(new Menu(true,saved.serialize()).view().skin,11);
+      assert.equal(f.sockets.length,0);assert.deepEqual(f.calls.filter(v=>Array.isArray(v)&&v[0]==='requestAnimationFrame'),[]);
+    }finally{adapter.endOperation();}
+  }finally{saved.free();host.dispose();}
+});
+
+test('ordinary default bootstrap hands standard source bank to runtime after one initialization',async()=>{
+  const f=fixture();standardNativeSourceMethods(f);localConfig(f);let initialized=0,received;
+  const raw=standardSourceRecipesDouble();
+  const result=await startDefault(options=>{received=options;
+    const host=options.localHost;host.bindSkinPolicy(resolveLocalSkinDouble);const menu=new (createMenuPreferencesDouble())(true,'1:5361766564:0a:');
+    const saved=menu.view();host.sources.adapter.beginOperation();
+    try{const recipe=host.sources.adapter.resolveRecipe({skin:saved.skin,customBytes:saved.customSkin,cosmetic:0}).recipe;
+      assert.deepEqual(recipe.runs.map(r=>r.palette),[9,1,7]);assert.equal(recipe.palettes.length,42);
+      assert.equal(recipe.palettes[36].variants.length,60);assert.equal(recipe.palettes[9].variants[0].asset.source.width,48);}
+    finally{host.sources.adapter.endOperation();menu.free();}
+    return 'standard default runtime sink';
+  })({realm:f.realm,initialize(){initialized++;return Promise.resolve();},wasmApi:{authored_source_recipes:()=>raw}});
+  assert.equal(initialized,1);assert.equal(result,'standard default runtime sink');assert.equal(f.sockets.length,0);
+  received.localHost.dispose();
 });

@@ -51,18 +51,18 @@ export function skinPolicySmoke(wasm) {
     }
   }
   for (const [skin, expected] of [
-    [9, [...Array.from({ length: 11 }, (_, index) => ({ palette: index % 2 ? 0 : 1, count: 1 })), { palette: 1, count: 9 }]],
-    [10, [{ palette: 0, count: 5 }, { palette: 1, count: 5 }, { palette: 1, count: 5 }]],
-    [15, Array.from({ length: 9 }, (_, index) => ({ palette: index % 3, count: 1 }))],
-    [29, [{ palette: 2, count: 2 }, { palette: 1, count: 1 }, { palette: 2, count: 4 }, { palette: 1, count: 1 }, { palette: 2, count: 2 }]],
-    [20, [{ palette: 0, count: 5 }, { palette: 0, count: 5 }]],
+    [9, [...Array.from({ length: 11 }, (_, index) => ({ palette: index % 2 ? 9 : 7, count: 1 })), { palette: 10, count: 9 }]],
+    [10, [{ palette: 9, count: 5 }, { palette: 1, count: 5 }, { palette: 7, count: 5 }]],
+    [15, Array.from({ length: 9 }, (_, index) => ({ palette: index, count: 1 }))],
+    [29, [{ palette: 11, count: 2 }, { palette: 4, count: 1 }, { palette: 11, count: 4 }, { palette: 4, count: 1 }, { palette: 11, count: 2 }]],
+    [20, [{ palette: 3, count: 5 }, { palette: 0, count: 5 }]],
   ]) equal(wasm.resolve_local_skin(skin, new Uint8Array()).runs, expected, `local builtin ${skin} stripe boundaries`);
   const projected = Uint8Array.of(...custom([1, 5], [9, 36], [0, 7], [2, 5], [2, 41], [3, 39], [1, 5]), 255);
-  const localCustom = { ...resolveStockSkin({ skin: 0, customBytes: custom([3, 2], [2, 2], [3, 0], [1, 2]) }),
-    basePalette: 2, runs: [{ palette: 2, count: 3 }, { palette: 2, count: 2 }, { palette: 0, count: 3 }, { palette: 2, count: 1 }] };
-  for (const skin of [24, 27, 40, 41, 60, 255]) {
+  const localCustom = { ...resolveStockSkin({ skin: 0, customBytes: custom([3, 5], [2, 41], [3, 39], [1, 5]) }),
+    basePalette: 5, runs: [{ palette: 5, count: 3 }, { palette: 41, count: 2 }, { palette: 39, count: 3 }, { palette: 5, count: 1 }] };
+  for (const skin of [24, 25, 27, 40, 41, 44, 60, 63, 64, 255]) {
     equal(wasm.resolve_local_skin(skin, projected), { ...localCustom, skin },
-      `authored modulo-three projection preserves admitted run boundaries for ${skin}`);
+      `local standard palettes preserve admitted run boundaries for ${skin}`);
   }
   equal(wasm.resolve_local_skin(60, maximum).runs, [{ palette: 0, count: 31365 }],
     'maximum authored custom count remains compact');
@@ -72,19 +72,22 @@ export function skinPolicySmoke(wasm) {
   class Canvas { width = 64; height = 64; }
   class Image {}
   const bodySources = {
-    palettes: Array.from({ length: 3 }, () => ({
-      variants: Array.from({ length: 7 }, () => new Canvas()), boostGlow: new Canvas(),
+    palettes: Array.from({ length: 42 }, (_, paletteId) => ({
+      variants: Array.from({ length: paletteId === 36 ? 60 : 7 }, () => new Canvas()), boostGlow: new Canvas(),
     })),
     effects: { outline: new Canvas(), shadow: new Canvas(), deathHighlight: new Canvas() },
   };
   const bind = createLocalBodyResolver(bodySources,
     { HTMLCanvasElement: Canvas, HTMLImageElement: Image }, wasm.resolve_local_skin);
-  for (const skin of [9, 10, 15, 20, 29, 60]) {
+  for (const skin of [9, 10, 15, 20, 25, 29, 44, 60, 63, 64]) {
     const { recipe, status } = bind({ skin, customBytes: new Uint8Array() });
     equal(status, 'ready', 'local builtin through actual Wasm/provider');
     equal(recipe.runs, resolveLocalSkinDouble(skin).runs, 'builtin run boundaries survive source binding');
+    equal(recipe.eyes, [25, 44, 63, 64].includes(skin)
+      ? resolveStockSkin({ skin }).eyes : resolveStockSkin({ skin: 0 }).eyes,
+    'supported numeric face survives actual Wasm/source binding');
     equal([recipe.variantMode, recipe.variantPeriod, recipe.eyes.kind, recipe.attachment],
-      ['ping-pong', 7, 'standard', null], 'local builtin keeps its supported shading/face roles');
+      [skin === 60 ? 'cycle' : 'ping-pong', skin === 60 ? 60 : 7, 'standard', null], 'local builtin keeps its supported shading/face roles');
     for (const run of recipe.runs) {
       equal(recipe.palettes[run.palette].variants.every((use, index) => use.asset.source === bodySources.palettes[run.palette].variants[index]), true,
         'builtin uses the exact existing seven shaded sources');
@@ -114,6 +117,13 @@ export function skinPolicySmoke(wasm) {
   copied.bodyStyle.rotateSegments = false;
   copied.eyes.pupilTravel = 999;
   compare(27, custom([3, 5]));
+  for (const skin of [25, 44, 63, 64]) {
+    const original = wasm.resolve_local_skin(skin, new Uint8Array());
+    equal(original.eyes, resolveStockSkin({ skin }).eyes, 'authoritative ordinary face');
+    original.eyes.pupilRadius = 999; original.runs[0].count = 999;
+    equal(wasm.resolve_local_skin(skin, new Uint8Array()).eyes, resolveStockSkin({ skin }).eyes, 'fresh local face');
+    assert.throws(() => wasm.resolve_local_skin(skin, new Uint8Array(256))); assertions++;
+  }
   const local = wasm.resolve_local_skin(41, new Uint8Array());
   local.runs[0].palette = 99;
   local.eyes.radius = 999;

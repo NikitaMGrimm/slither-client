@@ -198,7 +198,7 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, g
       'game/owned-leaderboard-ui.mjs', 'game/owned-minimap-ui.mjs', 'game/owned-end-screen-ui.mjs', 'game/owned-announcement-ui.mjs', ...gameWebFiles.map(name => `game/${name}`),
       ...bindingFiles.map(name => `game/pkg/${name}`)]);
     const declarations = manifest.web_accessible_resources;
-    const matches = ['http://slither.io/*', 'https://slither.io/*', 'http://www.slither.io/*', 'https://www.slither.io/*'];
+    const matches = ['http://slither.io/*', 'https://slither.io/*', 'http://www.slither.io/*', 'https://www.slither.io/*', 'http://slither.com/*'];
     if (declarations?.length !== 1 || JSON.stringify(Object.keys(declarations[0]).sort()) !== '["matches","resources"]'
       || JSON.stringify(declarations[0].matches) !== JSON.stringify(matches)
       || declarations[0].resources?.length !== expected.size

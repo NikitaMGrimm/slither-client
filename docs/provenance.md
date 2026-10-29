@@ -43,6 +43,14 @@ cancellation, unsupported capabilities or malformed data stop the attempt
 without a game socket, default profile, fallback request or automatic retry.
 External caller profiles remain an explicit separate path.
 
+Activation admission for exactly `http://slither.com/io` does not expand this
+acquisition exception. That HTTP entry has neither the required secure context
+nor the canonical profile origin; its gate exposes no live-profile capability.
+The pinned URL, same-origin request mode, no-redirect rule and one-attempt budget
+remain unchanged. The default Play control stays unavailable there unless a
+separate authorized capability design is implemented; the existing private
+trusted-caller profile API does not provide a normal-user credential source.
+
 The owned source and digest buffers clear before the private synchronous
 authored consumer runs; its borrowed password clears afterward, including on
 failure. Source/profile values must not be persisted, logged, exposed through

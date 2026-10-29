@@ -295,7 +295,8 @@ test('fixed native request and synthetic reader success clear all data and expos
 });
 
 test('unsupported origin/top-level/secure-context/current document rejects before any allocation or fetch', async () => {
-  for (const environment of [{ origin: 'http://slither.io' }, { origin: 'https://www.slither.io' },
+  for (const environment of [{ origin: 'http://slither.io' }, { origin: 'http://slither.com' },
+    { origin: 'https://slither.com' }, { origin: 'https://www.slither.io' },
     { origin: 'https://slither.io/other' }, { topLevel: false }, { secureContext: false }]) {
     const h = harness({ environment });
     await assert.rejects(h.acquirer.acquireForPlay(() => assert.fail()), code('unsupported-origin'));

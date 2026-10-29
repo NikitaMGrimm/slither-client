@@ -33,6 +33,8 @@ jobs:
       - run: node tools/check-repository.mjs --history
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: node --test tools/*.test.mjs
+      - name: Test shared gameplay socket adapter offline
+        run: node --test --test-concurrency=1 apps/wgpu-slice/tests/local-host.test.mjs
 
   native:
     name: Rust (${{ matrix.os }})
@@ -53,6 +55,28 @@ jobs:
       - run: cargo test --all-targets --locked
       - run: cargo test --doc --locked
       - run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Format shared wgpu slice
+        if: matrix.os == 'windows-latest'
+        run: cargo fmt --manifest-path apps/wgpu-slice/Cargo.toml --check
+      - name: Test shared wgpu slice offline
+        if: matrix.os == 'windows-latest'
+        env:
+          CARGO_BUILD_JOBS: 1
+          CARGO_TARGET_DIR: target/wgpu-slice-ci
+          RUST_TEST_THREADS: 1
+        run: cargo test --manifest-path apps/wgpu-slice/Cargo.toml --locked --lib --tests
+      - name: Check shared wgpu Windows host
+        if: matrix.os == 'windows-latest'
+        env:
+          CARGO_BUILD_JOBS: 1
+          CARGO_TARGET_DIR: target/wgpu-slice-ci
+        run: cargo clippy --manifest-path apps/wgpu-slice/Cargo.toml --locked --all-targets -- -D warnings
+      - name: Build shared wgpu Windows executable
+        if: matrix.os == 'windows-latest'
+        env:
+          CARGO_BUILD_JOBS: 1
+          CARGO_TARGET_DIR: target/wgpu-slice-ci
+        run: cargo build --manifest-path apps/wgpu-slice/Cargo.toml --locked --bin slither-wgpu-desktop
 
   wasm:
     name: WebAssembly build
@@ -82,3 +106,16 @@ jobs:
       - run: npm run build:web
       - run: node tools/wasm-smoke.mjs
       - run: npm run build:extension
+      - name: Check shared wgpu WebAssembly host
+        env:
+          CARGO_BUILD_JOBS: 1
+          CARGO_TARGET_DIR: target/wgpu-slice-ci
+        run: cargo clippy --manifest-path apps/wgpu-slice/Cargo.toml --locked --lib --target wasm32-unknown-unknown -- -D warnings
+      - name: Build shared wgpu WebAssembly host
+        env:
+          CARGO_BUILD_JOBS: 1
+          CARGO_TARGET_DIR: target/wgpu-slice-ci
+        run: cargo build --manifest-path apps/wgpu-slice/Cargo.toml --locked --lib --target wasm32-unknown-unknown
+      - name: Generate shared wgpu web bindings
+        shell: bash
+        run: '"$WASM_BINDGEN" --target web --out-dir dist/wgpu-slice-ci/pkg --out-name slither_wgpu_slice target/wgpu-slice-ci/wasm32-unknown-unknown/debug/slither_wgpu_slice.wasm'

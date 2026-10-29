@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { copyAuthoredSourceRecipes, readAuthoredSourceRecipes } from '../web/authored-source-recipes.mjs';
 import { createClientAssetMap } from '../web/client-asset-map.mjs';
+import { createLocalBodyResolver } from '../web/synthetic-body.mjs';
 import { createSyntheticFoodResolver } from '../web/synthetic-food.mjs';
 import { createSyntheticPreyResolver } from '../web/synthetic-prey.mjs';
 import { createClientAssetMap as originalAssets } from './fixtures/authored-client-asset-map-oracle.mjs';
@@ -35,4 +36,30 @@ export async function compareAuthoredSourceEffects(raw) {
   assert(a.palettes.every(source => current.canvases.includes(source)));
   assert.notEqual(a.background, a.backgroundImage);
   return { canvases: 335, images: 2, commands: current.events.length, randomCalls: current.events.filter(e => e[0] === 'random').length };
+}
+
+/** Actual current binding/source graph with inert native objects; never raster proof. */
+export async function compareStandardSourceEffects(raw, resolveSkin) {
+  const plan=copyAuthoredSourceRecipes(raw), f=authoredSourceRealm();
+  const assets=await createClientAssetMap({realm:f.realm,sourceRecipes:plan});
+  let randomCalls=0;const random=()=>{randomCalls++;return .25;};
+  const food=createSyntheticFoodResolver(f.realm,random,plan.food),prey=createSyntheticPreyResolver(f.realm,random,plan.prey);
+  assert.equal(assets.bodySources.palettes.length,42);
+  for(let id=0;id<42;id++)assert.equal(assets.bodySources.palettes[id].variants.length,id===36?60:7);
+  for(let id=0;id<10;id++){const p=food({palette:id}).palette;assert.equal(p.bodies.length,17);assert.equal(p.outlines.length,17);assert.equal(p.glows.length,17);}
+  for(let id=0;id<9;id++){const p=prey({palette:id}).palette;assert.equal(p.bodies.length,22);assert.equal(p.glows.length,17);}
+  if (resolveSkin !== undefined) {
+    assert.equal(typeof resolveSkin,'function');
+    const bind=createLocalBodyResolver(assets.bodySources,f.realm,resolveSkin);
+    for(const [skin,palettes] of [[10,[9,1,7]],[15,[0,1,2,3,4,5,6,7,8]],[29,[11,4,11,4,11]],[62,[17,39]]]) {
+      const result=bind({skin,customBytes:new Uint8Array()});assert.equal(result.status,'ready');
+      assert.deepEqual(result.recipe.runs.map(r=>r.palette),palettes);
+      for(const run of result.recipe.runs)assert.equal(result.recipe.palettes[run.palette].variants[0].asset.source,
+        assets.bodySources.palettes[run.palette].variants[0]);
+    }
+  }
+  assert.equal(randomCalls,38,'two retained factory units per selected entity');
+  assert.equal(f.canvases.length,1258);assert.equal(f.images.length,2);
+  assert(assets.bodySources.palettes.every(p=>p.variants.every(s=>f.canvases.includes(s))));
+  return {canvases:f.canvases.length,images:f.images.length,randomCalls,sourceBinding:true,pixels:false};
 }

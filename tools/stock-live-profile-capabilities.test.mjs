@@ -109,7 +109,8 @@ test('optional capture and claim do no fetch, digest, abort construction, schedu
 });
 
 for (const options of [
-  {href:'http://slither.io/'}, {href:'https://www.slither.io/'}, {secure:false},
+  {href:'http://slither.io/'}, {href:'http://slither.com/io',secure:false},
+  {href:'http://slither.com/io',secure:true}, {href:'https://www.slither.io/'}, {secure:false},
   ...['delete fetch','delete crypto.subtle.digest','delete AbortController',
     "delete AbortController.prototype.signal", "delete Response.prototype.body",
     'delete ReadableStream', 'delete ReadableStreamDefaultReader.prototype.cancel',

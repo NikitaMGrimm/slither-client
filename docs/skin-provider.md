@@ -7,24 +7,25 @@ DOM constructors from the trusted page realm, and a bounded asset catalog.
 It is not a sandbox for callbacks, proxies, getters, patched builtins, or an
 arbitrary page. The caller is responsible for authorization and host compatibility.
 
-The local source binder uses the pure Rust `resolve_local_skin` policy for both
-gameplay and admitted local preview selections. Without admitted custom data,
-it preserves the requested built-in's ordered positive run counts and cycle
-seam, projecting each palette ID modulo three onto the existing authored source
-families. Projection collisions stay separate, including adjacent equal palettes
-and equal cycle endpoints. For example, built-in 10 becomes runs `(0,5), (1,5),
-(1,5)`, with base palette zero. Seven-variant ping-pong shading, default body
-style, plain paired eyes and no antenna remain the local policy, including for
-stock selections that normally require special artwork or dense sources.
+The local source binder uses pure Rust `resolve_local_skin` for gameplay and
+admitted local preview selections. It preserves the requested built-in's ordered
+positive runs, standard palette IDs and cycle seam across 42 procedural body
+families. For example, built-in 10 uses runs `(9,5), (1,5), (7,5)`, with base
+palette nine. Ordinary families use seven ping-pong variants; the represented
+cycle family uses sixty. Default local body geometry and no antenna remain.
+Built-ins 25, 44, 63 and 64 reuse ordinary paired-eye colors/geometry; other
+built-ins retain plain paired eyes, including image-dependent 27, 40 and 41.
+No face-image sources or dense/swell geometry are added.
 
-Admitted custom runs keep their existing normal palette admission, adjacent
-coalescing before projection, ignored unmatched final byte and 255-byte bound.
-They project modulo three without further merging and use first-variant shading.
-The requested skin byte stays unchanged. This adds built-in stripe layouts over
-three stand-in families, not stock colors, image roles, catalog/unlock authority
-or more local chooser choices. The real-Wasm smoke source covers the policy and
-existing source binding; it requires a fresh matching build to validate changed
-Rust code. Inert provider tests alone do not establish that ABI or browser pixels.
+Admitted custom runs retain normal palette admission, adjacent coalescing,
+ignored unmatched final byte and the 255-byte bound. Their palette IDs remain
+unchanged, faces stay plain and shading uses the first variant. Empty or rejected
+custom data restores the selected built-in policy. The requested skin byte stays
+unchanged. Local chooser/storage grammar is unchanged, including the custom
+editor's palettes 0, 1 and 2. The source correction adds no catalog/unlock authority.
+Native and real-Wasm assertions require a fresh matching build. Inert provider
+tests and procedural source plans alone do not establish browser pixels,
+artwork fidelity or player-visible equivalence.
 
 ```ts
 type Status = 'ready' | 'pending' | 'unsupported';

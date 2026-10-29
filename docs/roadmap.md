@@ -1,113 +1,154 @@
 # Roadmap
 
-Version `0.1.0-alpha.0` contains bounded handshake primitives and an atomic
-protocol-19 scene with a Rust/Wasm Canvas2D preview. Synthetic browser rendering,
-borrowed-asset integration and a local simulator connection have been demonstrated.
-See [verification](verification.md) for scope.
+The product goal is a compatible client with a shared, idiomatic Rust core and
+platform adapters for native desktop, browser, Android and sideloaded iOS.
+Windows desktop and browser are the immediate targets. Android and iOS are later
+goals; mobile SDKs, devices, touch controls, signing and packaging do not gate the
+desktop/browser milestone.
 
-Future clients will target browser extensions, native desktop and Android, with
-planned support for official servers. No iOS app is planned; sideloading may be
-considered. These plans do not establish current official-server acceptance or
-authorize connections.
+Version `0.1.0-alpha.0` remains an unreleased prototype. Browser delivery and
+cross-platform product completion are different milestones. A working extension
+alone does not complete the product, and platform plans do not establish
+official-server acceptance or authorize a connection.
 
-## 1. Received scene slice (implemented)
+## Preserve the implemented core
 
-Setup, snake appearance/motion/removal and food state apply atomically with
-bounded retention. The deterministic renderer has a camera, three palettes,
-synthetic fixtures and optional loopback pointer/boost controls. It previews
-received anchors. Simulator results establish only the tested simulator path.
+Keep the existing Rust protocol/state, challenge and profile grammar, session and
+gameplay policies, input policy, clock/camera, presentation geometry, HUD/menu
+policies and authored material recipes. Preserve their bounded native/Wasm tests
+and accepted artifacts; do not restart the behavior port.
 
-## 2. Match desktop presentation
+Browser-free presentation already produces ordered body, food and prey plans.
+`BodyAsset` uses opaque `u64` handles and revisions with dimensions and readiness;
+body commands retain source rectangles, transforms, effective alpha, composition
+and order. These are reusable foundations, rather than a completed portable
+renderer. The main browser application submits through wasm32 `web_sys`
+Canvas2D; the additive shared slice now supplies wgpu submission on Windows and
+WebGPU. Native unit-test success alone does not demonstrate a native game window.
 
-Target Chrome and Firefox on Windows. Preserve the original client look and
-feel, including animation clocks, head/body corrections, interpolation, camera,
-quality modes, full skin recipes and effects. Validate numeric event/update/draw
-traces before treating a similar screenshot as equivalent behavior. Keep wire
-state, presentation state and drawing distinct, using idiomatic Rust types.
+Canvas remains the reference backend. Continue the bounded default-appearance
+feedback and controlled same-scene comparison. Procedural artwork, original
+artwork comparisons, rendering geometry and simulator world composition must
+retain separate evidence. Remaining image faces, antenna artwork, geometry and
+player-visible differences are not closed by recipe or API coverage.
 
-The separate animated preview now connects ordered events, head/body/length
-corrections, following camera, draw-driven spacing and sampled curves. Synthetic
-native/Wasm and Windows browser checks exercise this path. Standard paired eyes
-now retain gaze, pupil motion and deferred draw targets. Stock adapters select
-ordinary/custom body recipes, paired side images, single-image and mouth faces,
-and ordinary antennas from ready borrowed sources. Complete loading behavior,
-stock static accessories and team-mode drawing remain pending. An additive API now
-installs trusted normalized paired geometry before the first pupil update,
-retains it per appearance and checks standard-recipe coherence before drawing.
-An additional paired-face API retains side geometry and ready borrowed
-images to compose the complete represented ordinary paired family in both renderers.
-Startup blank-source behavior and broader host acceptance remain outside this
-completion. Generic static accessory APIs exist; stock selection and the
-accessory-aware runtime path remain unintegrated.
-Ordinary antennas now have explicit appearance metadata, retained draw-driven
-chains and borrowed bulbs in both animated renderers, including their standard
-death-pass cursor effect. Chooser dynamics and pending-source timing
-remain separate. Radius easing shares the connected update clock and retains cadence
-through reset. The opt-in
-standard-body renderer now connects ordered body effects and applied quality to
-production geometry; the synthetic page demonstrates three authored recipes.
-Native Firefox checks cover that bounded integration. Five frozen external-runtime
-schedules match production body commands exactly; full-skin and original-pixel
-parity remain unverified.
+Chrome page injection, privileged profile acquisition and extension packaging are
+one browser adapter lane. Preserve their safe checkpoints and withhold rejected
+packages. Their completion is not a prerequisite for the shared core, standalone
+browser client or native desktop renderer.
 
-Retained desktop food now connects ordered events, duplicate instances, captured
-eater objects, creation-selected sources and quality-dependent paint passes in
-both Wasm renderers and the authored page. Bounded numeric and native Windows
-browser checks cover the food engine and explicit draws; complete host parity is
-not established. Target-aware application now stages ordered Setup draws, with
-explicit resize APIs and synchronous page sizing/counting. New host-cadence
-reference/browser acceptance remains bounded. Retained prey now joins the same
-event/update/Setup transactions and both animated renderers, with independent
-appearances, captured eaters, source selections and early/late paint passes.
-Synthetic native/Wasm/page checks cover this path; source-runtime, original
-artwork/loading and stock-browser prey acceptance remain unverified. The
-animated arena edge now uses a late vector band and open inner stroke with
-retained camera selection and displayed-radius easing. Original browser pixels
-and full host cadence remain separate evidence requirements.
+## Shared wgpu gameplay-rendering slice
 
-## 3. Measure dense scenes
+The first bounded slice is implemented in
+[`apps/wgpu-slice`](../apps/wgpu-slice/README.md). A final-source Windows Vulkan
+window and browser WebGPU execution have been observed, including resize and
+cleanup. Matched Canvas checks cover two selected normal/boost keyframes using
+the same authored resources and draw plans. Source-raster and one-pixel
+quad-edge differences remain recorded; this does not establish whole-game
+fidelity. The subsequent shared owner now implements input, local transport,
+Rust HUD and body/food/prey/paired-eye/arena presentation. Native offscreen and
+ordinary browser local sessions have run; native-window input remains open.
+Detailed limits are in
+[verification](verification.md#shared-wgpu-rendering-slice).
 
-The offline benchmark provides deterministic received-anchor workloads without
-changing the renderer. Treat performance as secondary to presentation precision.
-Promote optimizations only with evidence that they preserve supported behavior;
-the existing preview does not establish original rendering or gameplay parity.
+The narrow renderer is used by a Windows host and a standalone browser canvas.
+It uses `wgpu` while preserving the existing core. Its dependencies and artifacts
+stay separate from the accepted Canvas path; no generic engine is introduced.
 
-## 4. Package the browser client
+The first slice consumes the existing Rust scene/presentation path and original,
+explicitly synthetic gameplay events. It draws an animated standard snake with
+normal/boost passes and food, using the same scene, resources and update times
+on desktop and web. That diagnostic remains available beside the explicit local
+Play route. Authoritative simulation stays in the separate simulator.
 
-The [extension package](extension.md) bundles the authored client and Rust/Wasm
-for Chrome and Firefox with local installation instructions, a preview launcher
-and explicit game-page activation. The activated runtime captures host
-capabilities and ready borrowed assets, holds original scheduling/socket paths,
-and composes authored input, session, update and rendering. Explicit Play APIs
-exist; activation alone starts neither profile acquisition nor a game connection.
+The common frame/resource boundary contains:
 
-One default bootstrap now selects Play controls, score tracking, current/final
-readouts and a visible schema-2 leaderboard with Rust-owned history, row policy
-and score projection. The
-packager accepts only the default entry; the former owned entry variants are
-removed. The [local game page](local-play.md) uses that same runtime and session
-with generated stand-ins, a selected loopback endpoint and the challenge
-handshake. Local browser verification remains in progress; implementation does
-not establish complete login/HUD equivalence or verified restart/input behavior.
+- A frame identity, backing extent, viewport scale and explicit clock/update
+  inputs. Rust retains the presentation clock and geometry decisions.
+- Existing ordered painter output, composed without regrouping translucent or
+  additive passes. Preserve the original numeric plans; document any GPU-side
+  `f64` to `f32` conversion at submission.
+- Resources addressed by the existing handle/revision identities, with explicit
+  dimensions, readiness, ownership and create/update/release operations. DOM,
+  `wgpu` texture and platform window objects stay in their adapters.
+- Explicit texture color/alpha conventions, sampling, crop and blend behavior.
+  Use portable pixel data or an implemented materialization of the selected
+  recipes. Canvas paths, gradients, shadows, text and borrowed image objects do
+  not convert to GPU rendering automatically.
+- Validation before submission, bounded frame/resource storage, and explicit
+  resize, surface/device-loss and resource-generation behavior. Renderer recovery
+  must not silently reset gameplay or open another connection.
 
-The default client draws Rust-owned nicknames and camera-driven background
-layers with authored replacement images. Nickname text fidelity, stock nickname
-palette capture and side-by-side visual matching remain incomplete. The default minimap uses
-Rust-owned decoding/state and a separate owned DOM/Canvas view; installed and
-side-by-side widget acceptance remain separate. Planned work includes
-announcement retention/display, viewport/login layout,
-menu transitions, preferences and
-victory/save/replay flows. Follow the
-[Rust ownership decision](architecture.md#ownership-decision) when moving the
-remaining JavaScript game/HUD/presentation state and policy; keep browser/DOM
-glue, extension plumbing and host capability capture in JavaScript. Existing
-JavaScript lifecycle, input and gameplay orchestration remain migration debt;
-local-host work must not add game-domain logic there.
+This boundary is a small adapter over current plans. Add shared abstractions only
+when both consumers need them. Keep the Canvas consumer available for trace and
+image comparison; do not replace correct behavior with backend-specific game
+logic or numeric fallbacks in JavaScript.
 
-Installed Chrome/Firefox/CSP behavior, native input/layout/pixels, loading
-lifecycle and end-to-end gameplay need separate evidence. Existing APIs,
-synthetic checks and local package builds do not establish a fully playable
-installed extension.
+Acceptance for this milestone requires both builds and actual execution on
+Windows and a supported browser: the same Rust fixture/updates, correct resource
+identity and draw order, visible normal/boost/food output, resize behavior and
+bounded cleanup. Record the actual adapter/backend and unsupported capabilities.
+Compare against Canvas with controlled assets, viewport/DPR, quality and timing.
+Judge meaningful player-visible differences; do not require harmless raster
+differences to be bit-identical or infer speed from GPU use alone. A compile,
+offscreen test or screenshot by itself is not full gameplay acceptance.
 
-Keep [release configuration](releases.md) dormant until a releasable milestone
-and its packaged contents have been reviewed.
+The [wgpu platform matrix](https://github.com/gfx-rs/wgpu#supported-platforms)
+includes Windows, browser, Android and Apple backends. Actual feature support and
+fallbacks need target-specific checks; a browser WebGPU result does not establish
+WebGL2, Firefox, Safari or mobile acceptance.
+
+## Current milestone: playable shared local client
+
+Develop the shared gameplay owner through native CLI tests and offscreen checks,
+with small browser checks at input, session and rendering milestones. Reuse the
+existing local-session path, input policy and presentation plans. Both hosts
+should consume the same Rust behavior; platform networking, window/DOM effects
+and event delivery stay in their adapters. Desktop automation is not required
+to make progress on the shared owner.
+
+The bounded local route is implemented and exercised on both runtime paths.
+Next, improve the ordinary playable experience and close concrete visual or
+behavioral differences with controlled comparisons. Preserve the Canvas reference
+and separate source artwork, draw geometry/camera/blending/cadence and simulator
+world composition. Avoid exhaustive synthetic-scene polish before player-facing
+work. Keep these remaining integration tasks explicit:
+
+- UI and input: consume Rust menu/HUD values, connect mouse/keyboard/window focus
+  to existing input policy, and establish text/font, clipboard and accessibility
+  behavior. The current ASCII bitmap HUD and minimal Play form are functional;
+  full menu, leaderboard/text and accessible UI remain work. Native window/input
+  checks that require desktop takeover stay pending under the user's restriction.
+- Network and profiles: provide browser and native socket/HTTP adapters around
+  the existing Rust session/protocol policies, with the same bounded profile and
+  credential lifetime rules. Browser-specific injection permissions do not belong
+  in the shared core. Test a declared local transport before separate authorized
+  official-server acceptance; never reuse a consumed attempt ledger. The shared
+  loopback transport is exercised; remote acquisition/extension work stays parked.
+- Lifecycle: resize, display scaling, suspend/resume, surface/device loss,
+  disconnect, death/return and explicit restart, preserving the existing state and
+  one-attempt semantics.
+- Build/delivery: reproducible native and web artifacts, capability reporting,
+  packaging and independent release verification. Keep release automation dormant
+  until a releasable milestone is reviewed.
+
+Measure and optimize only after behavior and the visible slice are established.
+Reuse allocations and batch compatible adjacent commands when evidence supports
+it; do not reorder effects or perform a broad cleanup alongside the first port.
+
+## Later mobile goals
+
+Android and sideloaded iOS use the same core and intended renderer boundary.
+Their later work includes native surfaces, touch/virtual controls, safe areas,
+orientation, app suspension and resource loss, platform networking permissions,
+and device performance/thermal checks. Packaging is separate: signed APKs for
+Android and a supported Xcode/provisioning/signing distribution path for iOS.
+See [Android signing](https://developer.android.com/studio/publish/app-signing)
+and [Apple device distribution](https://developer.apple.com/documentation/xcode/distributing-your-app-to-registered-devices).
+No mobile implementation or acceptance is implied by this roadmap.
+
+Completion is recorded per platform and per behavior/rendering/network/delivery
+scope. Windows/browser success is the next milestone, not a silent exclusion of
+mobile from the product goal. Preserve source privacy and all earlier failures
+and evidence boundaries described in [provenance](provenance.md) and
+[verification](verification.md).

@@ -13,7 +13,7 @@ fn custom(pairs: &[(u8, u8)]) -> Vec<u8> {
 }
 
 #[test]
-fn authored_local_builtin_patterns_preserve_runs_with_plain_local_style() {
+fn authored_local_builtin_patterns_preserve_runs_with_supported_local_style() {
     for skin in 0..=255 {
         let stock = selected(skin);
         for bytes in [
@@ -29,15 +29,20 @@ fn authored_local_builtin_patterns_preserve_runs_with_plain_local_style() {
             assert!(descriptor.runs.len() <= 256);
             assert!(descriptor.runs.iter().map(|run| run.count).sum::<usize>() <= 65_535);
             for (local, original) in descriptor.runs.iter().zip(&stock.runs) {
-                assert_eq!(local.palette, original.palette % 3);
+                assert_eq!(local.palette, original.palette);
                 assert_eq!(local.count, original.count);
-                assert!(local.palette < 3 && local.count > 0);
+                assert!(local.palette < 42 && local.count > 0);
             }
             assert_eq!(descriptor.base_palette, descriptor.runs[0].palette);
             assert!(!descriptor.custom);
-            assert_eq!(descriptor.variant_mode, BodyVariantMode::PingPong);
-            assert_eq!(descriptor.variant_period, 7);
-            assert_eq!(descriptor.face, FaceGeometry::default());
+            assert_eq!(descriptor.variant_mode, stock.variant_mode);
+            assert_eq!(descriptor.variant_period, stock.variant_period);
+            let expected_face = if matches!(skin, 25 | 44 | 63 | 64) {
+                stock.face
+            } else {
+                FaceGeometry::default()
+            };
+            assert_eq!(descriptor.face, expected_face);
             assert_eq!(descriptor.face_sources, SkinFaceSources::None);
             assert_eq!(descriptor.antenna, None);
             assert_eq!(descriptor.body_style, selected(0).body_style);
@@ -86,8 +91,8 @@ fn authored_local_projection_preserves_admission_counts_collisions_and_cycle_sea
         let descriptor = resolve_authored_local_skin(skin, &bytes).unwrap();
         assert_eq!(descriptor.skin, skin);
         assert!(descriptor.custom);
-        assert_eq!(descriptor.base_palette, 2);
-        assert_eq!(pairs(&descriptor), [(2, 3), (2, 2), (0, 3), (2, 1)]);
+        assert_eq!(descriptor.base_palette, 5);
+        assert_eq!(pairs(&descriptor), [(5, 3), (41, 2), (39, 3), (5, 1)]);
         assert_eq!(descriptor.variant_mode, BodyVariantMode::First);
         assert_eq!(descriptor.variant_period, 1);
         assert_eq!(descriptor.face, FaceGeometry::default());
@@ -100,7 +105,7 @@ fn authored_local_projection_preserves_admission_counts_collisions_and_cycle_sea
             &resolve_authored_local_skin(0, &custom(&[(1, 35), (2, 37), (3, 39), (4, 41)]))
                 .unwrap()
         ),
-        [(2, 1), (1, 2), (0, 3), (2, 4)]
+        [(35, 1), (37, 2), (39, 3), (41, 4)]
     );
 }
 
@@ -111,8 +116,8 @@ fn authored_local_projection_keeps_maximum_count_without_expanding_runs() {
         pair.copy_from_slice(&[255, 41]);
     }
     let descriptor = resolve_authored_local_skin(60, &bytes).unwrap();
-    assert_eq!(pairs(&descriptor), [(2, 31_365)]);
-    assert_eq!(descriptor.base_palette, 2);
+    assert_eq!(pairs(&descriptor), [(41, 31_365)]);
+    assert_eq!(descriptor.base_palette, 41);
     assert!(descriptor.custom);
 }
 
@@ -566,48 +571,29 @@ fn host_mask_matches_custom_run_admission_for_every_byte_and_rejects_drift() {
 
 #[test]
 fn authored_local_builtin_nine_keeps_head_origin_and_cycle_seam() {
+    let runs = pairs(&resolve_authored_local_skin(9, &[]).unwrap());
     assert_eq!(
-        pairs(&resolve_authored_local_skin(9, &[]).unwrap()),
-        [
-            (1, 1),
-            (0, 1),
-            (1, 1),
-            (0, 1),
-            (1, 1),
-            (0, 1),
-            (1, 1),
-            (0, 1),
-            (1, 1),
-            (0, 1),
-            (1, 1),
-            (1, 9),
-        ]
+        &runs[..11],
+        (0..11)
+            .map(|i| (if i % 2 == 0 { 7 } else { 9 }, 1))
+            .collect::<Vec<_>>()
     );
+    assert_eq!(runs[11], (10, 9));
 }
 
 #[test]
-fn authored_local_builtin_ten_retains_projected_adjacent_collision() {
+fn authored_local_builtin_ten_keeps_distinct_standard_colors() {
     assert_eq!(
         pairs(&resolve_authored_local_skin(10, &[]).unwrap()),
-        [(0, 5), (1, 5), (1, 5)]
+        [(9, 5), (1, 5), (7, 5)]
     );
 }
 
 #[test]
-fn authored_local_builtin_fifteen_repeats_the_three_existing_families() {
+fn authored_local_builtin_fifteen_exposes_all_nine_standard_runs() {
     assert_eq!(
         pairs(&resolve_authored_local_skin(15, &[]).unwrap()),
-        [
-            (0, 1),
-            (1, 1),
-            (2, 1),
-            (0, 1),
-            (1, 1),
-            (2, 1),
-            (0, 1),
-            (1, 1),
-            (2, 1)
-        ]
+        (0..9).map(|i| (i, 1)).collect::<Vec<_>>()
     );
 }
 
@@ -615,15 +601,15 @@ fn authored_local_builtin_fifteen_repeats_the_three_existing_families() {
 fn authored_local_builtin_twenty_nine_keeps_equal_cycle_endpoints_separate() {
     assert_eq!(
         pairs(&resolve_authored_local_skin(29, &[]).unwrap()),
-        [(2, 2), (1, 1), (2, 4), (1, 1), (2, 2)]
+        [(11, 2), (4, 1), (11, 4), (4, 1), (11, 2)]
     );
     assert_eq!(
         pairs(&resolve_authored_local_skin(20, &[]).unwrap()),
-        [(0, 5), (0, 5)]
+        [(3, 5), (0, 5)]
     );
     assert_eq!(
         pairs(&resolve_authored_local_skin(30, &[]).unwrap()),
-        [(1, 2), (1, 1), (2, 1), (1, 2), (2, 1), (1, 1)]
+        [(10, 2), (19, 1), (20, 1), (10, 2), (20, 1), (19, 1)]
     );
 }
 
@@ -635,17 +621,52 @@ fn authored_local_custom_projection_is_unchanged_across_every_requested_byte() {
         for palette in 0..=u8::MAX {
             for count in [0, 1, 255] {
                 let bytes = custom(&[(count, palette)]);
-                let mut expected = resolve_skin(skin % 3, &bytes, false).unwrap();
+                let mut expected = resolve_skin(skin, &bytes, false).unwrap();
                 if !expected.custom {
                     continue;
                 }
                 expected.skin = skin;
-                for run in &mut expected.runs {
-                    run.palette %= 3;
-                }
                 expected.base_palette = expected.runs[0].palette;
                 assert_eq!(resolve_authored_local_skin(skin, &bytes).unwrap(), expected);
             }
         }
+    }
+}
+
+#[test]
+fn local_ordinary_faces_reuse_all_authoritative_fields_but_not_source_roles() {
+    for (skin, color, alpha, pupil_color, pupil_radius) in [
+        (25, [255, 86, 9], 1., [0; 3], 3.5),
+        (44, [212; 3], 0.75, [0; 3], 3.5),
+        (63, [0; 3], 1., [204; 3], 2.5),
+        (64, [255, 255, 128], 1., [0; 3], 3.5),
+    ] {
+        let expected = FaceGeometry::Paired(PairedFaceGeometry {
+            eyes: StandardEyeGeometry {
+                eye_color: color,
+                eye_alpha: alpha,
+                pupil_color,
+                pupil_radius,
+                ..StandardEyeGeometry::default()
+            },
+            decoration: None,
+        });
+        assert_eq!(selected(skin).face, expected);
+        for bytes in [vec![], vec![255; 255], custom(&[(0, 0), (1, 36)])] {
+            let local = resolve_authored_local_skin(skin, &bytes).unwrap();
+            assert_eq!(local.face, expected);
+            assert_eq!(local.face_sources, SkinFaceSources::None);
+            assert_eq!(local.antenna, None);
+            assert_eq!(local.body_style, selected(0).body_style);
+        }
+        let bytes = custom(&[(2, 0), (3, 2)]);
+        let mut admitted = resolve_authored_local_skin(skin, &bytes).unwrap();
+        assert_eq!(admitted.face, FaceGeometry::default());
+        admitted.runs[0].count = 999;
+        assert_eq!(
+            resolve_authored_local_skin(skin, &bytes).unwrap().runs[0].count,
+            2
+        );
+        assert_eq!(resolve_authored_local_skin(skin, &[0; 256]), Err(SkinError));
     }
 }

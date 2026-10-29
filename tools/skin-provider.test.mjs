@@ -10,7 +10,7 @@ test('local provider preserves built-in stripes and projection collisions over e
   const { realm } = fixture();
   const source = () => new realm.HTMLCanvasElement();
   const bodySources = {
-    palettes: Array.from({ length: 3 }, () => ({ variants: Array.from({ length: 7 }, source), boostGlow: source() })),
+    palettes: Array.from({ length: 42 }, (_, paletteId) => ({ variants: Array.from({ length: paletteId === 36 ? 60 : 7 }, source), boostGlow: source() })),
     effects: { outline: source(), shadow: source(), deathHighlight: source() },
   };
   const calls = [];
@@ -19,11 +19,11 @@ test('local provider preserves built-in stripes and projection collisions over e
     calls.push({ skin, bytes }); return resolveLocalSkinDouble(skin, bytes);
   });
   for (const [skin, runs] of [
-    [9, [...Array.from({ length: 11 }, (_, index) => ({ palette: index % 2 ? 0 : 1, count: 1 })), { palette: 1, count: 9 }]],
-    [10, [{ palette: 0, count: 5 }, { palette: 1, count: 5 }, { palette: 1, count: 5 }]],
-    [15, Array.from({ length: 9 }, (_, index) => ({ palette: index % 3, count: 1 }))],
-    [29, [{ palette: 2, count: 2 }, { palette: 1, count: 1 }, { palette: 2, count: 4 }, { palette: 1, count: 1 }, { palette: 2, count: 2 }]],
-    [20, [{ palette: 0, count: 5 }, { palette: 0, count: 5 }]],
+    [9, [...Array.from({ length: 11 }, (_, index) => ({ palette: index % 2 ? 9 : 7, count: 1 })), { palette: 10, count: 9 }]],
+    [10, [{ palette: 9, count: 5 }, { palette: 1, count: 5 }, { palette: 7, count: 5 }]],
+    [15, Array.from({ length: 9 }, (_, index) => ({ palette: index, count: 1 }))],
+    [29, [{ palette: 11, count: 2 }, { palette: 4, count: 1 }, { palette: 11, count: 4 }, { palette: 4, count: 1 }, { palette: 11, count: 2 }]],
+    [20, [{ palette: 3, count: 5 }, { palette: 0, count: 5 }]],
   ]) {
     const { recipe, status } = resolve({ skin, customBytes: new Uint8Array(), cosmetic: 0 });
     assert.equal(status, 'ready'); assert.equal(calls.at(-1).skin, skin);
@@ -43,7 +43,7 @@ test('local provider preserves built-in stripes and projection collisions over e
   const recipe = resolve({ skin: 60, customBytes: bytes }).recipe;
   assert.notEqual(calls.at(-1).bytes, bytes);
   assert.deepEqual(calls.at(-1).bytes, bytes);
-  assert.deepEqual(recipe.runs, [{ palette: 2, count: 3 }, { palette: 2, count: 2 }, { palette: 0, count: 3 }, { palette: 2, count: 1 }]);
+  assert.deepEqual(recipe.runs, [{ palette: 5, count: 3 }, { palette: 41, count: 2 }, { palette: 39, count: 3 }, { palette: 5, count: 1 }]);
   assert.equal(recipe.custom, true); assert.equal(recipe.variantMode, 'first'); assert.equal(recipe.variantPeriod, 1);
   bytes.fill(0);
   assert.equal(recipe.runs[0].count, 3);
@@ -1438,5 +1438,44 @@ test('legacy untagged attachments retain exact shapes, mode inference, opacity a
       delete f.metadata.attachment; assert.deepEqual(f.resolve(), absent);
       f.metadata.attachment = null; assert.deepEqual(f.resolve(), absent);
     }
+  }
+});
+
+// Tools-only numeric ABI double through unchanged production source binding.
+// Native Rust and matching actual-Wasm execution are separate required gates.
+import { resolveStockSkin } from './stock-skin-policy-oracle.mjs';
+test('local ordinary paired variants reach provider inputs without new sources', () => {
+  const { realm } = fixture(), source = () => new realm.HTMLCanvasElement();
+  const bodySources = { palettes: Array.from({ length: 42 }, (_, paletteId) => ({
+    variants: Array.from({ length: paletteId === 36 ? 60 : 7 }, source), boostGlow: source() })),
+    effects: { outline: source(), shadow: source(), deathHighlight: source() } };
+  const bind = createLocalBodyResolver(bodySources, realm, resolveLocalSkinDouble);
+  for (const [skin, eyeColor, eyeOpacity, pupilColor, pupilRadius] of [
+    [25, 0xff5609, 1, 0, 3.5], [44, 0xd4d4d4, .75, 0, 3.5],
+    [63, 0, 1, 0xcccccc, 2.5], [64, 0xffff80, 1, 0, 3.5],
+  ]) {
+    const expected = { kind: 'standard', distance: 6, separation: 6, radius: 6,
+      pupilRadius, pupilTravel: 2.3, outlineWidth: 0, eyeColor, pupilColor,
+      outlineColor: 0, eyeOpacity, pupilOpacity: 1, angleSmoothing: .12 };
+    assert.deepEqual(resolveStockSkin({ skin }).eyes, expected, 'existing independent stock oracle');
+    for (const bytes of [new Uint8Array(), new Uint8Array(255).fill(255)]) {
+      const { recipe } = bind({ skin, customBytes: bytes });
+      assert.deepEqual(recipe.eyes, expected, 'selected numeric face reaches production provider');
+      assert.equal(recipe.variantMode, 'ping-pong'); assert.equal(recipe.variantPeriod, 7);
+      assert.equal(recipe.attachment, null); assert.equal(recipe.antenna, undefined);
+      assert.equal(recipe.faceDecoration, undefined);
+      for (const run of recipe.runs) for (const [i, use] of recipe.palettes[run.palette].variants.entries()) {
+        assert.equal(use.asset.source, bodySources.palettes[run.palette].variants[i]);
+      }
+    }
+    const bytes = Uint8Array.of(0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 3, 2);
+    const custom = bind({ skin, customBytes: bytes }).recipe;
+    assert.deepEqual(custom.eyes, resolveStockSkin({ skin: 0 }).eyes);
+    assert.equal(custom.variantMode, 'first'); assert.equal(custom.variantPeriod, 1);
+    bytes.fill(0); assert.deepEqual(custom.runs, [{ palette: 0, count: 2 }, { palette: 2, count: 3 }]);
+    const first = resolveLocalSkinDouble(skin), second = resolveLocalSkinDouble(skin);
+    first.eyes.eyeColor = 123; first.runs[0].count = 999;
+    assert.deepEqual(resolveLocalSkinDouble(skin), second, 'fresh copied output');
+    assert.throws(() => bind({ skin, customBytes: new Uint8Array(256) }));
   }
 });

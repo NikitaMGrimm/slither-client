@@ -1,0 +1,14 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SlitherClient local WebGPU</title>
+<style>html,body{margin:0;background:#090c10;color:#eee;font:13px monospace}form{display:flex;gap:8px;padding:8px;flex-wrap:wrap}input,button{border:1px solid #aaa;border-radius:0;background:#18202a;color:#eee;font:inherit}#endpoint{width:290px}#skin{width:44px}pre{height:100px;margin:0 8px;white-space:pre-wrap;font-variant-numeric:tabular-nums}canvas{display:block;width:100%;height:calc(100vh - 160px);min-height:0}</style>
+<form onsubmit="return false">
+<label>Local endpoint <input id="endpoint" placeholder="ws://127.0.0.1:PORT/slither" autocomplete="off"></label>
+<label>Name <input id="nickname" value="Player" maxlength="24"></label>
+<label>Skin <input id="skin" value="0" type="number" min="0" max="65"></label>
+<button id="play" type="button" disabled>Play</button><button id="stop" type="button">Stop</button>
+</form>
+<pre id="status">Offline. Enter an explicitly owned local endpoint and press Play. WebGPU required.</pre>
+<canvas id="game" width="960" height="540"></canvas>
+<script type="module" src="./local.mjs"></script>

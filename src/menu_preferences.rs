@@ -70,8 +70,8 @@ impl MenuPreferences {
     }
 
     fn skin_count(&self) -> u8 {
-        // Both routes represent built-ins 0..=65. Local patterns project over
-        // three authored palettes; custom palette admission stays route-specific.
+        // Both routes represent built-ins 0..=65 with standard palette IDs.
+        // Custom palette admission stays route-specific.
         66
     }
 

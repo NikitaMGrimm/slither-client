@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  Independent Rust and WebAssembly browser client.
+  Independent Rust client for Windows and the browser.
 </p>
 
 <p align="center">
@@ -24,12 +24,21 @@
 
 Version `0.1.0-alpha.0` is unreleased. The client provides bounded handshake
 primitives, atomic protocol-19 scene state, and Rust/Wasm Canvas2D previews
-with authored stand-ins and live-source adapters. One default bootstrap selects
-Play controls, current/final score readouts and a visible leaderboard. The local
+with authored procedural materials and live-source adapters. One default bootstrap
+selects Play controls, current/final score readouts and a visible leaderboard. The local
 game page uses that same runtime with the separate simulator; diagnostic previews
 remain available. Chrome/Firefox packages include experimental explicit game-page activation.
 Complete installed gameplay remains unverified.
 See [architecture](docs/architecture.md) for supported inputs and limits.
+
+An additive [shared wgpu client](apps/wgpu-slice/README.md) uses the same Rust
+protocol, session, input, HUD and presentation policies on Windows and browser
+WebGPU. Explicit local Play/Stop, pointer/arrows/boost and body/food/prey/paired-eye
+rendering are implemented. Actual local checks cover native transport with
+offscreen Vulkan rendering and the ordinary background-browser page, including
+restart, resize and cleanup. Native-window input and full visual/player-feel
+acceptance remain open. Canvas remains the reference backend.
+Windows and browser come first; Android and sideloaded iOS are later goals.
 
 Local loopback browser verification demonstrated Wasm execution, exact source
 object identity, and matching output pixels. An offline external comparison

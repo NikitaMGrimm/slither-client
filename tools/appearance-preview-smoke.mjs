@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createLocalBodyResolver } from '../web/synthetic-body.mjs';
 import { createStockSkinAdapter } from '../web/stock-skin-provider.mjs';
+import { resolveStockSkin } from './stock-skin-policy-oracle.mjs';
 
 // Real Wasm + existing providers with authored inert Canvas/source doubles.
 // Command/source identity evidence only: no browser, artwork, pixels or sockets.
@@ -74,7 +75,7 @@ export function appearancePreviewSmoke(wasm) {
       equal(request.skin, 1); equal(request.own, false); equal(request.customBytes.length, 0);
     }
     const bodySources = {
-      palettes: Array.from({ length: 3 }, () => ({ variants: Array.from({ length: 7 }, source), boostGlow: source() })),
+      palettes: Array.from({ length: 42 }, (_, id) => ({ variants: Array.from({ length: id === 36 ? 60 : 7 }, source), boostGlow: source() })),
       effects: { outline: source(), shadow: source(), deathHighlight: source() },
     };
     const resolveLocal = createLocalBodyResolver(bodySources, realm, wasm.resolve_local_skin);
@@ -122,6 +123,20 @@ export function appearancePreviewSmoke(wasm) {
         return resolveLocal(request);
       }, prepare).visible, true);
       equal(target.context.images.length > 0, true);
+    }
+    // Prepared matching-Wasm gate: the existing render receives the same numeric
+    // paired face as gameplay; this is command/input evidence, not raster proof.
+    for (const skin of [25, 44, 63, 64]) {
+      for (const customBytes of [new Uint8Array(), Uint8Array.of(0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 1, 2)]) {
+        const ticket = local.select(skin, customBytes);
+        equal(local.render(ticket, target, world, request => {
+          equal(request.skin, skin); equal(request.customBytes, customBytes);
+          const bound = resolveLocal(request);
+          equal(bound.recipe.eyes, resolveStockSkin({ skin: customBytes.length ? 0 : skin }).eyes);
+          return bound;
+        }, prepare).visible, true);
+        equal(target.context.images.length > 0, true);
+      }
     }
     const lastLocal = local.revision();
     rejects(() => local.select(66, new Uint8Array())); equal(local.revision(), lastLocal);

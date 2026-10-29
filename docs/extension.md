@@ -127,12 +127,17 @@ game/server acceptance remain unverified.
 
 The popup performs no activation until its button is clicked. It needs only
 `activeTab` and `scripting`: no permanent host permissions, `tabs`, storage,
-webRequest, DNR, native messaging or background context. Supported URLs are
-HTTP/HTTPS `slither.io` and explicitly named `www.slither.io`, with `/` or
-`/index.html`, no query/fragment/credentials, other port or wildcard subdomain.
+webRequest, DNR, native messaging or background context. Admitted origin/path
+pairs are HTTP/HTTPS `slither.io` and explicitly named `www.slither.io` with `/`
+or `/index.html`, plus exactly `http://slither.com/io`. The `.com` origin is not
+combined with the `.io` home paths; HTTPS `.com`, `www.slither.com`, `/io/`, query,
+fragment, credentials, other ports and wildcard subdomains gain no admission.
+The HTTP `.com/io` allowance addresses an observed installed entry route; it is
+not a grant of secure same-origin profile acquisition or a live Play result.
 
 Activation registers fixed MAIN and ISOLATED document-start scripts for those
-origins with `allFrames:false`, `persistAcrossSessions:false`. It then writes a
+`.io` origins and the exact HTTP `.com/io` path with `allFrames:false`,
+`persistAcrossSessions:false`. It then writes a
 single-use 30-second session-storage arm and reloads the same selected tab.
 API failure or observed navigation change aborts. Without a valid arm the gate
 leaves native APIs untouched. The page-readable marker is not an authentication
@@ -148,7 +153,9 @@ ordinary page** clears the arm before reload; old callbacks are not a fallback.
 
 The isolated link loads one fixed `runtime.getURL('game/bootstrap.mjs')` module
 in the page realm. Only its exact transitive JS/Wasm set is web accessible, scoped
-to the four named origins. Preview resources, gate, link and activation scripts
+to the five named origins. These resource match patterns use `/*`; activation,
+serialized arming, MAIN gate and isolated link independently retain the exact
+origin/path pairs above. Preview resources, gate, link and activation scripts
 are absent from that declaration. The builder refuses broader resources/origins.
 The worlds exchange bounded typed status/query only: no packet input, callbacks,
 DOM source clones, arbitrary fetch or extension commands.
@@ -478,7 +485,14 @@ claiming the gate again; nothing is installed on `window` for this purpose.
 The separate asynchronous `playWithLiveProfile` path requests the exact pinned
 same-origin script only after explicit invocation in canonical, top-level, secure
 `https://slither.io`. Optional captured native capabilities are absent on HTTP,
-www or unsupported environments; the external-profile path remains available.
+www, `.com` or unsupported environments; the external-profile path remains
+available only to an explicit trusted MAIN caller supplying its own profile.
+The default HTTP `.com/io` Play control has no automatic profile capability and
+remains unavailable. Admitting activation does not make that normal-user Play
+path complete, move the profile URL under `.com/io/s`, or authorize a cross-origin
+or insecure profile request. Existing host adapters still borrow the captured
+ready Canvas/image objects, including absolute `.io` sources, under their normal
+readiness/identity/mode checks; no asset-origin alias or new download is added.
 The acquirer observes complete EOF and verifies exact length/SHA-256 before
 closed numeric parsing. Owned source/digest bytes clear before the synchronous
 private consumer stages Play, and its borrowed password clears afterward.

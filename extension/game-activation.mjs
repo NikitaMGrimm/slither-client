@@ -1,11 +1,13 @@
 export const gameOrigins = Object.freeze(['http://slither.io', 'https://slither.io',
-  'http://www.slither.io', 'https://www.slither.io']);
+  'http://www.slither.io', 'https://www.slither.io', 'http://slither.com']);
 export const armKey = '__slitherClientArmV1';
 export const gateBuild = 'gamepage-v1';
 
 export function gamePage(value) {
   const url = new URL(value);
-  if (!gameOrigins.includes(url.origin) || !['/', '/index.html'].includes(url.pathname)
+  const home = url.origin === 'http://slither.com' ? url.href === 'http://slither.com/io'
+    : gameOrigins.includes(url.origin) && ['/', '/index.html'].includes(url.pathname);
+  if (!home
     || url.search || url.hash || url.username || url.password) throw new Error('Select the supported game home page');
   return url.href;
 }
@@ -14,7 +16,9 @@ export function gamePage(value) {
 export function armDocument(record) {
   const url = new URL(location.href);
   const origins = ['http://slither.io', 'https://slither.io', 'http://www.slither.io', 'https://www.slither.io'];
-  if (window !== window.top || !origins.includes(url.origin) || !['/', '/index.html'].includes(url.pathname)
+  const home = url.origin === 'http://slither.com' ? url.href === 'http://slither.com/io'
+    : origins.includes(url.origin) && ['/', '/index.html'].includes(url.pathname);
+  if (window !== window.top || !home
     || url.search || url.hash || url.username || url.password || record.url !== url.href
     || record.schema !== 1 || record.build !== 'gamepage-v1' || !/^[a-f0-9]{32}$/.test(record.id)
     || !Number.isSafeInteger(record.expires) || record.expires <= Date.now() || record.expires > Date.now() + 30000) {
@@ -31,9 +35,9 @@ export async function activateGamePage(api, { now = Date.now, random = bytes => 
   const tab = tabs[0];
   const url = gamePage(tab.url);
   const registration = [
-    { id: 'slither-client-game-main-v1', matches: gameOrigins.map(origin => `${origin}/*`),
+    { id: 'slither-client-game-main-v1', matches: gameOrigins.map(origin => `${origin}/${origin === 'http://slither.com' ? 'io' : '*'}`),
       js: ['game/gate.js'], runAt: 'document_start', world: 'MAIN', allFrames: false, persistAcrossSessions: false },
-    { id: 'slither-client-game-link-v1', matches: gameOrigins.map(origin => `${origin}/*`),
+    { id: 'slither-client-game-link-v1', matches: gameOrigins.map(origin => `${origin}/${origin === 'http://slither.com' ? 'io' : '*'}`),
       js: ['game/link.js'], css: ['game/host.css'], runAt: 'document_start', world: 'ISOLATED', allFrames: false, persistAcrossSessions: false },
   ];
   const existing = await api.scripting.getRegisteredContentScripts({ ids: registration.map(entry => entry.id) });

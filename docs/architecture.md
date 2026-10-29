@@ -1,5 +1,37 @@
 # Architecture
 
+## Shared desktop and browser rendering
+
+`apps/wgpu-slice` is an additive crate with its own lockfile and a path dependency
+on the existing browser-free Rust client. Its Windows host and standalone WebGPU
+host consume one `LocalGame` around the existing `AnimatedClient`, session,
+gameplay, desktop-input and HUD policies. Platform adapters execute copied socket,
+input and lifecycle effects outside Rust borrows. Only explicit Play to an admitted
+loopback endpoint opens a socket, after successful reset presentation; Stop closes
+it, and restart requires another Play. The Canvas application and root Cargo
+dependencies remain separate. A labelled synthetic diagnostic entry is retained.
+
+The small `Frame`/`Draw` boundary retains backing extent, viewport scale, frame
+and tick identities, full `u64` asset handles/revisions, readiness, dimensions,
+crops, transforms, effective alpha, blend and draw order. Only final submission
+vertices convert from validated `f64` to `f32`. The selected material adapter
+interprets the existing Rust-authored body, food and prey recipes, including the
+42 body palette families. Ordered paired-eye and arena plans and a small Rust
+bitmap HUD complete the represented local scene; image faces and antennas remain
+limited. It does not convert arbitrary Canvas operations automatically.
+Encoded-sRGB premultiplied textures, sampling and composition conventions are
+explicit. Circle coverage, blur and quad-edge raster differences remain bounded
+comparison inputs.
+
+Packet-time Setup output is validated before world/history/queue publication.
+Presentation acknowledgment and fresh socket-construction time are separate;
+handshake expiry is checked even while frames are retained or zero-sized.
+Native transport/offscreen GPU and ordinary browser local sessions have run.
+Native window/input acceptance remains separate. Windows leads development, with
+early browser checks of the shared owner. Mobile integration comes later. See
+[the slice](../apps/wgpu-slice/README.md), [verification](verification.md#shared-wgpu-rendering-slice)
+and [roadmap](roadmap.md).
+
 ## Ownership decision
 
 Game, HUD and presentation state and logic belong in Rust, exposed through the
@@ -70,31 +102,32 @@ real-Wasm oracle checks cover arithmetic and boundary admission, not browser pix
 See the [roadmap](roadmap.md) for remaining work.
 
 Local rendering binds a pure Rust skin resolver after Wasm initialization. Rust
-selects the existing three authored color stand-ins, plain paired eyes and
-seven-variant shading cadence. The asset map supplies shaded body, boost-glow,
-outline, shadow and death-highlight canvases; JavaScript binds those source
-objects through the existing provider. Admitted custom runs use first-variant
-shading and project each palette modulo three, preserving admitted run counts
-and order without merging projection collisions. Empty or rejected custom data
-uses the requested built-in run pattern with each palette projected modulo three,
-preserving run counts, order and cycle seams with seven-variant shading. The local
-chooser offers all 66 represented authored-pattern choices over the same three palettes, with plain paired faces and no antenna. These authored families do not imply
-stock 42-color equivalence. The production stock adapter separately binds the
-existing Rust resolve_skin for built-in/custom runs, face/antenna geometry and
-rotation policy, and validates the host custom mask through the same Rust
-palette predicate. Its JavaScript modules retain copied request admission and
-borrowed source lookup/readiness/identity, without a numeric policy fallback.
-The former authored JavaScript policy is a tools-only differential oracle.
-This cutover does not expand the local stand-ins or establish stock artwork,
-loading or installed-host acceptance.
+preserves the standard palette IDs, ordered run counts, cycle seams and shading
+selection across 42 procedural body families, without modulo-three projection.
+Ordinary families have seven shaded variants; the represented cycle family has
+sixty. Admitted custom runs retain normal palette admission and first-variant
+shading. Empty or rejected custom data uses the requested built-in pattern.
+The chooser retains all 66 represented built-in choices; its local custom editor
+still offers palettes 0, 1 and 2. Built-ins 25/44/63/64 reuse ordinary paired-eye
+numeric policy; other built-ins and admitted custom runs keep plain paired eyes.
+Local body geometry remains default, without antenna or image-face sources.
+The production stock adapter separately binds the existing Rust resolve_skin for
+built-in/custom runs, face/antenna geometry and rotation policy, and validates the
+host custom mask through the same Rust palette predicate. Its JavaScript modules
+retain copied request admission and borrowed source lookup/readiness/identity,
+without a numeric policy fallback. The former authored JavaScript policy remains
+a tools-only differential oracle. Source implementation does not establish
+visual equivalence, loading or installed-host acceptance.
 
-Browser-free authored_sources owns the numeric plans for the existing local
-RGB families, shaded body/effect sprites, hexagon tile, backdrop and food/prey
-sources. The pure authored_source_recipes Wasm export returns fresh copied
-operands. JavaScript admits own-data output, allocates/paints the same native
-Canvas objects and performs the two existing generated-image decodes; there is
-no JavaScript numeric fallback. Local skin selection and the source adapter
-lease stay separate, and the diagnostic flat body resolver is unchanged.
+Browser-free authored_sources owns the standard body/effect and food/prey
+procedural material plans, plus the preserved branded hexagon tile and backdrop.
+The pure authored_source_recipes Wasm export returns fresh copied numeric operands
+and owned RGBA samples. JavaScript admits own-data output, allocates and paints
+native Canvas objects, and performs the two existing generated-image decodes;
+there is no JavaScript numeric artwork fallback. The three legacy context
+canvases remain separate from the full gameplay body bank. Local skin selection
+and source adapter leases stay separate; the diagnostic flat resolver is unchanged.
+Matching Wasm and native visual checks remain separate gates.
 
 The default runtime enables Rust-owned nickname presentation before ingress.
 Each retained snake appearance owns its text and fade state, independently of
