@@ -70,33 +70,32 @@ real-Wasm oracle checks cover arithmetic and boundary admission, not browser pix
 See the [roadmap](roadmap.md) for remaining work.
 
 Local rendering binds a pure Rust skin resolver after Wasm initialization. Rust
-selects the existing three authored color stand-ins and seven-variant shading
-cadence. Built-ins 25/44/63/64 reuse the existing ordinary paired-eye numeric
-policy; other built-ins and admitted custom runs keep plain paired eyes. The asset map supplies shaded body, boost-glow,
-outline, shadow and death-highlight canvases; JavaScript binds those source
-objects through the existing provider. Admitted custom runs use first-variant
-shading and project each palette modulo three, preserving admitted run counts
-and order without merging projection collisions. Empty or rejected custom data
-uses the requested built-in run pattern with each palette projected modulo three,
-preserving run counts, order and cycle seams with seven-variant shading. The local
-chooser offers all 66 represented authored-pattern choices over the same three palettes,
-with the four supported ordinary paired-face variants and no antenna or face images. These authored families do not imply
-stock 42-color equivalence. The production stock adapter separately binds the
-existing Rust resolve_skin for built-in/custom runs, face/antenna geometry and
-rotation policy, and validates the host custom mask through the same Rust
-palette predicate. Its JavaScript modules retain copied request admission and
-borrowed source lookup/readiness/identity, without a numeric policy fallback.
-The former authored JavaScript policy is a tools-only differential oracle.
-This cutover does not expand the local stand-ins or establish stock artwork,
-loading or installed-host acceptance.
+preserves the standard palette IDs, ordered run counts, cycle seams and shading
+selection across 42 procedural body families, without modulo-three projection.
+Ordinary families have seven shaded variants; the represented cycle family has
+sixty. Admitted custom runs retain normal palette admission and first-variant
+shading. Empty or rejected custom data uses the requested built-in pattern.
+The chooser retains all 66 represented built-in choices; its local custom editor
+still offers palettes 0, 1 and 2. Built-ins 25/44/63/64 reuse ordinary paired-eye
+numeric policy; other built-ins and admitted custom runs keep plain paired eyes.
+Local body geometry remains default, without antenna or image-face sources.
+The production stock adapter separately binds the existing Rust resolve_skin for
+built-in/custom runs, face/antenna geometry and rotation policy, and validates the
+host custom mask through the same Rust palette predicate. Its JavaScript modules
+retain copied request admission and borrowed source lookup/readiness/identity,
+without a numeric policy fallback. The former authored JavaScript policy remains
+a tools-only differential oracle. Source implementation does not establish
+visual equivalence, loading or installed-host acceptance.
 
-Browser-free authored_sources owns the numeric plans for the existing local
-RGB families, shaded body/effect sprites, hexagon tile, backdrop and food/prey
-sources. The pure authored_source_recipes Wasm export returns fresh copied
-operands. JavaScript admits own-data output, allocates/paints the same native
-Canvas objects and performs the two existing generated-image decodes; there is
-no JavaScript numeric fallback. Local skin selection and the source adapter
-lease stay separate, and the diagnostic flat body resolver is unchanged.
+Browser-free authored_sources owns the standard body/effect and food/prey
+procedural material plans, plus the preserved branded hexagon tile and backdrop.
+The pure authored_source_recipes Wasm export returns fresh copied numeric operands
+and owned RGBA samples. JavaScript admits own-data output, allocates and paints
+native Canvas objects, and performs the two existing generated-image decodes;
+there is no JavaScript numeric artwork fallback. The three legacy context
+canvases remain separate from the full gameplay body bank. Local skin selection
+and source adapter leases stay separate; the diagnostic flat resolver is unchanged.
+Matching Wasm and native visual checks remain separate gates.
 
 The default runtime enables Rust-owned nickname presentation before ingress.
 Each retained snake appearance owns its text and fade state, independently of

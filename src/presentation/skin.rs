@@ -118,8 +118,8 @@ pub struct SkinAntenna {
 ///
 /// For [`resolve_skin`], `base_palette`, run palettes and fade palettes are stock
 /// family IDs (0..42), not indices into a compact draw recipe; the binding must
-/// remap them together. [`resolve_authored_local_skin`] instead selects one of
-/// three authored local stand-in families, with no stock color mapping implied.
+/// remap them together. [`resolve_authored_local_skin`] keeps these family IDs for
+/// local standard procedural sources while keeping image-dependent features separate.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SkinDescriptor {
     /// Requested skin byte, retained even when custom runs override it.
@@ -156,32 +156,20 @@ impl fmt::Display for SkinError {
 
 impl Error for SkinError {}
 
-/// Project skin patterns over the three existing authored local stand-in families.
-///
-/// Preserve built-in run counts and order, projecting only their palettes modulo
-/// three, with seven ping-pong variants. Admitted custom runs use the same palette
-/// projection after normal admission, with first-variant shading. Neither path
-/// merges projection collisions or the cycle seam.
-/// Built-ins 25, 44, 63 and 64 reuse their existing ordinary paired-eye policy.
-/// Other built-ins and admitted custom runs retain plain paired eyes. Both paths
-/// retain no antenna, no face images and the requested skin byte.
-/// These authored family IDs do not claim stock 42-palette color equivalence.
+/// Select local standard body palettes without projecting distinct colors together.
+/// The stock numeric policy remains authoritative for runs and shading. Local image
+/// faces, antennas and dense/swell body geometry are intentionally still unsupported.
 pub fn resolve_authored_local_skin(
     skin: u8,
     custom_bytes: &[u8],
 ) -> Result<SkinDescriptor, SkinError> {
-    let mut descriptor = resolve_skin(skin % 3, custom_bytes, false)?;
-    descriptor.skin = skin;
-    if !descriptor.custom {
-        descriptor.runs = builtin(skin);
-        if matches!(skin, 25 | 44 | 63 | 64) {
-            descriptor.face = resolve_skin(skin, &[], false)?.face;
-        }
+    let mut descriptor = resolve_skin(skin, custom_bytes, false)?;
+    descriptor.body_style = resolve_skin(0, &[], false)?.body_style;
+    if descriptor.custom || !matches!(skin, 25 | 44 | 63 | 64) {
+        descriptor.face = FaceGeometry::default();
     }
-    for run in &mut descriptor.runs {
-        run.palette %= 3;
-    }
-    descriptor.base_palette = descriptor.runs[0].palette;
+    descriptor.face_sources = SkinFaceSources::None;
+    descriptor.antenna = None;
     Ok(descriptor)
 }
 

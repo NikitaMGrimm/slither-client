@@ -13,17 +13,19 @@ standard body planner, paired/single-image/mouth face layouts, ordinary antenna
 preparation and browser submission helpers. There is no preview session, clock,
 animation, random stream or JavaScript geometry/palette fallback.
 
-The local route shares gameplay's pure Rust local skin policy: requested built-in
-run counts/order and the cycle seam project over its three existing authored
-families, without merging palette collisions. Built-ins retain seven-variant
-ping-pong shading; admitted custom stripes retain first-variant shading and their
-existing admission/projection rules and plain paired eyes. Built-ins 25, 44, 63
-and 64 reuse the existing Rust orange, gray, black/gray-small-pupil and pale-yellow
-ordinary paired-eye policies respectively, also in gameplay. Other built-ins keep
-plain paired eyes; default body style, no antenna and no face images remain. The local chooser exposes the 66 represented
-built-in IDs through its existing controls and persistence. Local custom colors
-remain 0, 1 and 2; values 66 through 255 are not chooser choices. These patterns
-use authored stand-ins, not stock 42-color artwork. The stock route uses the same
+The local route shares gameplay's Rust standard-source policy: it preserves the
+requested built-in run palettes, counts and seam without modulo-three projection.
+The candidate default bank has 42 distinct body families, seven ordinary shaded
+variants and sixty variants for the represented cycle family. Food/prey use the
+same expanded source-size plans in gameplay. The existing chooser exposes IDs
+0 through 65; its storage and explicit Play routing are unchanged. The local
+custom editor still offers indices 0, 1 and 2, which now name standard colors;
+external admitted custom runs retain full normal palette IDs and first shading.
+Built-ins 25/44/63/64 retain their ordinary paired-eye variants; other local faces
+remain plain, with no antenna or face images and default body geometry. The
+branded background is unchanged. The procedural material cutover is a separate
+matching-Wasm/native visual acceptance gate, not an artwork-parity claim from
+resolver or inert tests. The stock route uses the same
 existing ready borrowed provider objects as gameplay, including represented face
 families and ordinary
 antennas. Stock preview requests `own: true` and cosmetic zero, borrowing the

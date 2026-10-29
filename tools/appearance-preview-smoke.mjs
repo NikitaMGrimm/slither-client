@@ -75,7 +75,7 @@ export function appearancePreviewSmoke(wasm) {
       equal(request.skin, 1); equal(request.own, false); equal(request.customBytes.length, 0);
     }
     const bodySources = {
-      palettes: Array.from({ length: 3 }, () => ({ variants: Array.from({ length: 7 }, source), boostGlow: source() })),
+      palettes: Array.from({ length: 42 }, (_, id) => ({ variants: Array.from({ length: id === 36 ? 60 : 7 }, source), boostGlow: source() })),
       effects: { outline: source(), shadow: source(), deathHighlight: source() },
     };
     const resolveLocal = createLocalBodyResolver(bodySources, realm, wasm.resolve_local_skin);

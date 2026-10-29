@@ -2,7 +2,7 @@
 
 The local page runs the default bootstrap with Play controls, score readouts and
 leaderboard rows. It uses the same Rust/Wasm scene, controller, gameplay and
-session as game-page integration. Browser glue supplies generated shaded stand-ins
+session as game-page integration. Browser glue binds Rust-planned procedural materials
 and a selected loopback endpoint; it does not load official artwork or acquire
 a remote profile. Simulation remains in the separate
 [slither-sim repository](https://github.com/NikitaMGrimm/slither-sim).
@@ -33,7 +33,7 @@ in `ws://127.0.0.1:8766/slither` and accepts only that configured endpoint. Open
 the page constructs no game socket. Play supplies authored zero credentials to
 the existing challenge/login/setup session; no direct-login bypass is used.
 
-Each authored appearance supplies its selected stand-in family's base channels
+Each appearance supplies its selected standard palette's base channels
 and three `random()` units as nickname tint inputs, so name colors vary per
 appearance. These draws share the page random stream with food, prey and antennas.
 
@@ -78,38 +78,50 @@ animated diagnostic. Both also work without `--simulator-port`; `/` requires a
 configured simulator endpoint. These previews have their own diagnostic
 transport and do not substitute for the default game path.
 
-The default local body path uses three authored color families, with seven shaded
-variants, separate boost glow and shared outline/shadow/death sources from the
-single asset map. Rust owns pattern selection and shading cadence; browser code
-binds the source objects after Wasm initialization. The menu exposes represented
-built-in IDs 0 through 65, retaining each requested pattern's run counts, order
-and seams while projecting its colors modulo three, with seven ping-pong shading
-variants. Previous/Next wrap within these 66 choices and saved preferences retain
-the selected ID. No additional IDs, artwork or unlocks are introduced.
-Custom data uses the existing Rust admission: at most 255 bytes, an opaque
-eight-byte header, then complete positive count/palette pairs from the supported
-normal palette set. Adjacent equal admitted palettes merge before projection.
-Each admitted palette is then projected modulo three into the existing authored
-families, retaining run counts, order and boundaries without another merge.
-The first projected family supplies the body base and existing nickname tint
-base. Custom bodies use the first shading variant; empty or wholly rejected
-custom data retains the requested built-in pattern. The menu's existing custom
-editor remains limited to colors 0, 1 and 2 and its existing zero-filled prefix;
-the stock menu's custom palette namespace is unchanged.
+The candidate default source plan contains 42 separate standard body palette
+families. Built-in run counts, palette IDs and cycle seams are preserved without
+modulo-three color collapse. Ordinary bodies use seven 48-by-48 shaded sources;
+the represented cycle family has sixty. Body plans include numeric rim/tone
+materials and geometric star marks, 62-pixel boost sources, a 52-pixel outline
+ring, a 62-pixel shadow and the 32-pixel death highlight. These procedural
+sources are authored from retained numeric interoperability facts; no original
+program, image pack or downloaded artwork is shipped.
 
-This displays custom stripe structure in the authored palette namespace; it does
-not reproduce the stock 42-color palette. Plain paired faces remain selected;
-special faces, antennas, accessories and full skin identity remain incomplete.
-Same-art comparisons bypass these generated assets and do not validate them.
+Food uses ten families with seventeen body/outline/glow sizes; prey uses nine
+selectable families with twenty-two body sizes and the seventeen glow sizes.
+Native Canvas binds Rust-owned RGBA samples, source shadows and radial-gradient
+operands. The existing renderer, source leases, clocks, random callback order
+and sourceFactory bypass are unchanged. The branded tile/backdrop and three
+legacy context canvases are deliberately kept separate from the full body bank.
 
-An authored-only browser comparison remains deferred. Use the actual default
-asset generator and local resolver with fixed synthetic packets and identical
-viewport, DPR, clocks, quality and source-readiness controls. Compare unchanged
-no-custom families 0/1/2, a three-family custom cycle with unequal run lengths,
-and admitted palettes that collide after projection. Check the first body/tint
-family, head-to-tail run order, first-variant custom shading and existing
-boost/death sources. Inspect the actual images alongside recorded source
-identities; native/Wasm source-binding tests alone do not establish raster quality.
+Saved built-in IDs 0 through 65 still use the same chooser, preview and explicit
+Play paths. Custom admission and versioned storage are unchanged; the local
+custom editor still offers indices 0, 1 and 2. These now reference their standard
+palette colors, rather than the previous pastel substitutes. Admitted external
+custom runs retain their full normal palette IDs and first-variant shading;
+invalid custom data retains the requested built-in. Four ordinary paired-eye
+variants remain supported, but image faces, antenna artwork, accessories and
+local dense/swell geometry remain incomplete. The three legacy context canvases
+are not evidence of a three-color gameplay fallback.
+
+This source correction does not establish player-visible equivalence. The
+reported player run has no screenshot, so no camera or geometry diagnosis is
+inferred. Focused inert tests cover the actual default bootstrap, copied source
+plan, host adapter and palette bindings using labelled numeric/native doubles.
+Native/actual-Wasm assertions and matching builds are separate gates. Native
+antialiasing and shadow rasterization require the matched visual check; the
+source plan does not assert universal pixel identity. Food outlines use a native
+circle instead of a 600-edge approximation of the same disk.
+
+For the serialized comparison, keep packet bytes, scene composition, source
+readiness, viewport/DPR, applied quality, clocks and random draws fixed. First
+replay the retained same-art sourceFactory control with the same real source
+objects on both code versions. Then compare the original default-source plan and
+the candidate plan on that same fixture: standard skin 0 shading/boost/death,
+built-ins 10/15/29/60/62, a supported custom cycle, and food/prey sizes. Assess
+artwork/source differences separately from geometry and cadence. The retained
+mock-source numeric comparison is not a pixel oracle; the exact retained native
+sourceFactory/asset manifest is required before that visual gate can run.
 
 The implementation connects the local host adapter to the shared runtime and
 visible HUD/leaderboard. A local Chrome check completed trusted Play, steering and boost-on/off, then

@@ -2,9 +2,31 @@
 //!
 //! No Canvas, image, source identity, randomness, clocks or loading live here.
 
+mod standard;
+
 /// One ordered paint operation. The browser only binds these copied operands.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PaintCommand {
+    /// Owned RGBA samples, copied before native ImageData binding.
+    Pixels {
+        /// Sample width.
+        width: u32,
+        /// Sample height.
+        height: u32,
+        /// Row-major unpremultiplied RGBA bytes.
+        rgba: Vec<u8>,
+    },
+    /// Closed native coverage operation.
+    Composite(&'static str),
+    /// Native shadow parameters for one source.
+    Shadow {
+        /// Native blur in source pixels.
+        blur: f64,
+        /// Vertical source offset.
+        offset_y: f64,
+        /// Shadow CSS color.
+        color: String,
+    },
     /// Select a literal authored CSS color.
     FillStyle(String),
     /// Select the authored source opacity.
@@ -59,10 +81,10 @@ impl CanvasRecipe {
     }
 }
 
-/// Seven shaded body variants and their existing boost source.
+/// Standard shaded body variants and their boost source.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BodySourcePalette {
-    /// Ordered first through seventh source variant.
+    /// Ordered source variants (seven ordinary, sixty for the cycle family).
     pub variants: Vec<CanvasRecipe>,
     /// One existing boost-glow source.
     pub boost_glow: CanvasRecipe,
@@ -71,7 +93,7 @@ pub struct BodySourcePalette {
 /// Complete authored body source families; geometry selection remains `resolve_local_skin`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BodySourceRecipes {
-    /// Three authored families in their existing order.
+    /// Standard palette families in numeric order.
     pub palettes: Vec<BodySourcePalette>,
     /// Early body outline.
     pub outline: CanvasRecipe,
@@ -100,7 +122,7 @@ pub struct EntitySourcePalette {
 #[derive(Clone, Debug, PartialEq)]
 pub struct AuthoredSourceRecipes {
     /// Existing authored body colors, also used as nickname tint bases.
-    pub palette_rgb: [[u8; 3]; 3],
+    pub palette_rgb: Vec<[u8; 3]>,
     /// Three legacy flat source canvases.
     pub palettes: Vec<CanvasRecipe>,
     /// Repeating hexagon tile; remains distinct from the backdrop.
@@ -156,47 +178,11 @@ fn hexagon(commands: &mut Vec<PaintCommand>, x: f64, y: f64, radius: f64, color:
     ]);
 }
 
-fn radial(stops: &[(f64, String)], light_x: f64, light_y: f64) -> CanvasRecipe {
-    CanvasRecipe::new(
-        64,
-        64,
-        vec![
-            PaintCommand::RadialGradient {
-                circles: [light_x, light_y, 0., 32., 32., 31.],
-                stops: stops.to_vec(),
-            },
-            PaintCommand::FillRect([0., 0., 64., 64.]),
-        ],
-    )
-}
-
-fn shade(rgb: [u8; 3], amount: f64, alpha: f64) -> String {
-    let channels = rgb.map(|channel| {
-        let channel = f64::from(channel);
-        // All authored inputs yield positive channels: Rust round matches Math.round.
-        if amount < 0. {
-            (channel * (1. + amount)).round() as u32
-        } else {
-            (channel + (255. - channel) * amount).round() as u32
-        }
-    });
-    format!(
-        "rgba({},{},{},{alpha})",
-        channels[0], channels[1], channels[2]
-    )
-}
-
-fn literal_stops(stops: &[(f64, &str)]) -> Vec<(f64, String)> {
-    stops
-        .iter()
-        .map(|&(offset, color)| (offset, color.into()))
-        .collect()
-}
-
-/// Plan exactly the existing authored source pool, without allocating browser resources.
+/// Plan standard body/entity source materials while preserving branded background sources.
 pub fn authored_source_recipes() -> AuthoredSourceRecipes {
-    let palette_rgb = [[0x83, 0xd5, 0xb0], [0xef, 0xbb, 0x62], [0x76, 0xb9, 0xed]];
-    let palettes = palette_rgb
+    let palette_rgb = standard::COLORS.to_vec();
+    // Keep the three legacy context canvases separate from standard body sources.
+    let palettes = [[0x83, 0xd5, 0xb0], [0xef, 0xbb, 0x62], [0x76, 0xb9, 0xed]]
         .map(|rgb| circle(32, 32, &css_hex(rgb), None, 16.))
         .into();
     let mut tile_commands = Vec::new();
@@ -209,101 +195,6 @@ pub fn authored_source_recipes() -> AuthoredSourceRecipes {
             hexagon(&mut tile_commands, x, y + 0.5, 13., "#1c2b3b");
         }
     }
-    let body_palettes = palette_rgb
-        .into_iter()
-        .map(|rgb| BodySourcePalette {
-            variants: (0..7)
-                .map(|index| {
-                    let tone = f64::from(index - 3) * 0.045;
-                    radial(
-                        &[
-                            (0., shade(rgb, tone + 0.3, 1.)),
-                            (0.42, shade(rgb, tone, 1.)),
-                            (0.82, shade(rgb, tone - 0.28, 1.)),
-                            (0.96, shade(rgb, tone - 0.48, 0.9)),
-                            (1., shade(rgb, tone - 0.48, 0.)),
-                        ],
-                        25.,
-                        23.,
-                    )
-                })
-                .collect(),
-            boost_glow: radial(
-                &[
-                    (0., shade(rgb, 0.2, 0.68)),
-                    (0.2, shade(rgb, 0.2, 0.55)),
-                    (0.58, shade(rgb, 0.1, 0.2)),
-                    (0.85, shade(rgb, 0., 0.04)),
-                    (1., shade(rgb, 0., 0.)),
-                ],
-                32.,
-                32.,
-            ),
-        })
-        .collect();
-    let food = [
-        "#ffd35a", "#74dd9a", "#a9a4f2", "#ee9276", "#68c9e8", "#ed92cb", "#c0d476", "#e9b78b",
-        "#8ba9e9", "#d6dde3",
-    ]
-    .into_iter()
-    .enumerate()
-    .map(|(palette, color)| {
-        let family = |kind| {
-            (0..8)
-                .map(|index| {
-                    let width = 15 + 4 * index;
-                    let height = 13 + 2 * index;
-                    let radius = (f64::from(height) / 2. - if kind == 0 { 2. } else { 0. }).max(1.);
-                    circle(
-                        width,
-                        height,
-                        if kind == 1 { "#17202a" } else { color },
-                        Some(if kind == 2 { 0.25 } else { 1. }),
-                        radius,
-                    )
-                })
-                .collect()
-        };
-        EntitySourcePalette {
-            color: palette as u32,
-            count: 8,
-            bodies: family(0),
-            outlines: family(1),
-            glows: family(2),
-        }
-    })
-    .collect();
-    let prey = [
-        "#ffcf62", "#82d5aa", "#b2a3ef", "#ec957c", "#79c9e4", "#df9bc8", "#c3d87a", "#e1b991",
-        "#94b4ea",
-    ]
-    .into_iter()
-    .enumerate()
-    .map(|(palette, color)| {
-        let family = |count, glow| {
-            (0..count)
-                .map(|index| {
-                    let width = if glow { 57 + index * 8 } else { 21 + index * 4 };
-                    let height = if glow { 53 + index * 6 } else { 19 + index * 4 };
-                    circle(
-                        width,
-                        height,
-                        color,
-                        Some(if glow { 0.18 } else { 1. }),
-                        f64::from(height) / if glow { 2. } else { 3. },
-                    )
-                })
-                .collect()
-        };
-        EntitySourcePalette {
-            color: palette as u32,
-            count: 4,
-            bodies: family(4, false),
-            outlines: vec![],
-            glows: family(3, true),
-        }
-    })
-    .collect();
     AuthoredSourceRecipes {
         palette_rgb,
         palettes,
@@ -316,40 +207,8 @@ pub fn authored_source_recipes() -> AuthoredSourceRecipes {
                 PaintCommand::FillRect([0., 0., 512., 512.]),
             ],
         ),
-        body_sources: BodySourceRecipes {
-            palettes: body_palettes,
-            outline: radial(
-                &literal_stops(&[
-                    (0., "rgba(23,34,45,1)"),
-                    (0.88, "rgba(23,34,45,1)"),
-                    (0.95, "rgba(23,34,45,0.7)"),
-                    (1., "rgba(23,34,45,0)"),
-                ]),
-                32.,
-                32.,
-            ),
-            shadow: radial(
-                &literal_stops(&[
-                    (0., "rgba(0,0,0,0.55)"),
-                    (0.52, "rgba(0,0,0,0.42)"),
-                    (0.8, "rgba(0,0,0,0.16)"),
-                    (1., "rgba(0,0,0,0)"),
-                ]),
-                32.,
-                32.,
-            ),
-            death_highlight: radial(
-                &literal_stops(&[
-                    (0., "rgba(255,255,255,0.9)"),
-                    (0.45, "rgba(255,255,255,0.48)"),
-                    (0.9, "rgba(255,255,255,0.15)"),
-                    (1., "rgba(255,255,255,0)"),
-                ]),
-                25.,
-                23.,
-            ),
-        },
-        food,
-        prey,
+        body_sources: standard::bodies(),
+        food: standard::food(),
+        prey: standard::prey(),
     }
 }

@@ -20,6 +20,12 @@ export function authoredSourceRealm({ decode, events = [] } = {}) {
           else { canvas.commands.push(['radialGradient', value.circles, value.stops]); events.push(['selectGradient', id]); }
         },
         set globalAlpha(value) { call('globalAlpha', value); },
+        set globalCompositeOperation(value) { call('composite', value); },
+        set shadowBlur(value) { call('shadowBlur', value); },
+        set shadowOffsetY(value) { call('shadowOffsetY', value); },
+        set shadowColor(value) { call('shadowColor', value); },
+        createImageData(width, height) { return {width, height, data: new Uint8ClampedArray(width*height*4)}; },
+        putImageData(image, x, y) { call('pixels', image.width, image.height, new Uint8Array(image.data), x, y); },
         createRadialGradient(...circles) {
           events.push(['gradient', id, ...circles]);
           return { circles, stops: [], addColorStop(offset, color) { this.stops.push([offset, color]); events.push(['stop', id, offset, color]); } };

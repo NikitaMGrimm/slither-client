@@ -11,12 +11,11 @@ pub fn resolve_skin(
     skin_record(native_resolve_skin(skin, custom_bytes, no_segment_rotation).map_err(error)?)
 }
 
-/// Pure local selection: built-in patterns project over three authored families,
-/// preserving run counts/order with seven ping-pong variants. Admitted custom
-/// runs project after normal admission with first-variant shading. Projection
-/// collisions stay separate. Built-ins 25/44/63/64 reuse ordinary paired-eye
-/// policy; admitted custom runs keep plain eyes. No antenna or face images.
-/// This is not stock artwork.
+/// Pure local selection preserves standard palette IDs, run counts/order and
+/// shading across procedural body families. Admitted custom runs retain normal
+/// admission and first-variant shading. Built-ins 25/44/63/64 reuse ordinary
+/// paired-eye policy; admitted custom runs keep plain eyes. Local body geometry
+/// stays default, with no antenna or face images. Visual acceptance is separate.
 #[wasm_bindgen]
 pub fn resolve_local_skin(skin: u8, custom_bytes: &[u8]) -> Result<JsValue, JsValue> {
     skin_record(resolve_authored_local_skin(skin, custom_bytes).map_err(error)?)
