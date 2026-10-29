@@ -785,6 +785,40 @@
     const getItem = realm.Storage?.prototype.getItem;
     if (!storage || typeof getItem !== 'function') throw new Error('Native storage reader unavailable');
     native.readAccessory = () => Reflect.apply(getItem, storage, ['cosmetic']);
+    // Optional one-image load commitment. The pinned host uses these cached
+    // images once per load; this does not fence arbitrary image mutations.
+    try {
+      const Image = realm.HTMLImageElement, image = Image.prototype;
+      const reads = ['src', 'currentSrc', 'complete', 'naturalWidth', 'naturalHeight']
+        .map(name => Object.getOwnPropertyDescriptor(image, name)?.get);
+      const decode = image.decode, then = realm.Promise?.prototype.then;
+      const add = realm.EventTarget?.prototype.addEventListener, remove = realm.EventTarget?.prototype.removeEventListener;
+      if (reads.some(read => typeof read !== 'function') || [decode, then, add, remove].some(fn => typeof fn !== 'function')) {
+        throw new TypeError('Accessory native load capabilities unavailable');
+      }
+      native.accessorySource = Object.freeze({
+        inspect(source) {
+          if (!(source instanceof Image)) throw new TypeError('Existing native accessory image required');
+          return reads.map(read => Reflect.apply(read, source, []));
+        },
+        decode: source => Reflect.apply(decode, source, []),
+        then: (promise, success, failure) => Reflect.apply(then, promise, [success, failure]),
+        listen(source, invalidate) {
+          Reflect.apply(add, source, ['load', invalidate]);
+          try { Reflect.apply(add, source, ['error', invalidate]); }
+          catch (error) { try { Reflect.apply(remove, source, ['load', invalidate]); } catch {} throw error; }
+          return () => {
+            let failed = false, primary;
+            for (const type of ['load', 'error']) {
+              try { Reflect.apply(remove, source, [type, invalidate]); }
+              catch (error) { if (!failed) { failed = true; primary = error; } }
+            }
+            if (failed) throw primary;
+          };
+        },
+        setTimeout: native.setTimeout, clearTimeout: native.clearTimeout, now: native.now,
+      });
+    } catch { /* No selection retains the existing capability requirements. */ }
     for (const name of ['requestAnimationFrame', 'setTimeout', 'setInterval']) replace(realm, name, () => 0);
     if (typeof realm.WebSocket !== 'function') throw new Error('Native WebSocket unavailable');
     const Socket = realm.WebSocket;

@@ -11,7 +11,7 @@ import { projectStartPageDouble } from './start-page-view-double.mjs';
 const root = new URL('../', import.meta.url);
 const webNames = ['stock-skin-provider.mjs', 'stock-client.mjs', 'stock-food-provider.mjs',
   'stock-host-snapshot.mjs', 'desktop-layout.mjs', 'stock-gameplay.mjs', 'stock-hud-dom.mjs',
-  'stock-hud-view.mjs', 'stock-skin-rules.mjs', 'stock-accessory-selection.mjs', 'stock-prey-provider.mjs', 'stock-asset-sources.mjs',
+  'stock-hud-view.mjs', 'stock-skin-rules.mjs', 'stock-accessory-selection.mjs', 'stock-cached-accessory.mjs', 'stock-accessory-load.mjs', 'stock-prey-provider.mjs', 'stock-asset-sources.mjs',
   'skin-provider.mjs', 'client-input.mjs', 'stock-session.mjs', 'stock-hud-contract.mjs',
   'stock-hud-state.mjs', 'handshake-session.mjs', 'stock-live-profile.mjs',
   'stock-leaderboard-state.mjs', 'stock-leaderboard-view.mjs',

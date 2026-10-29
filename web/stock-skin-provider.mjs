@@ -1,6 +1,6 @@
 import { createSkinProvider } from './skin-provider.mjs';
 import { normalCustomPalette, ownData, resolveStockSkin, stockInteger } from './stock-skin-rules.mjs';
-import { assertStockAccessorySource, readStockAccessorySelection, sameStockAccessorySelection } from './stock-accessory-selection.mjs';
+import { assertStockAccessorySource, readStockAccessorySelection, sameStockAccessorySelection, withStockAccessoryForward } from './stock-accessory-selection.mjs';
 
 // Original live-slot adapter. Host sources are borrowed, never loaded or painted.
 const freeze = Object.freeze;
@@ -123,7 +123,7 @@ function capture(raw, realm, appearanceMode) {
     assetCatalog: freeze(catalog), shapes: freeze(shapes), nicknamePaletteRgb });
 }
 
-function selectedAccessory(request, rule, snapshot) {
+function selectedAccessory(request, rule, snapshot, resolveForward) {
   const own = ownData(request, 'own');
   if (Object.hasOwn(request, 'own') && typeof own !== 'boolean') throw new TypeError('Explicit own must be boolean');
   const selected = own === true ? snapshot.accessory : null;
@@ -132,12 +132,16 @@ function selectedAccessory(request, rule, snapshot) {
     error.status = 'unsupported';
     throw error;
   }
+  if (selected?.appearanceForward) {
+    if (typeof resolveForward !== 'function') throw new TypeError('Rust accessory forward policy required');
+    return withStockAccessoryForward(selected, resolveForward(request.skin, request.customBytes ?? new Uint8Array()));
+  }
   return selected;
 }
 
-function hostRecipe(request, rule, snapshot) {
+function hostRecipe(request, rule, snapshot, resolveForward) {
   if (rule.unsupportedFeatures.length) return { status: 'unsupported' };
-  const accessory = selectedAccessory(request, rule, snapshot);
+  const accessory = selectedAccessory(request, rule, snapshot, resolveForward);
   const selected = new Map();
   const palettes = [];
   const referenced = new Set();
@@ -186,7 +190,7 @@ function hostRecipe(request, rule, snapshot) {
 }
 
 /** Trusted main-world borrowing seam; see the private controller binding API. */
-export function createStockSkinAdapter({ realm, readSnapshot, random, appearanceMode = 'face' }) {
+export function createStockSkinAdapter({ realm, readSnapshot, random, appearanceMode = 'face', resolveAccessoryForward }) {
   if (!['face', 'accessory'].includes(appearanceMode)) throw new TypeError('Invalid stock appearance mode');
   const constructors = freeze({ HTMLCanvasElement: ownData(realm, 'HTMLCanvasElement'),
     HTMLImageElement: ownData(realm, 'HTMLImageElement') });
@@ -212,7 +216,7 @@ export function createStockSkinAdapter({ realm, readSnapshot, random, appearance
     return JSON.stringify([sources, selection, Object.values(snapshot.slots), snapshot.nicknamePaletteRgb]);
   }
   const provider = createSkinProvider({ trusted: true, realm: constructors,
-    resolveHostRecipe: request => hostRecipe(request, resolveStockSkin(request, active.nsr), active),
+    resolveHostRecipe: request => hostRecipe(request, resolveStockSkin(request, active.nsr), active, resolveAccessoryForward),
     normalizeHostRecipe: value => value });
 
   function guarded(callback) {
@@ -255,7 +259,7 @@ export function createStockSkinAdapter({ realm, readSnapshot, random, appearance
         const rule = resolveStockSkin(request, snapshot.nsr);
         if (rule.unsupportedFeatures.length) throw new TypeError(`Unsupported stock appearance: ${rule.unsupportedFeatures.join(', ')}`);
         assertStockAccessorySource(snapshot.accessory, constructors);
-        const accessory = selectedAccessory(request, rule, snapshot);
+        const accessory = selectedAccessory(request, rule, snapshot, resolveAccessoryForward);
         const face = ['single-image', 'mouth-face'].includes(rule.eyes.kind)
           ? freeze({ kind: rule.eyes.kind, geometry: rule.eyes.geometry })
           : freeze({ kind: 'paired', eyes: rule.eyes, decoration: rule.faceDecoration

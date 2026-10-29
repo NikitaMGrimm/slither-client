@@ -122,3 +122,25 @@ test('captured mouth/body sources and readiness stay in one adapter operation th
   assert.equal(f.adapter.resolveRecipe({ skin: 0 }).revision, ready.revision);
   assert.equal(f.captures, 2); f.adapter.endOperation();
 });
+
+test('cached selection admission rejects wrong/missing entries before any load commitment', () => {
+  for (const [change, status] of [
+    [f => { f.realm.a_imgs[0] = undefined; }, 'pending'],
+    [f => { f.realm.a_imgs[0].loaded = false; }, 'pending'],
+    [f => { f.realm.a_imgs[0].img = null; }, 'pending'],
+    [f => { f.realm.a_imgs[0].img = f.canvas(); }, 'unsupported'],
+    [f => { f.realm.a_imgs[0].ww = 33; }, 'unsupported'],
+    [f => { f.realm.a_imgs[0].sc = 0; }, 'unsupported'],
+    [f => { f.realm.a_ct = 1.5; }, 'unsupported'],
+    [f => { Object.defineProperty(f.realm.a_imgs[0], 'img', { get() { assert.fail('Host getter invoked'); } }); }, 'unsupported'],
+  ]) {
+    const f = fixture();
+    f.realm.a_ct = 1;
+    f.realm.a_imgs = [{ loaded: true, img: new f.realm.HTMLImageElement(), ww: 32, hh: 32, sc: .25, px: 3, py: 7 }];
+    change(f);
+    const reader = createStockHostSnapshot({ realm: f.realm, observer: f.observer, readAccessory: () => '0',
+      resolveAccessoryId: () => 0, accessorySource: new Proxy({}, { get() { assert.fail('Load capability reached before admission'); } }) });
+    assert.throws(() => reader.capture(), error => error.status === status);
+    reader.dispose();
+  }
+});
