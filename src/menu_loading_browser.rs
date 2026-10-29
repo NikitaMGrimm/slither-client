@@ -7,7 +7,7 @@ use wasm_bindgen::{JsCast, prelude::*};
 pub fn menu_loading_view(code: &str, owners_mounted: bool) -> Result<JsValue, JsValue> {
     let view = crate::menu_loading::project_menu_loading(code, owners_mounted)
         .map_err(JsValue::from_str)?;
-    let object = js_sys::Object::create(&JsValue::NULL.unchecked_into());
+    let object: js_sys::Object = js_sys::Object::create(&JsValue::NULL.unchecked_into());
     for (key, value) in [
         ("visible", JsValue::from_bool(view.visible)),
         ("busy", JsValue::from_bool(view.busy)),
