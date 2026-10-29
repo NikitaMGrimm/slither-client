@@ -161,12 +161,52 @@ The recipe borrows the selected source through the existing shared catalog and
 normalizer, with `[+0, +0, width, height]` and the ten-field attachment above.
 Full-image extent remains explicit crop mode. No catalog, image creation,
 downloader, lazy-loading transition, fallback or chooser is provided. The caller
-supplies the full forward distance for every face family. Automatic stock
-forward selection needs a separately scoped pure Rust policy projection; this
-binding introduces no JavaScript formula or numeric table.
+supplies the full forward distance for every face family. The cached-entry path
+below instead uses a pure Rust appearance-forward projection; neither binding
+introduces a JavaScript formula or numeric table.
 
-The live host capture still rejects active accessories until its direct-image
-readiness/content commitment is separately provided. Startup loading,
-installed-host behavior, original artwork/pixels and gameplay acceptance remain
-separate. Native arithmetic and synthetic Wasm recordings establish only their
-documented inputs; see [verification](verification.md).
+## Already-ready live cached entry
+
+Live capture can borrow one already-loaded selected entry from `a_imgs`, bounded
+by its captured `a_ct`. Rust admits the persisted `cosmetic` string: absent or
+`-1` selects none, otherwise a canonical unsigned decimal ID must be inside the
+captured table (at most 4096 entries). The wire cosmetic is never consulted.
+Missing entry/image or `loaded: false` stays pending; malformed metadata rejects.
+No image, URL request, catalog copy or lazy load is created.
+
+The entry supplies its existing `img`, cached `ww/hh`, `sc` and `px/py`. Native
+image completeness and intrinsic dimensions must agree with the cached extents.
+The additive snapshot field `ownCachedAccessorySelection` has the same closed
+five-field shape as the explicit selection above, except its closed geometry is
+`{imageScale,pivotX,pivotY}`. The selected entry, ID, source, extents and those
+three fields stay fixed for the session; replacement requires a fresh session.
+The existing complete-geometry `ownAccessorySelection` API is unchanged. Supplying
+both forms rejects; cached metadata never invents a placeholder forward value.
+
+For the cached form only, `resolveAccessoryForward` binds the pure Rust
+`stock_accessory_forward` projection to the skin adapter. Both appearance and
+recipe use the same skin/custom input. Paired faces reuse their admitted eye
+forward distance, Mouth uses the ordinary default head-forward distance, and a
+selected SingleImage rejects. Accepted custom runs suppress special features
+first. Native appearance retention owns the resulting forward through death,
+Setup and wire-ID reuse. Session-fixed entry metadata is not relaxed by this
+per-appearance projection. Adapter and controller both select accessory mode
+before ingress; no-selection defaults retain face mode.
+
+The optional document-start `accessorySource` capability captures native image
+getters, decode, promise/listener methods and timers. One selected image receives
+listeners before one decode; capture stays pending until decode succeeds within
+5000 ms with unchanged private source/load fingerprint and ready dimensions.
+Only then does the source receive its own **trusted load commitment** revision.
+Rejection, deadline, load/error event or observed fingerprint/extent/completeness
+drift permanently invalidates the lease for that session. Normal capture and
+operation completion recheck it. Disposal removes listeners/timers; late decode
+settlement is inert. URLs are neither returned nor logged, and no pixels are read.
+
+This commitment trusts the pinned host's load-once use of the already-loaded
+image. It is not proof of arbitrary image immutability: **same-URL reassignment
+can evade checks before its load/error event**. Decode proves neither immutable
+pixels nor pre-event mutation protection. No source/attribute setter fencing is
+provided. Startup loading, installed-host behavior, original artwork/pixels and
+gameplay acceptance remain separate. Synthetic native/Wasm and inert gate tests
+establish only their documented inputs; see [verification](verification.md).
