@@ -216,7 +216,8 @@ test('local pattern controls restore reload preview and explicit Play retain ful
       return{graph,runtime,logins,recipes,panel,menu,text,click};
     }
     for(const seed of[undefined,'1:5361766564:41:','1:5361766564:09:','1:5361766564:0a:','1:5361766564:0f:','1:5361766564:1d:',
-      '1:5361766564:00:','1:5361766564:01:','1:5361766564:02:']){
+      '1:5361766564:00:','1:5361766564:01:','1:5361766564:02:',
+      '1:5361766564:19:','1:5361766564:2c:','1:5361766564:3f:','1:5361766564:40:']){
       const f=await launch(seed);
       try{
         let id=seed?Number.parseInt(seed.split(':')[2],16):0;
@@ -224,21 +225,22 @@ test('local pattern controls restore reload preview and explicit Play retain ful
         if(seed)assert.equal(f.graph.f.realm.localStorage.getItem('slither-client.menu.v1'),seed);
         if(id===0){f.click('Previous skin');id=65;assert.equal(f.recipes.at(-1).skin,65);
           f.click('Next skin');id=0;assert.equal(f.recipes.at(-1).skin,0);}
-        for(const chosen of[9,10,15,29,65]){
+        const finalSkin = [25,44,63,64].includes(id) ? id : 65;
+        for(const chosen of[9,10,15,29,65,finalSkin]){
           while(id!==chosen){f.click('Next skin');id=(id+1)%66;}
           assert.equal(f.recipes.at(-1).skin,chosen);assert.equal(f.text(f.menu.children[1]),`Skin ${chosen+1} of 66`);
           assert.equal(f.graph.f.sockets,0);assert.deepEqual(f.logins,[]);
         }
         f.click('Build a skin');f.click('Next color');f.click('Longer stripe');f.click('Add stripe');
-        const expected=[0,0,0,0,0,0,0,0,2,1,1,1];assert.deepEqual(f.recipes.at(-1),{skin:65,custom:expected,own:false});
+        const expected=[0,0,0,0,0,0,0,0,2,1,1,1];assert.deepEqual(f.recipes.at(-1),{skin:finalSkin,custom:expected,own:false});
         const saved=f.graph.f.realm.localStorage.getItem('slither-client.menu.v1');
-        assert.equal(saved.split(':')[2],'41');assert.equal(f.graph.f.sockets,0);assert.deepEqual(f.logins,[]);
+        assert.equal(saved.split(':')[2],finalSkin.toString(16).padStart(2,'0'));assert.equal(f.graph.f.sockets,0);assert.deepEqual(f.logins,[]);
         const reload=await launch(saved);
         try{
-          assert.deepEqual(reload.recipes.at(-1),{skin:65,custom:expected,own:false});
+          assert.deepEqual(reload.recipes.at(-1),{skin:finalSkin,custom:expected,own:false});
           assert.equal(reload.graph.f.sockets,0);assert.deepEqual(reload.logins,[]);
           reload.graph.f.edit.dispatch('click',{target:reload.panel.children[2],button:0,trusted:true});reload.graph.f.flush();
-          assert.deepEqual(reload.logins,[{nickname:seed?'Saved':'',skin:65,custom:expected}]);
+          assert.deepEqual(reload.logins,[{nickname:seed?'Saved':'',skin:finalSkin,custom:expected}]);
           assert.equal(reload.graph.f.sockets,0,'the existing native frame commit still precedes construction');
           reload.graph.f.frame(8);reload.graph.f.flush();assert.equal(reload.graph.f.sockets,1);
           assert.equal(reload.logins.length,1);reload.runtime.dispose();reload.graph.f.flush();assert.equal(reload.graph.f.sockets,1,'no reconnect');

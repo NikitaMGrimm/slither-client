@@ -13,7 +13,7 @@ fn custom(pairs: &[(u8, u8)]) -> Vec<u8> {
 }
 
 #[test]
-fn authored_local_builtin_patterns_preserve_runs_with_plain_local_style() {
+fn authored_local_builtin_patterns_preserve_runs_with_supported_local_style() {
     for skin in 0..=255 {
         let stock = selected(skin);
         for bytes in [
@@ -37,7 +37,12 @@ fn authored_local_builtin_patterns_preserve_runs_with_plain_local_style() {
             assert!(!descriptor.custom);
             assert_eq!(descriptor.variant_mode, BodyVariantMode::PingPong);
             assert_eq!(descriptor.variant_period, 7);
-            assert_eq!(descriptor.face, FaceGeometry::default());
+            let expected_face = if matches!(skin, 25 | 44 | 63 | 64) {
+                stock.face
+            } else {
+                FaceGeometry::default()
+            };
+            assert_eq!(descriptor.face, expected_face);
             assert_eq!(descriptor.face_sources, SkinFaceSources::None);
             assert_eq!(descriptor.antenna, None);
             assert_eq!(descriptor.body_style, selected(0).body_style);
@@ -647,5 +652,43 @@ fn authored_local_custom_projection_is_unchanged_across_every_requested_byte() {
                 assert_eq!(resolve_authored_local_skin(skin, &bytes).unwrap(), expected);
             }
         }
+    }
+}
+
+#[test]
+fn local_ordinary_faces_reuse_all_authoritative_fields_but_not_source_roles() {
+    for (skin, color, alpha, pupil_color, pupil_radius) in [
+        (25, [255, 86, 9], 1., [0; 3], 3.5),
+        (44, [212; 3], 0.75, [0; 3], 3.5),
+        (63, [0; 3], 1., [204; 3], 2.5),
+        (64, [255, 255, 128], 1., [0; 3], 3.5),
+    ] {
+        let expected = FaceGeometry::Paired(PairedFaceGeometry {
+            eyes: StandardEyeGeometry {
+                eye_color: color,
+                eye_alpha: alpha,
+                pupil_color,
+                pupil_radius,
+                ..StandardEyeGeometry::default()
+            },
+            decoration: None,
+        });
+        assert_eq!(selected(skin).face, expected);
+        for bytes in [vec![], vec![255; 255], custom(&[(0, 0), (1, 36)])] {
+            let local = resolve_authored_local_skin(skin, &bytes).unwrap();
+            assert_eq!(local.face, expected);
+            assert_eq!(local.face_sources, SkinFaceSources::None);
+            assert_eq!(local.antenna, None);
+            assert_eq!(local.body_style, selected(0).body_style);
+        }
+        let bytes = custom(&[(2, 0), (3, 2)]);
+        let mut admitted = resolve_authored_local_skin(skin, &bytes).unwrap();
+        assert_eq!(admitted.face, FaceGeometry::default());
+        admitted.runs[0].count = 999;
+        assert_eq!(
+            resolve_authored_local_skin(skin, &bytes).unwrap().runs[0].count,
+            2
+        );
+        assert_eq!(resolve_authored_local_skin(skin, &[0; 256]), Err(SkinError));
     }
 }

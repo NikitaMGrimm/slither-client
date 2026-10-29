@@ -14,12 +14,16 @@ seam, projecting each palette ID modulo three onto the existing authored source
 families. Projection collisions stay separate, including adjacent equal palettes
 and equal cycle endpoints. For example, built-in 10 becomes runs `(0,5), (1,5),
 (1,5)`, with base palette zero. Seven-variant ping-pong shading, default body
-style, plain paired eyes and no antenna remain the local policy, including for
-stock selections that normally require special artwork or dense sources.
+style and no antenna remain the local policy. Built-ins 25, 44, 63 and 64 reuse
+the existing Rust ordinary paired-eye colors/geometry; other built-ins retain
+plain paired eyes, including image-dependent 27, 40 and 41. No face images or
+dense sources are added.
 
 Admitted custom runs keep their existing normal palette admission, adjacent
 coalescing before projection, ignored unmatched final byte and 255-byte bound.
-They project modulo three without further merging and use first-variant shading.
+They project modulo three without further merging, keep plain paired eyes and
+use first-variant shading. Empty or rejected custom data restores the selected
+built-in face policy.
 The requested skin byte stays unchanged. This adds built-in stripe layouts over
 three stand-in families, not stock colors, image roles, catalog/unlock authority
 or more local chooser choices. The real-Wasm smoke source covers the policy and

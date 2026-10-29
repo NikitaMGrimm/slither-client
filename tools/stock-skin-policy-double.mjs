@@ -8,7 +8,9 @@ export function resolveLocalSkinDouble(skin, customBytes = new Uint8Array()) {
   const rule = resolveSkinDouble(skin % 3, customBytes, false);
   const runs = (rule.custom ? rule.runs : resolveStockSkin({ skin }).runs)
     .map(({ palette, count }) => ({ palette: palette % 3, count }));
-  return { ...rule, skin, runs, basePalette: runs[0].palette };
+  const eyes = !rule.custom && [25, 44, 63, 64].includes(skin)
+    ? { ...resolveStockSkin({ skin }).eyes } : rule.eyes;
+  return { ...rule, skin, runs, basePalette: runs[0].palette, eyes };
 }
 export function validCustomPaletteMaskDouble(mask) {
   return mask.length === 256 && mask.every((value, palette) => value === Number(normalCustomPalette(palette)));

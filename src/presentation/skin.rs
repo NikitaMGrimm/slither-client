@@ -162,7 +162,9 @@ impl Error for SkinError {}
 /// three, with seven ping-pong variants. Admitted custom runs use the same palette
 /// projection after normal admission, with first-variant shading. Neither path
 /// merges projection collisions or the cycle seam.
-/// Both paths retain plain paired eyes, no antenna and the requested skin byte.
+/// Built-ins 25, 44, 63 and 64 reuse their existing ordinary paired-eye policy.
+/// Other built-ins and admitted custom runs retain plain paired eyes. Both paths
+/// retain no antenna, no face images and the requested skin byte.
 /// These authored family IDs do not claim stock 42-palette color equivalence.
 pub fn resolve_authored_local_skin(
     skin: u8,
@@ -172,6 +174,9 @@ pub fn resolve_authored_local_skin(
     descriptor.skin = skin;
     if !descriptor.custom {
         descriptor.runs = builtin(skin);
+        if matches!(skin, 25 | 44 | 63 | 64) {
+            descriptor.face = resolve_skin(skin, &[], false)?.face;
+        }
     }
     for run in &mut descriptor.runs {
         run.palette %= 3;

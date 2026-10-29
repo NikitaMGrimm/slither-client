@@ -17,8 +17,10 @@ The local route shares gameplay's pure Rust local skin policy: requested built-i
 run counts/order and the cycle seam project over its three existing authored
 families, without merging palette collisions. Built-ins retain seven-variant
 ping-pong shading; admitted custom stripes retain first-variant shading and their
-existing admission/projection rules. Plain paired faces, default body style and
-no antenna or face images remain. The local chooser exposes the 66 represented
+existing admission/projection rules and plain paired eyes. Built-ins 25, 44, 63
+and 64 reuse the existing Rust orange, gray, black/gray-small-pupil and pale-yellow
+ordinary paired-eye policies respectively, also in gameplay. Other built-ins keep
+plain paired eyes; default body style, no antenna and no face images remain. The local chooser exposes the 66 represented
 built-in IDs through its existing controls and persistence. Local custom colors
 remain 0, 1 and 2; values 66 through 255 are not chooser choices. These patterns
 use authored stand-ins, not stock 42-color artwork. The stock route uses the same

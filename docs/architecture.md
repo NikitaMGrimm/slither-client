@@ -70,15 +70,17 @@ real-Wasm oracle checks cover arithmetic and boundary admission, not browser pix
 See the [roadmap](roadmap.md) for remaining work.
 
 Local rendering binds a pure Rust skin resolver after Wasm initialization. Rust
-selects the existing three authored color stand-ins, plain paired eyes and
-seven-variant shading cadence. The asset map supplies shaded body, boost-glow,
+selects the existing three authored color stand-ins and seven-variant shading
+cadence. Built-ins 25/44/63/64 reuse the existing ordinary paired-eye numeric
+policy; other built-ins and admitted custom runs keep plain paired eyes. The asset map supplies shaded body, boost-glow,
 outline, shadow and death-highlight canvases; JavaScript binds those source
 objects through the existing provider. Admitted custom runs use first-variant
 shading and project each palette modulo three, preserving admitted run counts
 and order without merging projection collisions. Empty or rejected custom data
 uses the requested built-in run pattern with each palette projected modulo three,
 preserving run counts, order and cycle seams with seven-variant shading. The local
-chooser offers all 66 represented authored-pattern choices over the same three palettes, with plain paired faces and no antenna. These authored families do not imply
+chooser offers all 66 represented authored-pattern choices over the same three palettes,
+with the four supported ordinary paired-face variants and no antenna or face images. These authored families do not imply
 stock 42-color equivalence. The production stock adapter separately binds the
 existing Rust resolve_skin for built-in/custom runs, face/antenna geometry and
 rotation policy, and validates the host custom mask through the same Rust

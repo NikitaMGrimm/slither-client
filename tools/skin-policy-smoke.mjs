@@ -60,7 +60,7 @@ export function skinPolicySmoke(wasm) {
   const projected = Uint8Array.of(...custom([1, 5], [9, 36], [0, 7], [2, 5], [2, 41], [3, 39], [1, 5]), 255);
   const localCustom = { ...resolveStockSkin({ skin: 0, customBytes: custom([3, 2], [2, 2], [3, 0], [1, 2]) }),
     basePalette: 2, runs: [{ palette: 2, count: 3 }, { palette: 2, count: 2 }, { palette: 0, count: 3 }, { palette: 2, count: 1 }] };
-  for (const skin of [24, 27, 40, 41, 60, 255]) {
+  for (const skin of [24, 25, 27, 40, 41, 44, 60, 63, 64, 255]) {
     equal(wasm.resolve_local_skin(skin, projected), { ...localCustom, skin },
       `authored modulo-three projection preserves admitted run boundaries for ${skin}`);
   }
@@ -79,10 +79,13 @@ export function skinPolicySmoke(wasm) {
   };
   const bind = createLocalBodyResolver(bodySources,
     { HTMLCanvasElement: Canvas, HTMLImageElement: Image }, wasm.resolve_local_skin);
-  for (const skin of [9, 10, 15, 20, 29, 60]) {
+  for (const skin of [9, 10, 15, 20, 25, 29, 44, 60, 63, 64]) {
     const { recipe, status } = bind({ skin, customBytes: new Uint8Array() });
     equal(status, 'ready', 'local builtin through actual Wasm/provider');
     equal(recipe.runs, resolveLocalSkinDouble(skin).runs, 'builtin run boundaries survive source binding');
+    equal(recipe.eyes, [25, 44, 63, 64].includes(skin)
+      ? resolveStockSkin({ skin }).eyes : resolveStockSkin({ skin: 0 }).eyes,
+    'supported numeric face survives actual Wasm/source binding');
     equal([recipe.variantMode, recipe.variantPeriod, recipe.eyes.kind, recipe.attachment],
       ['ping-pong', 7, 'standard', null], 'local builtin keeps its supported shading/face roles');
     for (const run of recipe.runs) {
@@ -114,6 +117,13 @@ export function skinPolicySmoke(wasm) {
   copied.bodyStyle.rotateSegments = false;
   copied.eyes.pupilTravel = 999;
   compare(27, custom([3, 5]));
+  for (const skin of [25, 44, 63, 64]) {
+    const original = wasm.resolve_local_skin(skin, new Uint8Array());
+    equal(original.eyes, resolveStockSkin({ skin }).eyes, 'authoritative ordinary face');
+    original.eyes.pupilRadius = 999; original.runs[0].count = 999;
+    equal(wasm.resolve_local_skin(skin, new Uint8Array()).eyes, resolveStockSkin({ skin }).eyes, 'fresh local face');
+    assert.throws(() => wasm.resolve_local_skin(skin, new Uint8Array(256))); assertions++;
+  }
   const local = wasm.resolve_local_skin(41, new Uint8Array());
   local.runs[0].palette = 99;
   local.eyes.radius = 999;

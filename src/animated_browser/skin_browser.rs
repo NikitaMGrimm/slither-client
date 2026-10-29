@@ -14,7 +14,8 @@ pub fn resolve_skin(
 /// Pure local selection: built-in patterns project over three authored families,
 /// preserving run counts/order with seven ping-pong variants. Admitted custom
 /// runs project after normal admission with first-variant shading. Projection
-/// collisions stay separate; plain paired eyes and no antenna remain unchanged.
+/// collisions stay separate. Built-ins 25/44/63/64 reuse ordinary paired-eye
+/// policy; admitted custom runs keep plain eyes. No antenna or face images.
 /// This is not stock artwork.
 #[wasm_bindgen]
 pub fn resolve_local_skin(skin: u8, custom_bytes: &[u8]) -> Result<JsValue, JsValue> {

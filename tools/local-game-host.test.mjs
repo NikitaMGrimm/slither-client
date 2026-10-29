@@ -647,3 +647,36 @@ test('default local decode failure retains its primary and supplied host bypasse
   const result = await startDefault(options => { assert.equal(options.initialize, initialize); assert.equal(options.localHost, supplied); return marker; })({ realm: g.realm, localHost: supplied, initialize, wasmApi: {} });
   assert.equal(result, marker); assert.equal(g.canvases.length, 0);
 });
+
+// Generated ABI policy DOUBLE with actual local host/provider, no Rust/browser proof.
+import { resolveLocalSkinDouble } from './stock-skin-policy-double.mjs';
+import { resolveStockSkin } from './stock-skin-policy-oracle.mjs';
+test('local paired variants share numeric appearance and body recipes through retained host sources', async () => {
+  const f = fixture(), host = await create(f), adapter = host.sources.adapter;
+  host.bindSkinPolicy(resolveLocalSkinDouble);
+  try {
+    adapter.beginOperation();
+    try {
+      for (const skin of [25, 44, 63, 64]) {
+        for (const customBytes of [new Uint8Array(), Uint8Array.of(0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 1, 2)]) {
+          const request = { skin, customBytes, cosmetic: 0, own: false, x: 112, y: 0 };
+          const appearance = adapter.resolveAppearance(request), recipe = adapter.resolveRecipe(request).recipe;
+          const expected = resolveStockSkin({ skin: customBytes.length ? 0 : skin }).eyes;
+          assert.deepEqual(appearance.face.eyes, expected); assert.deepEqual(recipe.eyes, expected);
+          assert.equal(appearance.antenna, null); assert.deepEqual(appearance.face.decoration, { kind: 'none' });
+          assert.equal(recipe.attachment, null); assert.equal(recipe.antenna, undefined);
+          assert.equal(recipe.variantMode, customBytes.length ? 'first' : 'ping-pong');
+          assert.equal(recipe.variantPeriod, customBytes.length ? 1 : 7);
+          const repeated = adapter.resolveRecipe(request).recipe;
+          for (const [i, palette] of recipe.palettes.entries()) {
+            for (const [j, use] of palette.variants.entries()) {
+              assert.equal(use.asset.source, repeated.palettes[i].variants[j].asset.source);
+              assert(f.canvases.includes(use.asset.source));
+            }
+          }
+        }
+      }
+    } finally { adapter.endOperation(); }
+    assert.equal(f.sockets.length, 0);
+  } finally { host.dispose(); }
+});

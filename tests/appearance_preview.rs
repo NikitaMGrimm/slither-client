@@ -271,3 +271,39 @@ fn preview_accessory_rejects_invalid_extent_geometry_without_committing_draw() {
     assert_eq!(preview.revision(), ticket);
     assert!(preview.needs_draw(ticket));
 }
+
+#[test]
+fn local_paired_variants_reach_the_existing_preview_face_layout() {
+    let mut local = AppearancePreview::new(true);
+    let mut stock = AppearancePreview::new(false);
+    let mut plain = AppearancePreview::new(true);
+    let custom = [0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 3, 2];
+    plain.select(0, &[]).unwrap();
+    for skin in [25, 44, 63, 64] {
+        local.select(skin, &[]).unwrap();
+        stock.select(skin, &[]).unwrap();
+        let plan = local.plan(false).unwrap();
+        assert_eq!(
+            plan.descriptor.face,
+            resolve_skin(skin, &[], false).unwrap().face
+        );
+        assert_eq!(plan.face, stock.plan(false).unwrap().face);
+        assert_ne!(plan.face, plain.plan(false).unwrap().face);
+        assert!(plan.antenna.is_none());
+        assert!(matches!(
+            plan.face,
+            PreviewFace::Paired {
+                decoration: None,
+                ..
+            }
+        ));
+        let revision = local.select(skin, &custom).unwrap();
+        assert_eq!(local.skin(), skin);
+        assert_eq!(
+            local.plan(false).unwrap().face,
+            plain.plan(false).unwrap().face
+        );
+        local.mark_drawn(revision).unwrap();
+        assert!(!local.needs_draw(revision));
+    }
+}
