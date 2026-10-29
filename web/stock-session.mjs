@@ -35,58 +35,6 @@ function copiedBytes(value, length, name) {
   return copy;
 }
 
-// All subscription modes use this fold. Only the final commit touches live cells.
-function stageControls(commands, receivedMs, initial, hudSchema) {
-  const next = { ...initial, actions: { ...initial.actions } };
-  const guards = [], finalCaptureIndices = [];
-  for (let index = 0; index < commands.length; index++) {
-    const command = commands[index];
-    if (hudSchema) {
-      guards.push({ playing: next.playing, closeRequested: next.closeRequested, deathPending: next.deathMs !== null });
-      if (command[0] === 118 && command[1] !== 2 && next.playing && !next.closeRequested) finalCaptureIndices.push(index);
-    }
-    if (command[0] === 97) {
-      next.connected = true; next.playing = true; next.phase = 'playing';
-      next.previousUiMs = receivedMs; next.uiPhase = 'in';
-    } else if (command[0] === 112) {
-      next.pingPending = false; next.lagging = false;
-    } else if (command[0] === 118) {
-      if (command[1] === 2) next.closeRequested = true;
-      else {
-        next.deathMs = receivedMs; next.lifeEnded = true; next.lagging = false;
-        next.actions = { ...next.actions, resetLag: true }; next.actionRevision++;
-        if (next.playing && !next.closeRequested) {
-          if (command[1] === 1) next.phase = 'victory';
-          else { next.closeRequested = true; next.phase = 'dead'; }
-        }
-      }
-    }
-  }
-  const plan = hudSchema ? copyHudIngressPlan({ schema: hudSchema, commandCount: commands.length, guards, finalCaptureIndices }) : null;
-  return { next, plan };
-}
-
-function matchHudReport(report, commands, plan) {
-  let eventIndex = 0, captureIndex = 0, setups = 0;
-  for (let index = 0; index < commands.length; index++) {
-    const opcode = commands[index][0];
-    let expected;
-    if (opcode === 97) { expected = 'setup'; setups++; }
-    else if (opcode === 108 && plan.guards[index].playing) expected = 'leaderboard';
-    else if (plan.finalCaptureIndices[captureIndex] === index) { expected = 'final-score'; captureIndex++; }
-    const current = report.events[eventIndex];
-    if (expected) {
-      if (!current || current.commandIndex !== index || current.kind !== expected) throw new TypeError('Missing HUD event');
-      if (expected === 'leaderboard' && current.deathPending !== plan.guards[index].deathPending) throw new TypeError('Invalid HUD death guard');
-      eventIndex += expected === 'setup' ? 2 : 1;
-    } else if (current?.commandIndex === index) {
-      if (current.kind !== 'own-length-scheduled' || ![115, 110, 78, 43, 104, 114].includes(opcode)) throw new TypeError('Unexpected HUD event');
-      eventIndex++;
-    }
-  }
-  if (eventIndex !== report.events.length || setups !== report.setupDraws) throw new TypeError('Unexpected HUD events');
-}
-
 const nonSynchronousPrototypes = [async function () {}, function* () {}, async function* () {}].map(Object.getPrototypeOf);
 function synchronousHudSink(callback, foreignKinds = false) {
   if (typeof callback !== 'function') throw new TypeError('Synchronous HUD sink required');
@@ -125,56 +73,58 @@ export function stockEndpoint(input) {
 }
 
 /** No socket is constructed until an explicit Play and its native reset commit. */
-export function createStockSession({ wasm, createSocket, now, maxBufferedBytes = 4096 }) {
+export function createStockSession({ wasm, createSocket, now, maxBufferedBytes = 4096,
+  SessionPolicy = wasm?.SessionPolicy }) {
   for (const name of ['encode_login', 'solve_challenge', 'decode_frame', 'setup_protocol_version']) {
-    if (typeof wasm?.[name] !== 'function') throw new TypeError(`Wasm capability required: ${name}`);
+    if (typeof wasm?.[name] !== 'function') throw new TypeError('Wasm capability required: ' + name);
   }
   if (typeof createSocket !== 'function' || typeof now !== 'function') throw new TypeError('Session capabilities required');
   integer(maxBufferedBytes, 1048576, 'send budget');
-  let sink;
-  let subscribed = false;
-  let hudSchema = 0;
-  let phase = 'ready';
-  let connected = false;
-  let playing = false;
-  let lifeEnded = false;
-  let lagging = false;
-  let pingPending = false;
-  let lastPingMs = 0;
-  let closeRequested = false;
-  let reason = null;
-  let socket;
-  let generation = 0;
-  let constructorAttempts = 0;
-  let closedSocket = false;
-  let startedMs;
-  let launch;
-  let launchCommitted = false;
-  let busy = false;
-  let notifying = false;
-  let actions = {};
-  let actionRevision = 0;
-  let offeredActions;
-  let stepRevision;
-  let deathMs = null;
-  let returnFraction = 0;
-  let uiPhase = 'idle';
-  let previousUiMs = 0;
-  let handshakeFrames = 0;
-  let handshakeBytes = 0;
-  const terminal = () => phase === 'failed' || phase === 'disconnected';
-  const outsideIngress = () => { if (busy || notifying) throw new Error('Session reentry'); };
+  if (typeof SessionPolicy !== 'function' || typeof SessionPolicy.prototype?.free !== 'function'
+    || typeof SessionPolicy.valid_input !== 'function' || typeof SessionPolicy.protocol_allowed !== 'function' || typeof SessionPolicy.negotiation_packet !== 'function') throw new TypeError('Wasm SessionPolicy required');
+  const free = SessionPolicy.prototype.free, validInput = SessionPolicy.valid_input;
+  const protocolAllowed = SessionPolicy.protocol_allowed, negotiationPacket = SessionPolicy.negotiation_packet;
+  let policy = new SessionPolicy();
+  try {
+  let sink, socket, launch, offeredActions, retired;
+  let generation = 0, closedSocket = false, busy = false, notifying = false;
+  let leases = 0, releaseRequested = false, disposing = false;
+  const owner = () => { if (releaseRequested || !policy) throw new Error('Session disposed'); return policy; };
+  const terminal = () => releaseRequested || !policy || policy.terminal();
+  const outsideIngress = () => { if (busy || notifying) throw new Error('Session reentry'); owner(); };
   const time = () => finite(now(), 'clock');
-  function snapshot() {
-    return freeze({ phase, connected, playing, lifeEnded, lagging, pingPending,
-      lastPingMs, closeRequested, returnFraction, uiTimerNeeded: uiPhase === 'in',
-      reason, constructorAttempts });
+  // Wasm UTF-8 string conversion replaces lone surrogates. Reasons are arbitrary
+  // JS strings, so retain and copy their exact UTF-16 units at the object boundary.
+  function copiedSnapshot(current) {
+    const value = current.snapshot();
+    if (value.reason === null) return freeze({ ...value });
+    const pieces = [];
+    for (let i = 0; i < value.reason.length; i += 8192) {
+      pieces.push(String.fromCharCode(...value.reason.subarray(i, i + 8192)));
+    }
+    return freeze({ ...value, reason: pieces.join('') });
   }
+  function release() {
+    if (!releaseRequested || leases || !policy) return;
+    const current = policy; policy = undefined;
+    let failed = false, failure;
+    try { retired = copiedSnapshot(current); } catch (error) { failed = true; failure = error; }
+    try { Reflect.apply(free, current, []); } catch (error) { if (!failed) { failed = true; failure = error; } }
+    if (failed) throw failure;
+  }
+  // Resource leases contain no policy decisions. They keep synchronous host
+  // callbacks from releasing an owner that an enclosing operation still uses.
+  function leased(callback) {
+    owner(); leases++;
+    let failed = false;
+    try { return callback(); } catch (error) { failed = true; throw error; }
+    finally { leases--; try { release(); } catch (error) { if (!failed) throw error; } }
+  }
+  function snapshot() { return policy ? copiedSnapshot(policy) : retired; }
   function publish() {
     notifying = true;
     try { sink?.state(snapshot()); } finally { notifying = false; }
   }
-  function requestActions(next) { actions = { ...actions, ...next }; actionRevision++; }
   function detach(onError) {
     if (!socket) return;
     for (const key of ['onopen', 'onmessage', 'onerror', 'onclose']) {
@@ -184,15 +134,15 @@ export function createStockSession({ wasm, createSocket, now, maxBufferedBytes =
   function stop(nextPhase, code, error, hasError = false) {
     if (terminal()) return;
     const retainFailure = secondary => { if (!hasError) { hasError = true; error = secondary; } };
-    phase = nextPhase; reason = code; connected = false; playing = false;
-    lagging = false; pingPending = false; closeRequested = false; uiPhase = 'idle';
+    if (!owner().begin_stop(nextPhase === 'failed', Uint16Array.from({ length: code.length }, (_, index) => code.charCodeAt(index)))) return;
     launch?.login.fill(0); launch = undefined; generation++; detach(retainFailure);
-    requestActions({ resetWorld: true, connected: false });
+    // A nested disposal can request release during detach. The terminal
+    // transaction still owns its lease and must finish its already-admitted reset.
+    policy.stop_actions();
     if (socket && !closedSocket) {
       closedSocket = true;
       try { if (socket.readyState !== 3) socket.close(); } catch (closeError) { retainFailure(closeError); }
     }
-    // Notifications may run inside a native control callback: they must not reenter the scene.
     try { publish(); } catch (notificationError) { retainFailure(notificationError); }
     if (hasError) {
       notifying = true;
@@ -202,11 +152,13 @@ export function createStockSession({ wasm, createSocket, now, maxBufferedBytes =
   }
   function fail(error, code = 'session-failed') { stop('failed', code, error, true); }
   function guarded(callback) {
-    if (busy) throw new Error('Session reentry');
-    busy = true;
-    try { return callback(); }
-    catch (error) { fail(error); throw error; }
-    finally { busy = false; }
+    return leased(() => {
+      if (busy) throw new Error('Session reentry');
+      busy = true;
+      try { return callback(); }
+      catch (error) { fail(error); throw error; }
+      finally { busy = false; }
+    });
   }
   function send(bytes) {
     if (!socket || socket.readyState !== 1 || terminal()) throw new Error('Socket is not open');
@@ -218,223 +170,178 @@ export function createStockSession({ wasm, createSocket, now, maxBufferedBytes =
   function receive(data) {
     if (!(data instanceof ArrayBuffer) || data.byteLength > 1048576) throw new TypeError('Binary protocol frame required');
     const bytes = new Uint8Array(data);
-    if (!connected) {
-      handshakeFrames++; handshakeBytes += bytes.length;
-      if (handshakeFrames > 16 || handshakeBytes > 1048576) throw new Error('Handshake receive budget exceeded');
-    }
+    owner().receive_bytes(bytes.length);
     const commands = unpackCommands(wasm.decode_frame(bytes, false));
-    if (phase === 'challenge') {
-      if (commands.length !== 1 || commands[0][0] !== 54) throw new Error('Expected one challenge command');
+    if (owner().receive_header(commands.length, commands[0][0])) {
       const reply = copiedBytes(wasm.solve_challenge(commands[0].subarray(1)), 27, 'challenge reply');
       send(reply); send(launch.login.slice());
       launch.login.fill(0); launch = undefined;
-      phase = 'setup'; publish(); return;
+      owner().challenged(); publish(); return;
     }
-    if (!connected && phase !== 'setup') throw new Error('Unexpected protocol frame');
-    if (phase === 'setup' && commands[0][0] !== 97) throw new Error('Expected Setup after login');
-    // Controls are deliberately canonical; Rust additionally validates the entire world transaction.
     for (const command of commands) {
-      if (command[0] === 54) throw new Error('Repeated challenge');
-      if (command[0] === 97 && wasm.setup_protocol_version(command) !== 19) throw new Error('Unsupported protocol');
-      if (command[0] === 112 && command.length !== 1) throw new Error('Invalid pong');
-      if (command[0] === 118 && command.length !== 2) throw new Error('Invalid life control');
+      if (owner().command_requires_version(command[0], command.length)) {
+        const version = wasm.setup_protocol_version(command);
+        owner().admit_protocol(typeof version === 'number' ? version : NaN);
+      }
     }
     const receivedMs = time();
-    const { next, plan } = stageControls(commands, receivedMs, {
-      phase, connected, playing, lifeEnded, lagging, pingPending, closeRequested, deathMs,
-      previousUiMs, uiPhase, actions, actionRevision,
-    }, hudSchema);
+    const schema = owner().schema();
+    const pairs = Uint8Array.from(commands.flatMap(command => [command[0], command[1] ?? 0]));
+    const copiedPlan = owner().prepare_controls(pairs, receivedMs);
+    const plan = schema ? copyHudIngressPlan({ schema: copiedPlan.schema, commandCount: copiedPlan.commandCount,
+      guards: Array.from(copiedPlan.guards, guard => ({ playing: guard.playing,
+        closeRequested: guard.closeRequested, deathPending: guard.deathPending })),
+      finalCaptureIndices: Array.from(copiedPlan.finalCaptureIndices) }) : null;
     const packetGeneration = generation;
-    const applied = hudSchema ? sink.packet(bytes, false, plan) : sink.packet(bytes, false);
+    const applied = schema ? sink.packet(bytes, false, plan) : sink.packet(bytes, false);
     if (terminal() || generation !== packetGeneration) throw new Error('Session stopped during packet');
     let report;
-    if (hudSchema) {
+    if (schema) {
       report = copyHudIngressReport(applied, commands.length);
-      if (report.schema !== hudSchema) throw new TypeError('Invalid HUD data');
-      matchHudReport(report, commands, plan);
+      if (report.schema !== schema) throw new TypeError('Invalid HUD data');
+      const kinds = { setup: 0, 'setup-draw': 1, leaderboard: 2, 'final-score': 3, 'own-length-scheduled': 4 };
+      const events = Uint32Array.from(report.events.flatMap(event =>
+        [event.commandIndex, kinds[event.kind], event.deathPending === true ? 1 : 0]));
+      owner().match_report(events, report.setupDraws);
     } else if (applied !== undefined && (!Number.isInteger(applied) || applied < 0 || applied > 4096)) {
       throw new TypeError('Synchronous packet result required');
     }
-    // Reflection can run Proxy traps too; terminal state must win even then.
     if (terminal() || generation !== packetGeneration) throw new Error('Session stopped during packet');
-    ({ phase, connected, playing, lifeEnded, lagging, pingPending, closeRequested, deathMs,
-      previousUiMs, uiPhase, actions, actionRevision } = next);
-    if (hudSchema) {
+    owner().commit_controls();
+    if (schema) {
       notifying = true;
-      try {
-        if (sink?.hud(report) !== undefined) throw new TypeError('Synchronous HUD notification required');
-      } finally { notifying = false; }
+      try { if (sink?.hud(report) !== undefined) throw new TypeError('Synchronous HUD notification required'); }
+      finally { notifying = false; }
     }
     publish();
   }
   function construct() {
     const activeGeneration = ++generation;
     const active = () => generation === activeGeneration && !terminal();
-    startedMs = time();
-    constructorAttempts++;
+    owner().begin_construct(time());
     socket = createSocket(launch.endpoint);
     if (!socket || typeof socket.send !== 'function' || typeof socket.close !== 'function') throw new TypeError('Invalid socket capability');
     socket.binaryType = 'arraybuffer';
     socket.onopen = () => {
       if (!active()) return;
-      try {
-        guarded(() => {
-          if (phase !== 'opening') throw new Error('Unexpected socket open');
-          send(Uint8Array.of(1)); send(Uint8Array.of(99, 0));
-          phase = 'challenge'; publish();
-        });
-      } catch (error) { fail(error); }
+      try { guarded(() => {
+        owner().check_open();
+        send(Reflect.apply(negotiationPacket, SessionPolicy, [0]));
+        send(Reflect.apply(negotiationPacket, SessionPolicy, [1]));
+        owner().opened(); publish();
+      }); } catch (error) { fail(error); }
     };
     socket.onmessage = event => {
       if (!active()) return;
       try { guarded(() => receive(event.data)); } catch (error) { fail(error); }
     };
-    socket.onerror = event => { if (active()) fail(event instanceof Error ? event : new Error('Stock socket error'), 'socket-error'); };
-    socket.onclose = () => { if (active()) stop('disconnected', 'socket-closed'); };
+    socket.onerror = event => { if (active()) leased(() => fail(event instanceof Error ? event : new Error('Stock socket error'), 'socket-error')); };
+    socket.onclose = () => { if (active()) leased(() => stop('disconnected', 'socket-closed')); };
   }
   function foldAfterStep(request, requireHud = false) {
-    outsideIngress();
-    if (requireHud && !hudSchema) throw new Error('HUD subscription required');
-    if (stepRevision !== undefined) throw new Error('Previous control step is not committed');
-    finite(request?.nowMs, 'step time');
+    outsideIngress(); owner().check_step(requireHud);
+    const admittedNow = finite(request?.nowMs, 'step time');
     const delta = finite(request?.delta, 'lagged step');
-    integer(request?.wholeSteps, 5, 'whole steps');
+    const wholeSteps = integer(request?.wholeSteps, 5, 'whole steps');
     if (delta < 0 || delta > 5) throw new RangeError('Invalid lagged step');
-    let returnActive = false, returnCompleted = false;
-    if (deathMs !== null && request.nowMs - deathMs > 1600) {
-      if (uiPhase === 'idle') uiPhase = 'out';
-      if (uiPhase === 'out') {
-        returnActive = true;
-        returnFraction -= 0.004 * delta;
-        if (returnFraction <= 0) {
-          returnCompleted = true;
-          returnFraction = 0; deathMs = null; playing = false; uiPhase = 'idle';
-        }
-      }
-    }
-    if (closeRequested && deathMs === null && !terminal()) stop('disconnected', 'life-returned');
-    stepRevision = actionRevision;
-    if (launch && !socket && Object.hasOwn(actions, 'resetWorld')) launchCommitted = true;
-    return freeze({ actions: freeze({ ...actions }), lifecycle: freeze({ schema: 1,
-      deathPending: deathMs !== null, returnActive, returnCompleted, returnFraction }) });
+    // The original boundary rereads time only while death is pending. Coercion
+    // and caller getters finish before entering the Rust stage.
+    const stepNow = owner().has_death() ? request.nowMs - 0 : admittedNow;
+    const observed = owner().advance_step(stepNow, delta, wholeSteps);
+    if (observed.close) stop('disconnected', 'life-returned');
+    owner().finish_step(!!socket);
+    return freeze({ actions: freeze({ ...owner().pending_actions().actions }), lifecycle: freeze({ ...observed.lifecycle }) });
   }
   function subscribeHud(value, schema) {
-    if (subscribed || phase !== 'ready') throw new Error('One subscriber required before Play');
+    owner().check_subscribe();
     if (!value || (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null)) throw new TypeError('Expected data record');
     const next = record(value, ['packet', 'hud', 'state', 'error']);
     for (const name of ['packet', 'hud', 'state', 'error']) if (typeof next[name] !== 'function') throw new TypeError('Synchronous subscriber required');
     synchronousHudSink(next.hud, schema === 2);
-    if (subscribed || phase !== 'ready') throw new Error('One subscriber required before Play');
-    subscribed = true; sink = next; hudSchema = schema;
+    owner().check_subscribe(); owner().subscribe(schema); sink = next;
     return () => { sink = undefined; };
   }
-  return freeze({
+  const methods = {
     snapshot,
     subscribe(value) {
-      if (subscribed || phase !== 'ready') throw new Error('One subscriber required before Play');
+      owner().check_subscribe();
       const next = record(value, ['packet', 'state', 'error']);
       for (const name of ['packet', 'state', 'error']) if (typeof next[name] !== 'function') throw new TypeError('Synchronous subscriber required');
-      subscribed = true; sink = next;
+      owner().subscribe(0); sink = next;
       return () => { sink = undefined; };
     },
-    subscribeWithHud(value) {
-      return subscribeHud(value, 1);
-    },
-    subscribeWithLeaderboardRows(value) {
-      return subscribeHud(value, 2);
-    },
+    subscribeWithHud(value) { return subscribeHud(value, 1); },
+    subscribeWithLeaderboardRows(value) { return subscribeHud(value, 2); },
     play(value) {
       if (busy) throw new Error('Session reentry');
-      if (!sink || phase !== 'ready') throw new Error('One manual Play per session');
-      // Invalid requests leave readiness intact and construct nothing.
+      owner().check_play(!!sink);
       const request = record(value, ['endpoint', 'profile', 'nickname', 'skin', 'customSkin']);
       const profile = record(request.profile, ['clientVersion', 'password', 'protocolVersion']);
       integer(profile.clientVersion, 65535, 'client version');
-      if (profile.protocolVersion !== 19) throw new RangeError('Protocol 19 required');
+      if (typeof profile.protocolVersion !== 'number' || !Reflect.apply(protocolAllowed, SessionPolicy, [profile.protocolVersion])) throw new RangeError('Protocol 19 required');
       const password = copiedBytes(profile.password, 20, 'external profile');
       let endpoint, login;
       try {
         const custom = copiedBytes(request.customSkin, undefined, 'custom skin');
         if (custom.length > 255 || typeof request.nickname !== 'string' || !/^[\x20-\x7f]{0,24}$/.test(request.nickname)) throw new TypeError('Invalid login fields');
-        integer(request.skin, 255, 'skin');
-        endpoint = stockEndpoint(request.endpoint);
+        integer(request.skin, 255, 'skin'); endpoint = stockEndpoint(request.endpoint);
         login = copiedBytes(wasm.encode_login(profile.clientVersion, password, request.nickname, request.skin, custom), undefined, 'encoded login');
-      }
-      finally { password.fill(0); }
-      return guarded(() => {
-        launch = { endpoint, login }; phase = 'opening';
-        requestActions({ resetWorld: true, connected: false }); publish();
-      });
+      } finally { password.fill(0); }
+      return guarded(() => { launch = { endpoint, login }; owner().begin_play(); publish(); });
     },
     beforeUpdate(nowMs) {
-      outsideIngress();
-      finite(nowMs, 'update time');
-      if (!terminal() && startedMs !== undefined && !connected && nowMs - startedMs > 3333) {
-        fail(new Error('Stock handshake timed out'), 'handshake-timeout');
-      }
-      if (!terminal() && !lagging && pingPending && nowMs - lastPingMs > 750) lagging = true;
-      return freeze({ lagging, connected, playing });
+      outsideIngress(); finite(nowMs, 'update time');
+      if (owner().handshake_timed_out(nowMs)) fail(new Error('Stock handshake timed out'), 'handshake-timeout');
+      owner().observe_lag(nowMs);
+      const value = snapshot(); return freeze({ lagging: value.lagging, connected: value.connected, playing: value.playing });
     },
     pendingActions() {
-      outsideIngress();
-      offeredActions = freeze({ revision: actionRevision, actions: freeze({ ...actions }) });
-      return offeredActions;
+      outsideIngress(); const value = owner().pending_actions();
+      offeredActions = freeze({ revision: value.revision, actions: freeze({ ...value.actions }) }); return offeredActions;
     },
     acknowledgeActions(value) {
       outsideIngress();
-      if (value !== offeredActions || value.revision !== actionRevision) throw new Error('Stale action acknowledgement');
-      if (!Object.hasOwn(actions, 'resetLag')) throw new Error('No lag reset to acknowledge');
-      const { resetLag: consumed, ...remaining } = actions;
-      void consumed;
-      actions = remaining; actionRevision++; offeredActions = undefined;
+      if (value !== offeredActions || value.revision !== owner().pending_actions().revision) throw new Error('Stale action acknowledgement');
+      owner().acknowledge(value.revision); offeredActions = undefined;
     },
-    afterStep(request) {
-      return foldAfterStep(request).actions;
-    },
-    afterStepWithHud(request) {
-      return foldAfterStep(request, true);
-    },
-    commitControl() {
-      outsideIngress();
-      if (stepRevision === undefined) return;
-      if (stepRevision === actionRevision) { actions = {}; actionRevision++; }
-      stepRevision = undefined;
-      if (launchCommitted && launch && !socket && !terminal()) {
-        launchCommitted = false;
-        guarded(construct);
-      }
-    },
+    afterStep(request) { return foldAfterStep(request).actions; },
+    afterStepWithHud(request) { return foldAfterStep(request, true); },
+    commitControl() { outsideIngress(); if (owner().commit_control(!!socket)) guarded(construct); },
     betweenKeyboardAndBoost(context, emit) {
-      outsideIngress();
-      finite(context?.nowMs, 'ping time');
-      if (context?.protocolVersion !== 19 || typeof emit !== 'function') throw new TypeError('Protocol 19 ping capability required');
-      if (!connected || pingPending || context.nowMs - lastPingMs <= 250) return;
-      lastPingMs = context.nowMs; pingPending = true;
-      try { emit(Uint8Array.of(251)); } catch (error) { fail(error); throw error; }
+      outsideIngress(); finite(context?.nowMs, 'ping time');
+      const protocol = context?.protocolVersion;
+      if (typeof protocol !== 'number' || !Reflect.apply(protocolAllowed, SessionPolicy, [protocol]) || typeof emit !== 'function') throw new TypeError('Protocol 19 ping capability required');
+      if (!owner().ping_available() || !owner().ping_due(context.nowMs - 0)) return;
+      const intent = owner().commit_ping(context.nowMs - 0);
+      try { emit(intent); } catch (error) { fail(error); throw error; }
     },
     sendInput(value) {
-      outsideIngress();
-      const bytes = copiedBytes(value, undefined, 'input packet');
-      const valid = (bytes.length === 1 && bytes[0] <= 254)
-        || (bytes.length === 2 && bytes[0] === 252 && bytes[1] !== 0 && bytes[1] !== 128);
-      if (!valid || (bytes.length === 1 && bytes[0] === 252)) throw new TypeError('Invalid compact input packet');
-      if (!connected) throw new Error('Session is not connected');
+      outsideIngress(); const bytes = copiedBytes(value, undefined, 'input packet');
+      if (!Reflect.apply(validInput, SessionPolicy, [bytes])) throw new TypeError('Invalid compact input packet');
+      if (!snapshot().connected) throw new Error('Session is not connected');
       try { send(bytes); } catch (error) { fail(error); throw error; }
     },
-    uiTick(nowMs) {
-      outsideIngress();
-      finite(nowMs, 'UI time');
-      if (uiPhase !== 'in' || terminal()) return snapshot();
-      const units = (nowMs - previousUiMs) / 25;
-      previousUiMs = nowMs;
-      returnFraction += 0.05 * units;
-      if (returnFraction >= 1) { returnFraction = 1; uiPhase = 'idle'; }
-      return snapshot();
-    },
-    close(code = 'closed') {
-      outsideIngress();
-      if (typeof code !== 'string') throw new TypeError('Close reason required');
-      stop('disconnected', code);
-    },
-  });
+    uiTick(nowMs) { outsideIngress(); finite(nowMs, 'UI time'); owner().ui_tick(nowMs); return snapshot(); },
+    close(code = 'closed') { outsideIngress(); if (typeof code !== 'string') throw new TypeError('Close reason required'); stop('disconnected', code); },
+  };
+  const result = { snapshot };
+  for (const [name, method] of Object.entries(methods)) {
+    if (name !== 'snapshot') result[name] = (...args) => leased(() => method(...args));
+  }
+  result.dispose = (code = 'disposed') => {
+    if (disposing || releaseRequested || !policy) return;
+    return leased(() => {
+      outsideIngress(); disposing = true;
+      let failed = false, failure;
+      try { methods.close(code); } catch (error) { failed = true; failure = error; }
+      finally { releaseRequested = true; generation++; }
+      if (failed) throw failure;
+    });
+  };
+  return freeze(result);
+  } catch (error) {
+    const current = policy; policy = undefined;
+    if (current) { try { Reflect.apply(free, current, []); } catch { /* Constructor failure remains primary, even undefined. */ } }
+    throw error;
+  }
 }

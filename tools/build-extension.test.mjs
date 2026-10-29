@@ -36,7 +36,7 @@ function syntheticWasm(omit) {
   const leb = value => value < 128 ? [value] : [(value & 127) | 128, ...leb(value >>> 7)];
   const section = (id, bytes) => [id, ...leb(bytes.length), ...bytes];
   const entry = (name, kind, index) => [name.length, ...text(name), kind, index];
-  const functions = ['animatedscene_new', 'desktopquality_new', 'desktopinput_new',
+  const functions = ['animatedscene_new', 'desktopquality_new', 'desktopinput_new', 'sessionpolicy_new', 'sessionpolicy_prepare_controls', 'sessionpolicy_commit_controls', 'sessionpolicy_commit_control', 'sessionpolicy_protocol_allowed', 'sessionpolicy_negotiation_packet', 'sessionpolicy_commit_ping', 'sessionpolicy_valid_input', '__wbg_sessionpolicy_free',
     'animatedscene_apply_frame_and_render_standard_with_face_presentation_and_prey',
     'animatedscene_apply_frame_and_render_standard_with_face_presentation_and_prey_and_hud',
     'animatedscene_render_standard_with_face_presentation_at_size',
@@ -60,6 +60,7 @@ import { copyHudIngressPlan, copyHudIngressReport } from './${snippetName}';
 export class AnimatedScene {}
 export class DesktopQuality {}
 export class DesktopInput {}
+export class SessionPolicy {}
 export function desktop_backing_size() {}
 const url = new URL('slither_client_bg.wasm', import.meta.url);
 async function __wbg_init() {}
@@ -252,6 +253,9 @@ for (const [name, change, expected] of [
   ['non-Wasm bytes', f => f.write('dist/web/slither_client_bg.wasm', Buffer.from('not Wasm')), /valid version-1 WebAssembly/],
   ['truncated Wasm', f => f.write('dist/web/slither_client_bg.wasm', syntheticWasm().subarray(0, 10)), /valid version-1 WebAssembly/],
   ['empty valid Wasm', f => f.write('dist/web/slither_client_bg.wasm', syntheticWasm().subarray(0, 8)), /Wasm\/glue export mismatch/],
+  ['missing JavaScript session policy export',
+    f => f.write('dist/web/slither_client.js', syntheticGlue.replace('export class SessionPolicy {}\n', '')),
+    /generated web entrypoint/],
   ['missing JavaScript desktop input export',
     f => f.write('dist/web/slither_client.js', syntheticGlue.replace('export class DesktopInput {}\n', '')),
     /generated web entrypoint/],
@@ -284,7 +288,7 @@ for (const [name, change, expected] of [
   });
 }
 
-for (const name of ['desktopinput_new', 'animatedscene_control_view', 'animatedscene_advance_with_control', 'animatedscene_reset_lag',
+for (const name of ['desktopinput_new', 'sessionpolicy_new', 'sessionpolicy_prepare_controls', 'sessionpolicy_commit_controls', 'sessionpolicy_commit_control', 'sessionpolicy_protocol_allowed', 'sessionpolicy_negotiation_packet', 'sessionpolicy_commit_ping', 'sessionpolicy_valid_input', '__wbg_sessionpolicy_free', 'animatedscene_control_view', 'animatedscene_advance_with_control', 'animatedscene_reset_lag',
   'animatedscene_set_background_backdrop',
   'animatedscene_enable_nicknames',
     'animatedscene_enable_announcement_tracking', 'animatedscene_announcement_view',

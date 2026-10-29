@@ -1,3 +1,4 @@
+import { TestSessionPolicy } from './fixtures/session-policy-double.mjs';
 import { TestDesktopInput } from './fixtures/client-input-fixture.mjs';
 import { LeaderboardHistoryDouble } from './leaderboard-history-double.mjs';
 import { HudHistoryDouble } from './hud-history-double.mjs';
@@ -111,7 +112,7 @@ function harness({ configure, callback, rows = true } = {}) {
   };
   const options = { scene, quality, controller: routed, hudReadout: true, leaderboardRows: rows,
     leaderboardProjector: projector,
-    wasm: { DesktopInput: TestDesktopInput, LeaderboardHistory: LeaderboardHistoryDouble, HudHistory: HudHistoryDouble,
+    wasm: { DesktopInput: TestDesktopInput, SessionPolicy: TestSessionPolicy, LeaderboardHistory: LeaderboardHistoryDouble, HudHistory: HudHistoryDouble,
       encode_login(_version, _password, nickname) { hit('encode'); faults.encodedNickname = nickname; return Uint8Array.of(115); },
       solve_challenge() { return new Uint8Array(27); }, setup_protocol_version() { return 19; },
       decode_frame(bytes) {

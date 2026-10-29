@@ -1,3 +1,4 @@
+import { TestSessionPolicy } from './fixtures/session-policy-double.mjs';
 import { TestDesktopInput } from './fixtures/client-input-fixture.mjs';
 // Actual authored acquirer/gameplay/session with synthetic bytes and inert socket/capability doubles.
 import assert from 'node:assert/strict';
@@ -92,7 +93,7 @@ function harness(options = {}) {
       return actions;
     },
   };
-  const wasm = { DesktopInput: TestDesktopInput,
+  const wasm = { DesktopInput: TestDesktopInput, SessionPolicy: TestSessionPolicy,
     encode_login(version, password, nickname, skin, custom) {
       encoded.push({ version, password: [...password], nickname, skin, custom: [...custom] });
       options.onEncode?.(h);

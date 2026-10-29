@@ -17,6 +17,7 @@ pub mod desktop_layout;
 pub mod menu_preferences;
 pub mod presentation;
 pub mod protocol;
+pub mod session_policy;
 pub mod start_page;
 pub mod state;
 
@@ -34,6 +35,9 @@ mod browser;
 
 #[cfg(target_arch = "wasm32")]
 mod desktop_input_browser;
+
+#[cfg(target_arch = "wasm32")]
+mod session_policy_browser;
 
 #[cfg(target_arch = "wasm32")]
 mod canvas_browser;

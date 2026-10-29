@@ -9,10 +9,9 @@ the following exceptions:
 
 | JavaScript module | State or logic still outside Rust |
 | --- | --- |
-| `web/stock-session.mjs` | Mixed socket/callback plumbing and handshake, ping/lag, death/return and command-time lifecycle policy. |
 | `web/stock-gameplay.mjs` | Mixed capability/scheduling glue and input/session reconciliation, reset ordering and staged HUD state publication. |
 | `web/stock-client.mjs` | Mixed borrowed-source/Canvas/Wasm glue and update/draw/quality ordering with successful-draw statistics counters. |
-| `web/handshake-session.mjs` | Challenge/login/setup state machine and frame limits; Rust already owns encoding, decoding and challenge arithmetic. |
+| `web/handshake-session.mjs` | Standalone probe-only challenge/login/setup sequencing; production uses only packed-ABI record admission from this module. |
 | `web/stock-hud-view.mjs` | Binding/readiness composition around Rust-formatted current/final HUD values. |
 | `web/stock-skin-rules.mjs` | Appearance selection and numeric recipe policy; borrowed DOM source capture remains separate. |
 | `extension/game-runtime.mjs` | Mixed entry/DOM/capability plumbing and Play admission/availability state. |
@@ -32,6 +31,19 @@ before returning to synchronous host callbacks. `web/client-input.mjs` retains
 scalar/record admission, arbitrary `Object.is` token identity and callback order;
 it contains no numeric policy fallback. Session ping remains between keyboard
 and boost, and callbacks can update public input setters between phases.
+Browser-free `session_policy` owns production session phases, launch/reset commit,
+Setup and canonical-control admission, handshake budgets, pending action revisions,
+ping/lag thresholds and command-time death/final/return history. Its copied
+`SessionPolicy` Wasm stages return before socket, packet, HUD or state callbacks;
+terminal flags commit before detach, reset intents and close/notification effects.
+`web/stock-session.mjs` retains socket/listener/clock/send/close capabilities,
+URL/buffer/record admission, generation and callback-resource fences, issued
+action-record identity and exact JS errors. It has no production policy fallback.
+Close and native resets retain the owner; explicit disposal releases it once,
+with active resource leases deferring release and preserving primary failures.
+The separate `HandshakeSession` class is used only by standalone probes, never
+production gameplay. Its probe sequencing remains outside this migration.
+
 The default [player menu](menu-preferences.md) keeps appearance selection, custom
 run editing and bounded preference restore in Rust. Captured DOM/storage glue
 restores nickname/appearance and passes their copied bytes to explicit Play.

@@ -854,7 +854,7 @@ export function stockRenderSmoke(wasm, { control = true } = {}) {
           eq(failures, []); eq(f.captures, f.ends);
           cases.push(victory ? 'real-same-step-victory-return-lifecycle' : 'real-same-step-disconnect-return-lifecycle');
         } finally {
-          try { session?.close(); } finally { f.close(); }
+          try { session?.dispose(); } finally { f.close(); }
         }
       }
       for (const malformed of [() => Promise.resolve({}), () => ({ unknownAction: true }), () => ({ gazeHeading: NaN }),
