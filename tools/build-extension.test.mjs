@@ -258,6 +258,8 @@ for (const [name, change, expected] of [
     /generated web entrypoint/],
   ['missing JavaScript desktop sizing export',
     f => f.write('dist/web/slither_client.js', syntheticGlue.replace('export function desktop_backing_size() {}\n', '')),
+    /generated web entrypoint/],
+  ['missing JavaScript authored source recipes export',
     f => f.write('dist/web/slither_client.js', syntheticGlue.replace('export function authored_source_recipes() {}\n', '')),
     /generated web entrypoint/],
   ['wrong generated URL', f => f.write('dist/web/slither_client.js', syntheticGlue.replace('slither_client_bg.wasm', 'elsewhere.wasm')), /generated web entrypoint/],
