@@ -51,5 +51,17 @@ export function sessionPolicyLifetimeSmoke(wasm){let cases=0;
   h.session.dispose('valid-after-caller-error');h.session.dispose();assert.equal(counts.freed,1);assert.equal(closes,1);
   for(const key of ['onopen','onmessage','onerror','onclose'])assert.equal(socket[key],null);cases++;
  }
+
+ for(const previous of ['1000',{valueOf(){return 1000;}}])for(const outcome of ['numeric','opaque','throw-undefined']){
+  const{Policy,counts}=tracked(wasm.SessionPolicy,{failFree:outcome==='throw-undefined',freeFailure:{secondary:'free'}}),h=harness(Policy);h.connect();let closes=0;h.hooks.close=()=>{closes++;};
+  let firstReads=0;h.session.betweenKeyboardAndBoost({get nowMs(){return ++firstReads<3?1300:previous;},protocolVersion:19},()=>{});
+  h.socket.onmessage({data:Uint8Array.of(112).buffer});assert.equal(h.session.snapshot().lastPingMs,previous);assert.equal(h.session.snapshot().pingPending,false);
+  let reads=0,emits=0;const uncommitted={authored:'must not replace old clock'};
+  const result=capture(()=>h.session.betweenKeyboardAndBoost({get nowMs(){if(++reads<3)return 2000;h.session.dispose('clock-getter-dispose');assert.equal(counts.freed,0);if(outcome==='throw-undefined')throw undefined;return outcome==='numeric'?3000:uncommitted;},protocolVersion:19},()=>{emits++;}));
+  assert(result.thrown);if(outcome==='throw-undefined')assert.equal(result.value,undefined);else assert.match(result.value.message,/Session disposed/);
+  assert.equal(emits,0);assert.equal(closes,1);assert.equal(counts.freed,1);assert.equal(reads,3);
+  assert.equal(h.states.at(-1).lastPingMs,previous);assert.equal(h.session.snapshot().lastPingMs,previous,'rejected third-read commit preserves the retired clock identity');
+  assert.equal(h.session.snapshot().pingPending,false);h.session.dispose();assert.equal(counts.freed,1);assert.equal(closes,1);cases++;
+ }
  return{cases,evidence:'Explicit policy ownership, resource leases and exact primary errors; caller labels real Wasm versus test-only ABI; no browser/GC claim'};
 }

@@ -34,7 +34,10 @@ export class TestSessionPolicy {
   acknowledge(revision){if(revision!==this.actionRevision)fail('Stale action acknowledgement');if(!Object.hasOwn(this.actions,'resetLag'))fail('No lag reset to acknowledge');delete this.actions.resetLag;this.actionRevision++;}
   check_step(hud){if(hud&&!this.hudSchema)fail('HUD subscription required');if(this.stepRevision!==undefined)fail('Previous control step is not committed');}
   has_death(){return this.deathMs!==null;}
-  advance_step(now,delta){let returnActive=false,returnCompleted=false;if(this.deathMs!==null&&now-this.deathMs>1600){if(this.uiPhase==='idle')this.uiPhase='out';if(this.uiPhase==='out'){returnActive=true;this.returnFraction-=0.004*delta;if(this.returnFraction<=0){returnCompleted=true;this.returnFraction=0;this.deathMs=null;this.playing=false;this.uiPhase='idle';}}}return{close:this.closeRequested&&this.deathMs===null&&!this.terminal(),lifecycle:{schema:1,deathPending:this.deathMs!==null,returnActive,returnCompleted,returnFraction:this.returnFraction}};}
+  death_time(){return this.deathMs;}
+  static death_elapsed(now,death){return now-death;}
+  advance_step(now,delta){return this.advance_step_elapsed(this.has_death(),TestSessionPolicy.death_elapsed(now,this.deathMs),delta);}
+  advance_step_elapsed(present,elapsed,delta){let returnActive=false,returnCompleted=false;if(present&&elapsed>1600){if(this.uiPhase==='idle')this.uiPhase='out';if(this.uiPhase==='out'){returnActive=true;this.returnFraction-=0.004*delta;if(this.returnFraction<=0){returnCompleted=true;this.returnFraction=0;this.deathMs=null;this.playing=false;this.uiPhase='idle';}}}return{close:this.closeRequested&&this.deathMs===null&&!this.terminal(),lifecycle:{schema:1,deathPending:this.deathMs!==null,returnActive,returnCompleted,returnFraction:this.returnFraction}};}
   finish_step(hasSocket){this.stepRevision=this.actionRevision;if(this.launch&&!hasSocket&&Object.hasOwn(this.actions,'resetWorld'))this.launchCommitted=true;}
   commit_control(hasSocket){if(this.stepRevision===undefined)return false;if(this.stepRevision===this.actionRevision){this.actions={};this.actionRevision++;}this.stepRevision=undefined;if(this.launchCommitted&&this.launch&&!hasSocket&&!this.terminal()){this.launchCommitted=false;return true;}return false;}
   ping_available(){return this.connected&&!this.pingPending;}

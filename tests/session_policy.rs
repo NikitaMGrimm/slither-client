@@ -313,3 +313,82 @@ fn lag_comparison_admitted_before_host_coercion_is_not_regated_after_it() {
     assert!(p.view().lagging);
     assert!(!p.view().ping_pending);
 }
+
+#[test]
+fn captured_death_comparison_uses_post_coercion_controls_without_recapturing_time() {
+    let mut p = connected();
+    p.ui_tick(1500.0).unwrap();
+    p.prepare_controls(&[command(118, 1)], 1000.0).unwrap();
+    p.commit_controls().unwrap();
+    let present = p.has_death();
+    let captured = p.death_time();
+    let revision = p.actions().0;
+    // The host's ToNumeric callback commits a later death after the RHS capture.
+    p.prepare_controls(&[command(118, 1)], 3000.0).unwrap();
+    p.commit_controls().unwrap();
+    let elapsed = SessionPolicy::death_elapsed(2601.0, captured);
+    let (lifecycle, close) = p.advance_step_elapsed(present, elapsed, 5.0, 5.0).unwrap();
+    assert!(lifecycle.return_active);
+    assert_eq!(lifecycle.return_fraction, 0.98);
+    assert!(lifecycle.death_pending);
+    assert_eq!(p.death_time(), Some(3000.0));
+    assert!(!close);
+    assert_eq!(p.actions().0, revision + 1.0);
+    assert!(p.actions().1.reset_lag);
+}
+#[test]
+fn death_rhs_is_captured_after_getter_and_current_ui_is_not_replaced() {
+    let mut p = connected();
+    p.ui_tick(1500.0).unwrap();
+    p.prepare_controls(&[command(118, 1)], 1000.0).unwrap();
+    p.commit_controls().unwrap();
+    let present = p.has_death();
+    // A side effect in the getter precedes RHS evaluation.
+    p.prepare_controls(&[command(118, 1)], 3000.0).unwrap();
+    p.commit_controls().unwrap();
+    let captured = p.death_time();
+    let (lifecycle, _) = p
+        .advance_step_elapsed(
+            present,
+            SessionPolicy::death_elapsed(2601.0, captured),
+            5.0,
+            5.0,
+        )
+        .unwrap();
+    assert!(!lifecycle.return_active);
+    assert_eq!(lifecycle.return_fraction, 1.0);
+    // With the older RHS captured, a subsequent Setup still owns the live UI phase.
+    p.prepare_controls(&[command(97, 0)], 3000.0).unwrap();
+    p.commit_controls().unwrap();
+    let (lifecycle, _) = p.advance_step_elapsed(true, 1601.0, 5.0, 5.0).unwrap();
+    assert!(!lifecycle.return_active);
+    assert!(p.view().ui_timer_needed);
+    assert_eq!(lifecycle.return_fraction, 1.0);
+}
+#[test]
+fn initial_presence_gate_and_null_rhs_remain_distinct_after_host_callbacks() {
+    let mut p = connected();
+    p.ui_tick(1500.0).unwrap();
+    p.prepare_controls(&[command(118, 1)], 1000.0).unwrap();
+    p.commit_controls().unwrap();
+    for _ in 0..51 {
+        p.advance_step(3000.0, 5.0, 5.0).unwrap();
+    }
+    p.prepare_controls(&[command(118, 1)], 1000.0).unwrap();
+    p.commit_controls().unwrap();
+    let present = p.has_death();
+    assert!(present);
+    // A recursive host step during the second getter completes the new death.
+    p.advance_step(3000.0, 0.0, 0.0).unwrap();
+    assert_eq!(p.death_time(), None);
+    let elapsed = SessionPolicy::death_elapsed(2601.0, p.death_time());
+    assert_eq!(elapsed, 2601.0);
+    let (lifecycle, _) = p.advance_step_elapsed(present, elapsed, 5.0, 5.0).unwrap();
+    assert!(lifecycle.return_active && lifecycle.return_completed);
+    assert!(!lifecycle.death_pending);
+    let (lifecycle, _) = p
+        .advance_step_elapsed(false, f64::INFINITY, 5.0, 5.0)
+        .unwrap();
+    assert!(!lifecycle.return_active);
+    assert!(SessionPolicy::death_elapsed(-0.0, None).is_sign_negative());
+}

@@ -22,6 +22,21 @@ fn actions(a: session_policy::Actions) -> Result<JsValue, JsValue> {
         .collect::<Vec<_>>();
     record(&fields)
 }
+fn step_observation((l, close): (session_policy::Lifecycle, bool)) -> Result<JsValue, JsValue> {
+    record(&[
+        ("close", close.into()),
+        (
+            "lifecycle",
+            record(&[
+                ("schema", 1.into()),
+                ("deathPending", l.death_pending.into()),
+                ("returnActive", l.return_active.into()),
+                ("returnCompleted", l.return_completed.into()),
+                ("returnFraction", l.return_fraction.into()),
+            ])?,
+        ),
+    ])
+}
 /// Production phase/lifecycle owner. Every method returns before host effects run.
 #[wasm_bindgen]
 pub struct SessionPolicy {
@@ -227,22 +242,34 @@ impl SessionPolicy {
     pub fn has_death(&self) -> bool {
         self.inner.has_death()
     }
-    /// Return the lifecycle and a close intent before host effects.
+    /// Copy the right operand after the second host getter; null is preserved.
+    pub fn death_time(&self) -> JsValue {
+        self.inner
+            .death_time()
+            .map(JsValue::from)
+            .unwrap_or(JsValue::NULL)
+    }
+    /// Numeric difference of already captured operands; no live state is read.
+    pub fn death_elapsed(now: f64, death: Option<f64>) -> f64 {
+        Policy::death_elapsed(now, death)
+    }
+    /// Apply the original comparison to current post-callback state.
+    pub fn advance_step_elapsed(
+        &mut self,
+        present: bool,
+        elapsed: f64,
+        delta: f64,
+        whole: f64,
+    ) -> Result<JsValue, JsValue> {
+        step_observation(
+            self.inner
+                .advance_step_elapsed(present, elapsed, delta, whole)
+                .map_err(error)?,
+        )
+    }
+    /// Numeric native-style observation, retained for existing copied ABI callers.
     pub fn advance_step(&mut self, now: f64, delta: f64, whole: f64) -> Result<JsValue, JsValue> {
-        let (l, close) = self.inner.advance_step(now, delta, whole).map_err(error)?;
-        record(&[
-            ("close", close.into()),
-            (
-                "lifecycle",
-                record(&[
-                    ("schema", 1.into()),
-                    ("deathPending", l.death_pending.into()),
-                    ("returnActive", l.return_active.into()),
-                    ("returnCompleted", l.return_completed.into()),
-                    ("returnFraction", l.return_fraction.into()),
-                ])?,
-            ),
-        ])
+        step_observation(self.inner.advance_step(now, delta, whole).map_err(error)?)
     }
     /// Record the post-notification action revision.
     pub fn finish_step(&mut self, has_socket: bool) {

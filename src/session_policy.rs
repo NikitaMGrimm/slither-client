@@ -581,9 +581,29 @@ impl SessionPolicy {
     pub fn has_death(&self) -> bool {
         self.control.death_ms.is_some()
     }
-    /// Advance death/return arithmetic after initial metadata admission.
-    /// The second time observation may be nonfinite, matching the original getter boundary.
+    /// Capture the right operand after the host's second getter has returned.
+    pub fn death_time(&self) -> Option<f64> {
+        self.control.death_ms
+    }
+    /// Numeric expression projection from already captured operands. Null becomes zero.
+    pub fn death_elapsed(now: f64, death: Option<f64>) -> f64 {
+        now - death.unwrap_or(0.0)
+    }
+    /// Advance a native numeric step without host coercion callbacks.
     pub fn advance_step(&mut self, now: f64, delta: f64, whole: f64) -> Result<(Lifecycle, bool)> {
+        let present = self.has_death();
+        let elapsed = Self::death_elapsed(now, self.death_time());
+        self.advance_step_elapsed(present, elapsed, delta, whole)
+    }
+    /// Apply the captured comparison to current post-callback UI/action state.
+    /// Do not recapture death or clone controls that may have changed during coercion.
+    pub fn advance_step_elapsed(
+        &mut self,
+        death_present: bool,
+        elapsed: f64,
+        delta: f64,
+        whole: f64,
+    ) -> Result<(Lifecycle, bool)> {
         finite(delta, "Invalid lagged step")?;
         if !(0.0..=5.0).contains(&delta)
             || !whole.is_finite()
@@ -594,11 +614,7 @@ impl SessionPolicy {
         }
         let mut active = false;
         let mut completed = false;
-        if self
-            .control
-            .death_ms
-            .is_some_and(|death| now - death > 1600.0)
-        {
+        if death_present && elapsed > 1600.0 {
             if self.control.ui_phase == UiPhase::Idle {
                 self.control.ui_phase = UiPhase::Out
             }

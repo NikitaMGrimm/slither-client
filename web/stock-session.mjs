@@ -81,9 +81,10 @@ export function createStockSession({ wasm, createSocket, now, maxBufferedBytes =
   if (typeof createSocket !== 'function' || typeof now !== 'function') throw new TypeError('Session capabilities required');
   integer(maxBufferedBytes, 1048576, 'send budget');
   if (typeof SessionPolicy !== 'function' || typeof SessionPolicy.prototype?.free !== 'function'
-    || typeof SessionPolicy.valid_input !== 'function' || typeof SessionPolicy.protocol_allowed !== 'function' || typeof SessionPolicy.negotiation_packet !== 'function') throw new TypeError('Wasm SessionPolicy required');
+    || typeof SessionPolicy.valid_input !== 'function' || typeof SessionPolicy.protocol_allowed !== 'function' || typeof SessionPolicy.negotiation_packet !== 'function' || typeof SessionPolicy.death_elapsed !== 'function') throw new TypeError('Wasm SessionPolicy required');
   const free = SessionPolicy.prototype.free, validInput = SessionPolicy.valid_input;
   const protocolAllowed = SessionPolicy.protocol_allowed, negotiationPacket = SessionPolicy.negotiation_packet;
+  const deathElapsed = SessionPolicy.death_elapsed;
   let policy = new SessionPolicy();
   try {
   let sink, socket, launch, offeredActions, retired, opaquePingValue;
@@ -242,14 +243,22 @@ export function createStockSession({ wasm, createSocket, now, maxBufferedBytes =
   }
   function foldAfterStep(request, requireHud = false) {
     outsideIngress(); owner().check_step(requireHud);
-    const admittedNow = finite(request?.nowMs, 'step time');
+    finite(request?.nowMs, 'step time');
     const delta = finite(request?.delta, 'lagged step');
     const wholeSteps = integer(request?.wholeSteps, 5, 'whole steps');
     if (delta < 0 || delta > 5) throw new RangeError('Invalid lagged step');
-    // The original boundary rereads time only while death is pending. Coercion
-    // and caller getters finish before entering the Rust stage.
-    const stepNow = owner().has_death() ? request.nowMs - 0 : admittedNow;
-    const observed = owner().advance_step(stepNow, delta, wholeSteps);
+    // Preserve the expression order: initial death gate, left getter, right
+    // death-time capture, then left/right ToNumeric. A callback can change the
+    // live death/UI/actions after either capture; the final stage uses live state.
+    const deathPresent = owner().has_death();
+    let elapsed = 0;
+    if (deathPresent) {
+      const left = request.nowMs;
+      const right = owner().death_time();
+      elapsed = typeof left === 'number'
+        ? Reflect.apply(deathElapsed, SessionPolicy, [left, right]) : left - right;
+    }
+    const observed = owner().advance_step_elapsed(deathPresent, elapsed, delta, wholeSteps);
     if (observed.close) stop('disconnected', 'life-returned');
     owner().finish_step(!!socket);
     return freeze({ actions: freeze({ ...owner().pending_actions().actions }), lifecycle: freeze({ ...observed.lifecycle }) });
@@ -335,10 +344,12 @@ export function createStockSession({ wasm, createSocket, now, maxBufferedBytes =
       }
       if (!due) return;
       const committed = context.nowMs;
-      // The third read was an assignment, never a numeric admission/coercion.
+      // Admit/capture the live owner after the getter, before mutating either
+      // half of the clock representation. No host callback separates the pair.
+      const current = owner();
       const numeric = typeof committed === 'number';
       opaquePingValue = numeric ? undefined : committed;
-      const intent = numeric ? owner().commit_ping(committed) : owner().commit_opaque_ping();
+      const intent = numeric ? current.commit_ping(committed) : current.commit_opaque_ping();
       try { emit(intent); } catch (error) { fail(error); throw error; }
     },
     sendInput(value) {
