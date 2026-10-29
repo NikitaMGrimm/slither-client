@@ -4,8 +4,10 @@
   const realm = globalThis;
   if (realm !== realm.top) return;
   const url = new URL(realm.location.href);
-  if (!['http://slither.io', 'https://slither.io', 'http://www.slither.io', 'https://www.slither.io'].includes(url.origin)
-    || !['/', '/index.html'].includes(url.pathname) || url.search || url.hash || url.username || url.password) return;
+  const home = url.origin === 'http://slither.com' ? url.pathname === '/io'
+    : ['http://slither.io', 'https://slither.io', 'http://www.slither.io', 'https://www.slither.io'].includes(url.origin)
+      && ['/', '/index.html'].includes(url.pathname);
+  if (!home || url.search || url.hash || url.username || url.password) return;
   const key = '__slitherClientArmV1';
   let arm;
   try {

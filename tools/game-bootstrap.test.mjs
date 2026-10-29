@@ -306,6 +306,78 @@ test('an unarmed/expired/wrong-host document leaves scheduling and sockets untou
   }
 });
 
+test('com entry: actual gate holds once and isolated link loads only the fixed bootstrap', () => {
+  const f = fixture({ href: 'http://slither.com/io' });
+  assert(f.gate); assert.equal(f.gate.metadata().code, 'held');
+  assert.equal(f.realm.sessionStorage.getItem('__slitherClientArmV1'), null);
+  const native = f.gate.claim(f.gate.metadata().id);
+  assert.equal(Object.hasOwn(native, 'liveProfile'), false, 'HTTP com gains no secure same-origin profile capability');
+  assert.throws(() => f.gate.claim(f.gate.metadata().id), /claimed/);
+  f.realm.chrome = { runtime: { getURL: name => `chrome-extension://synthetic/${name}` } };
+  const context = createContext({ document: f.document, location: f.realm.location, URL,
+    chrome: f.realm.chrome, window: f.realm, globalThis: { chrome: f.realm.chrome },
+    setTimeout: () => 1, clearTimeout() {}, Set });
+  new Script(readFileSync(new URL('../extension/game-link.js', import.meta.url), 'utf8')).runInContext(context);
+  assert.equal(f.document.head.children.length, 1);
+  assert.equal(f.document.head.children[0].src, 'chrome-extension://synthetic/game/bootstrap.mjs');
+  f.realm.postMessage({ type: 'slither-client-status', schema: 1, id: 'a'.repeat(32), code: 'held' });
+  assert.equal(f.document.head.children.length, 1); assert.equal(f.sockets, 0); assert.equal(f.original, 0);
+});
+
+test('com entry: actual gate and link refuse unpaired routes before holding or loading', () => {
+  for (const href of ['http://slither.com/', 'http://slither.com/index.html', 'http://slither.com/io/',
+    'https://slither.com/io', 'http://www.slither.com/io', 'http://slither.io/io',
+    'http://slither.com:81/io', 'http://user@slither.com/io', 'http://slither.com/io?x=1',
+    'http://slither.com/io#x', 'http://slither.com.evil.invalid/io']) {
+    const f = fixture({ href }); assert.equal(f.gate, undefined, href);
+    assert.equal(f.realm.requestAnimationFrame, f.nativeRaf);
+    const context = createContext({ document: f.document, location: f.realm.location, URL,
+      window: f.realm, globalThis: {}, setTimeout() { assert.fail('Rejected route scheduled'); } });
+    new Script(readFileSync(new URL('../extension/game-link.js', import.meta.url), 'utf8')).runInContext(context);
+    assert.equal(f.document.head.children.length, 0); assert.equal(f.messages.length, 0); assert.equal(f.sockets, 0);
+  }
+});
+
+test('com entry: stale or expired arm does not hold the observed route', () => {
+  for (const change of [{ expires: 0 }, { expires: Date.now() + 60000 }, { url: 'http://slither.io/' },
+    { schema: 2 }, { build: 'other' }, { id: 'wrong' }]) {
+    const f = fixture({ href: 'http://slither.com/io', armed: false });
+    f.realm.sessionStorage.setItem('__slitherClientArmV1', JSON.stringify({ schema: 1, build: 'gamepage-v1',
+      id: 'a'.repeat(32), url: 'http://slither.com/io', expires: Date.now() + 25000, ...change }));
+    new Script(gateSource).runInContext(f.context);
+    assert.equal(f.gate, undefined); assert.equal(f.realm.requestAnimationFrame, f.nativeRaf);
+    assert.equal(f.realm.sessionStorage.getItem('__slitherClientArmV1'), null);
+    assert.equal(f.sockets, 0); assert.equal(f.messages.length, 0);
+  }
+});
+
+test('com entry: MAIN gate and isolated link remain inert in a nested document', () => {
+  const f = fixture({ href: 'http://slither.com/io', armed: false }); f.realm.top = {};
+  const record = JSON.stringify({ schema: 1, build: 'gamepage-v1', id: 'a'.repeat(32),
+    url: 'http://slither.com/io', expires: Date.now() + 25000 });
+  f.realm.sessionStorage.setItem('__slitherClientArmV1', record);
+  new Script(gateSource).runInContext(f.context);
+  assert.equal(f.gate, undefined); assert.equal(f.realm.requestAnimationFrame, f.nativeRaf);
+  assert.equal(f.realm.sessionStorage.getItem('__slitherClientArmV1'), record);
+  const context = createContext({ window: f.realm, location: f.realm.location, URL,
+    document: f.document, setTimeout() { assert.fail('Nested link scheduled'); } });
+  new Script(readFileSync(new URL('../extension/game-link.js', import.meta.url), 'utf8')).runInContext(context);
+  assert.equal(f.document.head.children.length, 0); assert.equal(f.messages.length, 0); assert.equal(f.sockets, 0);
+});
+
+test('com entry: borrowed absolute io sources and explicit trusted profile retain existing runtime path', async () => {
+  const f = fixture({ href: 'http://slither.com/io' }); f.host(); f.complete();
+  // Explicitly synthetic existing image metadata, not an asset or network load.
+  Object.assign(f.imageState(f.realm.bg_hex), { src: 'https://slither.io/s/synthetic-background.png',
+    currentSrc: 'https://slither.io/s/synthetic-background.png' });
+  const background = f.realm.bg_hex, wasm = wasmDouble(f);
+  const runtime = await startGamePage({ realm: f.realm, wasmApi: wasm.api });
+  assert.equal(runtime.diagnostics().disposed, false); assert.equal(f.realm.bg_hex, background);
+  assert.equal(f.sockets, 0); assert.equal(f.original, 0);
+  connect(f, runtime); assert.equal(f.sockets, 1, 'existing private supplied-profile API only; fake documented endpoint');
+  assert.equal(f.original, 0); runtime.dispose(); assert.equal(wasm.counts().sceneFrees, 1);
+});
+
 test('local nickname owner exposes only an opt-in frozen unbind ticket', async () => {
   const h = nicknameOwnerHarness(), runtime = await h.start();
   assert.equal(typeof runtime.bindNicknameField, 'function');

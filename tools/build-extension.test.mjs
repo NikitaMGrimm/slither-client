@@ -207,7 +207,7 @@ test('MV3 browser differences, explicit activation permissions, closed WAR and o
     assert.equal(manifest.action.default_popup, 'launcher.html');
     assert.deepEqual(manifest.permissions, ['activeTab', 'scripting']);
     assert.deepEqual(manifest.web_accessible_resources, [{
-      matches: ['http://slither.io/*', 'https://slither.io/*', 'http://www.slither.io/*', 'https://www.slither.io/*'],
+      matches: ['http://slither.io/*', 'https://slither.io/*', 'http://www.slither.io/*', 'https://www.slither.io/*', 'http://slither.com/*'],
       resources: ['game/bootstrap.mjs', 'game/runtime.mjs', 'game/owned-hud-ui.mjs', 'game/owned-play-ui.mjs', 'game/owned-appearance-ui.mjs', 'game/appearance-preview.mjs', 'game/game-owned-loading-ui.mjs', 'game/start-page-layout.mjs', 'assets/logo.svg', 'game/owned-leaderboard-ui.mjs', 'game/owned-minimap-ui.mjs', 'game/owned-end-screen-ui.mjs', 'game/owned-announcement-ui.mjs', 'game/stock-host-snapshot.mjs', 'game/stock-client.mjs', 'game/stock-skin-provider.mjs',
         'game/stock-skin-rules.mjs', 'game/stock-accessory-selection.mjs', 'game/stock-cached-accessory.mjs', 'game/stock-accessory-load.mjs', 'game/stock-accessory-request.mjs', 'game/skin-provider.mjs', 'game/stock-food-provider.mjs', 'game/stock-prey-provider.mjs',
         'game/stock-asset-sources.mjs', 'game/desktop-layout.mjs', 'game/client-input.mjs',
@@ -444,6 +444,17 @@ test('game entry API and CLI reject ambiguous and nonstring selection before out
 });
 
 const launcher = new Script(fs.readFileSync(new URL('../extension/launcher.js', import.meta.url), 'utf8').replace(/^import .+;\r?$/gm, ''));
+test('com entry: static manifest and builder admission inventories agree without packaging', () => {
+  const expected = ['http://slither.io/*', 'https://slither.io/*', 'http://www.slither.io/*',
+    'https://www.slither.io/*', 'http://slither.com/*'];
+  for (const browser of ['chrome', 'firefox']) {
+    const manifest = JSON.parse(fs.readFileSync(new URL(`../extension/manifest.${browser}.json`, import.meta.url)));
+    assert.deepEqual(manifest.web_accessible_resources[0].matches, expected);
+  }
+  const source = fs.readFileSync(new URL('./build-extension.mjs', import.meta.url), 'utf8');
+  const declared = /const matches = \[([\s\S]*?)\];/.exec(source);
+  assert(declared); assert.deepEqual([...declared[1].matchAll(/'([^']+)'/g)].map(match => match[1]), expected);
+});
 for (const namespace of ['chrome', 'browser']) {
   test(`${namespace} action popup opens only the packaged page and then closes, without a socket`, async () => {
     const calls = [];
@@ -485,6 +496,9 @@ test('launcher reports tab creation failure and keeps its status visible', async
 
 for (const mutate of [
   manifest => manifest.web_accessible_resources[0].matches.push('https://*.slither.io/*'),
+  manifest => manifest.web_accessible_resources[0].matches.push('https://slither.com/*'),
+  manifest => manifest.web_accessible_resources[0].matches.push('http://www.slither.com/*'),
+  manifest => { manifest.web_accessible_resources[0].matches = manifest.web_accessible_resources[0].matches.filter(value => value !== 'http://slither.com/*'); },
   manifest => manifest.web_accessible_resources[0].resources.push('scene/animated.mjs'),
   manifest => { manifest.web_accessible_resources[0].extension_ids = ['*']; },
 ]) {
