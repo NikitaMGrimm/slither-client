@@ -21,4 +21,7 @@ export const startPageLayout = Object.freeze({
     ['font-family', 'inherit'], ['font-size', '20px'], ['border-radius', '0']]),
   status: freeze([['display', 'block'], ['width', '100%'], ['min-height', '3em'],
     ['margin-top', '12px'], ['white-space', 'pre-wrap'], ['font-size', '14px']]),
+  menu: freeze([['display', 'block'], ['margin-top', '8px'], ['text-align', 'center']]),
+  menuButton: freeze([['position', 'static'], ['display', 'inline-block'], ['margin', '4px'],
+    ['min-height', '36px'], ['font-family', 'inherit'], ['font-size', '14px'], ['border-radius', '0']]),
 });

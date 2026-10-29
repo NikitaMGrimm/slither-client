@@ -59,6 +59,8 @@
     controlsLease = undefined;
     if (gesture?.lease === previous?.edit) gesture = undefined;
     if (previous) {
+      for (const action of previous.actions) action.button = action.buttonParent = action.onPlay = undefined;
+      previous.actions = [];
       previous.edit.element = previous.edit.parent = previous.edit.generation = undefined;
       previous.button = previous.buttonParent = previous.onPlay = previous.generation = undefined;
     }
@@ -318,8 +320,42 @@
     } catch { return; }
   }
   const ownedPlayDom = captureOwnedPlayDom();
+  function captureMenuPreferences() {
+    if (!hudDom || !ownedPlayDom || !nicknameValue) return;
+    let storage, getItem, setItem;
+    try {
+      storage = realm.localStorage;
+      getItem = descriptor(realm.Storage.prototype, 'getItem')?.value;
+      setItem = descriptor(realm.Storage.prototype, 'setItem')?.value;
+    } catch { /* Unavailable persistence keeps in-memory menu choices usable. */ }
+    const current = () => { if (!hudDom.isCurrentDocument()) throw new Error('Current menu document required'); };
+    const key = 'slither-client.menu.v1';
+    return freeze({ schema: 1, document: hudDom.document,
+      read() {
+        current(); let result = null;
+        try { if (typeof getItem === 'function') result = apply(getItem, storage, [key]); } catch { /* Blocked storage is optional. */ }
+        current();
+        return typeof result === 'string' && result.length <= 600 ? result : null;
+      },
+      write(value) {
+        current();
+        if (typeof value !== 'string' || value.length > 600) throw new TypeError('Bounded menu record required');
+        let stored = false;
+        try { if (typeof setItem === 'function') { apply(setItem, storage, [key, value]); stored = true; } } catch { /* Quota/permission failures do not consume Play. */ }
+        current(); return stored;
+      },
+      setNickname(receiver, value) {
+        current();
+        if (typeof value !== 'string' || value.length > 24 || editing.ownerDocument(receiver) !== hudDom.document
+          || editing.localName(receiver) !== 'input' || !editing.connected(receiver)) throw new TypeError('Current menu nickname field required');
+        apply(nicknameValue.set, receiver, [value]); current();
+      },
+    });
+  }
+  const menuPreferences = captureMenuPreferences();
   function createControlsLease(record) {
-    const keys = ['schema', 'endpoint', 'endpointParent', 'button', 'buttonParent', 'onPlay'];
+    const extended = descriptor(record ?? {}, 'schema')?.value === 2;
+    const keys = ['schema', 'endpoint', 'endpointParent', 'button', 'buttonParent', 'onPlay', ...(extended ? ['actions'] : [])];
     if (!record || typeof record !== 'object' || ![recordPrototype, null].includes(prototype(record))) {
       throw new TypeError('Closed owned controls record required');
     }
@@ -330,24 +366,49 @@
       if (!field || !Object.hasOwn(field, 'value')) throw new TypeError('Owned controls data fields required');
       values[key] = field.value;
     }
-    if (values.schema !== 1 || typeof values.onPlay !== 'function') throw new TypeError('Owned controls schema/callback required');
-    let cursor = values.onPlay;
-    const seen = new Set();
-    for (let visits = 0; visits < 64; visits++) {
-      cursor = prototype(cursor);
-      if (cursor === null) break;
-      const kind = descriptor(cursor, functionKind);
-      if (seen.has(cursor) || kind && Object.hasOwn(kind, 'value')
-        && ['AsyncFunction', 'GeneratorFunction', 'AsyncGeneratorFunction'].includes(kind.value)) {
+    if (values.schema !== (extended ? 2 : 1)) throw new TypeError('Owned controls schema required');
+    const callback = value => {
+      if (typeof value !== 'function') throw new TypeError('Owned controls callback required');
+      let cursor = value;
+      const seen = new Set();
+      for (let visits = 0; visits < 64; visits++) {
+        cursor = prototype(cursor);
+        if (cursor === null) break;
+        const kind = descriptor(cursor, functionKind);
+        if (seen.has(cursor) || kind && Object.hasOwn(kind, 'value')
+          && ['AsyncFunction', 'GeneratorFunction', 'AsyncGeneratorFunction'].includes(kind.value)) {
+          throw new TypeError('Synchronous owned controls callback required');
+        }
+        seen.add(cursor);
+      }
+      if (cursor !== null || /^(?:\*|function\s*\*|async(?:\s+function\b|\s+[$\w]+|\s*\([^]*?\)\s*=>))/.test(apply(functionSource, value, []))) {
         throw new TypeError('Synchronous owned controls callback required');
       }
-      seen.add(cursor);
-    }
-    if (cursor !== null || /^(?:\*|function\s*\*|async(?:\s+function\b|\s+[$\w]+|\s*\([^]*?\)\s*=>))/.test(apply(functionSource, values.onPlay, []))) {
-      throw new TypeError('Synchronous owned controls callback required');
+      return value;
+    };
+    callback(values.onPlay);
+    const actions = [];
+    if (extended) {
+      const length = descriptor(values.actions ?? {}, 'length')?.value;
+      if (!Array.isArray(values.actions) || !Number.isInteger(length) || length < 1 || length > 16
+        || ownKeys(values.actions).length !== length + 1) throw new TypeError('Bounded menu actions required');
+      for (let index = 0; index < length; index++) {
+        const entry = descriptor(values.actions, String(index));
+        if (!entry || !Object.hasOwn(entry, 'value')) throw new TypeError('Menu action data required');
+        const item = entry.value;
+        if (!item || ![recordPrototype, null].includes(prototype(item)) || ownKeys(item).length !== 3) throw new TypeError('Closed menu action required');
+        const copied = {};
+        for (const key of ['button', 'parent', 'onPress']) {
+          const field = descriptor(item, key);
+          if (!field || !Object.hasOwn(field, 'value')) throw new TypeError('Menu action data required');
+          copied[key] = field.value;
+        }
+        actions.push({ button: copied.button, buttonParent: copied.parent, onPlay: callback(copied.onPress) });
+      }
+      if (new Set([values.button, ...actions.map(action => action.button)]).size !== actions.length + 1) throw new TypeError('Distinct menu buttons required');
     }
     let candidate = { edit: { element: values.endpoint, parent: values.endpointParent, generation: undefined },
-      button: values.button, buttonParent: values.buttonParent, onPlay: values.onPlay, generation: undefined };
+      button: values.button, buttonParent: values.buttonParent, onPlay: values.onPlay, actions, generation: undefined };
     let used = false;
     return freeze({
       bind() {
@@ -376,6 +437,8 @@
         candidate = undefined; used = true;
         if (controlsLease === previous) revokeControls();
         if (previous) {
+          for (const action of previous.actions) action.button = action.buttonParent = action.onPlay = undefined;
+          previous.actions = [];
           previous.edit.element = previous.edit.parent = previous.edit.generation = undefined;
           previous.button = previous.buttonParent = previous.onPlay = previous.generation = undefined;
         }
@@ -389,6 +452,15 @@
         || editing.ownerDocument(node) !== editing.initialDocument || !editing.connected(node)
         || editing.root(node, { composed: false }) !== editing.initialDocument) return false;
     }
+    for (const action of value.actions) {
+      for (const node of [action.button, action.buttonParent]) {
+        if (editing.nodeType(node) !== 1 || editing.namespace(node) !== 'http://www.w3.org/1999/xhtml'
+          || editing.ownerDocument(node) !== editing.initialDocument || !editing.connected(node)
+          || editing.root(node, { composed: false }) !== editing.initialDocument) return false;
+      }
+      if (editing.localName(action.button) !== 'button' || editing.localName(action.buttonParent) !== 'div'
+        || editing.parentNode(action.button) !== action.buttonParent || editing.parentNode(action.buttonParent) !== value.buttonParent) return false;
+    }
     return value.edit.element !== value.button && value.edit.parent !== value.buttonParent
       && value.edit.element !== value.edit.parent && value.button !== value.buttonParent
       && (!lease || value.edit.element !== lease.element && value.edit.parent !== lease.parent)
@@ -400,10 +472,10 @@
     if (!current(value.generation) || !controlsStructural(value) || !current(value.generation)) { revokeControls(); return false; }
     return controlsLease === value && value.generation === routerGeneration;
   }
-  function eligibleButton(value) {
-    return validControls(value) && !editing.disabled(value.button, ':disabled')
-      && editing.inert(value.button, '[inert]') === null
-      && editing.visible(value.button, { opacityProperty: true, visibilityProperty: true, contentVisibilityAuto: true }) === true
+  function eligibleButton(value, action = value) {
+    return validControls(value) && (action === value || value.actions.includes(action)) && !editing.disabled(action.button, ':disabled')
+      && editing.inert(action.button, '[inert]') === null
+      && editing.visible(action.button, { opacityProperty: true, visibilityProperty: true, contentVisibilityAuto: true }) === true
       && current(value.generation) && controlsLease === value && value.generation === routerGeneration;
   }
   function editMember(target) {
@@ -413,7 +485,7 @@
       && editing.active(editing.initialDocument) === endpoint.element || gesture?.lease === endpoint)) return endpoint;
     return lease;
   }
-  function queuePlay(value, operation) {
+  function queuePlay(value, operation, action = value) {
     if (pendingPlay || controlsLease !== value) return;
     const ticket = { value, ready: false };
     pendingPlay = ticket;
@@ -432,7 +504,7 @@
         }
         playFence = check;
         try {
-          if (validControls(value) && eligibleButton(value) && controlsLease === value && pendingPlay === ticket) callback = value.onPlay;
+          if (validControls(value) && eligibleButton(value, action) && controlsLease === value && pendingPlay === ticket) callback = action.onPlay;
           if (check.failed) throw check.primary;
         } catch (error) { controlFailure(error); throw check.primary; }
         finally { playFence = undefined; pendingPlay = undefined; }
@@ -598,17 +670,18 @@
   function controlsKeyboardDefault(controls, event, type, target) {
     if (!['keydown', 'keyup', 'keypress'].includes(type) || !validControls(controls)
       || editing.active(editing.initialDocument) !== target) return false;
+    const action = target === controls.button ? controls : controls.actions.find(action => action.button === target);
     const member = target === controls.edit.element ? controls.edit
       : lease && target === lease.element ? lease : undefined;
-    if (target === controls.button ? !eligibleButton(controls) : !member || !eligible(member, true)) return false;
+    if (action ? !eligibleButton(controls, action) : !member || !eligible(member, true)) return false;
     if (editing.ctrl(event) || editing.meta(event) || editing.alt(event)
       || editing.composing(event) || editing.modifier(event, 'AltGraph')) return false;
     const key = editing.key(event);
-    const allow = key === 'Tab' || target === controls.button && !editing.shift(event)
+    const allow = key === 'Tab' || action && !editing.shift(event)
       && (key === 'Enter' || key === ' ' || editing.code(event) === 'NumpadEnter');
     if (!allow || controlsLease !== controls || !current(controls.generation)) return false;
     // Keyboard getters can revoke a member or change its focus/DOM eligibility.
-    const eligibleNow = target === controls.button ? eligibleButton(controls)
+    const eligibleNow = action ? eligibleButton(controls, action)
       : (member === controls.edit || lease === member) && eligible(member, true)
         && (member === controls.edit || lease === member);
     return eligibleNow && editing.active(editing.initialDocument) === target
@@ -779,6 +852,7 @@
     if (leaderboardDom !== undefined) native.leaderboardDom = leaderboardDom;
     if (ownedHudDom !== undefined) native.ownedHudDom = ownedHudDom;
     if (ownedPlayDom !== undefined) native.ownedPlayDom = ownedPlayDom;
+    if (menuPreferences !== undefined) native.menuPreferences = menuPreferences;
     const liveProfile = captureLiveProfile();
     if (liveProfile !== undefined) native.liveProfile = liveProfile;
     const storage = realm.localStorage;
@@ -873,7 +947,7 @@
         revoke(); controlFailure(primary); allow = false;
       };
       let entered = false, wasDeciding;
-      let action, operation;
+      let action, actionButton, operation;
       // Native fence operations can reenter before the nested dispatch is refused.
       sinking++;
       try {
@@ -906,12 +980,13 @@
           }
           candidate = live && disposition(value, event, type, target);
           navigation = controls && controlsKeyboardDefault(controls, event, type, target);
-          if (controls && type === 'click' && target === controls.button && initiallyPrevented === false
-            && editing.button(event) === 0 && eligibleButton(controls)) {
+          const chosen = controls && (target === controls.button ? controls : controls.actions.find(action => action.button === target));
+          if (chosen && type === 'click' && initiallyPrevented === false
+            && editing.button(event) === 0 && eligibleButton(controls, chosen)) {
             const trusted = descriptor(event, 'isTrusted');
             if (trusted && trusted.configurable === false && typeof trusted.get === 'function'
               && trusted.set === undefined && !Object.hasOwn(trusted, 'value')
-              && apply(trusted.get, event, []) === true) action = controls;
+              && apply(trusted.get, event, []) === true) { action = controls; actionButton = chosen; }
           }
         } catch (error) { failure(error); }
         let result;
@@ -933,7 +1008,7 @@
         if (navigation && controlsLease === controls && input === router && routerGeneration === generation
           && controlsKeyboardDefault(controls, event, type, eventTarget(event))) allow = true;
         if (action && (controlsLease !== action || input !== router || routerGeneration !== generation
-          || eventTarget(event) !== action.button || !eligibleButton(action))) action = undefined;
+          || eventTarget(event) !== actionButton.button || !eligibleButton(action, actionButton))) action = undefined;
         finishGesture(value, event, type, target, allow);
       } catch (error) { failure(error); }
       finally {
@@ -944,9 +1019,9 @@
         if (operation) {
           try {
             if (operation.failed) throw operation.primary;
-            if (!failed && action && controlsLease === action && eligibleButton(action)) {
+            if (!failed && action && controlsLease === action && eligibleButton(action, actionButton)) {
               if (operation.failed) throw operation.primary;
-              queuePlay(action, operation);
+              queuePlay(action, operation, actionButton);
             }
           } catch (error) { failure(error); }
           finally { if (playFence === operation) playFence = undefined; }

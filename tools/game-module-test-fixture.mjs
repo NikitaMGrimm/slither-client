@@ -1,5 +1,6 @@
 import { createLeaderboardHistoryDouble } from './leaderboard-history-double.mjs';
 import { createHudHistoryDouble } from './hud-history-double.mjs';
+import { createMenuPreferencesDouble } from './menu-preferences-double.mjs';
 // Authored Node-only full ESM graph boundary. No browser or production Wasm proof.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -18,6 +19,7 @@ const webNames = ['stock-skin-provider.mjs', 'stock-client.mjs', 'stock-food-pro
   'local-game-host.mjs', 'client-asset-map.mjs', 'synthetic-body.mjs', 'synthetic-food.mjs', 'synthetic-prey.mjs', 'loopback-session.mjs'];
 const entryNames = { 'bootstrap.mjs': 'game-bootstrap.mjs', 'runtime.mjs': 'game-runtime.mjs',
   'owned-hud-ui.mjs': 'game-owned-hud-ui.mjs', 'owned-play-ui.mjs': 'game-owned-play-ui.mjs',
+  'owned-appearance-ui.mjs': 'game-owned-appearance-ui.mjs',
   'start-page-layout.mjs': 'start-page-layout.mjs',
   'owned-leaderboard-ui.mjs': 'game-owned-leaderboard-ui.mjs',
   'owned-announcement-ui.mjs': 'game-owned-announcement-ui.mjs',
@@ -70,6 +72,7 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
     announcement_view() { announcements.reads++; return announcements.view; },
   });
   wasm.api.start_page_view = vm.runInContext('(' + projectStartPageDouble.toString() + ')', f.context);
+  wasm.api.MenuPreferences = vm.runInContext('(' + createMenuPreferencesDouble.toString() + ')()', f.context);
   const minimap = { enabled: 0, reads: [], fractions: [], view: {
     schema: 1, enabled: true, imageRevision: 0n, dimension: null,
     baseRgba: new Uint8Array(), alternateRgba: new Uint8Array(), widget: null,
