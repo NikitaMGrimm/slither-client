@@ -12,11 +12,8 @@ the following exceptions:
 | `web/stock-session.mjs` | Mixed socket/callback plumbing and handshake, ping/lag, death/return and command-time lifecycle policy. |
 | `web/stock-gameplay.mjs` | Mixed capability/scheduling glue and input/session reconciliation, reset ordering and staged HUD state publication. |
 | `web/stock-client.mjs` | Mixed borrowed-source/Canvas/Wasm glue and update/draw/quality ordering with successful-draw statistics counters. |
-| `web/client-input.mjs` | Retained key/pointer/boost state, turn debt, timing gates, heading quantization and packet intents. |
 | `web/handshake-session.mjs` | Challenge/login/setup state machine and frame limits; Rust already owns encoding, decoding and challenge arithmetic. |
 | `web/stock-hud-view.mjs` | Binding/readiness composition around Rust-formatted current/final HUD values. |
-| `web/stock-skin-rules.mjs` | Appearance selection and numeric recipe policy; borrowed DOM source capture remains separate. |
-| `extension/game-runtime.mjs` | Mixed entry/DOM/capability plumbing and Play admission/availability state. |
 
 The browser-free Rust leaderboard owner retains command-ordered Setup/table and
 board history, one-use prepared operations, revisions, name/text/style policy and
@@ -26,9 +23,21 @@ identity checks and DOM binding readiness composition. The same default runtime
 consumes the copied Rust output. See [leaderboard history](leaderboard-state.md).
 New local-host work is browser/DOM/capability glue; it must not introduce new
 game-domain logic.
+Browser-free `desktop_input` owns CSS pointer arithmetic, key/boost state,
+retained own metadata, turn debt, strict timing gates and versioned packet intents.
+The copied `DesktopInput` Wasm API commits keyboard, boost and heading phases
+before returning to synchronous host callbacks. `web/client-input.mjs` retains
+scalar/record admission, arbitrary `Object.is` token identity and callback order;
+it contains no numeric policy fallback. Session ping remains between keyboard
+and boost, and callbacks can update public input setters between phases.
 The default [player menu](menu-preferences.md) keeps appearance selection, custom
 run editing and bounded preference restore in Rust. Captured DOM/storage glue
 restores nickname/appearance and passes their copied bytes to explicit Play.
+The browser-free [Play admission owner](play-admission.md) retains availability,
+accepted attempts and local explicit-return admission. Its primitive Wasm boundary
+releases each Rust borrow before UI locking, status, unlock or launch effects.
+Runtime JS retains native security/generation guards, URL/capability admission,
+session observations, promises and browser effects; it has no admission fallback.
 `desktop_layout::desktop_backing_size` owns desktop viewport arithmetic in
 browser-free Rust. Its pure Wasm export returns a fresh copied width/height
 record; `web/desktop-layout.mjs` admits primitive inputs and copies that output
@@ -49,9 +58,14 @@ objects through the existing provider. Admitted custom runs use first-variant
 shading and project each palette modulo three, preserving admitted run counts
 and order without merging projection collisions. Empty or rejected custom data
 keeps the existing `skin % 3` selection. These authored families do not imply
-stock 42-color equivalence. The separate Rust stock resolver covers built-in/custom
-runs, face and antenna geometry, but complete palette artwork and special-source
-binding are still needed before that policy can replace the local stand-ins.
+stock 42-color equivalence. The production stock adapter separately binds the
+existing Rust resolve_skin for built-in/custom runs, face/antenna geometry and
+rotation policy, and validates the host custom mask through the same Rust
+palette predicate. Its JavaScript modules retain copied request admission and
+borrowed source lookup/readiness/identity, without a numeric policy fallback.
+The former authored JavaScript policy is a tools-only differential oracle.
+This cutover does not expand the local stand-ins or establish stock artwork,
+loading or installed-host acceptance.
 
 The default runtime enables Rust-owned nickname presentation before ingress.
 Each retained snake appearance owns its text and fade state, independently of

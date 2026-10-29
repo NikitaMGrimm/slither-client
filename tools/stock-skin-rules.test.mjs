@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { resolveStockSkin } from '../web/stock-skin-rules.mjs';
+import { resolveStockSkin } from './stock-skin-policy-oracle.mjs';
 
 // Original synthetic metadata witnesses; no source artwork, URLs or generators.
 const custom = (...pairs) => Uint8Array.of(0, 1, 2, 3, 4, 5, 6, 7, ...pairs.flat());

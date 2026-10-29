@@ -520,3 +520,27 @@ fn representative_antenna_colors_opacity_and_nominal_dimensions_are_exact() {
         );
     }
 }
+
+#[test]
+fn host_mask_matches_custom_run_admission_for_every_byte_and_rejects_drift() {
+    let expected: Vec<u8> = (0..=u8::MAX)
+        .map(|palette| {
+            u8::from(
+                resolve_skin(0, &custom(&[(1, palette)]), false)
+                    .unwrap()
+                    .custom,
+            )
+        })
+        .collect();
+    assert!(stock_custom_palette_mask_valid(&expected));
+    for palette in 0..=usize::from(u8::MAX) {
+        for invalid in [1 - expected[palette], 2, u8::MAX] {
+            let mut changed = expected.clone();
+            changed[palette] = invalid;
+            assert!(!stock_custom_palette_mask_valid(&changed));
+        }
+    }
+    for length in [0, 255, 257, 4096] {
+        assert!(!stock_custom_palette_mask_valid(&vec![0; length]));
+    }
+}
