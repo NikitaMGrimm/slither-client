@@ -184,6 +184,34 @@ test('eleven fresh nodes, closed frozen result, exact tree and bounded original 
   lease.dispose(); assert.deepEqual(f.parent.children, []);
 });
 
+test('scrollable panel logo follows form content while the loading surface keeps its placement', () => {
+  const f = fixture(), lease = createOwnedPlayUi(f.input, false), nodes = lease.mount();
+  const panel = f.style(nodes.mount);
+  assert.equal(panel.get('background-attachment'), 'local',
+    'the logo must scroll with the padded form, rather than stay behind nickname content');
+  assert.equal(panel.get('padding-top'), '112px');
+  assert.equal(panel.get('background-position'), 'center top');
+  assert.equal(panel.get('background-size'), '100% auto');
+  assert.equal(panel.get('background-repeat'), 'no-repeat');
+  assert.equal(panel.get('overflow'), 'auto', 'menu, preview and result keep their shared scroll reachability');
+  assert.equal(panel.get('max-height'), 'calc(100% - clamp(48px, 18vh, 180px) - 16px)');
+  const loading = Object.fromEntries(startPageLayout.loadingSurface);
+  for (const property of ['position', 'left', 'top', 'transform', 'width', 'padding-top',
+    'background-image', 'background-position', 'background-size']) {
+    assert.equal(panel.get(property), loading[property], 'initial panel/loading alignment stays shared');
+  }
+  assert.equal(loading['background-attachment'], undefined, 'the non-scrolling loading surface is unchanged');
+  const children = [...nodes.mount.children];
+  lease.lock(); lease.setStatus('connecting'); lease.setPlaying(true); lease.setPlaying(false);
+  lease.setStatus('not-connected'); lease.unlock();
+  assert.equal(panel.get('background-attachment'), 'local');
+  assert.deepEqual(nodes.mount.children, children, 'no logo node, wrapper or replacement controls');
+  assert.equal(f.button(nodes.button).disabled, false);
+  assert.equal(f.calls.some(call => /scroll|BoundingClientRect|Listener/.test(call.name)), false,
+    'CSS submission adds no scroll handler or geometry measurement');
+  lease.dispose();
+});
+
 test('consumer presentation hides only the configured endpoint row and preserves owned controls', () => {
   const f = fixture(), lease = createOwnedPlayUi(f.input, false), nodes = lease.mount();
   assert.equal(f.style(nodes.endpointParent).get('display'), 'none');
