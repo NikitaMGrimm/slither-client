@@ -1,3 +1,4 @@
+import { TestDesktopInput } from './fixtures/client-input-fixture.mjs';
 // Actual authored acquirer/gameplay/session with synthetic bytes and inert socket/capability doubles.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -91,7 +92,7 @@ function harness(options = {}) {
       return actions;
     },
   };
-  const wasm = {
+  const wasm = { DesktopInput: TestDesktopInput,
     encode_login(version, password, nickname, skin, custom) {
       encoded.push({ version, password: [...password], nickname, skin, custom: [...custom] });
       options.onEncode?.(h);

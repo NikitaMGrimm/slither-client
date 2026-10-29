@@ -1,20 +1,14 @@
-/** Desktop backing dimensions for a positive viewport, with no UI insets or DPR multiplier. */
-export function desktopBackingSize(areaWidth, areaHeight) {
-  if (!Number.isFinite(areaWidth) || !Number.isFinite(areaHeight) || areaWidth <= 0 || areaHeight <= 0) {
+/** Copy a captured Rust viewport projection. No numeric policy or JS fallback. */
+export function desktopBackingSize(areaWidth, areaHeight, project) {
+  if (typeof areaWidth !== 'number' || typeof areaHeight !== 'number') {
     throw new Error('Desktop viewport dimensions must be positive finite numbers');
   }
-  const width = Math.ceil(areaWidth), height = Math.ceil(areaHeight);
-  const diagonal = Math.sqrt(width * width + height * height);
-  if (!Number.isFinite(diagonal) || diagonal === 0) throw new Error('Desktop viewport diagonal is invalid');
-  let backingWidth = Math.ceil(width * 1800 / diagonal);
-  let backingHeight = Math.ceil(height * 1800 / diagonal);
-  if (backingWidth > 1500) {
-    backingHeight = Math.ceil(backingHeight * 1500 / backingWidth);
-    backingWidth = 1500;
-  }
-  if (backingHeight > 1500) {
-    backingWidth = Math.ceil(backingWidth * 1500 / backingHeight);
-    backingHeight = 1500;
-  }
-  return { width: backingWidth, height: backingHeight };
+  if (typeof project !== 'function') throw new TypeError('Rust desktop layout projection required');
+  const value = Reflect.apply(project, undefined, [areaWidth, areaHeight]);
+  if (!value || typeof value !== 'object' || Reflect.ownKeys(value).length !== 2) throw new TypeError('Copied desktop size required');
+  const width = Object.getOwnPropertyDescriptor(value, 'width');
+  const height = Object.getOwnPropertyDescriptor(value, 'height');
+  if (![width, height].every(field => field && Object.hasOwn(field, 'value')
+    && Number.isInteger(field.value) && field.value >= 1 && field.value <= 1500)) throw new TypeError('Desktop size data fields required');
+  return { width: width.value, height: height.value };
 }

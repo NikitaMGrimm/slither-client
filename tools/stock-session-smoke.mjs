@@ -47,7 +47,7 @@ export function stockSessionSmoke(wasm) {
 
   function harness(seed = false) {
     const scene = new wasm.AnimatedScene(0);
-    const input = createClientInput();
+    const input = createClientInput({InputPolicy:wasm.DesktopInput});
     let now = 0;
     let inControl = false;
     const sockets = [], ingresses = [], states = [], errors = [];
@@ -142,7 +142,13 @@ export function stockSessionSmoke(wasm) {
         assert.equal(h.calls, 0, 'challenge must not enter native world');
         return sockets[0];
       },
-      dispose() { session.close('smoke-cleanup'); unsubscribe(); scene.free(); },
+      dispose() {
+        let failed=false,primary;
+        for(const cleanup of [()=>session.close('smoke-cleanup'),unsubscribe,()=>input.dispose(),()=>scene.free()]){
+          try{cleanup();}catch(error){if(!failed){failed=true;primary=error;}}
+        }
+        if(failed)throw primary;
+      },
     };
     owners.push(h);
     return h;

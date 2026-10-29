@@ -12,10 +12,8 @@ the following exceptions:
 | `web/stock-session.mjs` | Mixed socket/callback plumbing and handshake, ping/lag, death/return and command-time lifecycle policy. |
 | `web/stock-gameplay.mjs` | Mixed capability/scheduling glue and input/session reconciliation, reset ordering and staged HUD state publication. |
 | `web/stock-client.mjs` | Mixed borrowed-source/Canvas/Wasm glue and update/draw/quality ordering with successful-draw statistics counters. |
-| `web/client-input.mjs` | Retained key/pointer/boost state, turn debt, timing gates, heading quantization and packet intents. |
 | `web/handshake-session.mjs` | Challenge/login/setup state machine and frame limits; Rust already owns encoding, decoding and challenge arithmetic. |
 | `web/stock-hud-view.mjs` | Binding/readiness composition around Rust-formatted current/final HUD values. |
-| `web/desktop-layout.mjs` | Numeric viewport-to-backing-size policy. |
 | `extension/game-runtime.mjs` | Mixed entry/DOM/capability plumbing and Play admission/availability state. |
 
 The browser-free Rust leaderboard owner retains command-ordered Setup/table and
@@ -26,9 +24,26 @@ identity checks and DOM binding readiness composition. The same default runtime
 consumes the copied Rust output. See [leaderboard history](leaderboard-state.md).
 New local-host work is browser/DOM/capability glue; it must not introduce new
 game-domain logic.
+Browser-free `desktop_input` owns CSS pointer arithmetic, key/boost state,
+retained own metadata, turn debt, strict timing gates and versioned packet intents.
+The copied `DesktopInput` Wasm API commits keyboard, boost and heading phases
+before returning to synchronous host callbacks. `web/client-input.mjs` retains
+scalar/record admission, arbitrary `Object.is` token identity and callback order;
+it contains no numeric policy fallback. Session ping remains between keyboard
+and boost, and callbacks can update public input setters between phases.
 The default [player menu](menu-preferences.md) keeps appearance selection, custom
 run editing and bounded preference restore in Rust. Captured DOM/storage glue
 restores nickname/appearance and passes their copied bytes to explicit Play.
+`desktop_layout::desktop_backing_size` owns desktop viewport arithmetic in
+browser-free Rust. Its pure Wasm export returns a fresh copied width/height
+record; `web/desktop-layout.mjs` admits primitive inputs and copies that output
+without a JavaScript numeric fallback. The default runtime and the separate
+animated diagnostic both use initialized Wasm. JavaScript still reads the actual
+viewport and performs existing resize/DOM/Canvas effects. The policy retains
+positive finite inputs, ceiled dimensions, squared-sum diagonal overflow
+rejection, ceiled 1800 scaling and sequential ceiled 1500 dimension caps, without
+DPR multiplication, UI insets, clocks or renderer changes. Authored native and
+real-Wasm oracle checks cover arithmetic and boundary admission, not browser pixels.
 See the [roadmap](roadmap.md) for remaining work.
 
 Local rendering binds a pure Rust skin resolver after Wasm initialization. Rust

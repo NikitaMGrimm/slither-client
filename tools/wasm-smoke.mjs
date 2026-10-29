@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
 import { loadWasm } from './reference-context.mjs';
 import { syntheticChallenge } from './reference-parity.mjs';
 import { HandshakeSession } from '../web/handshake-session.mjs';
@@ -23,15 +24,26 @@ import { skinPolicySmoke } from './skin-policy-smoke.mjs';
 import { startPageSmoke } from './start-page-smoke.mjs';
 import { endScreenSmoke } from './end-screen-smoke.mjs';
 import { menuPreferencesSmoke } from './menu-preferences-smoke.mjs';
+import { desktopLayoutSmoke } from './desktop-layout-smoke.mjs';
+import { desktopInputSmoke } from './desktop-input-smoke.mjs';
+import { desktopInputLifetimeSmoke } from './desktop-input-lifetime-smoke.mjs';
 
 // Entirely synthetic ABI integration; no reference files or network are used.
 const wasm = await loadWasm();
+desktopLayoutSmoke(wasm);
 menuPreferencesSmoke(wasm);
+console.log('Synthetic real-Wasm desktop input equivalence passed:', desktopInputSmoke(wasm));
+console.log('Synthetic real-Wasm desktop input release passed:', desktopInputLifetimeSmoke(wasm));
+const inputRequirements = execFileSync(process.execPath,
+  ['--test', '--test-reporter=tap', fileURLToPath(new URL('./client-input.test.mjs', import.meta.url))],
+  { encoding: 'utf8', env: { ...process.env, SLITHER_INPUT_WASM: '1' }, maxBuffer: 4 * 1024 * 1024 });
+console.log('Synthetic real-Wasm desktop input requirements passed:',
+  inputRequirements.split(/\r?\n/).filter(line => /^# (tests|pass|fail|skipped) /.test(line)).join(', '));
 // Replay existing authored reducer/view/DOM requirements against real Rust history.
 const hudHistoryTests = ['stock-hud-state', 'stock-hud-view', 'stock-hud-dom',
   'stock-leaderboard-state', 'stock-leaderboard-view', 'stock-gameplay-leaderboard', 'game-owned-hud-ui'];
 const hudHistoryResult = execFileSync(process.execPath,
-  ['--test', '--test-reporter=tap', ...hudHistoryTests.map(name => `tools/${name}.test.mjs`)],
+  ['--test', '--test-reporter=tap', ...hudHistoryTests.map(name => fileURLToPath(new URL(`./${name}.test.mjs`, import.meta.url)))],
   { encoding: 'utf8', env: { ...process.env, SLITHER_HUD_HISTORY_WASM: '1', SLITHER_LEADERBOARD_HISTORY_WASM: '1' }, maxBuffer: 4 * 1024 * 1024 });
 console.log('Synthetic real-Wasm HUD/leaderboard history requirements passed:',
   hudHistoryResult.split(/\r?\n/).filter(line => /^# (tests|pass|fail|skipped) /.test(line)).join(', '));

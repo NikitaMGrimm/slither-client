@@ -125,7 +125,8 @@ async function start() {
     preyRandomState = (Math.imul(preyRandomState, 1664525) + 1013904223) >>> 0;
     return preyRandomState / 4294967296;
   });
-  const desiredSize = () => desktopBackingSize(window.innerWidth, window.innerHeight);
+  const projectDesktopSize = wasm.desktop_backing_size;
+  const desiredSize = () => desktopBackingSize(window.innerWidth, window.innerHeight, projectDesktopSize);
   function recordDraws(count) {
     renders += count;
     drawsSinceStatistics += count;

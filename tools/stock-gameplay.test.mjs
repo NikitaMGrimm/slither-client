@@ -1,3 +1,4 @@
+import { TestDesktopInput } from './fixtures/client-input-fixture.mjs';
 // Original synthetic protocol, scene and native scheduling doubles; no real socket.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -12,7 +13,7 @@ const own = (token = 1n, dead = false) => ({ token, id: 7, rawHead: { x: 300, y:
 const frame = commands => Uint8Array.from(commands.length === 1 ? commands[0] : commands.flatMap((c, i) =>
   i === 0 ? [0, c.length, ...c] : [c.length + 32, ...c])).buffer;
 
-function harness({ useStockController = false } = {}) {
+function harness({ useStockController = false, InputPolicy = TestDesktopInput } = {}) {
   let time = 0, borrowed = false, ingress = false, serial = 0;
   let nativeConnected = false, currentOwn = null, stopped = false;
   const trace = [], sockets = [], pending = [], intervals = new Map(), errors = [], statuses = [], faults = {};
@@ -86,7 +87,7 @@ function harness({ useStockController = false } = {}) {
   }
   const gameplay = createStockGameplay({ scene, controller,
     quality,
-    wasm: {
+    wasm: { DesktopInput: InputPolicy,
       encode_login() { return Uint8Array.of(115, 1); }, solve_challenge() { return new Uint8Array(27); },
       setup_protocol_version() { return 19; },
       decode_frame(bytes) {
@@ -102,7 +103,7 @@ function harness({ useStockController = false } = {}) {
     createSocket(endpoint) {
       outside(); trace.push(['construct', endpoint]);
       const socket = { readyState: 0, bufferedAmount: 0, sent: [], closes: 0,
-        send(bytes) { trace.push(['send', [...bytes]]); this.sent.push([...bytes]); if (faults.send) throw faults.send; },
+        send(bytes) { trace.push(['send', [...bytes]]); this.sent.push([...bytes]); faults.onSend?.(bytes); if (faults.send) throw faults.send; },
         close() { this.closes++; this.readyState = 3; trace.push(['close']); },
         open() { this.readyState = 1; ingress = true; try { this.onopen?.(); } finally { ingress = false; } },
         message(...commands) { ingress = true; try { this.onmessage?.({ data: frame(commands) }); } finally { ingress = false; } },
@@ -324,4 +325,13 @@ test('send failure inside control latches only, preserves attempts and never rep
   assert.equal(h.gameplay.diagnostics().input.lastTurnMs, 300);
   assert.equal(h.sockets[0].sent.some(c => c[0] === 251 || c[0] === 253 || c[0] === 254), false);
   assert.throws(() => h.gameplay.frame(308), /stopped/); assert.equal(h.sockets[0].closes, 1);
+});
+
+test('disposal reentry during input send releases the input only after controller unwind, preserving undefined', () => {
+ let frees=0;class OwnedInput extends TestDesktopInput { free(){frees++;super.free();} }
+ const h=harness({InputPolicy:OwnedInput});h.connected();h.setOwn(own());h.event('keydown',{code:'ArrowLeft'});
+ h.faults.onSend=bytes=>{if(bytes[0]===252){assert.throws(()=>h.gameplay.dispose(),/disposal reentry/);assert.equal(frees,0);throw undefined;}};
+ let thrown=false,primary;try{h.gameplay.frame(251);}catch(error){thrown=true;primary=error;}
+ assert.equal(thrown,true);assert.equal(primary,undefined);assert.equal(frees,0);h.flush();assert.equal(frees,1);
+ assert.deepEqual(h.errors,[undefined]);h.gameplay.dispose();assert.equal(frees,1);assert.equal(h.gameplay.diagnostics().input.connected,false);
 });

@@ -1,4 +1,5 @@
 import { stockSkinPolicyDouble, stockSkinWasmDouble } from './stock-skin-policy-double.mjs';
+import { TestDesktopInput } from './fixtures/client-input-fixture.mjs';
 import { createLeaderboardHistoryDouble } from './leaderboard-history-double.mjs';
 import { createHudHistoryDouble } from './hud-history-double.mjs';
 import assert from 'node:assert/strict';
@@ -12,6 +13,7 @@ import { createStockSkinAdapter } from '../web/stock-skin-provider.mjs';
 import { createStockClient } from '../web/stock-client.mjs';
 import { createStockEntityAssets } from '../web/stock-food-provider.mjs';
 import { desktopBackingSize } from '../web/desktop-layout.mjs';
+import { desktopBackingOracle } from './fixtures/desktop-layout-fixture.mjs';
 import { createStockGameplay } from '../web/stock-gameplay.mjs';
 import { bindStockHudDom } from '../web/stock-hud-dom.mjs';
 import { projectHudView } from '../web/stock-hud-view.mjs';
@@ -250,7 +252,8 @@ function wasmDouble(f) {
     begin_connection() { calls.push('quality.connection'); }
     free() { qualityFrees++; f.faults.cleanup?.('quality.free'); }
   }
-  const api = { ...stockSkinWasmDouble, AnimatedScene, DesktopQuality, HudHistory: createHudHistoryDouble(), LeaderboardHistory: createLeaderboardHistoryDouble(),
+  const api = { ...stockSkinWasmDouble, DesktopInput: TestDesktopInput, AnimatedScene, DesktopQuality, HudHistory: createHudHistoryDouble(), LeaderboardHistory: createLeaderboardHistoryDouble(),
+    desktop_backing_size: desktopBackingOracle,
     encode_login() { return Uint8Array.of(115, 1); }, solve_challenge() { return new Uint8Array(27); },
     setup_protocol_version() { return 19; },
     decode_frame(bytes) {

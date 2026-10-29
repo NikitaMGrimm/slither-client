@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import fs from 'node:fs';
 import { runScenarioSteps, validateScenario } from './browser-scenario-steps.mjs';
-import { createClientInput } from '../web/client-input.mjs';
+import { createClientInput } from './fixtures/client-input-fixture.mjs';
 import { createSyntheticSession, createPeerReceipt } from './browser-session-fixture.mjs';
 
 function harness(steps) {
