@@ -13,6 +13,14 @@ loopback endpoint; hiding the row supplies no remote endpoint or connection.
 The logo is packaged byte for byte at its approved asset path. No new artwork
 or external source is included.
 
+The scrollable panel's logo background moves with its padded form content
+(`background-attachment: local`), so scrolling to the returned result does not
+leave the logo behind the nickname controls. The existing panel position, top
+padding, overflow and result/preview flow are retained. The non-scrolling loading
+surface keeps its existing background placement. Focused inert tests check the
+submitted CSS contract; browser geometry and usability for this change remain
+separate validation.
+
 `src/start_page.rs` projects fixed status text, busy button text, disabled state
 and panel visibility. `src/start_page_browser.rs` copies that result through the
 `start_page_view` Wasm ABI. The DOM owner applies the copied projection through

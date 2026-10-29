@@ -22,6 +22,7 @@ export const startPageLayout = Object.freeze({
     ['font-family', 'Arial, sans-serif'], ['font-size', '16px'], ['text-align', 'center'],
     ['font-variant-numeric', 'tabular-nums'], ['border', '0'], ['border-radius', '0'],
     ['background-image', `url("${logo}")`], ['background-repeat', 'no-repeat'],
+    ['background-attachment', 'local'],
     ['background-position', 'center top'], ['background-size', '100% auto'],
   ]),
   label: freeze([['display', 'block'], ['margin-bottom', '16px'], ['text-align', 'left']]),
