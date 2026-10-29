@@ -70,11 +70,17 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
   let minimapUi, minimapCanvas, readMinimapView;
   let announcementUi, readAnnouncementView;
   let endScreenUi, endScreenProjector, EndScreenProjector, projectEndScreen, freeEndScreen;
-  let playAccepted = false, playAvailable = false, playGeneration = 0;
+  let PlayPolicy, playPolicy, playPolicyMethods, playCapabilityObservation, playGeneration = 0;
   const documentIdentity = hudReadout ? Symbol('HUD document') : undefined;
   const ownKeys = Reflect.ownKeys, apply = Reflect.apply, prototype = Object.getPrototypeOf;
   const descriptor = Object.getOwnPropertyDescriptor, hasOwn = Object.hasOwn;
   const recordPrototype = Object.prototype, freeze = Object.freeze;
+  function playFlag(name, ...args) {
+    const value = apply(playPolicyMethods[name], playPolicy, args);
+    checkHudOperation();
+    if (typeof value !== 'boolean') throw new TypeError('Copied Rust Play boolean required');
+    return value;
+  }
   function synchronous(callback) {
     if (typeof callback !== 'function') return false;
     const asynchronous = [prototype(async function () {}), prototype(function* () {}), prototype(async function* () {})];
@@ -208,12 +214,14 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
         endScreenUi.render(view);
         checkHudOperation();
       }
-      if (localHost && playUi && playAccepted) {
+      if (localHost && playUi && playFlag('accepted')) {
         const session = gameplay.diagnostics().session;
-        if (session.phase === 'disconnected' || session.phase === 'victory' && session.playing === false) {
+        if (typeof session.phase !== 'string' || typeof session.playing !== 'boolean') throw new TypeError('Copied Play session observation required');
+        if (playFlag('return_ready', session.phase, session.playing)) {
           playUi.unlock();
           checkHudOperation();
-          playAccepted = false;
+          if (apply(playPolicyMethods.complete_return, playPolicy, []) !== undefined) throw new TypeError('Synchronous Rust Play return required');
+          checkHudOperation();
         }
       }
       if (playUi) {
@@ -414,6 +422,9 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     for (const remove of listeners.splice(0)) cleanup(remove);
     cleanup(() => native.setInput(event => { if (event.type === 'click' && event.target === reload) native.ordinaryReload(); }));
     for (const action of [() => gameplay?.dispose(), () => controller?.dispose()]) cleanup(action);
+    const playOwner = playPolicy, playRelease = playPolicyMethods?.free;
+    playPolicy = PlayPolicy = playPolicyMethods = playCapabilityObservation = undefined;
+    if (playOwner !== undefined) cleanup(() => apply(playRelease, playOwner, []));
     const owner = projector, release = freeProjector;
     projector = projectScores = freeProjector = Projector = undefined;
     if (owner !== undefined) cleanup(() => apply(release, owner, []));
@@ -459,7 +470,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
       'ready-not-connected': 'Ready', connected: 'Connected', disconnected: 'Not connected',
       'host-unavailable': 'Unavailable', 'csp-or-module-unavailable': 'Unavailable',
       'client-failed': 'Failed', disposed: 'Not connected' };
-    return `SlitherClient: ${code === 'ready-not-connected' && !playAvailable ? 'Unavailable' : labels[code] ?? 'Unavailable'}`;
+    return `SlitherClient: ${code === 'ready-not-connected' && !playFlag('available') ? 'Unavailable' : labels[code] ?? 'Unavailable'}`;
   }
   function displayStatus(visible) {
     if (diagnosticUi || !ownedPlayUi || !hudCapabilities || !output) return false;
@@ -479,7 +490,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     if (playUi && !disposed) {
       const states = { __proto__: null, 'ready-not-connected': 'ready', connected: 'connected',
         disconnected: 'not-connected', 'host-unavailable': 'unavailable', 'client-failed': 'failed' };
-      if (states[code]) playUi.setStatus(code === 'ready-not-connected' && !playAvailable ? 'unavailable' : states[code]);
+      if (states[code]) playUi.setStatus(code === 'ready-not-connected' && !playFlag('available') ? 'unavailable' : states[code]);
       checkHudOperation();
     }
     native.status(code);
@@ -600,7 +611,14 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
         }
         for (const name of names) controls[name] = guarded(controls[name]);
         playCapabilities = { controls: freeze(controls), createControlsLease: guarded(group.createControlsLease) };
-        playAvailable = Boolean(localHost) || native.liveProfile !== undefined;
+        PlayPolicy = descriptor(wasmApi, 'PlayAdmission')?.value;
+        const policyPrototype = typeof PlayPolicy === 'function' && descriptor(PlayPolicy, 'prototype')?.value;
+        const policyNames = ['available', 'accepted', 'nickname_valid', 'accept', 'lock_unavailable', 'return_ready', 'complete_return', 'free'];
+        if (!synchronous(PlayPolicy) || policyNames.some(name => !synchronous(policyPrototype && descriptor(policyPrototype, name)?.value))) {
+          throw new TypeError('Captured Rust Play admission required');
+        }
+        playPolicyMethods = freeze(Object.fromEntries(policyNames.map(name => [name, descriptor(policyPrototype, name).value])));
+        playCapabilityObservation = [Boolean(localHost), localHost ? false : native.liveProfile !== undefined];
         if (ownedMenuUi) {
           const raw = descriptor(native, 'menuPreferences')?.value;
           const group = copyRecord(raw, ['schema', 'document', 'read', 'write', 'setNickname']);
@@ -655,6 +673,10 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     report('loading');
     await initialize();
     if (disposed) return Object.freeze({ dispose });
+    if (ownedPlayUi) runNative(() => {
+      playPolicy = new PlayPolicy(...playCapabilityObservation);
+      playCapabilityObservation = undefined;
+    });
     if (localHost) {
       if (!synchronous(localHost.bindSkinPolicy) || !synchronous(wasmApi.resolve_local_skin)) {
         throw new TypeError('Local Rust skin policy binding required');
@@ -854,7 +876,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
         let request, promise;
         try {
           runPlay(() => {
-            if (playAccepted) return;
+            if (playFlag('accepted')) return;
             let endpoint, nickname;
             try {
               endpoint = playCapabilities.controls.inputValue(playNodes.endpoint);
@@ -864,11 +886,11 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
               try { endpoint = stockEndpoint(endpoint); }
               catch { playUi.setStatus('invalid-endpoint'); return; }
               if (localHost && endpoint !== localHost.endpoint) { playUi.setStatus('invalid-endpoint'); return; }
-              if (typeof nickname !== 'string' || nickname.length > 24 || /[^\x20-\x7f]/.test(nickname)) {
+              if (typeof nickname !== 'string' || !playFlag('nickname_valid', nickname)) {
                 playUi.setStatus('invalid-nickname'); return;
               }
               const selection = menuUi ? menuUi.selection(nickname) : { nickname, skin: 0, customSkin: new Uint8Array() };
-              playAccepted = true;
+              if (!playFlag('accept')) return;
               playUi.lock();
               playUi.setStatus('preparing');
               request = { endpoint, ...selection,
@@ -920,8 +942,11 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
             isCurrentDocument: hudCapabilities.isCurrentDocument });
           menuActions = menuUi.mount().map(action => freeze({ button: action.button, parent: action.parent,
             onPress() {
-              if (disposed || cleanupActive || generation !== playGeneration || playAccepted) return;
-              try { runPlay(() => action.onPress()); } catch (error) { fail(error); }
+              if (disposed || cleanupActive || generation !== playGeneration) return;
+              try {
+                if (playFlag('accepted')) return;
+                runPlay(() => action.onPress());
+              } catch (error) { fail(error); }
             } }));
         }
       });
@@ -940,7 +965,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
         if (apply(controlsLease.bind, undefined, []) !== undefined) throw new TypeError('Synchronous owned Play binding required');
         checkHudOperation();
       });
-      if (!playAvailable) runPlay(() => { playAccepted = true; playUi.lock(); });
+      runPlay(() => { if (playFlag('lock_unavailable')) playUi.lock(); });
     }
     if (ownedLeaderboardUi) {
       hudIdle();
