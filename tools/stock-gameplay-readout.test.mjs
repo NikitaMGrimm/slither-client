@@ -1,3 +1,4 @@
+import { TestSessionPolicy } from './fixtures/session-policy-double.mjs';
 import { ProfileLiteralParserDouble } from './fixtures/profile-literals-double.mjs';
 import { TestDesktopInput } from './fixtures/client-input-fixture.mjs';
 import { HudHistoryDouble } from './hud-history-double.mjs';
@@ -112,7 +113,7 @@ function harness({ mode = true, callback, configure } = {}) {
   const routed = Object.fromEntries(['packet', 'packetWithHud', 'frame', 'render', 'resize'].map(name =>
     [name, (...args) => { const result = controller[name](...args); hit(`${name}-return`); return result; }]));
   const options = { scene, quality, controller: routed,
-    wasm: { DesktopInput: TestDesktopInput, HudHistory: HudHistoryDouble, ProfileLiteralParser: ProfileLiteralParserDouble,
+    wasm: { DesktopInput: TestDesktopInput, SessionPolicy: TestSessionPolicy, HudHistory: HudHistoryDouble, ProfileLiteralParser: ProfileLiteralParserDouble,
       encode_login() { return Uint8Array.of(115, 1); }, solve_challenge() { return new Uint8Array(27); },
       setup_protocol_version() { return 19; },
       decode_frame(bytes) {

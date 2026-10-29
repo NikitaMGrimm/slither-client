@@ -38,7 +38,7 @@ export function menuPreferencesSmoke(wasm) {
       selected.customSkin.fill(0);
       assert.deepEqual(encoded, Uint8Array.from([115, 30, 0, 1, ...new Array(20).fill(0), 0, 3, 32, 127, 32, 0, 255, ...bytes]));
       assert.equal(socketAttempts, 0);
-    } finally { session.close('menu-smoke-cleanup'); unsubscribe(); }
+    } finally { session.dispose('menu-smoke-cleanup'); unsubscribe(); }
     assert.throws(() => p.action('connect'));
     p.reset(); assert.equal(p.view().nickname, '');
   } finally { restored?.free(); p.free(); }

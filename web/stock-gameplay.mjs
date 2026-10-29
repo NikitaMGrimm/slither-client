@@ -99,8 +99,9 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
     : ownRecord(liveProfile, ['capabilities', 'isCurrentDocument']);
   if (profileOptions && typeof profileOptions.isCurrentDocument !== 'function') throw new TypeError('Current-document checker required');
   const input = createClientInput({ protocolVersion: 19, InputPolicy: wasm.DesktopInput });
+  let session;
   try {
-  let session = createStockSession({ wasm, createSocket, now });
+  session = createStockSession({ wasm, createSocket, now, SessionPolicy: wasm.SessionPolicy });
   let disposed = false, active = false, queued = false, dirty = true, hasFatal = false, fatal, uiTimer;
   let fatalNotified = false;
   let reconciling = false;
@@ -266,7 +267,7 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
     cleanup(clearUiTimer);
     cleanup(unsubscribe);
     cleanup(() => input.pagehide());
-    cleanup(() => session.close('host-disposed'));
+    cleanup(() => session.dispose('host-disposed'));
     cleanup(() => input.dispose());
     if (hasFatal && !fatalNotified) {
       fatalNotified = true;
@@ -378,11 +379,11 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
         || (status.phase === 'victory' && status.playing === false))) {
         try {
           clearUiTimer();
-          session.close('local-session-replaced');
+          session.dispose('local-session-replaced');
           unsubscribe();
           leaderboardCompanion = null;
           if (hasFatal) throw fatal;
-          session = createStockSession({ wasm, createSocket, now });
+          session = createStockSession({ wasm, createSocket, now, SessionPolicy: wasm.SessionPolicy });
           unsubscribe = subscribeSession();
         } catch (error) { latchError(error); throw error; }
       }
@@ -533,6 +534,7 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
     dispose,
   });
   } catch (error) {
+    try { session?.dispose(); } catch { /* Preserve the exact construction failure. */ }
     try { input.dispose(); } catch { /* Construction failure remains primary, even undefined. */ }
     throw error;
   }

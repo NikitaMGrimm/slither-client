@@ -14,8 +14,8 @@ function tracked(Base,{freeFailure,throwOnFree=false}={}) {
   }
   return{Policy:Tracked,counts};
 }
-function gameplay(Policy,{fault,late=false}={}){
-  const errors=[],wasm={DesktopInput:Policy,encode_login(){return new Uint8Array();},solve_challenge(){},decode_frame(){},setup_protocol_version(){}};
+function gameplay(Policy,SessionPolicy,{fault,late=false}={}){
+  const errors=[],wasm={DesktopInput:Policy,SessionPolicy,encode_login(){return new Uint8Array();},solve_challenge(){},decode_frame(){},setup_protocol_version(){}};
   if(fault&&!late)Object.defineProperty(wasm,'encode_login',{get:()=>{throw fault.value;}});
   const args={wasm,scene:{control_view(){},set_connected(){},reset_lag(){}},quality:{begin_connection(){}},controller:{packet(){},frame(){}},
     createSocket(){assert.fail('No construction socket');},now:()=>0,defer(){},setInterval(){},clearInterval(){},onStatus(){},onFatal:e=>errors.push(e)};
@@ -54,15 +54,15 @@ export function desktopInputLifetimeSmoke(wasm){
   }
   for(const primary of [undefined,{},false])for(const late of [false,true]){
     const{Policy,counts}=tracked(wasm.DesktopInput,{throwOnFree:true,freeFailure:'secondary free'});
-    const result=capture(()=>gameplay(Policy,{fault:{value:primary},late}));
+    const result=capture(()=>gameplay(Policy,wasm.SessionPolicy,{fault:{value:primary},late}));
     assert.equal(result.thrown,true);assert.ok(Object.is(result.value,primary));assert.equal(counts.created,1);assert.equal(counts.freed,1);cases++;
   }
   {
-    const{Policy,counts}=tracked(wasm.DesktopInput),h=gameplay(Policy);h.owner.dispose();h.owner.dispose();
+    const{Policy,counts}=tracked(wasm.DesktopInput),h=gameplay(Policy,wasm.SessionPolicy);h.owner.dispose();h.owner.dispose();
     assert.equal(counts.freed,1);assert.equal(h.owner.diagnostics().disposed,true);assert.equal(h.owner.diagnostics().input.connected,false);cases++;
   }
   {
-    const{Policy,counts}=tracked(wasm.DesktopInput,{throwOnFree:true,freeFailure:undefined}),h=gameplay(Policy);
+    const{Policy,counts}=tracked(wasm.DesktopInput,{throwOnFree:true,freeFailure:undefined}),h=gameplay(Policy,wasm.SessionPolicy);
     const result=capture(()=>h.owner.dispose());assert.equal(result.thrown,true);assert.equal(result.value,undefined);
     assert.deepEqual(h.errors,[undefined]);h.owner.dispose();assert.equal(counts.freed,1);cases++;
   }

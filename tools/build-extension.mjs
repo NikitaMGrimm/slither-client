@@ -108,6 +108,7 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, g
   if (!/export class AnimatedScene\b/.test(glue) || !/export class DesktopQuality\b/.test(glue)
     || !/export class ProfileLiteralParser\b/.test(glue)
     || !/export class DesktopInput\b/.test(glue)
+    || !/export class SessionPolicy\b/.test(glue)
     || !/export function desktop_backing_size\b/.test(glue)
     || !/export class PlayAdmission\b/.test(glue)
     || !/new URL\(['"]slither_client_bg\.wasm['"], import\.meta\.url\)/.test(glue)
@@ -126,7 +127,7 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, g
     throw new Error('Generated HUD validator differs from its authored source; rebuild before packaging');
   }
   bindings.set(snippetName, snippet);
-  for (const name of ['memory', 'animatedscene_new', 'desktopquality_new', 'desktopinput_new',
+  for (const name of ['memory', 'animatedscene_new', 'desktopquality_new', 'desktopinput_new', 'sessionpolicy_new', 'sessionpolicy_prepare_controls', 'sessionpolicy_commit_controls', 'sessionpolicy_commit_control', 'sessionpolicy_protocol_allowed', 'sessionpolicy_negotiation_packet', 'sessionpolicy_commit_ping', 'sessionpolicy_ping_external', 'sessionpolicy_ping_due_elapsed', 'sessionpolicy_commit_opaque_ping', 'sessionpolicy_lag_check_needed', 'sessionpolicy_observe_lag_elapsed', 'sessionpolicy_death_time', 'sessionpolicy_death_elapsed', 'sessionpolicy_advance_step_elapsed', 'sessionpolicy_valid_input', '__wbg_sessionpolicy_free',
     'animatedscene_apply_frame_and_render_standard_with_face_presentation_and_prey',
     'animatedscene_apply_frame_and_render_standard_with_face_presentation_and_prey_and_hud',
     'animatedscene_render_standard_with_face_presentation_at_size',

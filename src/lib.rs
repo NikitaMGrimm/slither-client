@@ -19,6 +19,7 @@ pub mod play_admission;
 pub mod presentation;
 pub mod profile_literals;
 pub mod protocol;
+pub mod session_policy;
 pub mod start_page;
 pub mod state;
 
@@ -42,6 +43,9 @@ mod browser;
 
 #[cfg(target_arch = "wasm32")]
 mod desktop_input_browser;
+
+#[cfg(target_arch = "wasm32")]
+mod session_policy_browser;
 
 #[cfg(target_arch = "wasm32")]
 mod canvas_browser;
