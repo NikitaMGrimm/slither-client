@@ -53,9 +53,16 @@ rejecting redirects. Complete EOF/size/hash and the same closed Rust parser,
 owner or new host permission; its HTTP-com default Play stays unavailable.
 
 Only the parsed version/protocol and 20 borrowed password bytes may cross
-browser-controlled scripting IPC into the exact pending MAIN document. A private
-one-use token binds delivery to the gate-issued owned-Play intent; public wake
-hints carry no profile authority. No source bytes cross IPC. Raw source and
+browser-controlled scripting IPC into the exact pending MAIN document. An isolated
+extension closure creates a private random document key; only private extension
+IPC and privileged gate/bootstrap carry it into construction before UI admission.
+The gate is constructed with the key before publication and requires it to release
+native capabilities; neither public claim nor public runtime construction sets it.
+It never appears in the public arm, page messages, globals, DOM or status. Public
+receiver calls can only compare against that already bound key, never set or
+retrieve it. Worker restarts reuse the isolated key without resetting the one-use
+MAIN intent; terminal MAIN/worker paths and isolated pagehide clear owned copies.
+Public wake hints carry no profile authority. No source bytes cross IPC. Raw source and
 credentials never traverse the page-visible status/message bridge or DOM, globals,
 storage or diagnostics. Worker and MAIN owned buffers clear explicitly, including
 serialized mutable copies. Browser-internal IPC copies, temporaries and forcibly

@@ -20,6 +20,9 @@ import * as vm from 'node:vm';
 import { createGateTestDom, attachGateTestRealm, issuedMinimapViewDouble } from './game-gate-test-fixture.mjs';
 import { projectStartPageDouble } from './start-page-view-double.mjs';
 import { projectMenuLoadingDouble } from './menu-loading-view-double.mjs';
+import { createProfileBroker } from '../extension/profile-broker.mjs';
+import { createExtensionLiveProfileAcquirer } from '../web/stock-live-profile.mjs';
+import { privateProfileGateSource } from './profile-gate-source.mjs';
 
 const root = new URL('../', import.meta.url);
 // The flagged ABI phase replays the same inert runtime requirements with real Rust admission.
@@ -66,7 +69,8 @@ export async function runGameModuleTest(scenario) {
 }
 
 function createGraph({ armed = true, hudNative = false, ownedHudNative = false, ownedPlayNative = false,
-  leaderboardNative = false, minimapNative = false, initialize, prepare, prepareWasm, href, profileBroker = false } = {}) {
+  leaderboardNative = false, minimapNative = false, initialize, prepare, prepareWasm, href, profileBroker = false,
+  deferPrivateGate = false } = {}) {
   // Reuse authored native/Wasm fixture definitions, never transform a product module.
   const testSource = readFileSync(new URL('tools/game-bootstrap.test.mjs', root), 'utf8');
   const definitions = testSource.slice(testSource.indexOf('function fixture('), testSource.indexOf("\ntest('an unarmed"));
@@ -76,14 +80,14 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
   const { fixture, wasmDouble } = makeFixture(nativeSource, vm.Script, vm.createContext, vm.runInContext, assert,
     options => { const dom = createGateTestDom({ ...options, ownedHud: ownedHudNative, ownedPlay: ownedPlayNative,
       leaderboard: leaderboardNative, minimap: minimapNative }); prepare?.(dom); return dom; }, attachGateTestRealm, createHudHistoryDouble, createLeaderboardHistoryDouble, TestDesktopInput,desktopBackingOracle,TestSessionPolicy,stockSkinWasmDouble,TestStockControllerPolicy,TestGameplayPolicy,authoredSourceRecipesDouble);
-  const f = fixture({ armed, hudNative, ...(href ? { href } : {}), profileBroker });
+  const f = fixture({ armed, hudNative, ...(href ? { href } : {}), profileBroker, deferPrivateGate });
   if (hudNative) {
     // The legacy native boundary must create HTML-branded borrowed root/status nodes too.
     const create = f.document.createElement;
     f.document.createElement = name => name === 'canvas' || name === 'input'
       ? create(name) : new f.edit.hud.HTMLElement(name);
   }
-  f.host(); f.complete();
+  if (!deferPrivateGate) { f.host(); f.complete(); }
   const wasm = wasmDouble(f), counts = { initialize: 0 };
   // Explicit doubles must allocate their copied tuples in the module's realm,
   // just like generated Wasm glue; retain production typed-array admission.
@@ -156,7 +160,22 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
     if (module.status === 'linked') await module.evaluate();
     return module.namespace;
   };
-  return { f, wasm, counts, minimap, announcements, previewCalls, load, sources, run: source => vm.runInContext(source, f.context),
+  return { f, wasm, counts, minimap, announcements, previewCalls, load, sources,
+    privateGateFunction: new vm.Script('('+privateProfileGateSource(nativeSource)+')').runInThisContext(),
+    run: source => vm.runInContext(source, f.context),
+    async injectProfile(func, args) {
+      // Native scripting IPC double: a separate entry supplies browser-created
+      // JSON copies; the function and its imports execute in the actual MAIN realm.
+      const injection = new vm.Script(`(${func.toString()})`, {
+        importModuleDynamically: async specifier => {
+          const match = /^chrome-extension:\/\/[a-p]{32}\/game\/(bootstrap|profile-receiver)\.mjs$/.exec(specifier);
+          if (!match) throw new Error('Unexpected private IPC import');
+          return load(match[1] + '.mjs');
+        },
+      });
+      const values = vm.runInContext('JSON.parse', f.context)(JSON.stringify(args));
+      return await injection.runInContext(f.context)(...values);
+    },
     message(values) {
       // Native WebSocket delivery supplies an ArrayBuffer from the document's own realm.
       const data = vm.runInContext(`(values => {
@@ -282,7 +301,8 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
 if (!isMainThread && workerData?.kind === 'authored-game-module-test') {
   try {
     const scenario = new vm.Script('(' + workerData.scenario + ')').runInThisContext();
-    const value = await scenario({ assert, createGraph, issuedMinimapViewDouble });
+    const value = await scenario({ assert, createGraph, issuedMinimapViewDouble,
+      createProfileBroker, createExtensionLiveProfileAcquirer, ProfileLiteralParserDouble });
     parentPort.postMessage({ ok: true, value });
   } catch (error) { parentPort.postMessage({ ok: false, error: error?.stack ?? String(error) }); }
 }

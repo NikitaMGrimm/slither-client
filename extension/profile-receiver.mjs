@@ -2,9 +2,21 @@
 let destination;
 const failure = () => new Error('Extension profile unavailable');
 
-export function createExtensionProfileReceiver(native, isCurrentDocument) {
+export function createExtensionProfileReceiver(native, isCurrentDocument, bootstrapAuthority) {
   if (destination || globalThis[Symbol.for('slither.client.gate.v1')]?.verifyExtensionProfile?.(native) !== true) throw failure();
   const { freeze, octets } = native;
+  if (!octets(bootstrapAuthority, 16)) throw failure();
+  // Authority is bound during private bootstrap, never installed by public claim.
+  const authority = native.bytes.allocate(16);
+  for (let i = 0; i < 16; i++) authority[i] = bootstrapAuthority[i];
+  let authorityLive = true;
+  const authenticated = token => {
+    if (!authorityLive || !octets(token, 16)) return false;
+    let mismatch = 0;
+    for (let i = 0; i < 16; i++) mismatch |= token[i] ^ authority[i];
+    return mismatch === 0;
+  };
+  const clearAuthority = () => { if (authorityLive) { authorityLive = false; native.bytes.clear(authority); } };
   let state = 'idle', active;
   const fresh = op => {
     const now = native.now();
@@ -19,8 +31,8 @@ export function createExtensionProfileReceiver(native, isCurrentDocument) {
     op.done = true; state = success ? 'used' : 'failed';
     let cleaned = true;
     try { if (op.timer !== undefined) native.clearTimeout(op.timer); } catch { cleaned = false; }
-    try { if (op.token) native.bytes.clear(op.token); } catch { cleaned = false; }
-    op.token = op.consumer = undefined;
+    try { clearAuthority(); } catch { cleaned = false; }
+    op.consumer = undefined;
     if (success && cleaned) op.resolve(); else { state = 'failed'; op.reject(failure()); }
   }
   const acquirer = freeze({
@@ -30,7 +42,7 @@ export function createExtensionProfileReceiver(native, isCurrentDocument) {
       state = 'loading';
       return new Promise((resolve, reject) => {
         const op = { __proto__: null, resolve, reject, consumer, done: false, claimed: false, delivered: false,
-          token: undefined, timer: undefined, start: undefined, previous: undefined };
+          timer: undefined, start: undefined, previous: undefined };
         active = op;
         try {
           native.authorize();
@@ -47,29 +59,27 @@ export function createExtensionProfileReceiver(native, isCurrentDocument) {
       if (active && !active.done) {
         try { finish(active, false); } finally { native.cancel(); }
       }
+      clearAuthority();
       state = 'disposed';
     },
   });
   destination = {
     claim(token) {
       const op = active;
-      if (!op || op.claimed || !octets(token, 16)) return { accepted: false };
+      if (!op || op.claimed || !authenticated(token)) return { accepted: false };
       try {
         const remainingMs = fresh(op);
         op.claimed = true;
-        op.token = native.bytes.allocate(16);
-        for (let i = 0; i < 16; i++) op.token[i] = token[i];
         return { accepted: true, remainingMs };
       } catch { finish(op, false); return { accepted: false }; }
     },
     accept(operation, token, version, protocol, values) {
       const op = active;
       let password;
+      // An unauthenticated public call cannot claim, cancel or finish the intent.
+      if (!authenticated(token)) return false;
       try {
-        if (!op || !op.claimed || !op.token || !octets(token, 16)) throw failure();
-        let mismatch = 0;
-        for (let i = 0; i < 16; i++) mismatch |= token[i] ^ op.token[i];
-        if (mismatch) return false;
+        if (!op || !op.claimed) throw failure();
         fresh(op);
         if (operation === 'fail') { finish(op, false); return true; }
         if (operation === 'finish') {

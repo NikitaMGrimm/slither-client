@@ -24,7 +24,7 @@ async function fixture(options = {}) {
     now: () => mainNow, setTimeout, clearTimeout, wake() {}, cancel() {},
     authorize() { if (!allowed) throw Error('Synthetic untrusted action'); } };
   globalThis[slot] = { verifyExtensionProfile: value => value === native };
-  const local = module.createExtensionProfileReceiver(native, () => current);
+  const local = module.createExtensionProfileReceiver(native, () => current, Array(16).fill(37));
   delete globalThis[slot];
   const sender = { id, frameId: 0, tab: { id: 7 }, documentId: 'synthetic-document', url:'http://slither.com/io', origin:'http://slither.com' };
   const api = { runtime: { id, getURL: name => `chrome-extension://${id}/${name}` }, scripting: {
@@ -59,7 +59,7 @@ async function fixture(options = {}) {
   const receive = createProfileBroker({api,native:{capabilities:caps,now:()=>workerNow,
     random: b=>b.fill(37),setTimeout,clearTimeout},initialize:async()=>{initialized++;await options.initialize?.();},
     Parser:ProfileLiteralParserDouble,createAcquirer:createExtensionLiveProfileAcquirer});
-  const wake={type:'slither-client-profile-wake',schema:1,activationId:id};
+  const wake={type:'slither-client-profile-wake',schema:1,activationId:id,authority:Array(16).fill(37)};
   const begin = () => local.acquirer.acquireForPlay(profile=>{ consumed.push([...profile.password]); options.consume?.(profile); });
   return {module,local,receive,wake,sender,begin,requests,ipc,owned,consumed,timers,
     advance(ms){mainNow+=ms;workerNow+=ms;}, expire(){mainNow=5000;workerNow=15000;for(const {callback} of [...timers.values()])callback();},
@@ -158,7 +158,7 @@ test('HTTP-com clears source/digest before parsed delivery and password before f
 });
 
 test('MAIN parsed receiver uses captured freeze/array admission after mutable page globals change',async()=>{
-  const f=await fixture(),pending=f.begin(),token=Array(16).fill(4),password=Array(20).fill(8);
+  const f=await fixture(),pending=f.begin(),token=Array(16).fill(37),password=Array(20).fill(8);
   const freeze=Object.freeze,isArray=Array.isArray;
   let leaked=0,result;
   try {

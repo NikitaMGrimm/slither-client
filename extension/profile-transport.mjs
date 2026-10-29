@@ -14,3 +14,16 @@ export async function profileDelivery(receiverURL, operation, token, version, pr
     if (token !== null && token !== undefined) for (let i = 0; i < token.length; i++) token[i] = 0;
   }
 }
+
+// The isolated extension context supplies this key privately before real UI construction.
+export async function profileBootstrap(bootstrapURL, authority) {
+  try {
+    if (globalThis !== globalThis.top || globalThis.location.href !== 'http://slither.com/io'
+      || !/^chrome-extension:\/\/[a-p]{32}\/game\/bootstrap\.mjs$/.test(bootstrapURL)) return false;
+    const bootstrap = await import(bootstrapURL);
+    if (globalThis !== globalThis.top || globalThis.location.href !== 'http://slither.com/io') return false;
+    await bootstrap.startGamePage({ profileAuthority: authority });
+    return true;
+  } catch { return false; }
+  finally { if (authority !== null && authority !== undefined) for (let i = 0; i < authority.length; i++) authority[i] = 0; }
+}

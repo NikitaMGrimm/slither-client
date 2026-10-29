@@ -58,6 +58,7 @@ function connect(f, runtime) {
 }
 
 function fixture({ armed = true, late = false, sourcePending = false, href = 'https://slither.io/', profileBroker = false,
+  deferPrivateGate = false, privateAuthority = Array(16).fill(1),
   missingEdit = false, missingFence = false, missingNative, hudNative = false, accessoryNative = false, accessoryRequestNative = false } = {}) {
   const dimensions = new WeakMap(), images = new WeakMap();
   const log = [], messages = [], raf = new Map(), timers = new Map(), intervals = new Map(), microtasks = [], faults = {};
@@ -172,6 +173,14 @@ function fixture({ armed = true, late = false, sourcePending = false, href = 'ht
   }
   const nativeRaf = realm.requestAnimationFrame;
   new Script(gateSource).runInContext(context);
+  if (profileBroker && href === 'http://slither.com/io' && !deferPrivateGate) {
+    // Explicit browser scripting double: private function construction precedes
+    // any page-visible gate. This is not a public first-setter or claim call.
+    const start=gateSource.indexOf('(function installGameGate(profileAuthority) {');
+    const end=gateSource.lastIndexOf('})(undefined);');
+    const install=new Script('('+gateSource.slice(start+1,end+1)+')').runInContext(context);
+    install(runInContext('JSON.parse',context)(JSON.stringify(privateAuthority)));
+  }
   function canvas() { const value = makeCanvas(); value.getContext('2d').fillRect(0, 0, 32, 32); return value; }
   function host() {
     Object.assign(realm, { render_mode: 2, is_mobile: false, team_mode: false, choosing_skin: false,
@@ -676,6 +685,47 @@ test('actual isolated link loads exactly one fixed MAIN module and accepts bound
   assert.equal(f.document.getElementById('slither-client-status').textContent, 'Play unavailable on this page.');
   assert.equal(f.document.getElementById('slither-client-reload').hidden, true);
   assert.equal(f.sockets, 0);
+});
+
+test('HTTP-com isolated link keeps document key private and cannot take a key from public wake', async () => {
+  const f = fixture({ href: 'http://slither.com/io', profileBroker: true }), sent = [], owned = [];
+  let acknowledge;
+  const chrome = { runtime: { getManifest: () => ({background:{service_worker:'game/profile-worker.mjs'}}),
+    getURL: name => `chrome-extension://${'a'.repeat(32)}/${name}`,
+    sendMessage(message) { sent.push(structuredClone(message)); owned.push(message.authority);
+      return message.type==='slither-client-profile-bootstrap'?new Promise(resolve=>{acknowledge=resolve;}):Promise.resolve(true); },
+  } };
+  const context = createContext({ document:f.document,location:f.realm.location,URL,chrome,globalThis:{chrome},window:f.realm,
+    crypto:{getRandomValues(value){owned.push(value);value.fill(37);return value;}},setTimeout:()=>1,clearTimeout(){},Set });
+  new Script(readFileSync(new URL('../extension/game-link.js',import.meta.url),'utf8')).runInContext(context);
+  assert.equal(sent.length,1);assert.equal(sent[0].type,'slither-client-profile-bootstrap');
+  assert(sent[0].authority.every(v=>v===37));assert.equal(f.document.head.children.length,0);
+  const forged={type:'slither-client-profile-wake',schema:1,activationId:'a'.repeat(32),authority:Array(16).fill(7)};
+  f.realm.postMessage(forged);
+  assert.equal(sent.length,1,'public messages cannot supply a key');
+  f.realm.postMessage({type:'slither-client-profile-wake',schema:1,activationId:'a'.repeat(32)});
+  assert.equal(sent.length,1,'wake waits for successful private construction');
+  acknowledge(true);await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(sent.length,2);assert(sent[1].authority.every(v=>v===37));
+  assert(f.messages.filter(message=>message!==forged).every(message=>!Object.hasOwn(message,'authority')));
+  f.event('pagehide');await Promise.resolve();await Promise.resolve();
+  assert.equal(sent[2].type,'slither-client-profile-cancel');assert(owned.every(key=>key.every(v=>v===0)));
+  assert.equal(context.authority,undefined);
+});
+
+test('HTTP-com failed private construction never forwards a page wake with authority',async()=>{
+  const f=fixture({href:'http://slither.com/io',profileBroker:true}),sent=[],owned=[];
+  const create=f.document.createElement.bind(f.document);
+  f.document.createElement=name=>{const node=create(name);if(name==='p')node.style={setProperty(){}};return node;};
+  const chrome={runtime:{getManifest:()=>({background:{service_worker:'game/profile-worker.mjs'}}),
+    sendMessage(message){sent.push(message.type);owned.push(message.authority);return Promise.resolve(false);}}};
+  const context=createContext({document:f.document,location:f.realm.location,URL,chrome,globalThis:{chrome},window:f.realm,
+    crypto:{getRandomValues(value){owned.push(value);value.fill(37);return value;}},setTimeout:()=>1,clearTimeout(){},Set});
+  new Script(readFileSync(new URL('../extension/game-link.js',import.meta.url),'utf8')).runInContext(context);
+  await new Promise(resolve=>setImmediate(resolve));
+  f.realm.postMessage({type:'slither-client-profile-wake',schema:1,activationId:'a'.repeat(32)});
+  assert.deepEqual(sent,['slither-client-profile-bootstrap']);assert(owned.every(key=>key.every(v=>v===0)));
+  assert.equal(f.sockets,0);f.event('pagehide');
 });
 
 test('isolated module deadline reveals an existing hidden fallback without loading a second module', () => {

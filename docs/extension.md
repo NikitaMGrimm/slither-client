@@ -481,16 +481,19 @@ This local API is
 for explicit trusted composition. An importing MAIN module can await exported
 `gamePageRuntime`, the single auto-entry promise, to obtain this runtime without
 claiming the gate again; nothing is installed on `window` for this purpose.
+That shared promise applies to the ordinary canonical/local entry. Chrome's
+HTTP-com instance is constructed privately by the extension bootstrap and does
+not expose its runtime handle through that promise.
 
 The separate asynchronous `playWithLiveProfile` path requests the exact pinned
 same-origin script only after explicit invocation in canonical, top-level, secure
 `https://slither.io`. Optional captured native capabilities are absent on HTTP,
 www, `.com` or unsupported environments; the external-profile path remains
 available only to an explicit trusted MAIN caller supplying its own profile.
-The default HTTP `.com/io` Play control has no automatic profile capability and
-remains unavailable. Admitting activation does not make that normal-user Play
-path complete, move the profile URL under `.com/io/s`, or authorize a cross-origin
-or insecure profile request. Existing host adapters still borrow the captured
+Chrome's default HTTP `.com/io` Play control uses the explicit owned-Play broker
+described below; Firefox remains unavailable there. This implemented contract
+does not establish installed/live acceptance, move the profile URL under `.com/io/s`,
+or allow insecure profile requests. Existing host adapters still borrow the captured
 ready Canvas/image objects, including absolute `.io` sources, under their normal
 readiness/identity/mode checks; no asset-origin alias or new download is added.
 The acquirer observes complete EOF and verifies exact length/SHA-256 before
@@ -553,7 +556,24 @@ Exact `http://slither.com/io` uses the existing owned Play control and Rust
 admission/session stages. Chrome activation arms a dedicated broker capability;
 activation and forged public wake hints alone start no acquisition. The background
 checks browser sender identity, top frame and exact document, then claims one
-private gate-issued pending Play. It fetches only the existing pinned HTTPS-io
+private gate-issued pending Play. Before that UI exists, the isolated extension
+closure creates a random document key and sends it only through private extension
+IPC. The worker first privately injects the same authored gate function with that
+key, then bootstraps the MAIN runtime. The published gate will not release its
+native capabilities without the already closed-over key; public runtime/receiver
+construction cannot choose a different key. A pre-existing page gate makes the
+injection fail closed instead of accepting it. Construction binds the receiver's
+expected authority once. Public claim/delivery exports only
+compare against it and can never install or retrieve authority. Importing the
+receiver before bootstrap or racing the first public wake does not grant access.
+Chrome-com's registered MAIN file preserves the nonsecret arm until this private
+construction. The isolated document-start link requests it immediately. Missing
+the existing early host-startup window fails closed; no original callbacks are
+replayed and no alternate bootstrap or acquisition retries are added. This timing
+and installed CSP compatibility require separate browser evidence.
+The isolated key survives an idle worker restart, stays off page globals/DOM/arm
+records/status, and clears on pagehide; worker and MAIN copies clear on their
+terminal paths. Bootstrap starts no profile acquisition. The broker fetches only the existing pinned HTTPS-io
 profile with omitted credentials, rejected redirects, exact EOF/size/hash and the
 existing Rust literal parser. The original five-second deadline includes worker
 initialization and IPC. Cancellation, navigation, timeout and worker restart never
@@ -564,7 +584,9 @@ profile delivery. Only a one-use authenticated privileged scripting call deliver
 the parsed fields to the existing private synchronous gameplay consumer. Borrowed
 password/IPC arrays clear before completion releases the acquiring draw fence;
 the normal complete reset/controller operation still precedes socket construction.
-Nothing secret is returned through runtime messages, public status or diagnostics.
+No source/profile/password is returned through runtime messages, public status or
+diagnostics. Only the separate document authentication key crosses private
+isolated-to-worker runtime IPC and privileged bootstrap/delivery scripting IPC.
 Chrome's host grant is origin-wide `https://slither.io/*`, while authored fetch is
 one-path-only. Its module worker and private transport are not web-accessible.
 Firefox retains its old permissions and fails closed for HTTP-com live Play.

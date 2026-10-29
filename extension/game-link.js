@@ -8,9 +8,42 @@
       && ['/', '/index.html'].includes(url.pathname);
   if (!home || url.search || url.hash || url.username || url.password) return;
   const api = globalThis.browser ?? globalThis.chrome;
+  const privateProfile = url.href === 'http://slither.com/io'
+    && api.runtime.getManifest?.().background?.service_worker === 'game/profile-worker.mjs';
+  let authority;
+  let profileReady = false, pendingWake = false, ended = false;
+  const pendingKeys = new Set();
+  function privateRequest(type) {
+    if (!authority) return Promise.resolve(false);
+    const copy = Array.from(authority); pendingKeys.add(copy);
+    try {
+      return api.runtime.sendMessage({ type, schema: 1, activationId: activation, authority: copy })
+        .finally(() => { copy.fill(0); pendingKeys.delete(copy); });
+    } catch { copy.fill(0); pendingKeys.delete(copy); return Promise.resolve(false); }
+  }
   let loaded = false;
   let activation;
   let timer;
+  function failPrivate() {
+    profileReady = false; pendingWake = false;
+    if (authority) { authority.fill(0); authority = undefined; }
+    for (const key of pendingKeys) key.fill(0);
+    pendingKeys.clear();
+    if (!ended) show('csp-or-module-unavailable', true);
+  }
+  function startPrivate() {
+    loaded = true;
+    authority = new Uint8Array(16);
+    crypto.getRandomValues(authority);
+    void privateRequest('slither-client-profile-bootstrap').then(ok => {
+      if (ended) return;
+      if (ok === true && authority) {
+        profileReady = true;
+        if (pendingWake) { pendingWake = false; void privateRequest('slither-client-profile-wake').catch(() => {}); }
+      } else failPrivate();
+    }, failPrivate);
+    timer = setTimeout(() => show('csp-or-module-unavailable', true), 15000);
+  }
   function show(code, reveal = false) {
     let output = document.getElementById('slither-client-status');
     if (!output) {
@@ -48,9 +81,10 @@
     if (event.source === window && event.origin === url.origin && url.href === 'http://slither.com/io'
       && activation !== undefined && data && Object.keys(data).length === 3 && data.schema === 1
       && data.activationId === activation && ['slither-client-profile-wake', 'slither-client-profile-cancel'].includes(data.type)
-      && api.runtime.getManifest?.().background?.service_worker === 'game/profile-worker.mjs') {
-      // A public wake is not acquisition authority; the worker must claim a private owned-Play intent.
-      try { api.runtime.sendMessage(data).catch(() => {}); } catch { /* MAIN retains its own deadline. */ }
+      && privateProfile) {
+      // Only the isolated closure adds authority to the private extension channel.
+      if (data.type === 'slither-client-profile-wake' && !profileReady) pendingWake = true;
+      else void privateRequest(data.type).catch(() => {});
       return;
     }
     if (event.source !== window || event.origin !== url.origin || data === null || typeof data !== 'object'
@@ -63,6 +97,10 @@
       if (!parent) return;
       loaded = true;
       try {
+        if (privateProfile) {
+          startPrivate();
+          return;
+        }
         const script = document.createElement('script');
         script.type = 'module';
         script.src = api.runtime.getURL('game/bootstrap.mjs');
@@ -75,7 +113,27 @@
     if (loaded || data.code === 'gate-unavailable') show(data.code);
   }
   window.addEventListener('message', receive);
-  window.addEventListener('pagehide', () => { clearTimeout(timer); window.removeEventListener('message', receive); }, { once: true });
+  window.addEventListener('pagehide', () => {
+    ended = true;
+    profileReady = false; pendingWake = false;
+    if (authority) {
+      void privateRequest('slither-client-profile-cancel').catch(() => {});
+      authority.fill(0); authority = undefined;
+      for (const key of pendingKeys) key.fill(0);
+      pendingKeys.clear();
+    }
+    clearTimeout(timer); window.removeEventListener('message', receive);
+  }, { once: true });
+  // The private gate is installed by browser scripting before MAIN bootstrap;
+  // this public record carries only activation metadata, never the key.
+  if (privateProfile) try {
+    const arm = JSON.parse(sessionStorage.getItem('__slitherClientArmV1'));
+    if (arm?.schema === 1 && arm.build === 'gamepage-v1' && arm.url === url.href
+      && /^[a-f0-9]{32}$/.test(arm.id) && Number.isSafeInteger(arm.expires)
+      && arm.expires > Date.now() && arm.expires <= Date.now() + 30000) {
+      activation = arm.id; startPrivate();
+    }
+  } catch { /* No valid activation leaves the ordinary page untouched. */ }
   // Both document-start worlds may start in either order; one native tick closes that race.
   window.postMessage({ type: 'slither-client-query', schema: 1 }, url.origin);
   setTimeout(() => window.postMessage({ type: 'slither-client-query', schema: 1 }, url.origin), 0);

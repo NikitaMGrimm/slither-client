@@ -1,5 +1,5 @@
 // Runs before host startup only on an explicitly armed document. No host callback is invoked.
-(() => {
+(function installGameGate(profileAuthority) {
   'use strict';
   const realm = globalThis;
   if (realm !== realm.top) return;
@@ -19,9 +19,32 @@
     if (arm.schema !== 1 || arm.build !== 'gamepage-v1' || arm.url !== url.href
       || !/^[a-f0-9]{32}$/.test(arm.id) || !Number.isSafeInteger(arm.expires)
       || arm.expires <= Date.now() || arm.expires > Date.now() + 30000) return;
+    if (arm.profileBroker === true && url.href === 'http://slither.com/io' && profileAuthority === undefined) {
+      // Chrome's private document-targeted injection, not a public initializer,
+      // constructs this gate with authority. Keep the nonsecret arm for it.
+      realm.sessionStorage.setItem(key, text);
+      return false;
+    }
   } catch { return; }
   const slot = Symbol.for('slither.client.gate.v1');
-  if (realm[slot]) return;
+  if (realm[slot]) return false;
+  const privateProfile = arm.profileBroker === true && url.href === 'http://slither.com/io';
+  let gateAuthority;
+  if (privateProfile) {
+    if (!realm.Array.isArray(profileAuthority) || profileAuthority.length !== 16) return false;
+    gateAuthority = new realm.Uint8Array(16);
+    for (let i = 0; i < 16; i++) {
+      if (!realm.Number.isInteger(profileAuthority[i]) || profileAuthority[i] < 0 || profileAuthority[i] > 255) {
+        for (let j = 0; j < 16; j++) gateAuthority[j] = profileAuthority[j] = 0;
+        return false;
+      }
+      gateAuthority[i] = profileAuthority[i]; profileAuthority[i] = 0;
+    }
+    profileAuthority = undefined;
+  }
+  const clearGateAuthority = () => {
+    if (gateAuthority) { for (let i = 0; i < 16; i++) gateAuthority[i] = 0; gateAuthority = undefined; }
+  };
   const bind = name => {
     if (typeof realm[name] !== 'function') throw new Error(`Native capability unavailable: ${name}`);
     return realm[name].bind(realm);
@@ -1252,7 +1275,10 @@
     for (const type of [...originalTypes, ...notificationTypes]) {
       realm.addEventListener(type, sink, { capture: true, passive: false });
     }
-    realm.addEventListener('pagehide', () => { ended = true; revoke(); revokeControls(); }, { capture: true });
+    realm.addEventListener('pagehide', () => {
+      ended = true; revoke(); revokeControls();
+      clearGateAuthority();
+    }, { capture: true });
     realm.document.addEventListener('DOMContentLoaded', () => { completed = true; completedAt = revision; }, { once: true });
     realm.addEventListener('message', event => {
       if (event.source !== realm || event.origin !== url.origin || event.data?.type !== 'slither-client-query'
@@ -1260,10 +1286,18 @@
       status(phase);
     });
     gateRecord = Object.freeze({
+      requiresProfileBootstrap: () => arm.profileBroker === true && url.href === 'http://slither.com/io',
       verifyExtensionProfile: value => claimed && value === native.extensionProfile && value !== undefined,
       metadata: () => Object.freeze({ schema: 1, id: arm.id, code: phase }),
-      claim(id) {
+      claim(id, authority) {
         if (id !== arm.id || claimed) throw new Error('Game document already claimed');
+        if (privateProfile) {
+          if (!gateAuthority || !native.extensionProfile.octets(authority, 16)) throw new Error('Private gate authority required');
+          let mismatch = 0;
+          for (let i = 0; i < 16; i++) mismatch |= authority[i] ^ gateAuthority[i];
+          if (mismatch) throw new Error('Private gate authority required');
+          clearGateAuthority();
+        }
         claimed = true;
         return Object.freeze({ ...native,
           completed: () => completed,
@@ -1286,11 +1320,14 @@
     });
     Object.defineProperty(realm, slot, { value: gateRecord });
     status('held');
+    return true;
   } catch {
+    clearGateAuthority();
     // Keep any installed holds; replaying the original host is not a recovery path.
     Object.defineProperty(realm, slot, { value: Object.freeze({
       metadata: () => Object.freeze({ schema: 1, id: arm.id, code: 'gate-unavailable' }),
     }) });
     status('gate-unavailable');
+    return false;
   }
-})();
+})(undefined);

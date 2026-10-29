@@ -1,7 +1,7 @@
-import { profileDelivery } from './profile-transport.mjs';
+import { profileDelivery, profileBootstrap } from './profile-transport.mjs';
 
 /** Fixed-purpose background owner; only browser sender metadata selects a document. */
-export function createProfileBroker({ api, native, initialize, Parser, createAcquirer }) {
+export function createProfileBroker({ api, native, initialize, Parser, createAcquirer, installGate }) {
   const active = new Map();
   const receiverURL = api.runtime.getURL('game/profile-receiver.mjs');
   const keyOf = sender => {
@@ -12,12 +12,20 @@ export function createProfileBroker({ api, native, initialize, Parser, createAcq
   };
   return async function receive(message, sender) {
     const key = keyOf(sender);
-    if (!key || !message || Object.keys(message).length !== 3 || message.schema !== 1
+    if (!key || !message || Object.keys(message).length !== 4 || message.schema !== 1
       || !/^[a-f0-9]{32}$/.test(message.activationId)
-      || !['slither-client-profile-wake', 'slither-client-profile-cancel'].includes(message.type)) return false;
-    if (message.type === 'slither-client-profile-cancel') { active.get(key)?.cancel(); return false; }
-    if (active.has(key)) return false;
-    const token = new Uint8Array(16), serialized = [];
+      || !Array.isArray(message.authority) || message.authority.length !== 16
+      || !message.authority.every(byte => Number.isInteger(byte) && byte >= 0 && byte <= 255)
+      || !['slither-client-profile-bootstrap', 'slither-client-profile-wake', 'slither-client-profile-cancel'].includes(message.type)) {
+      if (Array.isArray(message?.authority)) message.authority.fill(0);
+      return false;
+    }
+    if (message.type === 'slither-client-profile-cancel') { message.authority.fill(0); active.get(key)?.cancel(); return false; }
+    if (active.has(key)) { message.authority.fill(0); return false; }
+    // This private runtime-message field originates in the isolated extension
+    // closure, never in the public wake hint. MAIN cannot select or read it.
+    const token = Uint8Array.from(message.authority), serialized = [];
+    message.authority.fill(0);
     let acquirer, cancelled = false, delivery, timer, cancelWait;
     const cancellation = new Promise(resolve => { cancelWait = resolve; });
     const op = { cancel() {
@@ -49,8 +57,23 @@ export function createProfileBroker({ api, native, initialize, Parser, createAcq
       finally { copy.fill(0); }
     };
     try {
+      if (message.type === 'slither-client-profile-bootstrap') {
+        const gateKey = Array.from(token); serialized.push(gateKey);
+        const gateResult = await api.scripting.executeScript({
+          target: { tabId: sender.tab.id, documentIds: [sender.documentId] }, world: 'MAIN',
+          func: installGate, args: [gateKey],
+        });
+        if (cancelled || gateResult.length !== 1 || gateResult[0].frameId !== 0 || gateResult[0].documentId !== sender.documentId
+          || gateResult[0].error || gateResult[0].result !== true) return false;
+        const copy = Array.from(token); serialized.push(copy);
+        const result = await api.scripting.executeScript({
+          target: { tabId: sender.tab.id, documentIds: [sender.documentId] }, world: 'MAIN',
+          func: profileBootstrap, args: [api.runtime.getURL('game/bootstrap.mjs'), copy],
+        });
+        return !cancelled && result.length === 1 && result[0].frameId === 0 && result[0].documentId === sender.documentId
+          && !result[0].error && result[0].result === true;
+      }
       timer = native.setTimeout(op.cancel, 5000);
-      native.random(token);
       if (!current()) return false;
       const claim = await inject('claim');
       if (!current() || claim?.accepted !== true || !Number.isFinite(claim.remainingMs)
@@ -80,7 +103,7 @@ export function createProfileBroker({ api, native, initialize, Parser, createAcq
       try { if (timer !== undefined) native.clearTimeout(timer); } catch { /* Still clear owned copies. */ }
       // A consumed MAIN claim remains terminal even if this worker restarts.
       // Cleanup notification is best effort and never extends the attempt deadline.
-      void inject('fail');
+      if (message.type !== 'slither-client-profile-bootstrap') void inject('fail');
       if (delivery) await delivery.catch(() => {});
       token.fill(0);
       for (const copy of serialized) copy.fill(0);

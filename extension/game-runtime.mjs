@@ -28,7 +28,7 @@ const editNotifications = new Set(['keypress', 'beforeinput', 'input', 'composit
   'dragstart', 'drag', 'dragenter', 'dragleave', 'dragover', 'drop', 'dragend']);
 
 /** Local runtime factory. Importing this module performs no page ownership work. */
-export async function startGamePage({ realm = globalThis, initialize, wasmApi, hudReadout = false, ownedHudUi = false, ownedPlayUi = false, ownedMenuUi = false, ownedAppearancePreview = false, ownedLoadingUi = false, ownedLeaderboardUi = false, ownedMinimapUi = false, ownedAnnouncementUi = false, ownedEndScreenUi = false, diagnosticUi = true, localHost } = {}) {
+export async function startGamePage({ realm = globalThis, initialize, wasmApi, hudReadout = false, ownedHudUi = false, ownedPlayUi = false, ownedMenuUi = false, ownedAppearancePreview = false, ownedLoadingUi = false, ownedLeaderboardUi = false, ownedMinimapUi = false, ownedAnnouncementUi = false, ownedEndScreenUi = false, diagnosticUi = true, localHost, profileAuthority } = {}) {
   if (typeof hudReadout !== 'boolean') throw new TypeError('Explicit hudReadout boolean required');
   if (typeof diagnosticUi !== 'boolean') throw new TypeError('Explicit diagnosticUi boolean required');
   if (typeof initialize !== 'function' || wasmApi === null || typeof wasmApi !== 'object') {
@@ -64,11 +64,12 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
   }
   const gate = localHost ? localHost.gate : realm[Symbol.for('slither.client.gate.v1')];
   if (!gate || gate.metadata().code !== 'held') throw new Error('Armed document-start gate required');
+  if (gate.requiresProfileBootstrap?.() && profileAuthority === undefined) throw new Error('Private profile bootstrap required');
   const armed = gate.metadata(), document = realm.document, pageUrl = realm.location.href;
-  const native = gate.claim(armed.id);
+  const native = gate.claim(armed.id, profileAuthority);
   let scene, quality, controller, gameplay, held, frame, waiting, wakeWaiting, reload, output;
   let disposed = false;
-  let requestOwner, requestStartupFailed = false;
+  let requestOwner, requestStartupFailed = false, extensionReceiver;
   let nickname, bindingOperation, handlingNickname, routing = 0;
   let hud, ownedUi, constructCapabilities, hudOperation, nativeOperation, sourceOperation, hudCapabilities, cleanupActive = false;
   let playUi, controlsLease, playCapabilities, playOperation, playNodes;
@@ -430,7 +431,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     cleanup(() => wake?.());
     for (const remove of listeners.splice(0)) cleanup(remove);
     cleanup(() => native.setInput(event => { if (event.type === 'click' && event.target === reload) native.ordinaryReload(); }));
-    for (const action of [() => gameplay?.dispose(), () => controller?.dispose()]) cleanup(action);
+    for (const action of [() => gameplay?.dispose(), () => extensionReceiver?.acquirer.dispose(), () => controller?.dispose()]) cleanup(action);
     const owner = projector, release = freeProjector;
     projector = projectScores = freeProjector = Projector = undefined;
     if (owner !== undefined) cleanup(() => apply(release, owner, []));
@@ -913,7 +914,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
         },
       }) } : {}),
       ...(localHost ? {} : native.liveProfile !== undefined ? { liveProfile: { capabilities: native.liveProfile, isCurrentDocument } }
-        : native.extensionProfile !== undefined ? { liveProfile: createExtensionProfileReceiver(native.extensionProfile, isCurrentDocument) } : {}) });
+        : native.extensionProfile !== undefined ? { liveProfile: extensionReceiver = createExtensionProfileReceiver(native.extensionProfile, isCurrentDocument, profileAuthority) } : {}) });
     const tick = now => {
       frame = undefined;
       if (disposed) return;

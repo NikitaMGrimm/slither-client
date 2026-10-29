@@ -20,6 +20,7 @@ const gameWebNames = ['stock-client.mjs', 'stock-skin-provider.mjs', 'stock-skin
   'stock-leaderboard-state.mjs', 'stock-leaderboard-view.mjs',
   'local-game-host.mjs', 'client-asset-map.mjs', 'authored-source-recipes.mjs', 'synthetic-body.mjs', 'synthetic-food.mjs', 'synthetic-prey.mjs', 'loopback-session.mjs'];
 const brokerSources = ['profile-worker.mjs', 'profile-broker.mjs', 'profile-transport.mjs'];
+const brokerOutput = [...brokerSources, 'profile-gate.mjs'];
 const gameSources = [['profile-receiver.mjs', 'profile-receiver.mjs'], ['game-activation.mjs', 'activation.mjs'], ['game-gate.js', 'gate.js'],
   ['game-link.js', 'link.js'], ['game-bootstrap.mjs', 'bootstrap.mjs'], ['game-runtime.mjs', 'runtime.mjs'],
   ['game-owned-hud-ui.mjs', 'owned-hud-ui.mjs'], ['game-owned-play-ui.mjs', 'owned-play-ui.mjs'],
@@ -131,8 +132,8 @@ test('default packages have a closed deterministic inventory and preserve module
     ...gameWebNames.map(name => `game/${name}`), ...gameSources.map(value => `game/${value[1]}`),
     'game/pkg/slither_client.js', 'game/pkg/slither_client_bg.wasm', `game/pkg/${snippetName}`].sort();
   const result = f.build();
-  assert.deepEqual(result.files.map(file => file.path), ['chrome', 'firefox'].flatMap(browser => [...expectedPerBrowser, ...(browser === 'chrome' ? brokerSources.map(name => `game/${name}`) : [])].sort().map(name => `${browser}/${name}`)));
-  assert.equal(result.files.length, 145);
+  assert.deepEqual(result.files.map(file => file.path), ['chrome', 'firefox'].flatMap(browser => [...expectedPerBrowser, ...(browser === 'chrome' ? brokerOutput.map(name => `game/${name}`) : [])].sort().map(name => `${browser}/${name}`)));
+  assert.equal(result.files.length, 146);
   assert(result.files.every(file => file.bytes > 0 && /^[a-f0-9]{64}$/.test(file.sha256)));
   assert.deepEqual(f.build(), result, 'an identical rerun neither accumulates nor changes files');
   for (const browser of ['chrome', 'firefox']) {
@@ -171,7 +172,7 @@ test('generated validator paths remain exact, byte-preserved and independent of 
     output.web_accessible_resources[0].resources.pop();
     assert.deepEqual(output, source, 'all source manifest fields remain intact');
   }
-  assert.equal(result.files.length, 145);
+  assert.equal(result.files.length, 146);
 });
 
 test('changing the authored HUD validator makes the generated pair stale', t => {
@@ -403,19 +404,19 @@ test('CLI requires unambiguous paths and confines outputs to the ignored extensi
   }
   for (const outputDir of ['dist/elsewhere', '.', 'dist/extension/../../outside']) assert.throws(() => f.build({ outputDir }), /must stay inside/);
   assert.throws(() => f.build({ webDir: 'dist/extension' }), /must be separate/);
-  assert.equal(f.build({ outputDir: 'dist/extension/fresh' }).files.length, 145);
+  assert.equal(f.build({ outputDir: 'dist/extension/fresh' }).files.length, 146);
 });
 
 test('one default package copies the actual bootstrap and all owned UI helpers in both browsers', t => {
   const f = fixture(t), outputDir = 'dist/extension/default';
   const result = f.build({ outputDir });
-  assert.equal(result.files.length, 145);
+  assert.equal(result.files.length, 146);
   for (const browser of ['chrome', 'firefox']) {
     const game = path.join(f.root, outputDir, browser, 'game');
     for (const [source, destination] of gameSources) {
       assert.deepEqual(fs.readFileSync(path.join(game, destination)), fs.readFileSync(path.join(f.root, 'extension', source)));
     }
-    assert.equal(result.files.filter(file => file.path.startsWith(browser + '/')).length, browser === 'chrome' ? 74 : 71);
+    assert.equal(result.files.filter(file => file.path.startsWith(browser + '/')).length, browser === 'chrome' ? 75 : 71);
     assert.deepEqual(fs.readdirSync(game).filter(name => /(?:bootstrap|entry)/.test(name)), ['bootstrap.mjs']);
     const bytes = fs.readFileSync(path.join(game, 'bootstrap.mjs'));
     const stamp = fs.statSync(path.join(game, 'bootstrap.mjs')).mtimeMs;
