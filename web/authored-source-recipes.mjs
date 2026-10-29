@@ -51,13 +51,29 @@ function tuple(value, length, copy) {
   return result;
 }
 function copier() {
-  let sources = 0, commands = 0;
+  let sources = 0, commands = 0, pixelBytes = 0;
   function command(raw) {
-    if (++commands > 8192) throw new TypeError('Authored paint budget exceeded');
+    if (++commands > 32768) throw new TypeError('Authored paint budget exceeded');
     const kind = own(raw, '0');
     if (typeof kind !== 'string') throw new TypeError('Authored paint operation name required');
     let result;
-    if (kind === 'radialGradient') {
+    if (kind === 'pixels') {
+      const input = tuple(raw, 4, value => value), width = integer(input[1], 4096), height = integer(input[2], 4096);
+      const bytes = input[3];
+      if (Reflect.apply(Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype), Symbol.toStringTag).get, bytes, []) !== 'Uint8Array') throw new TypeError('Source byte array required');
+      const length = Reflect.apply(Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype), 'length').get, bytes, []);
+      if (!width || !height || length !== width * height * 4 || (pixelBytes += length) > 16 * 1024 * 1024) throw new TypeError('Bounded source pixel data required');
+      result = array([kind, width, height, new Uint8Array(bytes)]);
+    } else if (kind === 'composite') {
+      const input = tuple(raw, 2, value => value);
+      if (!['source-over', 'destination-in'].includes(input[1])) throw new TypeError('Source coverage operation required');
+      result = array([kind, input[1]]);
+    } else if (kind === 'shadow') {
+      const input = tuple(raw, 4, value => value);
+      const blur = number(input[1]), offset = number(input[2]);
+      if (blur < 0 || blur > 1024 || Math.abs(offset) > 4096) throw new TypeError('Bounded source shadow required');
+      result = array([kind, blur, offset, color(input[3])]);
+    } else if (kind === 'radialGradient') {
       const input = tuple(raw, 3, value => value);
       result = array([kind, tuple(input[1], 6, number), list(input[2], 16, stop => {
         const input = tuple(stop, 2, value => value);
@@ -76,13 +92,15 @@ function copier() {
     return result;
   }
   function canvas(raw) {
-    if (++sources > 512) throw new TypeError('Authored source budget exceeded');
+    if (++sources > 2048) throw new TypeError('Authored source budget exceeded');
     const width = integer(own(raw, 'width'), 4096), height = integer(own(raw, 'height'), 4096);
     if (!width || !height) throw new TypeError('Positive authored source dimensions required');
+    const commands = list(own(raw, 'commands'), 8192, command);
+    if (commands.some(c => c[0] === 'pixels' && (c[1] !== width || c[2] !== height))) throw new TypeError('Source pixel extent mismatch');
     return record([
       ['width', width], ['height', height],
       ['halfWidth', number(own(raw, 'halfWidth'))], ['halfHeight', number(own(raw, 'halfHeight'))],
-      ['commands', list(own(raw, 'commands'), 8192, command)],
+      ['commands', commands],
     ]);
   }
   const canvases = raw => list(raw, 64, canvas);
@@ -134,6 +152,12 @@ export function paintAuthoredCanvas(realm, recipe) {
   for (const command of recipe.commands) {
     const [kind, ...args] = command;
     switch (kind) {
+      case 'pixels': {
+        const image = context.createImageData(args[0], args[1]);
+        image.data.set(args[2]); context.putImageData(image, 0, 0); break;
+      }
+      case 'composite': context.globalCompositeOperation = args[0]; break;
+      case 'shadow': context.shadowBlur = args[0]; context.shadowOffsetY = args[1]; context.shadowColor = args[2]; break;
       case 'fillStyle': context.fillStyle = args[0]; break;
       case 'globalAlpha': context.globalAlpha = args[0]; break;
       case 'radialGradient': {

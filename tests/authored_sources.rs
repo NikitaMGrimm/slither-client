@@ -1,63 +1,118 @@
-//! Authored source-plan witnesses. No external program, images or source generation.
-
+//! Original standard-material numeric witnesses. No browser or external input is executed.
 use slither_client::authored_sources::{CanvasRecipe, PaintCommand, authored_source_recipes};
-
-fn arc(recipe: &CanvasRecipe) -> [f64; 5] {
-    recipe
-        .commands
-        .iter()
-        .find_map(|command| match command {
-            PaintCommand::Arc(values) => Some(*values),
-            _ => None,
-        })
+fn pixel(recipe: &CanvasRecipe, x: usize, y: usize) -> [u8; 4] {
+    let PaintCommand::Pixels { width, rgba, .. } = &recipe.commands[0] else {
+        panic!("owned sample tape required")
+    };
+    rgba[(y * (*width as usize) + x) * 4..][..4]
+        .try_into()
         .unwrap()
 }
-
 #[test]
-fn source_pool_counts_order_and_existing_native_dimensions_are_fixed() {
-    let recipes = authored_source_recipes();
-    assert_eq!(
-        recipes.palette_rgb,
-        [[131, 213, 176], [239, 187, 98], [118, 185, 237]]
-    );
-    assert_eq!(recipes.palettes.len(), 3);
-    for palette in &recipes.palettes {
-        assert_eq!((palette.width, palette.height), (32, 32));
-        assert_eq!(arc(palette), [16., 16., 16., 0., std::f64::consts::PI * 2.]);
+fn standard_pool_uses_independent_palette_ids_and_native_source_extents() {
+    let p = authored_source_recipes();
+    assert_eq!(p.palette_rgb.len(), 42);
+    assert_eq!(p.palette_rgb[0], [192, 128, 255]);
+    assert_eq!(p.palette_rgb[3], [128, 255, 128]);
+    assert_eq!(p.palette_rgb[39], [104, 40, 170]);
+    assert_eq!(p.palette_rgb[41], [128, 128, 255]);
+    assert_eq!(p.palettes.len(), 3);
+    assert_eq!(p.body_sources.palettes.len(), 42);
+    for (id, family) in p.body_sources.palettes.iter().enumerate() {
+        assert_eq!(family.variants.len(), if id == 36 { 60 } else { 7 });
+        assert!(
+            family
+                .variants
+                .iter()
+                .all(|v| v.width == 48 && v.height == 48)
+        );
+        assert_eq!(
+            (family.boost_glow.width, family.boost_glow.height),
+            (62, 62)
+        );
     }
-    assert_eq!((recipes.tile.width, recipes.tile.height), (324, 192));
     assert_eq!(
-        (recipes.backdrop.width, recipes.backdrop.height),
-        (512, 512)
-    );
-    assert_eq!(recipes.body_sources.palettes.len(), 3);
-    assert!(
-        recipes
-            .body_sources
-            .palettes
-            .iter()
-            .all(|p| p.variants.len() == 7)
-    );
-    assert_eq!(recipes.food.len(), 10);
-    assert_eq!(recipes.prey.len(), 9);
-    assert_eq!(
-        recipes
-            .food
-            .iter()
-            .map(|p| p.bodies.len() + p.outlines.len() + p.glows.len())
-            .sum::<usize>(),
-        240
+        (
+            p.body_sources.outline.width,
+            p.body_sources.shadow.width,
+            p.body_sources.death_highlight.width
+        ),
+        (52, 62, 32)
     );
     assert_eq!(
-        recipes
-            .prey
-            .iter()
-            .map(|p| p.bodies.len() + p.glows.len())
-            .sum::<usize>(),
-        63
+        (
+            p.food.len(),
+            p.food[0].count,
+            p.prey.len(),
+            p.prey[0].bodies.len(),
+            p.prey[0].glows.len()
+        ),
+        (10, 17, 9, 22, 17)
     );
 }
-
+#[test]
+fn ordinary_material_samples_and_ring_effects_have_known_independent_values() {
+    let p = authored_source_recipes();
+    let b = &p.body_sources;
+    assert_eq!(
+        pixel(&b.palettes[0].variants[0], 24, 24),
+        [234, 156, 255, 255]
+    );
+    assert_eq!(
+        pixel(&b.palettes[0].variants[3], 24, 24),
+        [192, 128, 255, 255]
+    );
+    assert_eq!(
+        pixel(&b.palettes[0].variants[6], 24, 24),
+        [149, 99, 198, 255]
+    );
+    assert_eq!(
+        pixel(&b.palettes[0].boost_glow, 31, 31),
+        [120, 80, 159, 255]
+    );
+    assert_eq!(pixel(&b.outline, 26, 26), [0, 0, 0, 0]);
+    assert_eq!(pixel(&b.outline, 42, 26), [0, 0, 0, 204]);
+    assert_eq!(pixel(&b.shadow, 46, 34), [0, 0, 0, 63]);
+    for id in [10, 19, 20] {
+        assert!(
+            b.palettes[id].variants[0]
+                .commands
+                .iter()
+                .any(|c| matches!(c, PaintCommand::LineTo(_)))
+        );
+    }
+    assert_ne!(
+        pixel(&b.palettes[36].variants[0], 24, 24),
+        pixel(&b.palettes[36].variants[30], 24, 24)
+    );
+}
+#[test]
+fn food_and_prey_sizes_glows_and_shadows_use_the_standard_material_contract() {
+    let p = authored_source_recipes();
+    assert_eq!(p.food[0].bodies[0].width, 4);
+    assert_eq!(p.food[0].glows[0].width, 29);
+    assert_eq!(p.food[0].outlines[0].width, 26);
+    assert_eq!(p.food[0].bodies[16].width, 25);
+    assert_eq!(p.prey[0].bodies[0].width, 44);
+    assert_eq!(p.prey[0].bodies[21].width, 86);
+    assert!(matches!(
+        p.prey[0].bodies[0].commands[0],
+        PaintCommand::Shadow {
+            blur: 22.,
+            offset_y: 0.,
+            ..
+        }
+    ));
+    assert_eq!(
+        p.prey[0].bodies[0]
+            .commands
+            .iter()
+            .filter(|c| matches!(c, PaintCommand::Fill))
+            .count(),
+        2
+    );
+    assert_eq!(p.prey[0].glows, p.food[0].glows);
+}
 #[test]
 fn hexagons_preserve_nested_column_row_layer_and_operand_order() {
     let tile = authored_source_recipes().tile;
@@ -83,90 +138,15 @@ fn hexagons_preserve_nested_column_row_layer_and_operand_order() {
 }
 
 #[test]
-fn shaded_sources_preserve_rounding_light_and_gradient_stop_order() {
-    let recipes = authored_source_recipes();
-    let PaintCommand::RadialGradient { circles, stops } =
-        &recipes.body_sources.palettes[0].variants[0].commands[0]
-    else {
-        panic!()
-    };
-    assert_eq!(*circles, [25., 23., 0., 32., 32., 31.]);
-    assert_eq!(
-        stops,
-        &vec![
-            (0., "rgba(151,220,189,1)".into()),
-            (0.42, "rgba(113,184,152,1)".into()),
-            (0.82, "rgba(77,125,103,1)".into()),
-            (0.96, "rgba(50,82,68,0.9)".into()),
-            (1., "rgba(50,82,68,0)".into()),
-        ]
-    );
-    assert_eq!(
-        recipes.body_sources.palettes[0].variants[0].commands[1],
-        PaintCommand::FillRect([0., 0., 64., 64.])
-    );
-    let PaintCommand::RadialGradient { circles, .. } =
-        &recipes.body_sources.palettes[0].boost_glow.commands[0]
-    else {
-        panic!()
-    };
-    assert_eq!(*circles, [32., 32., 0., 32., 32., 31.]);
-}
-
-#[test]
-fn food_and_prey_keep_every_source_extent_center_radius_and_alpha() {
-    let recipes = authored_source_recipes();
-    for palette in &recipes.food {
-        assert_eq!(palette.count, 8);
-        for (kind, family) in [&palette.bodies, &palette.outlines, &palette.glows]
-            .into_iter()
-            .enumerate()
-        {
-            for (index, source) in family.iter().enumerate() {
-                let width = 15 + 4 * index;
-                let height = 13 + 2 * index;
-                assert_eq!((source.width, source.height), (width as u32, height as u32));
-                assert_eq!(
-                    (source.half_width, source.half_height),
-                    (width as f64 / 2., height as f64 / 2.)
-                );
-                assert_eq!(
-                    arc(source)[2],
-                    (height as f64 / 2. - if kind == 0 { 2. } else { 0. }).max(1.)
-                );
-                assert_eq!(
-                    source.commands[1],
-                    PaintCommand::GlobalAlpha(if kind == 2 { 0.25 } else { 1. })
-                );
-            }
-        }
+fn numeric_plans_and_pixel_buffers_are_owned_fresh_values() {
+    let mut a = authored_source_recipes();
+    let expected = a.clone();
+    if let PaintCommand::Pixels { rgba, .. } =
+        &mut a.body_sources.palettes[0].variants[0].commands[0]
+    {
+        rgba[(24 * 48 + 24) * 4] ^= 255;
     }
-    for palette in &recipes.prey {
-        assert!(palette.outlines.is_empty());
-        for (glow, family) in [(false, &palette.bodies), (true, &palette.glows)] {
-            for (index, source) in family.iter().enumerate() {
-                let width = if glow { 57 + index * 8 } else { 21 + index * 4 };
-                let height = if glow { 53 + index * 6 } else { 19 + index * 4 };
-                assert_eq!((source.width, source.height), (width as u32, height as u32));
-                assert_eq!(
-                    arc(source)[2].to_bits(),
-                    (height as f64 / if glow { 2. } else { 3. }).to_bits()
-                );
-                assert_eq!(
-                    source.commands[1],
-                    PaintCommand::GlobalAlpha(if glow { 0.18 } else { 1. })
-                );
-            }
-        }
-    }
-}
-
-#[test]
-fn returned_numeric_plans_are_independent() {
-    let mut first = authored_source_recipes();
-    let expected = first.clone();
-    first.palette_rgb[0][0] = 0;
-    first.body_sources.palettes[0].variants.clear();
-    first.food.clear();
+    a.palette_rgb[0][0] = 0;
+    a.food.clear();
     assert_eq!(authored_source_recipes(), expected);
 }

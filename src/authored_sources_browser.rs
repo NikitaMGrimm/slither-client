@@ -44,6 +44,27 @@ fn numbers(values: &[f64]) -> Result<JsValue, JsValue> {
 
 fn command(command: &PaintCommand) -> Result<JsValue, JsValue> {
     let (name, values): (&str, Vec<JsValue>) = match command {
+        PaintCommand::Pixels {
+            width,
+            height,
+            rgba,
+        } => (
+            "pixels",
+            vec![
+                (*width).into(),
+                (*height).into(),
+                js_sys::Uint8Array::from(rgba.as_slice()).into(),
+            ],
+        ),
+        PaintCommand::Composite(mode) => ("composite", vec![(*mode).into()]),
+        PaintCommand::Shadow {
+            blur,
+            offset_y,
+            color,
+        } => (
+            "shadow",
+            vec![(*blur).into(), (*offset_y).into(), color.into()],
+        ),
         PaintCommand::FillStyle(color) => ("fillStyle", vec![color.into()]),
         PaintCommand::GlobalAlpha(alpha) => ("globalAlpha", vec![(*alpha).into()]),
         PaintCommand::BeginPath => ("beginPath", vec![]),
@@ -118,7 +139,7 @@ fn entities(palettes: &[EntitySourcePalette]) -> Result<JsValue, JsValue> {
     )
 }
 
-/// Copy the existing authored local source recipes without a scene or browser resource.
+/// Copy Rust-owned standard material plans and branded backgrounds without browser resources.
 #[wasm_bindgen]
 pub fn authored_source_recipes() -> Result<JsValue, JsValue> {
     let recipes = crate::authored_sources::authored_source_recipes();
