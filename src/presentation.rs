@@ -11,6 +11,7 @@ use std::{
 
 use crate::{math, state::Point};
 
+mod accessory_request;
 mod announcement;
 mod antenna;
 mod arena_edge;
@@ -44,6 +45,7 @@ mod skin;
 mod snake;
 mod static_accessory;
 
+pub use accessory_request::{AccessoryRequestInput, SelectedAccessoryRequest};
 pub(crate) use announcement::AnnouncementPacket;
 pub use announcement::{
     AnnouncementContent, AnnouncementError, AnnouncementLifecycle, AnnouncementLine,

@@ -6,13 +6,20 @@ import { createStockSkinAdapter } from '../web/stock-skin-provider.mjs';
 // Command/source identity evidence only: no browser, artwork, pixels or sockets.
 export function appearancePreviewSmoke(wasm) {
   class CanvasRenderingContext2D {
-    images = []; stack = []; calls = []; globalAlpha = 1;
+    images = []; stack = []; calls = []; globalAlpha = 1; transforms = [];
     constructor(canvas) { this.canvas = canvas; }
-    save() { this.stack.push(this.globalAlpha); }
-    restore() { this.globalAlpha = this.stack.pop(); }
-    setTransform() {} translate() {} rotate() {} scale() {}
-    beginPath() {} arc() {} moveTo() {} lineTo() {} closePath() {} fill() {} stroke() {}
-    drawImage(source, ...args) { this.images.push({ source, args }); this.onImage?.(); }
+    save() { this.stack.push({ alpha: this.globalAlpha, transforms: this.transforms.slice() }); }
+    restore() { const value = this.stack.pop(); this.globalAlpha = value.alpha; this.transforms = value.transforms; }
+    setTransform(...args) { this.transforms = [['setTransform', ...args]]; }
+    translate(...args) { this.transforms.push(['translate', ...args]); }
+    rotate(...args) { this.transforms.push(['rotate', ...args]); }
+    scale(...args) { this.transforms.push(['scale', ...args]); }
+    beginPath() {} arc() {} moveTo() {} lineTo() {} closePath() {}
+    fill() { this.calls.push({ kind: 'fill', alpha: this.globalAlpha }); } stroke() {}
+    drawImage(source, ...args) {
+      const image = { source, args, alpha: this.globalAlpha, transforms: this.transforms.slice() };
+      this.images.push(image); this.calls.push({ kind: 'image', ...image }); this.onImage?.(source);
+    }
   }
   class HTMLCanvasElement {
     #width = 64; #height = 64;
@@ -34,7 +41,7 @@ export function appearancePreviewSmoke(wasm) {
   const target = source(), world = source();
   const prepare = (canvas, width, height) => {
     equal(canvas, target); equal([width, height], [320, 128]); prepared++;
-    canvas.width = width; canvas.height = height; canvas.context.images = []; canvas.context.save();
+    canvas.width = width; canvas.height = height; canvas.context.images = []; canvas.context.calls = []; canvas.context.save();
     return Object.freeze({ context: canvas.context, finish() { finished++; canvas.context.restore(); } });
   };
   let local, stock;
@@ -124,10 +131,108 @@ export function appearancePreviewSmoke(wasm) {
       normalGameplay: true, ownAccessory: -1, host, readiness }), random() { random++; return 0.5; } });
     for (let skin = 0; skin <= 65; skin++) {
       const ticket = stock.select(skin, new Uint8Array()); adapter.beginOperation();
-      try { equal(stock.render(ticket, target, world, adapter.resolveRecipe, prepare).visible, true); }
+      try { equal(stock.render(ticket, target, world, request => {
+        equal(request.own, true); return adapter.resolveRecipe(request);
+      }, prepare).visible, true); }
       finally { adapter.endOperation(); }
       equal(target.context.images.length > 0, true); equal(target.context.stack.length, 0);
     }
+    // Synthetic selected ID only, not stock catalog data. Each adapter retains one selection.
+    const chosen = ready(), explicit = { forward: -0, imageScale: .375, pivotX: 3, pivotY: 7 };
+    const snapshot = { revision: 'accessory-capture-1', normalGameplay: true, ownAccessory: 71, host, readiness,
+      ownAccessorySelection: { id: 71, geometry: explicit, source: chosen, width: 64, height: 64 } };
+    const selectedAdapter = createStockSkinAdapter({ resolveSkin: wasm.resolve_skin,
+      validateCustomPaletteMask: wasm.stock_custom_palette_mask_valid, resolveAccessoryForward: wasm.stock_accessory_forward,
+      realm, appearanceMode: 'accessory', readSnapshot: () => snapshot, random() { random++; return .5; } });
+    const custom = Uint8Array.of(0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 1, 2);
+    for (const [skin, bytes] of [[0, new Uint8Array()], [24, new Uint8Array()], [40, new Uint8Array()], [41, new Uint8Array()], [27, custom]]) {
+      const ticket = stock.select(skin, bytes); selectedAdapter.beginOperation(); let reads = 0;
+      try { equal(stock.render(ticket, target, world, request => {
+        reads++; equal(request.own, true); equal(request.cosmetic, 0);
+        const value = selectedAdapter.resolveRecipe(request);
+        equal(value.recipe.attachment.asset.source, chosen);
+        equal(Object.is(value.recipe.attachment.forward, -0), true);
+        return value;
+      }, prepare).visible, true); }
+      finally { selectedAdapter.endOperation(); }
+      equal(reads, 1); equal(target.context.stack.length, 0);
+      const image = target.context.images.filter(row => row.source === chosen); equal(image.length, 1);
+      equal(image[0].args, [+0, +0, 64, 64, -1.125, -2.625, 24, 24]);
+      equal(image[0].alpha, 1);
+      equal(image[0].transforms, [['setTransform', 1, 0, 0, 1, 0, 0], ['translate', 280, 64], ['rotate', 0]]);
+      const at = target.context.calls.findIndex(row => row.source === chosen);
+      if (skin === 40) {
+        equal(target.context.calls.slice(at + 1).filter(row => row.kind === 'image').map(row => row.source), [host.ecmc, host.ecmc, host.jmou]);
+        equal(target.context.images.slice(-3).map(row => row.alpha), [1, 1, 1]);
+      } else {
+        equal(target.context.calls.slice(at + 1).some(row => row.kind === 'fill'), false, 'paired eyes precede accessory');
+        if (skin === 41) equal(target.context.images.slice(-2).map(row => row.source), [host.sest, host.sest]);
+      }
+    }
+    let ticket = stock.select(27, new Uint8Array()); selectedAdapter.beginOperation();
+    try { const before = prepared; rejects(() => stock.render(ticket, target, world, selectedAdapter.resolveRecipe, prepare));
+      equal(prepared, before); equal(stock.needs_draw(ticket), true); }
+    finally { selectedAdapter.endOperation(); }
+    const chosenCommitment = readiness.find(entry => entry.source === chosen);
+    chosenCommitment.revision = 'selected-content-next'; snapshot.revision = 'accessory-capture-2';
+    ticket = stock.select(0, new Uint8Array()); selectedAdapter.beginOperation();
+    try { equal(stock.render(ticket, target, world, request => {
+      const value = selectedAdapter.resolveRecipe(request);
+      equal(value.recipe.attachment.asset.source, chosen);
+      equal(value.recipe.attachment.asset.revision, 'selected-content-next'); return value;
+    }, prepare).visible, true); }
+    finally { selectedAdapter.endOperation(); }
+    chosenCommitment.state = 'pending';
+    const beforePending = prepared; rejects(() => selectedAdapter.beginOperation()); equal(prepared, beforePending);
+    chosenCommitment.state = 'ready';
+    // Cached selection keeps its session fields; only the Rust appearance forward varies.
+    const cachedSnapshot = { ...snapshot, ownAccessorySelection: null, ownCachedAccessorySelection: {
+      ...snapshot.ownAccessorySelection, geometry: { imageScale: .375, pivotX: 3, pivotY: 7 } } };
+    const cached = createStockSkinAdapter({ resolveSkin: wasm.resolve_skin,
+      validateCustomPaletteMask: wasm.stock_custom_palette_mask_valid, resolveAccessoryForward: wasm.stock_accessory_forward,
+      realm, appearanceMode: 'accessory', readSnapshot: () => cachedSnapshot, random() { random++; return .5; } });
+    // Start away from the already-drawn skin 0 so every cached case gets a fresh ticket.
+    for (const skin of [40, 0, 41]) {
+      const beforePrepared = prepared; let cachedReads = 0;
+      ticket = stock.select(skin, new Uint8Array()); cached.beginOperation();
+      try {
+        const rendered = stock.render(ticket, target, world, request => {
+          cachedReads++; return cached.resolveRecipe(request);
+        }, prepare);
+        equal(rendered.visible, true); equal(rendered.changed, true);
+      }
+      finally { cached.endOperation(); }
+      equal(cachedReads, 1); equal(prepared, beforePrepared + 1);
+      const image = target.context.images.find(row => row.source === chosen);
+      equal(image.transforms[1], ['translate', 280 + wasm.stock_accessory_forward(skin, new Uint8Array()), 64]);
+    }
+    // Both targets remain forbidden even when explicitly admitted as the selected source.
+    for (const forbidden of [target, world]) {
+      const badSnapshot = { ...snapshot, readiness: [...readiness, { source: forbidden, state: 'ready', revision: 'forbidden-1' }],
+        ownAccessorySelection: { ...snapshot.ownAccessorySelection, source: forbidden, width: forbidden.width, height: forbidden.height } };
+      const bad = createStockSkinAdapter({ resolveSkin: wasm.resolve_skin,
+        validateCustomPaletteMask: wasm.stock_custom_palette_mask_valid, realm, appearanceMode: 'accessory',
+        readSnapshot: () => badSnapshot, random() { random++; return .5; } });
+      ticket = stock.select(1, new Uint8Array()); bad.beginOperation();
+      try { const before = prepared; rejects(() => stock.render(ticket, target, world, bad.resolveRecipe, prepare)); equal(prepared, before); }
+      finally { bad.endOperation(); }
+    }
+    ticket = stock.select(2, new Uint8Array()); selectedAdapter.beginOperation();
+    try {
+      target.context.onImage = source => { if (source === chosen) chosen.width++; };
+      rejects(() => stock.render(ticket, target, world, selectedAdapter.resolveRecipe, prepare));
+      equal(stock.needs_draw(ticket), true); equal(target.context.stack.length, 0);
+    } finally { target.context.onImage = undefined; chosen.width = 64; selectedAdapter.endOperation(); }
+    selectedAdapter.beginOperation();
+    try {
+      let failed = false;
+      target.context.onImage = source => { if (source === chosen) throw undefined; };
+      try { stock.render(ticket, target, world, selectedAdapter.resolveRecipe, (canvas, width, height) => {
+        const frame = prepare(canvas, width, height);
+        return Object.freeze({ context: frame.context, finish() { frame.finish(); throw Error('secondary accessory frame finish'); } });
+      }); } catch (error) { failed = true; equal(error, undefined); }
+      equal(failed, true); equal(stock.needs_draw(ticket), true); equal(target.context.stack.length, 0);
+    } finally { target.context.onImage = undefined; selectedAdapter.endOperation(); }
     equal(random, 0); equal(prepared, finished);
     return { assertions, synthetic: true, browser: false, pixels: false, network: false };
   } finally {

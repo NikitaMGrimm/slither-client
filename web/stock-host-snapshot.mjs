@@ -36,8 +36,19 @@ function list(value, length, label) {
   return Array.from({ length }, (_, index) => field(value, String(index)));
 }
 
+/** Reuse the existing host admission before a selected-entry native effect. */
+export function assertStockHostCapture(realm, observer) {
+  if (!observer.completed()) fail('Waiting for host asset construction', 'pending');
+  if (field(realm, 'render_mode') !== 2 || field(realm, 'is_mobile') !== false
+    || field(realm, 'team_mode') !== false || field(realm, 'choosing_skin') !== false
+    || field(realm, 'building_skin') !== false || field(realm, 'testing') !== false) fail('Unsupported host gameplay mode');
+  if (field(realm, 'playing') !== false || field(realm, 'connecting') !== false || field(realm, 'ws') != null) {
+    fail('Original game session is not quiescent');
+  }
+}
+
 /** Capture live sources only. No host function, generator, pixel read or artwork load occurs. */
-export function createStockHostSnapshot({ realm, observer, readAccessory, resolveAccessoryId, accessorySource }) {
+export function createStockHostSnapshot({ realm, observer, readAccessory, resolveAccessoryId, accessorySource, requestOwner }) {
   if (typeof readAccessory !== 'function') throw new TypeError('Native accessory reader required');
   for (const name of ['completed', 'generated', 'painted', 'stamp']) {
     if (typeof observer?.[name] !== 'function') throw new TypeError(`Readiness observer required: ${name}`);
@@ -45,7 +56,7 @@ export function createStockHostSnapshot({ realm, observer, readAccessory, resolv
   const Canvas = realm.HTMLCanvasElement, Image = realm.HTMLImageElement;
   const identities = new WeakMap();
   const accessory = createStockCachedAccessory({ realm, readAccessory,
-    resolveId: resolveAccessoryId, native: accessorySource });
+    resolveId: resolveAccessoryId, native: accessorySource, requestOwner });
   let nextIdentity = 0, revision = 0, previous;
   function scalar(source, Constructor, key) {
     const descriptor = Object.getOwnPropertyDescriptor(Constructor.prototype, key);
@@ -59,13 +70,7 @@ export function createStockHostSnapshot({ realm, observer, readAccessory, resolv
     dispose: () => accessory.dispose(),
     assertAccessoryLoad: () => accessory.assertCurrent(),
     capture() {
-      if (!observer.completed()) fail('Waiting for host asset construction', 'pending');
-      if (field(realm, 'render_mode') !== 2 || field(realm, 'is_mobile') !== false
-        || field(realm, 'team_mode') !== false || field(realm, 'choosing_skin') !== false
-        || field(realm, 'building_skin') !== false || field(realm, 'testing') !== false) fail('Unsupported host gameplay mode');
-      if (field(realm, 'playing') !== false || field(realm, 'connecting') !== false || field(realm, 'ws') != null) {
-        fail('Original game session is not quiescent');
-      }
+      assertStockHostCapture(realm, observer);
       const selected = accessory.capture();
       const host = { nsr: field(realm, 'nsr') };
       if (typeof host.nsr !== 'boolean') fail('Host rotation policy unavailable');

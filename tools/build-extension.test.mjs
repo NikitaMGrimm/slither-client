@@ -12,7 +12,7 @@ const projectRoot = fileURLToPath(new URL('..', import.meta.url));
 const pageNames = ['authored-source-recipes.mjs', 'animated.html', 'animated.mjs', 'desktop-layout.mjs', 'scene.css',
   'synthetic-scene.mjs', 'synthetic-body.mjs', 'synthetic-food.mjs', 'synthetic-prey.mjs',
   'skin-provider.mjs', 'loopback-session.mjs'];
-const gameWebNames = ['stock-client.mjs', 'stock-skin-provider.mjs', 'stock-skin-rules.mjs', 'stock-accessory-selection.mjs', 'stock-cached-accessory.mjs', 'stock-accessory-load.mjs',
+const gameWebNames = ['stock-client.mjs', 'stock-skin-provider.mjs', 'stock-skin-rules.mjs', 'stock-accessory-selection.mjs', 'stock-cached-accessory.mjs', 'stock-accessory-load.mjs', 'stock-accessory-request.mjs',
   'stock-host-snapshot.mjs', 'stock-food-provider.mjs', 'stock-prey-provider.mjs', 'stock-asset-sources.mjs',
   'skin-provider.mjs', 'desktop-layout.mjs', 'client-input.mjs', 'stock-gameplay.mjs',
   'stock-session.mjs', 'stock-hud-contract.mjs', 'stock-hud-state.mjs', 'stock-hud-view.mjs',
@@ -59,7 +59,7 @@ function syntheticWasm(omit) {
     'profileliteralparser_protocol_version',
     'profileliteralparser_clear',
     '__wbg_profileliteralparser_free',
-    'appearancepreview_new', 'appearancepreview_select', 'appearancepreview_revision', 'appearancepreview_needs_draw', 'appearancepreview_render', '__wbg_appearancepreview_free'].filter(name => name !== omit);
+    'selectedaccessoryrequest_new', 'selectedaccessoryrequest_prepare', 'selectedaccessoryrequest_ticket', 'selectedaccessoryrequest_live', 'selectedaccessoryrequest_phase', 'selectedaccessoryrequest_check', 'selectedaccessoryrequest_remaining', 'selectedaccessoryrequest_loaded', 'selectedaccessoryrequest_handoff', 'selectedaccessoryrequest_invalidate', 'selectedaccessoryrequest_dispose', '__wbg_selectedaccessoryrequest_free', 'appearancepreview_new', 'appearancepreview_select', 'appearancepreview_revision', 'appearancepreview_needs_draw', 'appearancepreview_render', '__wbg_appearancepreview_free'].filter(name => name !== omit);
   return Buffer.from([0, 97, 115, 109, 1, 0, 0, 0,
     ...section(1, [1, 0x60, 0, 0]),
     ...section(3, [2, 0, 0]),
@@ -79,6 +79,7 @@ export class GameplayPolicy {}
 export class StockControllerPolicy {}
 export function authored_source_recipes() {}
 export class SessionPolicy {}
+export class SelectedAccessoryRequest {}
 export class AppearancePreview {}
 export function desktop_backing_size() {}
 export function menu_loading_view() {}
@@ -130,7 +131,7 @@ test('default packages have a closed deterministic inventory and preserve module
     'game/pkg/slither_client.js', 'game/pkg/slither_client_bg.wasm', `game/pkg/${snippetName}`].sort();
   const result = f.build();
   assert.deepEqual(result.files.map(file => file.path), ['chrome', 'firefox'].flatMap(browser => expectedPerBrowser.map(name => `${browser}/${name}`)));
-  assert.equal(result.files.length, 138);
+  assert.equal(result.files.length, 140);
   assert(result.files.every(file => file.bytes > 0 && /^[a-f0-9]{64}$/.test(file.sha256)));
   assert.deepEqual(f.build(), result, 'an identical rerun neither accumulates nor changes files');
   for (const browser of ['chrome', 'firefox']) {
@@ -169,7 +170,7 @@ test('generated validator paths remain exact, byte-preserved and independent of 
     output.web_accessible_resources[0].resources.pop();
     assert.deepEqual(output, source, 'all source manifest fields remain intact');
   }
-  assert.equal(result.files.length, 138);
+  assert.equal(result.files.length, 140);
 });
 
 test('changing the authored HUD validator makes the generated pair stale', t => {
@@ -208,7 +209,7 @@ test('MV3 browser differences, explicit activation permissions, closed WAR and o
     assert.deepEqual(manifest.web_accessible_resources, [{
       matches: ['http://slither.io/*', 'https://slither.io/*', 'http://www.slither.io/*', 'https://www.slither.io/*'],
       resources: ['game/bootstrap.mjs', 'game/runtime.mjs', 'game/owned-hud-ui.mjs', 'game/owned-play-ui.mjs', 'game/owned-appearance-ui.mjs', 'game/appearance-preview.mjs', 'game/game-owned-loading-ui.mjs', 'game/start-page-layout.mjs', 'assets/logo.svg', 'game/owned-leaderboard-ui.mjs', 'game/owned-minimap-ui.mjs', 'game/owned-end-screen-ui.mjs', 'game/owned-announcement-ui.mjs', 'game/stock-host-snapshot.mjs', 'game/stock-client.mjs', 'game/stock-skin-provider.mjs',
-        'game/stock-skin-rules.mjs', 'game/stock-accessory-selection.mjs', 'game/stock-cached-accessory.mjs', 'game/stock-accessory-load.mjs', 'game/skin-provider.mjs', 'game/stock-food-provider.mjs', 'game/stock-prey-provider.mjs',
+        'game/stock-skin-rules.mjs', 'game/stock-accessory-selection.mjs', 'game/stock-cached-accessory.mjs', 'game/stock-accessory-load.mjs', 'game/stock-accessory-request.mjs', 'game/skin-provider.mjs', 'game/stock-food-provider.mjs', 'game/stock-prey-provider.mjs',
         'game/stock-asset-sources.mjs', 'game/desktop-layout.mjs', 'game/client-input.mjs',
         'game/stock-gameplay.mjs', 'game/stock-session.mjs', 'game/stock-hud-contract.mjs', 'game/stock-hud-state.mjs',
         'game/stock-hud-view.mjs', 'game/stock-hud-dom.mjs', 'game/handshake-session.mjs', 'game/stock-live-profile.mjs',
@@ -285,6 +286,9 @@ for (const [name, change, expected] of [
   ['missing JavaScript desktop input export',
     f => f.write('dist/web/slither_client.js', syntheticGlue.replace('export class DesktopInput {}\n', '')),
     /generated web entrypoint/],
+  ['missing JavaScript selected accessory request export',
+    f => f.write('dist/web/slither_client.js', syntheticGlue.replace('export class SelectedAccessoryRequest {}\n', '')),
+    /generated web entrypoint/],
   ['missing JavaScript appearance preview export',
     f => f.write('dist/web/slither_client.js', syntheticGlue.replace('export class AppearancePreview {}\n', '')),
     /generated web entrypoint/],
@@ -347,7 +351,7 @@ for (const name of ['desktopinput_new', 'gameplaypolicy_new', 'gameplaypolicy_sn
     'profileliteralparser_protocol_version',
     'profileliteralparser_clear',
     '__wbg_profileliteralparser_free',
-    'appearancepreview_new', 'appearancepreview_select', 'appearancepreview_revision', 'appearancepreview_needs_draw', 'appearancepreview_render', '__wbg_appearancepreview_free']) {
+    'selectedaccessoryrequest_new', 'selectedaccessoryrequest_prepare', 'selectedaccessoryrequest_ticket', 'selectedaccessoryrequest_live', 'selectedaccessoryrequest_phase', 'selectedaccessoryrequest_check', 'selectedaccessoryrequest_remaining', 'selectedaccessoryrequest_loaded', 'selectedaccessoryrequest_handoff', 'selectedaccessoryrequest_invalidate', 'selectedaccessoryrequest_dispose', '__wbg_selectedaccessoryrequest_free', 'appearancepreview_new', 'appearancepreview_select', 'appearancepreview_revision', 'appearancepreview_needs_draw', 'appearancepreview_render', '__wbg_appearancepreview_free']) {
   test(`missing production gameplay ABI ${name} fails before package output`, t => {
     const f = fixture(t);
     f.write('dist/web/slither_client_bg.wasm', syntheticWasm(name));
@@ -396,19 +400,19 @@ test('CLI requires unambiguous paths and confines outputs to the ignored extensi
   }
   for (const outputDir of ['dist/elsewhere', '.', 'dist/extension/../../outside']) assert.throws(() => f.build({ outputDir }), /must stay inside/);
   assert.throws(() => f.build({ webDir: 'dist/extension' }), /must be separate/);
-  assert.equal(f.build({ outputDir: 'dist/extension/fresh' }).files.length, 138);
+  assert.equal(f.build({ outputDir: 'dist/extension/fresh' }).files.length, 140);
 });
 
 test('one default package copies the actual bootstrap and all owned UI helpers in both browsers', t => {
   const f = fixture(t), outputDir = 'dist/extension/default';
   const result = f.build({ outputDir });
-  assert.equal(result.files.length, 138);
+  assert.equal(result.files.length, 140);
   for (const browser of ['chrome', 'firefox']) {
     const game = path.join(f.root, outputDir, browser, 'game');
     for (const [source, destination] of gameSources) {
       assert.deepEqual(fs.readFileSync(path.join(game, destination)), fs.readFileSync(path.join(f.root, 'extension', source)));
     }
-    assert.equal(result.files.filter(file => file.path.startsWith(browser + '/')).length, 69);
+    assert.equal(result.files.filter(file => file.path.startsWith(browser + '/')).length, 70);
     assert.deepEqual(fs.readdirSync(game).filter(name => /(?:bootstrap|entry)/.test(name)), ['bootstrap.mjs']);
     const bytes = fs.readFileSync(path.join(game, 'bootstrap.mjs'));
     const stamp = fs.statSync(path.join(game, 'bootstrap.mjs')).mtimeMs;
