@@ -1,10 +1,16 @@
 # Death, return and victory presentation
 
-The default entry mounts a passive bottom-center result panel beside the existing
-Play and HUD owners. `EndScreenState` owns the accepted outcome and plain-text
+The default entry mounts a passive result panel alongside the existing Play and
+HUD owners. During the death/return delay it remains a bottom-center overlay,
+independent of the hidden start panel. After return, the same node follows the
+appearance controls and preview in the start panel's normal scroll flow. Its
+border-box width follows that responsive panel; it cannot cover earlier menu
+controls or the preview with fixed positioning. The result remains passive with
+pointer events disabled. Compositions without an owned Play panel retain the
+independent overlay. `EndScreenState` owns the accepted outcome and plain-text
 projection in pure Rust. `EndScreenProjector` copies the committed session phase,
 playing/life-ended flags, local replay capability and optional command-time final
-score into that model. The new DOM view submits the copied text using Text nodes.
+score into that model. The DOM view submits the copied text using Text nodes.
 It opens no socket, starts no timer, reads no score and owns no game state.
 
 The accepted `dead` phase displays **Game over**; the accepted `victory` phase

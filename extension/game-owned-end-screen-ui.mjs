@@ -2,7 +2,7 @@
 const html = 'http://www.w3.org/1999/xhtml';
 const invalid = () => { throw new TypeError('Invalid owned end-screen UI input'); };
 
-export function createOwnedEndScreenUi({ document, parent, dom, construct, isCurrentDocument }) {
+export function createOwnedEndScreenUi({ document, parent, menuParent, dom, construct, isCurrentDocument }) {
   for (const name of ['nodeType', 'ownerDocument', 'parentNode', 'firstChild', 'nextSibling',
     'isConnected', 'localName', 'namespaceURI', 'style', 'setText', 'setStyle']) {
     if (typeof dom?.[name] !== 'function') invalid();
@@ -11,6 +11,7 @@ export function createOwnedEndScreenUi({ document, parent, dom, construct, isCur
     if (typeof construct?.[name] !== 'function') invalid();
   }
   if (!document || !parent || parent === document || typeof isCurrentDocument !== 'function') invalid();
+  if (menuParent !== undefined && (!menuParent || menuParent === parent || menuParent === document)) invalid();
   let attempted = false, mounted = false, disposed = false, holder;
   const entries = [], texts = [];
   function current() {
@@ -27,6 +28,9 @@ export function createOwnedEndScreenUi({ document, parent, dom, construct, isCur
     if (dom.nodeType(document) !== 9 || dom.isConnected(document) !== true
       || dom.nodeType(parent) !== 1 || dom.ownerDocument(parent) !== document
       || dom.namespaceURI(parent) !== html || dom.isConnected(parent) !== true) invalid();
+    if (menuParent !== undefined && (dom.nodeType(menuParent) !== 1
+      || dom.ownerDocument(menuParent) !== document || dom.namespaceURI(menuParent) !== html
+      || dom.parentNode(menuParent) !== parent || dom.isConnected(menuParent) !== true)) invalid();
     current();
   }
   function inspect() {
@@ -88,7 +92,7 @@ export function createOwnedEndScreenUi({ document, parent, dom, construct, isCur
     style(holder, { position: 'fixed', left: '50%', bottom: '12%', transform: 'translateX(-50%)',
       display: 'none', 'pointer-events': 'none', 'z-index': '2147483646', 'text-align': 'center',
       color: '#eeeeee', background: '#102022', border: '1px solid #8ba398', padding: '12px 20px',
-      'max-width': 'calc(100vw - 48px)', 'box-sizing': 'border-box',
+      'max-width': 'calc(100vw - 48px)', 'box-sizing': 'border-box', 'overflow-wrap': 'anywhere',
       'font-family': 'Arial, sans-serif', 'font-variant-numeric': 'tabular-nums' });
     inspect();
     construct.appendChild(parent, holder.node);
@@ -96,11 +100,25 @@ export function createOwnedEndScreenUi({ document, parent, dom, construct, isCur
     inspect();
     return holder.node;
   }
-  function render(view) {
+  function render(view, playing = true) {
     if (!mounted || disposed) throw new Error('Owned end-screen is not mounted');
     inspect();
-    if (!view || view.schema !== 1 || typeof view.visible !== 'boolean'
+    if (typeof playing !== 'boolean' || !view || view.schema !== 1 || typeof view.visible !== 'boolean'
       || ['title', 'scoreText', 'statusText'].some(key => typeof view[key] !== 'string')) invalid();
+    // Follow the same committed playing flag as the start panel. Returning results
+    // occupy its scroll flow after the preview, rather than covering its controls.
+    const target = !playing && menuParent !== undefined ? menuParent : parent;
+    if (holder.parent !== target) {
+      inspect();
+      construct.appendChild(target, holder.node);
+      holder.parent = target;
+      inspect();
+      style(holder, target === menuParent
+        ? { position: 'static', left: 'auto', bottom: 'auto', transform: 'none',
+          width: '100%', 'max-width': '100%', margin: '12px 0 0' }
+        : { position: 'fixed', left: '50%', bottom: '12%', transform: 'translateX(-50%)',
+          width: 'auto', 'max-width': 'calc(100vw - 48px)', margin: '0' });
+    }
     for (const [index, key] of ['title', 'scoreText', 'statusText'].entries()) {
       effect(dom.setText, texts[index].node, view[key]);
     }
@@ -112,14 +130,15 @@ export function createOwnedEndScreenUi({ document, parent, dom, construct, isCur
     try {
       // Append can attach and then throw under the runtime guard. Retain cleanup
       // authority by node identity, even before mounted is acknowledged.
-      if (holder && isCurrentDocument() === true && dom.ownerDocument(holder.node) === document
-        && dom.ownerDocument(parent) === document && dom.parentNode(holder.node) === parent) {
-        construct.removeChild(parent, holder.node);
+      if (holder && isCurrentDocument() === true && dom.ownerDocument(holder.node) === document) {
+        const actualParent = dom.parentNode(holder.node);
+        if ((actualParent === parent || menuParent !== undefined && actualParent === menuParent)
+          && dom.ownerDocument(actualParent) === document) construct.removeChild(actualParent, holder.node);
       }
     } finally {
       mounted = false;
       entries.length = texts.length = 0;
-      holder = document = parent = dom = construct = isCurrentDocument = undefined;
+      holder = document = parent = menuParent = dom = construct = isCurrentDocument = undefined;
     }
   }
   return Object.freeze({ mount, render, dispose });
