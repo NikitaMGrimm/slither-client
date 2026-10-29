@@ -2,7 +2,7 @@
 import {stageControls,matchHudReport} from './session-policy-oracle.mjs';
 const fail=message=>{throw new Error(message);};
 export class TestSessionPolicy {
-  constructor(){Object.assign(this,{phase:'ready',connected:false,playing:false,lifeEnded:false,lagging:false,pingPending:false,lastPingMs:0,closeRequested:false,reason:null,constructorAttempts:0,startedMs:undefined,launch:false,launchCommitted:false,subscribed:false,hudSchema:0,actions:{},actionRevision:0,stepRevision:undefined,deathMs:null,returnFraction:0,uiPhase:'idle',previousUiMs:0,handshakeFrames:0,handshakeBytes:0});}
+  constructor(){Object.assign(this,{phase:'ready',connected:false,playing:false,lifeEnded:false,lagging:false,pingPending:false,lastPingMs:0,pingExternal:false,closeRequested:false,reason:null,constructorAttempts:0,startedMs:undefined,launch:false,launchCommitted:false,subscribed:false,hudSchema:0,actions:{},actionRevision:0,stepRevision:undefined,deathMs:null,returnFraction:0,uiPhase:'idle',previousUiMs:0,handshakeFrames:0,handshakeBytes:0});}
   free(){if(this.freed)fail('Test session released twice');this.freed=true;}
   snapshot(){const{phase,connected,playing,lifeEnded,lagging,pingPending,lastPingMs,closeRequested,returnFraction,reason,constructorAttempts}=this;return{phase,connected,playing,lifeEnded,lagging,pingPending,lastPingMs,closeRequested,returnFraction,uiTimerNeeded:this.uiPhase==='in',reason,constructorAttempts};}
   terminal(){return this.phase==='failed'||this.phase==='disconnected';}
@@ -27,7 +27,9 @@ export class TestSessionPolicy {
   match_report(values,setups){const names=['setup','setup-draw','leaderboard','final-score','own-length-scheduled'];const events=Array.from({length:values.length/3},(_,i)=>({commandIndex:values[i*3],kind:names[values[i*3+1]],deathPending:!!values[i*3+2]}));matchHudReport({events,setupDraws:setups},this.staged.commands,this.staged.plan);}
   commit_controls(){if(this.terminal())fail('Session stopped during packet');if(!this.staged)fail('No prepared controls');Object.assign(this,this.staged.next);this.staged=undefined;}
   handshake_timed_out(now){return !this.terminal()&&this.startedMs!==undefined&&!this.connected&&now-this.startedMs>3333;}
-  observe_lag(now){if(!this.terminal()&&!this.lagging&&this.pingPending&&now-this.lastPingMs>750)this.lagging=true;}
+  lag_check_needed(){return !this.terminal()&&!this.lagging&&this.pingPending;}
+  observe_lag_elapsed(elapsed){if(elapsed>750)this.lagging=true;}
+  observe_lag(now){if(this.lag_check_needed()&&!this.pingExternal)this.observe_lag_elapsed(now-this.lastPingMs);}
   pending_actions(){return{revision:this.actionRevision,actions:{...this.actions}};}
   acknowledge(revision){if(revision!==this.actionRevision)fail('Stale action acknowledgement');if(!Object.hasOwn(this.actions,'resetLag'))fail('No lag reset to acknowledge');delete this.actions.resetLag;this.actionRevision++;}
   check_step(hud){if(hud&&!this.hudSchema)fail('HUD subscription required');if(this.stepRevision!==undefined)fail('Previous control step is not committed');}
@@ -36,8 +38,11 @@ export class TestSessionPolicy {
   finish_step(hasSocket){this.stepRevision=this.actionRevision;if(this.launch&&!hasSocket&&Object.hasOwn(this.actions,'resetWorld'))this.launchCommitted=true;}
   commit_control(hasSocket){if(this.stepRevision===undefined)return false;if(this.stepRevision===this.actionRevision){this.actions={};this.actionRevision++;}this.stepRevision=undefined;if(this.launchCommitted&&this.launch&&!hasSocket&&!this.terminal()){this.launchCommitted=false;return true;}return false;}
   ping_available(){return this.connected&&!this.pingPending;}
-  ping_due(now){return !(now-this.lastPingMs<=250);}
-  commit_ping(now){this.lastPingMs=now;this.pingPending=true;return Uint8Array.of(251);}
+  ping_external(){return this.pingExternal;}
+  ping_due_elapsed(elapsed){return !(elapsed<=250);}
+  ping_due(now){return this.ping_due_elapsed(now-this.lastPingMs);}
+  commit_opaque_ping(){this.lastPingMs=NaN;this.pingExternal=true;this.pingPending=true;return Uint8Array.of(251);}
+  commit_ping(now){this.lastPingMs=now;this.pingExternal=false;this.pingPending=true;return Uint8Array.of(251);}
   static protocol_allowed(version){return version===19;}
   static valid_input(bytes){return(bytes.length===1&&bytes[0]<=254&&bytes[0]!==252)||(bytes.length===2&&bytes[0]===252&&bytes[1]!==0&&bytes[1]!==128);}
   ui_tick(now){if(this.uiPhase!=='in'||this.terminal())return;const units=(now-this.previousUiMs)/25;this.previousUiMs=now;this.returnFraction+=0.05*units;if(this.returnFraction>=1){this.returnFraction=1;this.uiPhase='idle';}}

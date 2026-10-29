@@ -26,6 +26,7 @@ import { endScreenSmoke } from './end-screen-smoke.mjs';
 import { menuPreferencesSmoke } from './menu-preferences-smoke.mjs';
 import { desktopLayoutSmoke } from './desktop-layout-smoke.mjs';
 import { sessionPolicySmoke } from './session-policy-smoke.mjs';
+import { sessionPolicyRecordSmoke } from './session-policy-record-smoke.mjs';
 import { sessionPolicyLifetimeSmoke } from './session-policy-lifetime-smoke.mjs';
 import { desktopInputSmoke } from './desktop-input-smoke.mjs';
 import { desktopInputLifetimeSmoke } from './desktop-input-lifetime-smoke.mjs';
@@ -35,6 +36,7 @@ const wasm = await loadWasm();
 desktopLayoutSmoke(wasm);
 console.log('Synthetic real-Wasm session equivalence passed:', sessionPolicySmoke(wasm));
 console.log('Synthetic real-Wasm session lifetime passed:', sessionPolicyLifetimeSmoke(wasm));
+console.log('Synthetic real-Wasm session copied records passed:', sessionPolicyRecordSmoke(wasm));
 const sessionRequirements = execFileSync(process.execPath,
   ['--test', '--test-reporter=tap', ...['stock-session','stock-session-hud','stock-session-lifecycle','stock-login-domain'].map(name => fileURLToPath(new URL(`./${name}.test.mjs`, import.meta.url)))],
   { encoding: 'utf8', env: { ...process.env, SLITHER_SESSION_WASM: '1' }, maxBuffer: 8 * 1024 * 1024 });

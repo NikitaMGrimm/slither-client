@@ -6,9 +6,12 @@ fn error(e: SessionError) -> JsValue {
     js_sys::Error::new(e.0).into()
 }
 fn record(fields: &[(&str, JsValue)]) -> Result<JsValue, JsValue> {
-    let result = Object::new();
+    // Copied output must not consult inherited data descriptors or setters.
+    let result = Object::create(&JsValue::NULL.unchecked_into::<Object>());
     for (name, value) in fields {
-        Reflect::set(&result, &JsValue::from_str(name), value)?;
+        if !Reflect::set(&result, &JsValue::from_str(name), value)? {
+            return Err(js_sys::TypeError::new("Session record copy failed").into());
+        }
     }
     Ok(result.into())
 }
@@ -195,6 +198,14 @@ impl SessionPolicy {
     pub fn handshake_timed_out(&self, now: f64) -> bool {
         self.inner.handshake_timed_out(now)
     }
+    /// Whether a retained host value needs its delayed lag coercion.
+    pub fn lag_check_needed(&self) -> bool {
+        self.inner.lag_check_needed()
+    }
+    /// Apply a comparison admitted before opaque host coercion callbacks.
+    pub fn observe_lag_elapsed(&mut self, elapsed: f64) {
+        self.inner.observe_lag_elapsed(elapsed)
+    }
     /// Observe lag after timeout effects.
     pub fn observe_lag(&mut self, now: f64) {
         self.inner.observe_lag(now)
@@ -244,6 +255,18 @@ impl SessionPolicy {
     /// Query before the caller time getter.
     pub fn ping_available(&self) -> bool {
         self.inner.ping_available()
+    }
+    /// Whether the copied clock is represented by an opaque host value.
+    pub fn ping_external(&self) -> bool {
+        self.inner.ping_external()
+    }
+    /// Apply the threshold after host arithmetic coercion, without rechecking prior gates.
+    pub fn ping_due_elapsed(&self, elapsed: f64) -> bool {
+        Policy::ping_due_elapsed(elapsed)
+    }
+    /// Commit an opaque host clock identity without coercing it.
+    pub fn commit_opaque_ping(&mut self) -> Vec<u8> {
+        self.inner.commit_opaque_ping()
     }
     /// Compare the second time observation.
     pub fn ping_due(&self, now: f64) -> bool {

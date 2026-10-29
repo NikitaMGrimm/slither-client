@@ -198,6 +198,7 @@ pub struct SessionPolicy {
     schema: u8,
     reason: Option<Vec<u16>>,
     last_ping_ms: f64,
+    ping_external: bool,
     started_ms: Option<f64>,
     constructor_attempts: u32,
     launch: bool,
@@ -235,6 +236,7 @@ impl SessionPolicy {
             schema: 0,
             reason: None,
             last_ping_ms: 0.0,
+            ping_external: false,
             started_ms: None,
             constructor_attempts: 0,
             launch: false,
@@ -532,14 +534,21 @@ impl SessionPolicy {
             && !self.control.connected
             && self.started_ms.is_some_and(|start| now - start > 3333.0)
     }
-    /// Observe strict lag threshold after any timeout effects have returned.
+    /// Gate arithmetic before an opaque host value can run coercion callbacks.
+    pub fn lag_check_needed(&self) -> bool {
+        !self.terminal() && !self.control.lagging && self.control.ping_pending
+    }
+    /// Commit the already-admitted comparison after host coercion has returned.
+    /// Earlier gates are deliberately not rechecked: coercion may change phase.
+    pub fn observe_lag_elapsed(&mut self, elapsed: f64) {
+        if elapsed > 750.0 {
+            self.control.lagging = true;
+        }
+    }
+    /// Observe a numeric retained clock without a host coercion callback.
     pub fn observe_lag(&mut self, now: f64) {
-        if !self.terminal()
-            && !self.control.lagging
-            && self.control.ping_pending
-            && now - self.last_ping_ms > 750.0
-        {
-            self.control.lagging = true
+        if self.lag_check_needed() && !self.ping_external {
+            self.observe_lag_elapsed(now - self.last_ping_ms);
         }
     }
     /// Current action revision and detached actions.
@@ -643,15 +652,30 @@ impl SessionPolicy {
     pub fn ping_available(&self) -> bool {
         self.control.connected && !self.control.ping_pending
     }
-    /// Compare the separately observed ping time without committing it.
-    pub fn ping_due(&self, now: f64) -> bool {
-        // The source used an early <= gate, so NaN from a second getter proceeds.
-        let elapsed = now - self.last_ping_ms;
+    /// Whether the retained third-read value has an opaque host representation.
+    pub fn ping_external(&self) -> bool {
+        self.ping_external
+    }
+    /// Compare elapsed time after all necessary host arithmetic coercions.
+    pub fn ping_due_elapsed(elapsed: f64) -> bool {
+        // The source uses an early <= gate; NaN deliberately proceeds.
         elapsed > 250.0 || elapsed.is_nan()
     }
-    /// Commit the final time observation before calling the send callback.
+    /// Compare a separately observed numeric time against a numeric retained clock.
+    pub fn ping_due(&self, now: f64) -> bool {
+        Self::ping_due_elapsed(now - self.last_ping_ms)
+    }
+    /// Commit the uncoerced numeric third read before returning its packet intent.
     pub fn commit_ping(&mut self, now: f64) -> Vec<u8> {
         self.last_ping_ms = now;
+        self.ping_external = false;
+        self.control.ping_pending = true;
+        vec![251]
+    }
+    /// Commit host-value ownership without evaluating or retaining JS objects here.
+    pub fn commit_opaque_ping(&mut self) -> Vec<u8> {
+        self.last_ping_ms = f64::NAN;
+        self.ping_external = true;
         self.control.ping_pending = true;
         vec![251]
     }

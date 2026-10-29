@@ -24,5 +24,35 @@ try{
  for(const point of ['send','packet','state'])for(const primary of [undefined,false,{authored:'primary'}]){const p=pair(0);p.connect();p.each(h=>{h.hooks[point]=()=>{throw primary;};});if(point==='send')p.call('sendInput',Uint8Array.of(1));else p.each(h=>h.message([112]));for(const h of [p.old,p.current])if(h.errors.length)assert.equal(h.errors.at(-1),primary);cases++;}
  {const p=pair(0);p.call('play',request());p.tick();p.call('beforeUpdate',4333);p.call('beforeUpdate',4333.1);cases++;}
  for(const point of ['send','packet']){const p=pair(0);p.connect();p.each(h=>{h.hooks[point]=()=>h.sockets[0].onclose?.();});if(point==='send')p.call('sendInput',Uint8Array.of(1));else p.each(h=>h.message([118,1]));cases++;}
+
+ // The third getter read is an opaque assignment. Coercion happens only when a
+ // later arithmetic boundary actually needs that retained value.
+ for(const raw of ['1300',{valueOf(){throw undefined;}}]){
+  const p=pair(0);p.connect();let emits=0;
+  p.each(h=>{let reads=0;const result=caught(()=>h.session.betweenKeyboardAndBoost({get nowMs(){return ++reads<3?1300:raw;},protocolVersion:19},bytes=>{emits++;assert.deepEqual([...bytes],[251]);assert.equal(h.session.snapshot().lastPingMs,raw);assert.equal(h.session.snapshot().pingPending,true);h.trace.push(['opaque-ping-emit',h.session.snapshot()]);}));assert.equal(result.thrown,false);assert.equal(reads,3);assert.equal(h.session.snapshot().lastPingMs,raw);});
+  assert.equal(emits,2);p.call('beforeUpdate',2050);p.call('beforeUpdate',2050.1);
+  p.each(h=>{assert.equal(h.session.snapshot().lastPingMs,raw);h.message([112]);});
+  p.call('beforeUpdate',3000);
+  p.each(h=>{let reads=0;const result=caught(()=>h.session.betweenKeyboardAndBoost({get nowMs(){reads++;return 1600;},protocolVersion:19},()=>{}));if(typeof raw==='object'){assert(result.thrown);assert.equal(result.value,undefined);assert.equal(reads,2);}else assert.equal(result.thrown,false);});cases++;
+ }
+ {
+  const p=pair(0),raw={valueOf(){assert.fail('emit must not coerce its committed clock');}};p.connect();
+  p.each(h=>{let reads=0,emits=0;const result=caught(()=>h.session.betweenKeyboardAndBoost({get nowMs(){return ++reads<3?1300:raw;},protocolVersion:19},bytes=>{emits++;assert.deepEqual([...bytes],[251]);assert.equal(h.session.snapshot().lastPingMs,raw);assert.equal(h.session.snapshot().pingPending,true);throw undefined;}));assert(result.thrown);assert.equal(result.value,undefined);assert.equal(emits,1);assert.equal(h.errors.at(-1),undefined);assert.equal(h.session.snapshot().lastPingMs,raw);assert.equal(h.session.snapshot().phase,'failed');});cases++;
+ }
+ {
+  const p=pair(0);let active,coercions=0;const raw={valueOf(){coercions++;active.session.close('coercion-close');return 1000;}};p.connect();
+  p.each(h=>{let reads=0;h.session.betweenKeyboardAndBoost({get nowMs(){return ++reads<3?1300:raw;},protocolVersion:19},()=>{});assert.equal(coercions,0);});
+  p.each(h=>{active=h;const result=h.session.beforeUpdate(2000);assert.equal(result.lagging,true);assert.equal(h.session.snapshot().phase,'disconnected');assert.equal(h.session.snapshot().lastPingMs,raw);});assert.equal(coercions,2);cases++;
+ }
+
+ for(const raw of [undefined,null,Symbol('opaque clock'),1n,10n**400n]){
+  const p=pair(0);p.connect();
+  p.each(h=>{let reads=0;h.session.betweenKeyboardAndBoost({get nowMs(){return ++reads<3?1300:raw;},protocolVersion:19},()=>{});assert.equal(reads,3);assert.equal(h.session.snapshot().lastPingMs,raw);assert.equal(h.session.snapshot().pingPending,true);});
+  p.call('beforeUpdate',2051);p.each(h=>h.message([112]));
+  if(typeof raw==='bigint'){
+   for(const delta of [250n,251n])p.each(h=>{let reads=0,emits=0;h.session.betweenKeyboardAndBoost({get nowMs(){return ++reads===1?1600:reads===2?Object(raw+delta):2000;},protocolVersion:19},()=>{emits++;});assert.equal(emits,delta===250n?0:1);assert.equal(reads,delta===250n?2:3);});
+  }
+  cases++;
+ }
  return{comparisons,cases,evidence:'Full retained project-authored JS session vs explicitly selected SessionPolicy; caller labels actual Wasm or test-only ABI; no browser/network'};
 }finally{for(const h of owners){h.hooks.send=h.hooks.packet=h.hooks.state=h.hooks.close=h.hooks.error=undefined;if(h.session.dispose)h.session.dispose();else h.session.close();}}}

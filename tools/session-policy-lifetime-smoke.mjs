@@ -41,5 +41,15 @@ export function sessionPolicyLifetimeSmoke(wasm){let cases=0;
   try{result=capture(()=>harness(Policy));}finally{Object.entries=entries;}
   assert(result.thrown);assert.equal(result.value,undefined);assert.equal(counts.created,1);assert.equal(counts.freed,1);cases++;
  }
+ for(const invalid of [null,false,17,{},Symbol('invalid reason')]){
+  const{Policy,counts}=tracked(wasm.SessionPolicy),h=harness(Policy);h.connect();let closes=0;h.hooks.close=()=>{closes++;};
+  const before=h.session.snapshot(),socket=h.socket;
+  const result=capture(()=>h.session.dispose(invalid));assert(result.thrown);assert(result.value instanceof TypeError);
+  assert.equal(counts.freed,0,'invalid caller reason must not release the live owner');assert.deepEqual(h.session.snapshot(),before);
+  for(const key of ['onopen','onmessage','onerror','onclose'])assert.equal(typeof socket[key],'function');
+  h.session.sendInput(Uint8Array.of(1));assert.deepEqual(socket.sent.at(-1),[1]);assert.equal(closes,0);
+  h.session.dispose('valid-after-caller-error');h.session.dispose();assert.equal(counts.freed,1);assert.equal(closes,1);
+  for(const key of ['onopen','onmessage','onerror','onclose'])assert.equal(socket[key],null);cases++;
+ }
  return{cases,evidence:'Explicit policy ownership, resource leases and exact primary errors; caller labels real Wasm versus test-only ABI; no browser/GC claim'};
 }

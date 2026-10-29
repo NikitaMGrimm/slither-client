@@ -86,7 +86,7 @@ export function createStockSession({ wasm, createSocket, now, maxBufferedBytes =
   const protocolAllowed = SessionPolicy.protocol_allowed, negotiationPacket = SessionPolicy.negotiation_packet;
   let policy = new SessionPolicy();
   try {
-  let sink, socket, launch, offeredActions, retired;
+  let sink, socket, launch, offeredActions, retired, opaquePingValue;
   let generation = 0, closedSocket = false, busy = false, notifying = false;
   let leases = 0, releaseRequested = false, disposing = false;
   const owner = () => { if (releaseRequested || !policy) throw new Error('Session disposed'); return policy; };
@@ -96,7 +96,8 @@ export function createStockSession({ wasm, createSocket, now, maxBufferedBytes =
   // Wasm UTF-8 string conversion replaces lone surrogates. Reasons are arbitrary
   // JS strings, so retain and copy their exact UTF-16 units at the object boundary.
   function copiedSnapshot(current) {
-    const value = current.snapshot();
+    const raw = current.snapshot();
+    const value = { ...raw, lastPingMs: current.ping_external() ? opaquePingValue : raw.lastPingMs };
     if (value.reason === null) return freeze({ ...value });
     const pieces = [];
     for (let i = 0; i < value.reason.length; i += 8192) {
@@ -110,6 +111,7 @@ export function createStockSession({ wasm, createSocket, now, maxBufferedBytes =
     let failed = false, failure;
     try { retired = copiedSnapshot(current); } catch (error) { failed = true; failure = error; }
     try { Reflect.apply(free, current, []); } catch (error) { if (!failed) { failed = true; failure = error; } }
+    opaquePingValue = undefined;
     if (failed) throw failure;
   }
   // Resource leases contain no policy decisions. They keep synchronous host
@@ -292,7 +294,12 @@ export function createStockSession({ wasm, createSocket, now, maxBufferedBytes =
     beforeUpdate(nowMs) {
       outsideIngress(); finite(nowMs, 'update time');
       if (owner().handshake_timed_out(nowMs)) fail(new Error('Stock handshake timed out'), 'handshake-timeout');
-      owner().observe_lag(nowMs);
+      if (owner().ping_external()) {
+        if (owner().lag_check_needed()) {
+          const elapsed = nowMs - opaquePingValue;
+          owner().observe_lag_elapsed(elapsed);
+        }
+      } else owner().observe_lag(nowMs);
       const value = snapshot(); return freeze({ lagging: value.lagging, connected: value.connected, playing: value.playing });
     },
     pendingActions() {
@@ -311,8 +318,27 @@ export function createStockSession({ wasm, createSocket, now, maxBufferedBytes =
       outsideIngress(); finite(context?.nowMs, 'ping time');
       const protocol = context?.protocolVersion;
       if (typeof protocol !== 'number' || !Reflect.apply(protocolAllowed, SessionPolicy, [protocol]) || typeof emit !== 'function') throw new TypeError('Protocol 19 ping capability required');
-      if (!owner().ping_available() || !owner().ping_due(context.nowMs - 0)) return;
-      const intent = owner().commit_ping(context.nowMs - 0);
+      if (!owner().ping_available()) return;
+      const observed = context.nowMs;
+      let due;
+      if (typeof observed === 'number' && !owner().ping_external()) {
+        due = owner().ping_due(observed);
+      } else {
+        // Capture the right operand before either ToNumeric callback. Rust
+        // retains the gate/threshold; only JS can preserve arbitrary value identity.
+        const previous = owner().ping_external() ? opaquePingValue : owner().snapshot().lastPingMs;
+        const elapsed = observed - previous;
+        // BigInt subtraction is legal when both delayed operands are BigInt.
+        // Project its result for the copied f64 ABI; every integer near the
+        // Rust threshold is exact, and larger magnitudes keep their ordering.
+        due = owner().ping_due_elapsed(typeof elapsed === 'bigint' ? Number(elapsed) : elapsed);
+      }
+      if (!due) return;
+      const committed = context.nowMs;
+      // The third read was an assignment, never a numeric admission/coercion.
+      const numeric = typeof committed === 'number';
+      opaquePingValue = numeric ? undefined : committed;
+      const intent = numeric ? owner().commit_ping(committed) : owner().commit_opaque_ping();
       try { emit(intent); } catch (error) { fail(error); throw error; }
     },
     sendInput(value) {
@@ -331,7 +357,9 @@ export function createStockSession({ wasm, createSocket, now, maxBufferedBytes =
   result.dispose = (code = 'disposed') => {
     if (disposing || releaseRequested || !policy) return;
     return leased(() => {
-      outsideIngress(); disposing = true;
+      outsideIngress();
+      if (typeof code !== 'string') throw new TypeError('Close reason required');
+      disposing = true;
       let failed = false, failure;
       try { methods.close(code); } catch (error) { failed = true; failure = error; }
       finally { releaseRequested = true; generation++; }

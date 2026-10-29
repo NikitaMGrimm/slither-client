@@ -262,3 +262,54 @@ fn arbitrary_reason_retains_all_utf16_units_including_lone_surrogates() {
     p.begin_stop(false, units.clone());
     assert_eq!(p.view().reason, Some(units));
 }
+
+#[test]
+fn opaque_ping_clock_defers_math_and_keeps_policy_gates_in_rust() {
+    let mut p = connected();
+    assert_eq!(p.commit_opaque_ping(), vec![251]);
+    assert!(p.ping_external());
+    assert!(p.view().last_ping_ms.is_nan());
+    assert!(p.view().ping_pending);
+    assert!(!p.ping_available());
+    assert!(p.lag_check_needed());
+    p.observe_lag(1e9);
+    assert!(
+        !p.view().lagging,
+        "an opaque host clock must not use a placeholder number"
+    );
+    p.observe_lag_elapsed(750.0);
+    assert!(!p.view().lagging);
+    p.observe_lag_elapsed(f64::NAN);
+    assert!(!p.view().lagging);
+    p.observe_lag_elapsed(750.0001);
+    assert!(p.view().lagging);
+    assert!(!p.lag_check_needed());
+    p.prepare_controls(&[command(112, 0)], 1500.0).unwrap();
+    p.commit_controls().unwrap();
+    assert!(
+        p.ping_external(),
+        "pong does not discard the original third-read value"
+    );
+    assert!(!p.lag_check_needed());
+    assert!(p.ping_available());
+    assert!(!SessionPolicy::ping_due_elapsed(250.0));
+    assert!(SessionPolicy::ping_due_elapsed(250.0001));
+    assert!(SessionPolicy::ping_due_elapsed(f64::NAN));
+    assert!(!SessionPolicy::ping_due_elapsed(-0.0));
+    assert_eq!(p.commit_ping(-0.0), vec![251]);
+    assert!(!p.ping_external());
+    assert!(p.view().last_ping_ms.is_sign_negative());
+}
+#[test]
+fn lag_comparison_admitted_before_host_coercion_is_not_regated_after_it() {
+    let mut p = connected();
+    p.commit_opaque_ping();
+    assert!(p.lag_check_needed());
+    p.begin_stop(false, "host-coercion-close".encode_utf16().collect());
+    p.stop_actions();
+    assert!(!p.lag_check_needed());
+    p.observe_lag_elapsed(1000.0);
+    assert_eq!(p.view().phase, Phase::Disconnected);
+    assert!(p.view().lagging);
+    assert!(!p.view().ping_pending);
+}

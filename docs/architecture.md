@@ -38,7 +38,10 @@ ping/lag thresholds and command-time death/final/return history. Its copied
 terminal flags commit before detach, reset intents and close/notification effects.
 `web/stock-session.mjs` retains socket/listener/clock/send/close capabilities,
 URL/buffer/record admission, generation and callback-resource fences, issued
-action-record identity and exact JS errors. It has no production policy fallback.
+action-record identity and exact JS errors. An accessor's uncoerced final ping-clock
+value remains an opaque host value; Rust owns its marker, pending intent and
+threshold gates. Necessary host arithmetic coercion runs at the original later
+boundaries, outside Rust borrows. There is no production policy fallback.
 Close and native resets retain the owner; explicit disposal releases it once,
 with active resource leases deferring release and preserving primary failures.
 The separate `HandshakeSession` class is used only by standalone probes, never

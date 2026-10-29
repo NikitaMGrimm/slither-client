@@ -13,3 +13,7 @@ import {sessionPolicySmoke,sessionProtocolDouble} from './session-policy-smoke.m
 test('staged session matches full retained authored session effects and callback observations',()=>{const result=sessionPolicySmoke({...sessionProtocolDouble(),SessionPolicy:TestSessionPolicy});assert.ok(result.comparisons>1000);});
 test('negative control rejects lifecycle commit before packet success',()=>{class Early extends TestSessionPolicy{prepare_controls(...args){const result=super.prepare_controls(...args);super.commit_controls();return result;}}assert.throws(()=>sessionPolicySmoke({...sessionProtocolDouble(),SessionPolicy:Early}));});
 test('negative control rejects a ping intent without its pre-callback commit',()=>{class Dropped extends TestSessionPolicy{commit_ping(){}}assert.throws(()=>sessionPolicySmoke({...sessionProtocolDouble(),SessionPolicy:Dropped}));});
+
+import {sessionPolicyRecordSmoke} from './session-policy-record-smoke.mjs';
+test('copied session records bypass inherited resetWorld data and setters',()=>{assert.equal(sessionPolicyRecordSmoke({...sessionProtocolDouble(),SessionPolicy:TestSessionPolicy}).cases,2);});
+test('record regression rejects the former Reflect.set copy semantics in a labelled negative ABI double',()=>{class UnsafeCopy extends TestSessionPolicy{pending_actions(){const result=super.pending_actions(),actions={};for(const[key,value]of Object.entries(result.actions))Reflect.set(actions,key,value);return{...result,actions};}}assert.throws(()=>sessionPolicyRecordSmoke({...sessionProtocolDouble(),SessionPolicy:UnsafeCopy}));});
