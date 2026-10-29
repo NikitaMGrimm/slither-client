@@ -4,23 +4,30 @@
 
 `apps/wgpu-slice` is an additive crate with its own lockfile and a path dependency
 on the existing browser-free Rust client. Its Windows host and standalone WebGPU
-host consume the same `AnimatedClient`, fixed synthetic packet schedule, camera,
-skin-zero resolver and ordered body/food paint plans. The Canvas application and
-root Cargo dependencies remain separate.
+host consume one `LocalGame` around the existing `AnimatedClient`, session,
+gameplay, desktop-input and HUD policies. Platform adapters execute copied socket,
+input and lifecycle effects outside Rust borrows. Only explicit Play to an admitted
+loopback endpoint opens a socket, after successful reset presentation; Stop closes
+it, and restart requires another Play. The Canvas application and root Cargo
+dependencies remain separate. A labelled synthetic diagnostic entry is retained.
 
 The small `Frame`/`Draw` boundary retains backing extent, viewport scale, frame
 and tick identities, full `u64` asset handles/revisions, readiness, dimensions,
 crops, transforms, effective alpha, blend and draw order. Only final submission
 vertices convert from validated `f64` to `f32`. The selected material adapter
-interprets the existing Rust-authored recipes for body-zero variants/effects and
-food-zero sources; it does not convert arbitrary Canvas operations automatically.
+interprets the existing Rust-authored body, food and prey recipes, including the
+42 body palette families. Ordered paired-eye and arena plans and a small Rust
+bitmap HUD complete the represented local scene; image faces and antennas remain
+limited. It does not convert arbitrary Canvas operations automatically.
 Encoded-sRGB premultiplied textures, sampling and composition conventions are
 explicit. Circle coverage, blur and quad-edge raster differences remain bounded
 comparison inputs.
 
-This first slice is offline rendering, without input-driven gameplay, UI/HUD or
-transport. The next step reuses existing Rust input/session policies around
-platform socket, input and lifecycle effects. Windows leads development, with
+Packet-time Setup output is validated before world/history/queue publication.
+Presentation acknowledgment and fresh socket-construction time are separate;
+handshake expiry is checked even while frames are retained or zero-sized.
+Native transport/offscreen GPU and ordinary browser local sessions have run.
+Native window/input acceptance remains separate. Windows leads development, with
 early browser checks of the shared owner. Mobile integration comes later. See
 [the slice](../apps/wgpu-slice/README.md), [verification](verification.md#shared-wgpu-rendering-slice)
 and [roadmap](roadmap.md).

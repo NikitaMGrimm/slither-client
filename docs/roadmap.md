@@ -45,8 +45,10 @@ window and browser WebGPU execution have been observed, including resize and
 cleanup. Matched Canvas checks cover two selected normal/boost keyframes using
 the same authored resources and draw plans. Source-raster and one-pixel
 quad-edge differences remain recorded; this does not establish whole-game
-fidelity. Input, local transport, HUD and broader presentation are the next
-implementation milestone. Detailed limits are in
+fidelity. The subsequent shared owner now implements input, local transport,
+Rust HUD and body/food/prey/paired-eye/arena presentation. Native offscreen and
+ordinary browser local sessions have run; native-window input remains open.
+Detailed limits are in
 [verification](verification.md#shared-wgpu-rendering-slice).
 
 The narrow renderer is used by a Windows host and a standalone browser canvas.
@@ -56,9 +58,8 @@ stay separate from the accepted Canvas path; no generic engine is introduced.
 The first slice consumes the existing Rust scene/presentation path and original,
 explicitly synthetic gameplay events. It draws an animated standard snake with
 normal/boost passes and food, using the same scene, resources and update times
-on desktop and web. It is an offline gameplay-rendering slice; local networking
-is the next integration step. Authoritative simulation stays in the separate
-simulator.
+on desktop and web. That diagnostic remains available beside the explicit local
+Play route. Authoritative simulation stays in the separate simulator.
 
 The common frame/resource boundary contains:
 
@@ -97,7 +98,7 @@ includes Windows, browser, Android and Apple backends. Actual feature support an
 fallbacks need target-specific checks; a browser WebGPU result does not establish
 WebGL2, Firefox, Safari or mobile acceptance.
 
-## Next milestone: playable shared local client
+## Current milestone: playable shared local client
 
 Develop the shared gameplay owner through native CLI tests and offscreen checks,
 with small browser checks at input, session and rendering milestones. Reuse the
@@ -106,16 +107,24 @@ should consume the same Rust behavior; platform networking, window/DOM effects
 and event delivery stay in their adapters. Desktop automation is not required
 to make progress on the shared owner.
 
-After the shared rendering slice, keep these as explicit integration tasks:
+The bounded local route is implemented and exercised on both runtime paths.
+Next, improve the ordinary playable experience and close concrete visual or
+behavioral differences with controlled comparisons. Preserve the Canvas reference
+and separate source artwork, draw geometry/camera/blending/cadence and simulator
+world composition. Avoid exhaustive synthetic-scene polish before player-facing
+work. Keep these remaining integration tasks explicit:
 
 - UI and input: consume Rust menu/HUD values, connect mouse/keyboard/window focus
   to existing input policy, and establish text/font, clipboard and accessibility
-  behavior. Choose native UI plumbing separately from the renderer.
+  behavior. The current ASCII bitmap HUD and minimal Play form are functional;
+  full menu, leaderboard/text and accessible UI remain work. Native window/input
+  checks that require desktop takeover stay pending under the user's restriction.
 - Network and profiles: provide browser and native socket/HTTP adapters around
   the existing Rust session/protocol policies, with the same bounded profile and
   credential lifetime rules. Browser-specific injection permissions do not belong
   in the shared core. Test a declared local transport before separate authorized
-  official-server acceptance; never reuse a consumed attempt ledger.
+  official-server acceptance; never reuse a consumed attempt ledger. The shared
+  loopback transport is exercised; remote acquisition/extension work stays parked.
 - Lifecycle: resize, display scaling, suspend/resume, surface/device loss,
   disconnect, death/return and explicit restart, preserving the existing state and
   one-attempt semantics.

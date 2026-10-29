@@ -31,11 +31,13 @@ remain available. Chrome/Firefox packages include experimental explicit game-pag
 Complete installed gameplay remains unverified.
 See [architecture](docs/architecture.md) for supported inputs and limits.
 
-An additive [shared wgpu slice](apps/wgpu-slice/README.md) uses the same Rust
-scene and body/food plans on Windows and browser WebGPU. Native-window and
-background-browser checks cover its fixed synthetic normal/boost scene,
-resize and cleanup. It has no player controls or live transport yet; the next
-milestone is a playable shared local path. Canvas remains the reference backend.
+An additive [shared wgpu client](apps/wgpu-slice/README.md) uses the same Rust
+protocol, session, input, HUD and presentation policies on Windows and browser
+WebGPU. Explicit local Play/Stop, pointer/arrows/boost and body/food/prey/paired-eye
+rendering are implemented. Actual local checks cover native transport with
+offscreen Vulkan rendering and the ordinary background-browser page, including
+restart, resize and cleanup. Native-window input and full visual/player-feel
+acceptance remain open. Canvas remains the reference backend.
 Windows and browser come first; Android and sideloaded iOS are later goals.
 
 Local loopback browser verification demonstrated Wasm execution, exact source

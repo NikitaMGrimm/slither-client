@@ -42,17 +42,19 @@ access package sources. Release-plz remains dormant.
 
 The separate [`apps/wgpu-slice`](../apps/wgpu-slice/README.md) crate has its own
 locked native/Wasm build and focused checks. It does not rebuild or replace the
-Canvas payload. Its final source passes 11 focused native tests, formatting,
-strict native/Wasm Clippy, both builds and matching bindgen generation.
-Independent source review found no supported P1/P2 in the represented slice.
+Canvas payload. The corrected playable source passes 31 focused Rust tests,
+nine inert Node adapter tests, formatting, strict native/Wasm Clippy, both builds
+and matching bindgen generation. Independent source review and the same-reviewer
+correction recheck found no remaining supported P1/P2 in the bounded change.
 The Windows CI job now includes its format, offline tests, Clippy and executable
 build; the WebAssembly job checks and builds the shared library and generates
 matching web bindings. These checks do not open a window or initialize a GPU.
 
-On 2026-10-29, the final executable rendered its synthetic body/food scene in a
-Windows Vulkan window on an NVIDIA GeForce RTX 5070 Ti, resized and exited
-normally. A separate, nonexclusive background-browser check executed the final
-WebGPU payload through the public Rust host API. It rendered ticks 60 and 240,
+On 2026-10-29, the earlier rendering-slice executable rendered its synthetic
+body/food scene in a Windows Vulkan window on an NVIDIA GeForce RTX 5070 Ti,
+resized and exited normally. A separate, nonexclusive background-browser check
+executed that slice's matching WebGPU payload through the public Rust host API.
+It rendered ticks 60 and 240,
 checked resize and scale arguments, retained tick 240 through zero size and
 restore, and freed its owner. The renderer reported `BrowserWebGpu` without a
 device name; a separate default-adapter query reported NVIDIA/Blackwell.
@@ -79,6 +81,28 @@ fidelity, server compatibility, performance or mobile support. Earlier offscreen
 evidence remains tied to its recorded source; the fresh browser result does not
 rewrite that history. Temporary agent-owned browser/listener resources closed;
 the user's windows, test folders, processes and ports were preserved.
+
+The subsequent corrected playable source also ran against a separately owned
+SlitherSim 0.8.1 arena, using real protocol-19 challenge/login/Setup and world
+packets. An external headless driver linked the actual native gameplay/transport
+library and rendered two explicit Play/Stop cycles to 960x540 offscreen targets
+on AMD Radeon integrated graphics, Vulkan, MSAA4. It received 85 frames and
+verified actual heading, keyboard-turn and boost-on/off sends, Rust HUD/own pose,
+two GPU readbacks and no automatic reconnect. This did not open a native window
+or test winit/physical input.
+
+A nonexclusive background tab then used the ordinary standalone page and the
+matching Wasm, with no packet fixture. BrowserWebGpu/MSAA4 rendered body, paired
+eyes, food and the Rust HUD. Three explicit local connections covered Escape,
+Stop, restart and pagehide cleanup. Actual outgoing turn, heading and boost
+packets were observed; held controls were synthetic DOM events through the
+production page handlers. Resize and zero-size/restore preserved the connection
+and continued packet ingress, at display DPR1. The pagehide observer recorded the
+production close call before the old document was discarded; it does not claim a
+later close-event callback after listeners detached. No page errors or unhandled
+rejections were observed. These bounded sessions are functional local checks,
+not original-client fidelity, player-feel, performance, extension, official-server
+or mobile acceptance. Current playable native-window event delivery remains open.
 
 ## Default runtime and local Play status
 
