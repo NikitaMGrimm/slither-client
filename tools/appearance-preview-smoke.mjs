@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { createLocalBodyResolver } from '../web/synthetic-body.mjs';
 import { createStockSkinAdapter } from '../web/stock-skin-provider.mjs';
-import { normalCustomPalette } from '../web/stock-skin-rules.mjs';
 
 // Real Wasm + existing providers with authored inert Canvas/source doubles.
 // Command/source identity evidence only: no browser, artwork, pixels or sockets.
@@ -16,8 +15,10 @@ export function appearancePreviewSmoke(wasm) {
     drawImage(source, ...args) { this.images.push({ source, args }); this.onImage?.(); }
   }
   class HTMLCanvasElement {
-    width = 64; height = 64;
+    #width = 64; #height = 64;
     constructor() { this.context = new CanvasRenderingContext2D(this); }
+    get width() { return this.#width; } set width(value) { this.#width = value; }
+    get height() { return this.#height; } set height(value) { this.#height = value; }
     getContext(kind) { assert.equal(kind, '2d'); return this.context; }
   }
   class HTMLImageElement { complete = true; naturalWidth = 64; naturalHeight = 64; }
@@ -83,15 +84,17 @@ export function appearancePreviewSmoke(wasm) {
     // Synthetic ready full stock source route, separate from the three local families.
     const readiness = [];
     const ready = () => { const value = source(); readiness.push({ source: value, state: 'ready', revision: readiness.length + 1 }); return value; };
-    const host = { nsr: false, alcsc: Uint8Array.from({ length: 256 }, (_, id) => Number(normalCustomPalette(id))),
+    const host = { nsr: false, alcsc: Uint8Array.from({ length: 256 }, (_, id) => Number(id <= 35 || [37, 39, 41].includes(id))),
       per_color_imgs: Array.from({ length: 42 }, (_, id) => ({ klp: id !== 36,
         kmcs: Array.from({ length: id === 36 ? 60 : 7 }, ready), kfmc: ready() })) };
     for (const name of ['komc', 'ksmc', 'kdmc', 'acbulb', 'cdbulb', 'kwkbulb', 'pwdbulb', 'playbulb',
       'leafbulb', 'swissbulb', 'moldovabulb', 'vietnambulb', 'argentinabulb', 'movbulb', 'bonkbulb', 'sest',
       'jsebi', 'jsepi', 'ecmc', 'jmou']) host[name] = ready();
+    host.ecmc.width = 48; host.ecmc.height = 48;
     host.jmou.width = 79; host.jmou.height = 130;
     let random = 0;
-    const adapter = createStockSkinAdapter({ realm, readSnapshot: () => ({ revision: 1,
+    const adapter = createStockSkinAdapter({ resolveSkin: wasm.resolve_skin,
+      validateCustomPaletteMask: wasm.stock_custom_palette_mask_valid, realm, readSnapshot: () => ({ revision: 1,
       normalGameplay: true, ownAccessory: -1, host, readiness }), random() { random++; return 0.5; } });
     for (let skin = 0; skin <= 65; skin++) {
       const ticket = stock.select(skin, new Uint8Array()); adapter.beginOperation();

@@ -27,7 +27,7 @@ export function captureLocalGameDocument(realm) {
   if (!document || realm.top !== realm || !match || Number(match[1]) > 65535) {
     throw new Error('Literal top-level http://127.0.0.1:<port> document required');
   }
-  return freeze({ isCurrent() {
+  return freeze({ document, isCurrent() {
     try { return realm.top === realm && realm.document === document && realm.location === location && location.href === href; }
     catch { return false; }
   }, assertCurrent() {

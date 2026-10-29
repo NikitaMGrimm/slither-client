@@ -8,8 +8,9 @@ import { readAuthoredSourceRecipes } from './authored-source-recipes.mjs';
 export async function startGamePage({ realm = globalThis, initialize = init, wasmApi = wasm, localHost } = {}) {
   let initializeRuntime = initialize;
   if (localHost === undefined && /^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}(?:[/?#]|$)/.test(realm.location?.href ?? '')) {
+    let documentFence;
     try {
-      const documentFence = captureLocalGameDocument(realm);
+      documentFence = captureLocalGameDocument(realm);
       const response = await realm.fetch('/scene/config.json');
       if (!response.ok) throw new Error('Local simulator configuration unavailable');
       const config = await response.json();
@@ -29,8 +30,10 @@ export async function startGamePage({ realm = globalThis, initialize = init, was
       localHost = await createLocalGameHost({ realm, endpoint, sourceRecipes });
     } catch (error) {
       try {
-        const status = realm.document?.getElementById('slither-client-status');
-        if (status) status.textContent = 'Client unavailable. Reload this page.';
+        if (documentFence?.isCurrent()) {
+          const status = documentFence.document.getElementById('slither-client-status');
+          if (status && documentFence.isCurrent()) status.textContent = 'Client unavailable. Reload this page.';
+        }
       } catch { /* A status write must not replace the startup failure. */ }
       throw error;
     }

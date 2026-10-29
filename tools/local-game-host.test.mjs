@@ -570,6 +570,71 @@ test('default local async initialization cannot continue after document replacem
   assert.equal(calls, 1); assert.equal(f.canvases.length, 0);
 });
 
+function startupStatusProbe(document) {
+  const label = { progress: {} }, status = { children: [label] };
+  let reads = 0, writes = 0;
+  Object.defineProperty(status, 'textContent', { set() { writes++; status.children = []; } });
+  document.getElementById = id => { assert.equal(id, 'slither-client-status'); reads++; return status; };
+  return { status, label, get reads() { return reads; }, get writes() { return writes; } };
+}
+
+test('default local stale completions preserve both documents loading subtrees', async () => {
+  for (const stage of ['config', 'initialize', 'decode']) {
+    for (const outcome of [{ reject: true, primary: undefined }, { reject: true, primary: {} }, { reject: false }]) {
+      let f, replacement;
+      const complete = () => { f.realm.document = replacement; if (outcome.reject) throw outcome.primary; };
+      f = fixture({ decode: async () => { if (stage === 'decode') complete(); } });
+      replacement = new f.dom.Document();
+      const original = startupStatusProbe(f.document), next = startupStatusProbe(replacement);
+      localConfig(f);
+      if (stage === 'config') f.realm.fetch = async () => {
+        complete(); return { ok: true, json: async () => ({ simulatorUrl: endpoint }) };
+      };
+      let caught = false;
+      try {
+        await startDefault(() => assert.fail('stale runtime'))({ realm: f.realm,
+          initialize: async () => { if (stage === 'initialize') complete(); },
+          wasmApi: { authored_source_recipes: authoredSourceRecipesDouble } });
+      } catch (error) {
+        caught = true;
+        if (outcome.reject) assert.equal(error, outcome.primary);
+        else assert.match(error.message, /Current local game document/);
+      }
+      assert(caught);
+      for (const probe of [original, next]) {
+        assert.equal(probe.reads, 0, `${stage}: stale status lookup`);
+        assert.equal(probe.writes, 0, `${stage}: stale status publication`);
+        assert.deepEqual(probe.status.children, [probe.label]);
+      }
+      assert.equal(f.sockets.length, 0); assert.equal(f.listeners.size, 0);
+    }
+  }
+});
+
+test('default local fallback rechecks document ownership after status lookup', async () => {
+  for (const change of ['document', 'top', 'url']) {
+    const f = fixture(), replacement = new f.dom.Document(); localConfig(f);
+    const original = startupStatusProbe(f.document), next = startupStatusProbe(replacement);
+    const lookup = f.document.getElementById;
+    f.document.getElementById = id => {
+      const value = lookup(id);
+      if (change === 'document') f.realm.document = replacement;
+      else if (change === 'top') f.realm.top = {};
+      else f.realm.location.href += '?new-document';
+      return value;
+    };
+    let caught = false;
+    try {
+      await startDefault(() => assert.fail('failed runtime'))({ realm: f.realm,
+        initialize() { throw undefined; }, wasmApi: {} });
+    } catch (error) { caught = true; assert.equal(error, undefined); }
+    assert(caught); assert.equal(original.reads, 1); assert.equal(next.reads, 0);
+    for (const probe of [original, next]) {
+      assert.equal(probe.writes, 0); assert.deepEqual(probe.status.children, [probe.label]);
+    }
+  }
+});
+
 test('default local decode failure retains its primary and supplied host bypasses early initialization', async () => {
   const primary = new Error('authored tile decode'); const f = fixture({ decode() { throw primary; } });
   localConfig(f); let calls = 0;
