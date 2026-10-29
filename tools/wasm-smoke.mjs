@@ -23,9 +23,11 @@ import { skinPolicySmoke } from './skin-policy-smoke.mjs';
 import { startPageSmoke } from './start-page-smoke.mjs';
 import { endScreenSmoke } from './end-screen-smoke.mjs';
 import { menuPreferencesSmoke } from './menu-preferences-smoke.mjs';
+import { desktopLayoutSmoke } from './desktop-layout-smoke.mjs';
 
 // Entirely synthetic ABI integration; no reference files or network are used.
 const wasm = await loadWasm();
+desktopLayoutSmoke(wasm);
 menuPreferencesSmoke(wasm);
 // Replay existing authored reducer/view/DOM requirements against real Rust history.
 const hudHistoryTests = ['stock-hud-state', 'stock-hud-view', 'stock-hud-dom',

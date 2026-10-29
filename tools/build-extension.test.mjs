@@ -46,7 +46,7 @@ function syntheticWasm(omit) {
     'animatedscene_enable_announcement_tracking', 'animatedscene_announcement_view',
     'animatedscene_enable_minimap_tracking', 'animatedscene_observe_minimap_ui_fraction', 'animatedscene_minimap_view',
     'encode_login', 'solve_challenge', 'decode_frame', 'setup_protocol_version',
-    'resolve_skin', 'resolve_local_skin', 'start_page_view', 'endscreenprojector_new', 'endscreenprojector_project', '__wbg_endscreenprojector_free'].filter(name => name !== omit);
+    'resolve_skin', 'resolve_local_skin', 'start_page_view', 'desktop_backing_size', 'endscreenprojector_new', 'endscreenprojector_project', '__wbg_endscreenprojector_free'].filter(name => name !== omit);
   return Buffer.from([0, 97, 115, 109, 1, 0, 0, 0,
     ...section(1, [1, 0x60, 0, 0]),
     ...section(3, [2, 0, 0]),
