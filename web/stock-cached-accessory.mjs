@@ -1,18 +1,20 @@
 import { ownData, stockInteger } from './stock-skin-rules.mjs';
 import { readStockAccessoryMetadata, sameStockAccessorySelection } from './stock-accessory-selection.mjs';
 import { createStockAccessoryLoadLease } from './stock-accessory-load.mjs';
+import { assertStockAccessoryRequest, handoffStockAccessoryRequest, hasFailedStockAccessoryRequest } from './stock-accessory-request.mjs';
 
 function unavailable(status, message) {
   const error = new TypeError(message); error.status = status; throw error;
 }
 
 /** Borrow only the one selected already-loaded cached entry. No catalog copy. */
-export function createStockCachedAccessory({ realm, readAccessory, resolveId, native }) {
+export function createStockCachedAccessory({ realm, readAccessory, resolveId, native, requestOwner }) {
   let selected, entry, lease, busy = false, disposed = false, poisoned = false;
   function capture() {
     if (disposed || busy || poisoned) unavailable('unsupported', 'Accessory capture disposed, invalidated or reentered');
     busy = true;
     try {
+      assertStockAccessoryRequest(requestOwner);
       if (lease?.read().state === 'unsupported') unavailable('unsupported', 'Accessory load invalidated; new session required');
       const raw = readAccessory();
       if (raw === null || raw === '-1') {
@@ -42,14 +44,18 @@ export function createStockCachedAccessory({ realm, readAccessory, resolveId, na
       const metadata = readStockAccessoryMetadata(snapshot, realm);
       if (!lease) {
         selected = metadata; entry = cached;
-        try { lease = createStockAccessoryLoadLease(source, native); }
+        try {
+          lease = createStockAccessoryLoadLease(source, native);
+          // Producer guards stay live until the existing lease has listeners.
+          handoffStockAccessoryRequest(requestOwner, source, lease);
+        }
         catch (error) { poisoned = true; throw error; }
       }
       const content = lease.read();
       if (content.state !== 'ready') unavailable(content.state, 'Selected accessory load commitment unavailable');
       return Object.freeze({ ...snapshot, commitment: Object.freeze({ source, state: 'ready', revision: content.revision }) });
     } catch (error) {
-      if (selected && error.status !== 'pending') {
+      if (selected && (hasFailedStockAccessoryRequest(requestOwner) || error?.status !== 'pending')) {
         poisoned = true;
         try { lease?.dispose(); } catch { /* Preserve primary admission failure. */ }
       }

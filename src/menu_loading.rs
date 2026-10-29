@@ -24,6 +24,7 @@ pub fn project_menu_loading(
         "loading" => ("preparing", Some("Loading client…"), false),
         "waiting-assets" => ("preparing", Some("Preparing appearance sources…"), false),
         "ready-not-connected" => ("ready", None, false),
+        "connecting" => ("connecting", None, false),
         "connected" => ("connected", None, false),
         "disconnected" => ("not-connected", None, false),
         "host-unavailable" | "csp-or-module-unavailable" => ("unavailable", None, true),

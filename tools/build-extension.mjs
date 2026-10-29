@@ -11,7 +11,7 @@ const pageFiles = [
   'synthetic-prey.mjs', 'skin-provider.mjs', 'loopback-session.mjs',
 ];
 const bindingFiles = ['slither_client.js', 'slither_client_bg.wasm'];
-const gameWebFiles = ['stock-client.mjs', 'stock-skin-provider.mjs', 'stock-skin-rules.mjs', 'stock-accessory-selection.mjs', 'stock-cached-accessory.mjs', 'stock-accessory-load.mjs',
+const gameWebFiles = ['stock-client.mjs', 'stock-skin-provider.mjs', 'stock-skin-rules.mjs', 'stock-accessory-selection.mjs', 'stock-cached-accessory.mjs', 'stock-accessory-load.mjs', 'stock-accessory-request.mjs',
   'stock-host-snapshot.mjs', 'stock-food-provider.mjs', 'stock-prey-provider.mjs', 'stock-asset-sources.mjs',
   'skin-provider.mjs', 'desktop-layout.mjs', 'client-input.mjs', 'stock-gameplay.mjs',
   'stock-session.mjs', 'stock-hud-contract.mjs', 'stock-hud-state.mjs', 'stock-hud-view.mjs',
@@ -114,6 +114,7 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, g
     || !/export class StockControllerPolicy\b/.test(glue)
     || !/export function authored_source_recipes\b/.test(glue)
     || !/export class SessionPolicy\b/.test(glue)
+    || !/export class SelectedAccessoryRequest\b/.test(glue)
     || !/export class AppearancePreview\b/.test(glue)
     || !/export function desktop_backing_size\b/.test(glue)
     || !/export function menu_loading_view\b/.test(glue)
@@ -156,7 +157,7 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, g
     'endscreenprojector_new', 'endscreenprojector_project', '__wbg_endscreenprojector_free',
     'playadmission_new', 'playadmission_available', 'playadmission_accepted', 'playadmission_nickname_valid',
     'playadmission_accept', 'playadmission_lock_unavailable', 'playadmission_return_ready', 'playadmission_complete_return', '__wbg_playadmission_free',
-    'appearancepreview_new', 'appearancepreview_select', 'appearancepreview_revision', 'appearancepreview_needs_draw', 'appearancepreview_render', '__wbg_appearancepreview_free',
+    'selectedaccessoryrequest_new', 'selectedaccessoryrequest_prepare', 'selectedaccessoryrequest_ticket', 'selectedaccessoryrequest_live', 'selectedaccessoryrequest_phase', 'selectedaccessoryrequest_check', 'selectedaccessoryrequest_remaining', 'selectedaccessoryrequest_loaded', 'selectedaccessoryrequest_handoff', 'selectedaccessoryrequest_invalidate', 'selectedaccessoryrequest_dispose', '__wbg_selectedaccessoryrequest_free', 'appearancepreview_new', 'appearancepreview_select', 'appearancepreview_revision', 'appearancepreview_needs_draw', 'appearancepreview_render', '__wbg_appearancepreview_free',
     ...Array.from(glue.matchAll(/\bwasm\.([A-Za-z_]\w*)/g), match => match[1])]) {
     if (!exports.has(name)) throw new Error(`Wasm/glue export mismatch: ${name}`);
   }

@@ -16,8 +16,9 @@ import { readFileSync } from 'node:fs';
 import { test, after } from 'node:test';
 import { createGateTestDom, attachGateTestRealm } from './game-gate-test-fixture.mjs';
 import { Script, createContext, runInContext } from 'node:vm';
-import { createStockHostSnapshot } from '../web/stock-host-snapshot.mjs';
-import { createStockSkinAdapter } from '../web/stock-skin-provider.mjs';
+import { createStockHostSnapshot, assertStockHostCapture } from '../web/stock-host-snapshot.mjs';
+import { createStockAccessoryRequest, hasFailedStockAccessoryRequest } from '../web/stock-accessory-request.mjs';
+import { createStockSkinAdapter, isUnsupportedStockAccessoryFace } from '../web/stock-skin-provider.mjs';
 import { createStockClient } from './fixtures/stock-client-fixture.mjs';
 import { createStockEntityAssets } from '../web/stock-food-provider.mjs';
 import { desktopBackingSize } from '../web/desktop-layout.mjs';
@@ -40,12 +41,12 @@ const {fixture,wasmDouble}=new Script(`(function(gateSource,Script,createContext
   ${hostFunctions}\nreturn {fixture,wasmDouble};})`).runInThisContext()(gateSource,Script,createContext,runInContext,assert,createGateTestDom,attachGateTestRealm,createHudHistoryDouble,createLeaderboardHistoryDouble,TestDesktopInput,desktopBackingOracle,TestSessionPolicy,stockSkinWasmDouble,TestStockControllerPolicy,TestGameplayPolicy,authoredSourceRecipesDouble);
 // Keep the actual modules and data records in ONE JS realm. Only the synthetic
 // Window/native boundary below is adapted; no acquirer/factory override exists.
-const makeBootstrap=new Script(`(function(init,wasm,createStockHostSnapshot,createStockSkinAdapter,
-  createStockClient,createStockEntityAssets,desktopBackingSize,createStockGameplay){
+const makeBootstrap=new Script(`(function(init,wasm,createStockHostSnapshot,createStockSkinAdapter, isUnsupportedStockAccessoryFace,
+  createStockClient,createStockEntityAssets,desktopBackingSize,createStockGameplay,assertStockHostCapture,createStockAccessoryRequest,hasFailedStockAccessoryRequest){
   ${bootstrapSource.replace(/^import .+;\r?$/gm,'').replace(/^export /gm,'')}
   return (options = {}) => startGamePage({initialize:init,wasmApi:wasm,...options});})`).runInThisContext();
-const startGamePage=makeBootstrap(async()=>{},{},createStockHostSnapshot,createStockSkinAdapter,
-  createStockClient,createStockEntityAssets,desktopBackingSize,createStockGameplay);
+const startGamePage=makeBootstrap(async()=>{},{},createStockHostSnapshot,createStockSkinAdapter, isUnsupportedStockAccessoryFace,
+  createStockClient,createStockEntityAssets,desktopBackingSize,createStockGameplay,assertStockHostCapture,createStockAccessoryRequest,hasFailedStockAccessoryRequest);
 const route='https://slither.io/s/game1107249518.js';
 const publicHash='5ad8aa8f06d1e71bad2945001bab077f8d4d279c093a046d19b6f26ac6b62095';
 const pending=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};};

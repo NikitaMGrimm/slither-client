@@ -21,7 +21,7 @@ export function menuLoadingSmoke(wasm) {
     for (const key of keys) assert.equal(Object.hasOwn(Object.getOwnPropertyDescriptor(view, key), 'value'), true);
     assert.deepEqual({ ...view }, { visible: true, busy: true, text: 'Loading client…' });
   }
-  for (const code of ['loading','waiting-assets','ready-not-connected','connected','disconnected',
+  for (const code of ['loading','waiting-assets','ready-not-connected','connecting','connected','disconnected',
     'host-unavailable','csp-or-module-unavailable','client-failed','disposed']) {
     for (const mounted of [false,true]) {
       const view=wasm.menu_loading_view(code,mounted),copy=wasm.menu_loading_view(code,mounted);

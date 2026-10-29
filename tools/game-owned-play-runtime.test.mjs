@@ -334,7 +334,7 @@ test('accepted genuine action keeps staged reset, source release and one socket 
       assert.equal(profile.counts.digest, 1); profile.assertWiped();
       assert.equal(runtime.diagnostics().gameplay.profilePhase, 'ready');
       assert.equal(graph.f.sockets, 0);
-      assert(['Connecting.','Not connected.'].includes(readout()), 'preparation is not connection acceptance');
+      assert.equal(readout(), 'Connecting.', 'deferred opening remains busy until connection acceptance');
       assert.equal(graph.f.realm.per_color_imgs[0].kmcs[0], source);
       graph.f.frame(16); assert.equal(graph.f.sockets, 1); assert.deepEqual(endpoints, [address]);
       assert.deepEqual(login, [{ nickname: ' \u007f ', skin: 0, customSkin: [] }]);

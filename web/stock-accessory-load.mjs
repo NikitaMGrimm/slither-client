@@ -1,5 +1,13 @@
 // One trusted load-once image lease, not a loader or arbitrary mutation observer.
 // Fingerprints may contain URLs privately; none are returned or included in errors.
+const issuedLeases = new WeakMap();
+
+/** A producer may retire guards only for this source's live issued listeners. */
+export function assertStockAccessoryLoadListeners(lease, source) {
+  const active = issuedLeases.get(lease);
+  if (!active || !active(source)) throw new TypeError('Issued live accessory load listeners required');
+}
+
 export function createStockAccessoryLoadLease(source, native) {
   for (const name of ['inspect', 'decode', 'then', 'listen', 'setTimeout', 'clearTimeout', 'now']) {
     if (typeof native?.[name] !== 'function') throw new TypeError('Accessory load capability unavailable');
@@ -40,7 +48,7 @@ export function createStockAccessoryLoadLease(source, native) {
     try { invalidate(); } catch { /* Preserve the primary setup failure. */ }
     throw error;
   }
-  return Object.freeze({
+  const lease = Object.freeze({
     read() {
       if (disposed) throw new Error('Accessory load lease disposed');
       if (state !== 'unsupported') {
@@ -52,4 +60,6 @@ export function createStockAccessoryLoadLease(source, native) {
     },
     dispose() { if (disposed) return; disposed = true; state = 'unsupported'; generation = null; stop(); if (cleanupFailed) throw cleanupError; },
   });
+  issuedLeases.set(lease, value => value === source && !disposed && state !== 'unsupported' && typeof remove === 'function');
+  return lease;
 }

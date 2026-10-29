@@ -12,8 +12,8 @@ import { test, after } from 'node:test';
 import { createGateTestDom, attachGateTestRealm } from './game-gate-test-fixture.mjs';
 import { Script, createContext, runInContext } from 'node:vm';
 import { activateGamePage, armDocument, gamePage } from '../extension/game-activation.mjs';
-import { createStockHostSnapshot } from '../web/stock-host-snapshot.mjs';
-import { createStockSkinAdapter } from '../web/stock-skin-provider.mjs';
+import { createStockHostSnapshot, assertStockHostCapture } from '../web/stock-host-snapshot.mjs';
+import { createStockSkinAdapter, isUnsupportedStockAccessoryFace } from '../web/stock-skin-provider.mjs';
 import { createStockClient } from './fixtures/stock-client-fixture.mjs';
 import { createStockEntityAssets } from '../web/stock-food-provider.mjs';
 import { desktopBackingSize } from '../web/desktop-layout.mjs';
@@ -21,6 +21,13 @@ import { desktopBackingOracle } from './fixtures/desktop-layout-fixture.mjs';
 import { createStockGameplay } from './fixtures/stock-gameplay-fixture.mjs';
 import { bindStockHudDom } from '../web/stock-hud-dom.mjs';
 import { projectHudView } from '../web/stock-hud-view.mjs';
+import { createStockAccessoryRequest, hasFailedStockAccessoryRequest } from '../web/stock-accessory-request.mjs';
+import { TestSelectedAccessoryRequest } from './fixtures/accessory-request-double.mjs';
+import { loadWasm } from './reference-context.mjs';
+
+const selectedRequestPolicy = process.env.SLITHER_ACCESSORY_REQUEST_WASM === '1'
+  ? (await loadWasm()).SelectedAccessoryRequest : TestSelectedAccessoryRequest;
+if (typeof selectedRequestPolicy !== 'function') throw new Error('Actual SelectedAccessoryRequest required; no ABI fallback');
 
 const networkGlobals = ['fetch', 'WebSocket'].map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)]);
 let networkAttempts = 0;
@@ -37,8 +44,8 @@ after(() => {
 const gateSource = readFileSync(new URL('../extension/game-gate.js', import.meta.url), 'utf8');
 const bootstrapSource = readFileSync(new URL('../extension/game-runtime.mjs', import.meta.url), 'utf8');
 const bootstrap = new Script('(() => {\n' + bootstrapSource.replace(/^import .+;\r?$/gm, '').replace(/^export /gm, '') + '\nreturn (options = {}) => startGamePage({ initialize: init, wasmApi: wasm, ...options });\n})();');
-const startGamePage = bootstrap.runInNewContext({ createStockHostSnapshot, createStockSkinAdapter,
-  createStockClient, createStockEntityAssets, desktopBackingSize, createStockGameplay, bindStockHudDom, projectHudView,
+const startGamePage = bootstrap.runInNewContext({ createStockHostSnapshot, assertStockHostCapture, createStockSkinAdapter, isUnsupportedStockAccessoryFace,
+  createStockAccessoryRequest, hasFailedStockAccessoryRequest, createStockClient, createStockEntityAssets, desktopBackingSize, createStockGameplay, bindStockHudDom, projectHudView,
   init: async () => {}, wasm: {} });
 
 // Documentation-range endpoint and labelled synthetic profile, never a real transport.
@@ -51,7 +58,7 @@ function connect(f, runtime) {
 }
 
 function fixture({ armed = true, late = false, sourcePending = false, href = 'https://slither.io/',
-  missingEdit = false, missingFence = false, missingNative, hudNative = false, accessoryNative = false } = {}) {
+  missingEdit = false, missingFence = false, missingNative, hudNative = false, accessoryNative = false, accessoryRequestNative = false } = {}) {
   const dimensions = new WeakMap(), images = new WeakMap();
   const log = [], messages = [], raf = new Map(), timers = new Map(), intervals = new Map(), microtasks = [], faults = {};
   const events = new EventTarget();
@@ -72,7 +79,14 @@ function fixture({ armed = true, late = false, sourcePending = false, href = 'ht
     get naturalWidth() { return images.get(this).width; }
     get naturalHeight() { return images.get(this).height; }
     get complete() { return images.get(this).complete; }
+    get width() { return images.get(this).elementWidth ?? images.get(this).width; }
+    get height() { return images.get(this).elementHeight ?? images.get(this).height; }
     get src() { return images.get(this).src; }
+    set src(value) {
+      log.push(['selected-src', this]);
+      if (Object.hasOwn(faults, 'selectedRequest')) throw faults.selectedRequest;
+      Object.assign(images.get(this), { src: value, currentSrc: value, complete: false, width: 0, height: 0 });
+    }
     get currentSrc() { return images.get(this).currentSrc; }
     decode() { return images.get(this).decode ?? Promise.resolve(); }
   }
@@ -140,7 +154,11 @@ function fixture({ armed = true, late = false, sourcePending = false, href = 'ht
   runInContext('window = globalThis; top = globalThis;', context);
   actualRealm = runInContext('globalThis', context);
   const edit = attachGateTestRealm(dom, realm, document, actualRealm);
-  if (accessoryNative) { realm.EventTarget = EventTarget; realm.Promise = Promise; }
+  if (accessoryNative || accessoryRequestNative) { realm.EventTarget = EventTarget; realm.Promise = Promise; }
+  if (accessoryRequestNative) {
+    Object.defineProperty(dom.Document.prototype, 'createElement', { configurable: true, writable: true,
+      value(name) { if (name !== 'img') throw new Error('Only selected native image expected'); log.push(['selected-create']); return new Image(); } });
+  }
   if (missingEdit) delete dom.Element.prototype.checkVisibility;
   if (missingFence) delete dom.FenceEvent.prototype.stopImmediatePropagation;
   if (missingNative) {
@@ -976,7 +994,7 @@ test('nickname owner rejects closed-grammar violations without getters, then, co
 
 test('nickname owner accepts its actual current realm record through the unbound factory', async () => {
   const f = fixture(); f.host(); f.complete(); const wasm = wasmDouble(f);
-  Object.assign(f.realm, { createStockHostSnapshot, createStockSkinAdapter, createStockClient,
+  Object.assign(f.realm, { createStockHostSnapshot, createStockSkinAdapter, isUnsupportedStockAccessoryFace, createStockClient,
     createStockEntityAssets, desktopBackingSize, createStockGameplay, init: async () => {}, wasm: wasm.api });
   f.realm.startRuntime = bootstrap.runInContext(f.context);
   const runtime = await f.realm.startRuntime({ realm: f.realm, wasmApi: wasm.api });
@@ -1355,7 +1373,7 @@ function hudOwnerHarness({ group = true } = {}) {
   };
   const nodes = (scope = 'readout-and-final') => ({ __proto__: null, schema: 1, document: h.f.document, mount,
     textPolicy: 'authored', readout, final: scope === 'readout' ? null : final });
-  const ownerContext = createContext({ createStockHostSnapshot, createStockSkinAdapter,
+  const ownerContext = createContext({ createStockHostSnapshot, createStockSkinAdapter, isUnsupportedStockAccessoryFace,
     createStockClient, createStockEntityAssets, desktopBackingSize, init: async () => {}, wasm: {},
     createStockGameplay(options) {
       gameplayOptions = options; hooks.gameplayOptions?.(options);
@@ -1912,7 +1930,7 @@ test('actual captured native HUD group composes with explicit bootstrap in the s
     };
     const decode = wasm.api.decode_frame;
     wasm.api.decode_frame = bytes => { opcode = bytes[0]; return decode(bytes); };
-    Object.assign(f.context, { createStockHostSnapshot, createStockSkinAdapter, createStockClient, createStockEntityAssets,
+    Object.assign(f.context, { createStockHostSnapshot, createStockSkinAdapter, isUnsupportedStockAccessoryFace, createStockClient, createStockEntityAssets,
       desktopBackingSize, createStockGameplay, bindStockHudDom, projectHudView, init: async () => {}, wasm: {} });
     // Keep the actual initializer in the gate's current realm; this explicitly selected path does not auto-enter.
     const explicit = bootstrap.runInContext(f.context);
@@ -2024,5 +2042,228 @@ test('cached selected entry rejects incomplete, replaced or drifting sources wit
     if(mode==='entry') f.realm.a_imgs[0]={...f.realm.a_imgs[0]};
     assert.throws(()=>reader.capture(), error=>error.status==='unsupported');
     reader.dispose(); assert.equal(f.timers.size,0);
+  }
+});
+
+// Synthetic missing-entry loader composition; URL token is authored test data.
+function selectedRequestFixture({existing=false,loaded=false,none=false,count=1,prepare}={}) {
+  const f=fixture({accessoryRequestNative:true});f.host();f.complete();
+  const native=f.gate.claim(f.gate.metadata().id);
+  assert(native.selectedAccessoryRequest,'captured native request capability');
+  const entry={loaded,img:existing?new f.realm.HTMLImageElement():null,sc:1,px:2,py:3,
+    u:'http://slither.io/s/a_zzz_000.png',...(loaded?{ww:40,hh:40}:{})};
+  f.realm.a_ct=count;f.realm.a_imgs=Array.from({length:count},(_,index)=>index===0?entry:{img:null});
+  if(!none)f.realm.localStorage.setItem('cosmetic','0');
+  prepare?.(entry,f);
+  const resolveId=(raw,actualCount)=>{assert.equal(raw,'0');assert.equal(actualCount,count);return 0;};
+  const owner=createStockAccessoryRequest({native:native.selectedAccessoryRequest,clock:native,
+    Request:selectedRequestPolicy,resolveId,started:0,deadline:10000});
+  const reader=createStockHostSnapshot({realm:f.realm,observer:native,readAccessory:native.readAccessory,
+    resolveAccessoryId:resolveId,accessorySource:native.accessorySource,requestOwner:owner});
+  return{f,native,entry,owner,reader,load(){Object.assign(f.imageState(entry.img),{complete:true,width:40,height:40});entry.img.dispatchEvent(new Event('load'));}};
+}
+test('actual gate one selected request publishes then hands off to existing decode listeners',async()=>{
+  const {f,native,entry,owner,reader,load}=selectedRequestFixture();
+  assert(entry.img);assert.equal(entry.loaded,false);assert.equal(entry.ww,undefined);
+  assert.throws(()=>reader.capture(),error=>error.status==='pending');
+  assert.equal(f.log.filter(row=>row[0]==='selected-create').length,1);
+  assert.equal(f.log.filter(row=>row[0]==='selected-src').length,1);
+  assert.throws(()=>native.selectedAccessoryRequest.open(()=>0),/already captured/);
+  load();assert.equal(entry.loaded,true);assert.equal(entry.ww,40);assert.equal(entry.hh,40);
+  assert.throws(()=>reader.capture(),error=>error.status==='pending');
+  await Promise.resolve();const snapshot=reader.capture();
+  assert.equal(snapshot.ownCachedAccessorySelection.source,entry.img);
+  assert(snapshot.readiness.find(row=>row.source===entry.img).revision.startsWith('trusted-accessory-load/'));
+  assert.equal(f.timers.size,0);entry.img.dispatchEvent(new Event('load'));
+  assert.throws(()=>reader.capture(),error=>error.status==='unsupported');
+  reader.dispose();owner.dispose();assert.equal(f.sockets,0);assert.equal(f.original,0);
+});
+test('actual gate none/already-ready/existing-unloaded paths never assign another src',async()=>{
+  for(const options of [{none:true},{existing:true,loaded:true},{existing:true,loaded:false}]){
+    const {f,entry,owner,reader}=selectedRequestFixture(options);
+    if(options.none)assert.equal(reader.capture().ownAccessory,-1);
+    else{assert.throws(()=>reader.capture(),error=>error.status==='pending');await Promise.resolve();
+      if(options.loaded)assert.equal(reader.capture().ownCachedAccessorySelection.source,entry.img);
+      else assert.throws(()=>reader.capture(),error=>error.status==='pending');}
+    assert.equal(f.log.filter(row=>row[0]==='selected-src'||row[0]==='selected-create').length,0);
+    reader.dispose();owner.dispose();assert.equal(f.timers.size,0);
+  }
+});
+test('actual gate rejects drift, alias, duplicate/error events and stale document without readiness resurrection',()=>{
+  for(const mode of ['url','geometry','entry','table','source','selection','alias','incomplete','element-extent','error','duplicate','document']){
+    const {f,entry,owner,reader,load}=selectedRequestFixture({count:mode==='alias'?2:1});
+    if(mode==='url')entry.u+='?changed';
+    if(mode==='geometry')entry.px++;
+    if(mode==='entry')f.realm.a_imgs[0]={...entry};
+    if(mode==='table')f.realm.a_imgs=[entry];
+    if(mode==='source')entry.img=new f.realm.HTMLImageElement();
+    if(mode==='selection')f.realm.localStorage.setItem('cosmetic','-1');
+    if(mode==='alias')f.realm.a_imgs[1].img=entry.img;
+    if(mode==='incomplete')entry.img.dispatchEvent(new Event('load'));
+    else if(mode==='element-extent'){
+      f.imageState(entry.img).elementWidth=10;
+      load();
+    }
+    else if(mode==='error')entry.img.dispatchEvent(new Event('error'));
+    else if(mode==='document')f.realm.location.href='https://slither.io/index.html';
+    else{load();if(mode==='duplicate')load();}
+    assert.throws(()=>reader.capture(),error=>error?.status!=='pending',mode);
+    reader.dispose();try{owner.dispose();}catch{/* Terminal primary retained by owner. */}
+    assert.equal(f.timers.size,0);assert.equal(f.sockets,0);
+  }
+});
+
+test('actual gate preflights writable data and uses own extent slots without inherited setters',()=>{
+  for(const key of ['img','loaded','ww','hh']){
+    assert.throws(()=>selectedRequestFixture({prepare(entry){Object.defineProperty(entry,key,{value:key==='img'?null:false,writable:false});}}),/writable/);
+  }
+  let setters=0;
+  const {entry,owner,reader,load}=selectedRequestFixture({prepare(entry){Object.setPrototypeOf(entry,{set ww(_){setters++;},set hh(_){setters++;}});}});
+  load();assert.equal(setters,0);assert.equal(Object.getOwnPropertyDescriptor(entry,'ww').value,40);
+  reader.dispose();owner.dispose();
+  let gets=0;
+  assert.throws(()=>selectedRequestFixture({prepare(entry){Object.defineProperty(entry,'u',{get(){gets++;return '';}});}}),/own data/);
+  assert.equal(gets,0);
+});
+test('actual gate published extent drift poisons the request before ready borrowing and restoration',()=>{
+  const {f,entry,owner,reader,load}=selectedRequestFixture();load();
+  f.imageState(entry.img).width=20;
+  assert.throws(()=>reader.capture(),/extent\/load changed/);f.imageState(entry.img).width=40;
+  assert.throws(()=>reader.capture(),/extent\/load changed/);
+  reader.dispose();assert.throws(()=>owner.dispose(),/extent\/load changed/);assert.equal(f.timers.size,0);
+});
+
+test('actual gate request errors preserve falsy primaries at runtime startup',async()=>{
+  let reads=0;
+  const forged=Object.defineProperty({},'status',{get(){reads++;throw Error('status must not be consulted');}});
+  for(const primary of [undefined,null,false,0,'',Object.freeze({status:'pending'}),forged]){
+    const f=fixture({accessoryRequestNative:true});f.host();f.complete();
+    f.realm.localStorage.setItem('cosmetic','0');
+    f.realm.a_ct=1;f.realm.a_imgs=[{loaded:false,img:null,sc:1,px:0,py:0,u:'http://slither.io/s/a_zzz_000.png'}];
+    f.faults.selectedRequest=primary;
+    const wasm=wasmDouble(f);wasm.api.SelectedAccessoryRequest=selectedRequestPolicy;wasm.api.stock_accessory_id=()=>0;
+    let caught=false;
+    try{await startGamePage({realm:f.realm,initialize(){},wasmApi:wasm.api});}
+    catch(error){caught=true;assert.equal(error,primary);}assert(caught);
+    assert.equal(f.log.filter(row=>row[0]==='selected-create').length,1);assert.equal(f.timers.size,0);
+  }
+  assert.equal(reads,0);
+});
+
+function requestRuntimeFixture({complete=true,constructorError,readerError,failConstructor=false,failReader=false,prepare}={}) {
+  const f=fixture({accessoryRequestNative:true});f.host();if(complete)f.complete();
+  const entry={loaded:false,img:null,sc:1,px:0,py:0,u:'http://slither.io/s/a_zzz_000.png'};
+  f.realm.a_ct=1;f.realm.a_imgs=[entry];f.realm.localStorage.setItem('cosmetic','0');
+  prepare?.(f,entry);
+  const counts={construct:0,free:0,reader:0};
+  class Request extends selectedRequestPolicy {
+    constructor(...args){counts.construct++;if(failConstructor)throw constructorError;super(...args);}
+    free(){counts.free++;return super.free();}
+  }
+  const wasm=wasmDouble(f);Object.assign(wasm.api,{SelectedAccessoryRequest:Request,stock_accessory_id:()=>0,stock_accessory_forward:()=>6});
+  const proto=wasm.api.AnimatedScene.prototype;
+  proto.render_standard_with_accessory_presentation_at_size=proto.render_standard_with_face_presentation_at_size;
+  proto.apply_frame_and_render_standard_with_accessory_presentation_and_prey=proto.apply_frame_and_render_standard_with_face_presentation_and_prey;
+  const start=bootstrap.runInNewContext({createStockHostSnapshot(options){counts.reader++;if(failReader)throw readerError;return createStockHostSnapshot(options);},
+    assertStockHostCapture,createStockSkinAdapter,isUnsupportedStockAccessoryFace,createStockAccessoryRequest,hasFailedStockAccessoryRequest,
+    createStockClient,createStockEntityAssets,desktopBackingSize,createStockGameplay,bindStockHudDom,projectHudView,init(){},wasm:wasm.api});
+  const pending=start({realm:f.realm});
+  const settle=()=>new Promise(resolve=>setImmediate(resolve));
+  const wake=()=>{const [id,callback]=[...f.timers].at(-1);f.timers.delete(id);callback();};
+  return{f,entry,wasm,counts,pending,settle,wake};
+}
+test('actual gate runtime defers sole construction until host completion and reuses it over pending retries',async()=>{
+  const h=requestRuntimeFixture({complete:false});await h.settle();
+  assert.deepEqual(h.counts,{construct:0,free:0,reader:0});assert.equal(h.entry.img,null);
+  h.f.complete();h.wake();await h.settle();assert.deepEqual(h.counts,{construct:1,free:0,reader:1});
+  const source=h.entry.img;assert(source);h.wake();await h.settle();
+  assert.equal(h.counts.construct,1);assert.equal(h.counts.reader,1);
+  Object.assign(h.f.imageState(source),{complete:true,width:40,height:40});source.dispatchEvent(new Event('load'));
+  h.wake();await h.settle(); // Existing decode promise settles while the same startup waits.
+  if(h.f.timers.size)h.wake();
+  const runtime=await h.pending;assert.equal(runtime.diagnostics().disposed,false);
+  runtime.dispose();runtime.dispose();assert.equal(h.counts.free,1);assert.equal(h.f.timers.size,0);
+  assert.equal(h.f.log.filter(row=>row[0]==='selected-src').length,1);assert.equal(h.f.sockets,0);
+});
+test('actual gate runtime incomplete expiry/disposal allocates no request owner or source',async()=>{
+  for(const mode of ['expiry','dispose']){
+    const h=requestRuntimeFixture({complete:false});const result=h.pending.then(value=>({value}),error=>({error}));await h.settle();
+    if(mode==='expiry')h.f.timer(10000);else h.f.event('pagehide');
+    const settled=await result;if(mode==='expiry')assert.equal(settled.error.status,'unsupported');
+    assert.deepEqual(h.counts,{construct:0,free:0,reader:0});assert.equal(h.entry.img,null);assert.equal(h.f.timers.size,0);
+  }
+});
+test('actual gate runtime constructor/reader failure is terminal and releases partial ownership once',async()=>{
+  for(const primary of [undefined,null,false])for(const failReader of [false,true]){
+    const h=requestRuntimeFixture({failConstructor:!failReader,constructorError:primary,failReader,readerError:primary});
+    let caught=false;try{await h.pending;}catch(error){caught=true;assert.equal(error,primary);}assert(caught);
+    assert.equal(h.counts.construct,1);assert.equal(h.counts.reader,Number(failReader));
+    assert.equal(h.counts.free,Number(failReader));assert.equal(h.f.timers.size,0);
+    assert.equal(h.f.log.filter(row=>row[0]==='selected-src').length,Number(failReader));
+  }
+});
+
+test('actual gate runtime rejects unsupported/active host admission before cache or request effects',async()=>{
+  for(const [key,value] of [['render_mode',1],['is_mobile',true],['team_mode',true],['choosing_skin',true],
+    ['building_skin',true],['testing',true],['playing',true],['connecting',true],['ws',{}]]){
+    const h=requestRuntimeFixture({prepare(f){f.realm[key]=value;Object.defineProperty(f.realm,'a_ct',{get(){assert.fail('cache inspected before host admission');}});}});
+    await assert.rejects(h.pending,/Unsupported host|not quiescent/);
+    assert.deepEqual(h.counts,{construct:0,free:0,reader:0});assert.equal(h.entry.img,null);assert.equal(h.f.timers.size,0);
+  }
+});
+
+for(const missing of ['table-absent','table-undefined','table-null','entry-absent','entry-undefined','entry-null']){
+  test('actual gate runtime waits without allocation for absent selected data: '+missing,async()=>{
+    const h=requestRuntimeFixture({prepare(f){
+      if(missing==='table-absent')delete f.realm.a_imgs;
+      else if(missing.startsWith('table-'))f.realm.a_imgs=missing==='table-null'?null:undefined;
+      else f.realm.a_imgs=missing==='entry-absent'?new Array(1):[missing==='entry-null'?null:undefined];
+    }});
+    const settled=h.pending.then(value=>({value}),error=>({error}));
+    try{
+      await h.settle();assert.deepEqual(h.counts,{construct:0,free:0,reader:0});
+      assert.equal(h.entry.img,null);assert.equal(h.f.log.filter(row=>row[0]==='selected-create'||row[0]==='selected-src').length,0);
+      h.wake();await h.settle();assert.deepEqual(h.counts,{construct:0,free:0,reader:0});
+      h.f.realm.a_imgs=[h.entry];h.wake();await h.settle();
+      assert.deepEqual(h.counts,{construct:1,free:0,reader:1});const source=h.entry.img;assert(source);
+      Object.assign(h.f.imageState(source),{complete:true,width:40,height:40});source.dispatchEvent(new Event('load'));
+      h.wake();await h.settle();if(h.f.timers.size)h.wake();
+      const result=await settled;assert(!Object.hasOwn(result,'error'));assert.equal(result.value.diagnostics().disposed,false);
+      result.value.dispose();assert.equal(h.counts.free,1);assert.equal(h.f.timers.size,0);
+      for(const effect of ['selected-create','selected-src'])assert.equal(h.f.log.filter(row=>row[0]===effect).length,1);
+      assert.equal(h.f.sockets,0);
+    }finally{h.f.event('pagehide');await settled;}
+  });
+}
+
+test('actual gate runtime absent selected data expires or disposes without allocating',async()=>{
+  for(const mode of ['expiry','dispose']){
+    const h=requestRuntimeFixture({prepare(f){f.realm.a_imgs=[null];}});
+    const settled=h.pending.then(value=>({value}),error=>({error}));await h.settle();
+    assert.equal(h.f.timers.size,1,'missing entry must retain the startup waiter');
+    if(mode==='expiry')h.f.timer(10000);else h.f.event('pagehide');
+    const result=await settled;if(mode==='expiry')assert.equal(result.error.status,'unsupported');
+    else assert(!Object.hasOwn(result,'error'));
+    assert.deepEqual(h.counts,{construct:0,free:0,reader:0});assert.equal(h.entry.img,null);assert.equal(h.f.timers.size,0);
+    assert.equal(h.f.log.filter(row=>row[0]==='selected-create'||row[0]==='selected-src').length,0);
+  }
+});
+
+test('actual gate runtime keeps malformed selected metadata terminal without invoking accessors',async()=>{
+  for(const mode of ['table-accessor','entry-accessor','table-object','table-count','entry-scalar','resource-accessor']){
+    let reads=0;
+    const h=requestRuntimeFixture({prepare(f,entry){
+      const get=()=>{reads++;throw new Error('metadata getter must not run');};
+      if(mode==='table-accessor')Object.defineProperty(f.realm,'a_imgs',{get});
+      else if(mode==='entry-accessor')Object.defineProperty(f.realm.a_imgs,'0',{get});
+      else if(mode==='table-object')f.realm.a_imgs={};
+      else if(mode==='table-count')f.realm.a_imgs=[];
+      else if(mode==='entry-scalar')f.realm.a_imgs=[false];
+      else Object.defineProperty(entry,'u',{get});
+    }});
+    await assert.rejects(h.pending,/Selected accessory (own data required|table unavailable)/);
+    assert.equal(reads,0);assert.deepEqual(h.counts,{construct:0,free:0,reader:0});
+    assert.equal(h.entry.img,null);assert.equal(h.f.timers.size,0);
+    assert.equal(h.f.log.filter(row=>row[0]==='selected-create'||row[0]==='selected-src').length,0);
   }
 });

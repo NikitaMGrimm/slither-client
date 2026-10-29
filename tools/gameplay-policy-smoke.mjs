@@ -1,5 +1,8 @@
 // Authored inert differential/lifetime requirements. Real ABI is exercised only
 // when a caller explicitly supplies freshly compiled gameplay and other owners.
+// The immutable legacy oracle reports pending connections as disconnected. This
+// operation-effect comparison records status invocation order, not that payload;
+// connecting-status-smoke separately verifies the intentional status-only delta.
 import assert from 'node:assert/strict';
 import {createStockGameplay as adapter} from '../web/stock-gameplay.mjs';
 import {createStockGameplay as oracle} from './fixtures/stock-gameplay-oracle.mjs';

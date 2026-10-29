@@ -12,13 +12,14 @@ test('remote runtime propagates the captured mode to both adapter and controller
       }
       graph.sources.set(origin + 'stock-host-snapshot.mjs', `
         import {createStockHostSnapshot as actual} from './stock-host-snapshot-actual.mjs';
-        export {isPendingStockCapture} from './stock-host-snapshot-actual.mjs';
+        export {isPendingStockCapture,assertStockHostCapture} from './stock-host-snapshot-actual.mjs';
         export function createStockHostSnapshot(options) {
           const reader=actual(options);
           return {...reader,capture(){const snapshot=reader.capture();return ${mode === 'face' ? 'snapshot' : "{...snapshot,appearanceMode:'accessory'}"};}};
         }`);
       graph.sources.set(origin + 'stock-skin-provider.mjs', `
         import {createStockSkinAdapter as actual} from './stock-skin-provider-actual.mjs';
+        export {isUnsupportedStockAccessoryFace} from './stock-skin-provider-actual.mjs';
         export let selectedMode, selectedPolicy;
         export function createStockSkinAdapter(options){selectedMode=options.appearanceMode;selectedPolicy=[options.resolveSkin,options.validateCustomPaletteMask];return actual(options);}`);
       const prototype = graph.wasm.api.AnimatedScene.prototype;
