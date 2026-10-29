@@ -19,7 +19,7 @@ export class TestGameplayPolicy {
   needs_connected(captured){return this.connected!==captured;}connected_done(captured){this.connected=captured;}
   static timer_action(needed,present){return needed&&!present?1:!needed?2:0;}
   take_status(){if(!this.changed)return false;this.changed=false;return true;}
-  static status(ready,connected){return ready?1:connected?2:3;}
+  static status(phase,connected){return phase==='ready'?1:connected?2:['opening','challenge','setup'].includes(phase)?4:3;}
   packet_base(){return Number(this.pending);}clear_companion(){this.companion=false;}stage_companion(){this.companion=true;}
   take_companion(){const present=this.companion;this.companion=false;return!this.rows||present;}
   stage_packet(){if(!this.publication_allowed())return false;this.pending=true;return true;}

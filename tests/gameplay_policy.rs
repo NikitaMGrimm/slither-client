@@ -30,7 +30,7 @@ fn status_capture_commits_before_callback_but_connected_commit_follows_effect() 
     let mut p = owner();
     assert!(p.needs_connected(true));
     assert!(p.take_status());
-    assert_eq!(Policy::status(false, true), 2);
+    assert_eq!(Policy::status("playing", true), 2);
     assert!(!p.take_status());
     // Reentrant callback dirtiness and a changed session do not alter captured status.
     p.mark_dirty();
@@ -38,7 +38,7 @@ fn status_capture_commits_before_callback_but_connected_commit_follows_effect() 
     assert!(!p.needs_connected(true));
     assert!(p.needs_connected(false));
     assert!(p.take_status());
-    assert_eq!(Policy::status(true, false), 1);
+    assert_eq!(Policy::status("ready", false), 1);
     assert_eq!(Policy::timer_action(true, false), 1);
     assert_eq!(Policy::timer_action(false, true), 2);
     assert_eq!(Policy::timer_action(true, true), 0);
@@ -141,4 +141,25 @@ fn host_reentry_modes_and_current_publication_barriers_remain_distinct() {
     p.begin_dispose();
     assert!(!p.publish_pending());
     assert!(!p.publication_allowed());
+}
+
+#[test]
+fn pending_connection_phases_are_busy_until_setup_or_a_terminal_change() {
+    assert_eq!(Policy::status("ready", false), 1);
+    assert_eq!(Policy::status("ready", true), 1);
+    for phase in ["opening", "challenge", "setup"] {
+        assert_eq!(Policy::status(phase, false), 4);
+        assert_eq!(Policy::status(phase, true), 2);
+    }
+    for phase in [
+        "playing",
+        "victory",
+        "dead",
+        "failed",
+        "disconnected",
+        "unknown",
+    ] {
+        assert_eq!(Policy::status(phase, false), 3);
+        assert_eq!(Policy::status(phase, true), 2);
+    }
 }

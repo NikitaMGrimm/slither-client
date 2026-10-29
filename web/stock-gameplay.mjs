@@ -21,7 +21,7 @@ const POLICY_METHOD_NAMES = [
   'free',
 ];
 const PROFILE_LABELS = ['unavailable','idle','acquiring','ready','committed','failed','disposed'];
-const STATUS_LABELS = ['', 'ready-not-connected', 'connected', 'disconnected'];
+const STATUS_LABELS = ['', 'ready-not-connected', 'connected', 'disconnected', 'connecting'];
 const stringCodeUnit = String.prototype.charCodeAt;
 const stringFromCodeUnit = String.fromCharCode;
 
@@ -391,8 +391,8 @@ export function createStockGameplay(options) {
         }), 25);
       } else if (Reflect.apply(policyStatics.timer_action, Policy, [state.uiTimerNeeded, uiTimer !== undefined]) === 2) clearUiTimer();
       if (policy('take_status')) {
-        const ready = state.phase === 'ready';
-        const status = Reflect.apply(policyStatics.status, Policy, [ready, ready ? false : state.connected]);
+        const phase = state.phase;
+        const status = Reflect.apply(policyStatics.status, Policy, [phase, phase === 'ready' ? false : state.connected]);
         onStatus(STATUS_LABELS[status]);
       }
       // Ingress and source release have unwound; all reconciliation must succeed.

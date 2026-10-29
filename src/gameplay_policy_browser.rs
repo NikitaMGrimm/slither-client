@@ -277,7 +277,7 @@ impl GameplayPolicy {
     }
 
     /// Status of the captured session fields.
-    pub fn status(ready: bool, connected: bool) -> u8 {
-        Policy::status(ready, connected)
+    pub fn status(phase: &str, connected: bool) -> u8 {
+        Policy::status(phase, connected)
     }
 }

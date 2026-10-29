@@ -1,3 +1,4 @@
+import { connectingStatusSmoke, connectingStatusScalarSmoke } from './connecting-status-smoke.mjs';
 import { gameplayPolicySmoke, gameplayPolicyNumericSmoke, gameplayPolicyLifetimeSmoke, gameplayPolicyAdmissionSmoke } from './gameplay-policy-smoke.mjs';
 import { stockControllerSmoke, stockControllerLifetimeSmoke, stockControllerAdmissionSmoke } from './stock-controller-smoke.mjs';
 import { authoredSourcesSmoke } from './authored-source-smoke.mjs';
@@ -40,6 +41,8 @@ import { desktopInputLifetimeSmoke } from './desktop-input-lifetime-smoke.mjs';
 
 // Entirely synthetic ABI integration; no reference files or network are used.
 const wasm = await loadWasm();
+console.log('Synthetic real-Wasm pending-connection status passed:', connectingStatusSmoke(wasm));
+console.log('Synthetic real-Wasm copied phase-string status ABI passed:', connectingStatusScalarSmoke(wasm));
 console.log('Synthetic real-Wasm authored source recipes passed:', await authoredSourcesSmoke(wasm));
 desktopLayoutSmoke(wasm);
 console.log('Synthetic real-Wasm gameplay differential passed:', await gameplayPolicySmoke(wasm));
