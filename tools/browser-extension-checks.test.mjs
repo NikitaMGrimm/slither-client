@@ -15,22 +15,73 @@ import { extensionFixture } from './browser-extension-fixture.mjs';
 import { installedChrome } from './browser-extension-chrome.mjs';
 
 const manifest = JSON.parse(await fs.readFile(new URL('../extension/manifest.chrome.json', import.meta.url)));
+const firefoxManifest = JSON.parse(await fs.readFile(new URL('../extension/manifest.firefox.json', import.meta.url)));
 test('package policy retains exact activation origin/permissions/CSP boundaries', () => {
-  const policy = extensionPolicy(manifest);
+  const policy = extensionPolicy(manifest, 'chrome');
   assert.match(policy.activation, /^BLOCKED_OFFLINE:/);
   for (const mutate of [value => value.permissions.push('tabs'), value => { value.host_permissions = ['<all_urls>']; },
     value => value.web_accessible_resources[0].matches.push('http://127.0.0.1/*'),
     value => { value.content_security_policy.extension_pages += '; connect-src http://127.0.0.1'; },
     value => { value.background = { service_worker: 'synthetic.js' }; }]) {
-    const changed = structuredClone(manifest); mutate(changed); assert.throws(() => extensionPolicy(changed));
+    const changed = structuredClone(manifest); mutate(changed); assert.throws(() => extensionPolicy(changed, 'chrome'));
+  }
+});
+test('Chrome broker permission, worker and CSP are exact and unavailable to Firefox', () => {
+  const chrome = extensionPolicy(manifest, 'chrome');
+  const firefox = extensionPolicy(firefoxManifest, 'firefox');
+  assert.deepEqual(chrome.hostPermissions, ['https://slither.io/*']);
+  assert.deepEqual(chrome.background, { service_worker: 'game/profile-worker.mjs', type: 'module' });
+  assert.deepEqual(firefox.hostPermissions, []);
+  assert.equal(firefox.background, null);
+  assert.throws(() => extensionPolicy(manifest, 'firefox'));
+  assert.throws(() => extensionPolicy(firefoxManifest, 'chrome'));
+  assert.throws(() => extensionPolicy(firefoxManifest));
+  for (const mutate of [
+    value => { delete value.host_permissions; },
+    value => { value.host_permissions = ['http://slither.io/*']; },
+    value => value.host_permissions.push('https://www.slither.io/*'),
+    value => { delete value.background; },
+    value => { delete value.background.type; },
+    value => { value.background.scripts = ['game/profile-worker.mjs']; },
+    value => { value.background.service_worker = 'https://slither.io/worker.mjs'; },
+    value => { value.content_security_policy.extension_pages += '; connect-src https://extra.invalid'; },
+    value => { value.content_security_policy.extension_pages = value.content_security_policy.extension_pages.replace('https://slither.io', 'https://*.slither.io'); },
+  ]) {
+    const changed = structuredClone(manifest); mutate(changed);
+    assert.throws(() => extensionPolicy(changed, 'chrome'));
+  }
+  for (const mutate of [
+    value => { value.host_permissions = ['https://slither.io/*']; },
+    value => { value.background = structuredClone(manifest.background); },
+    value => { value.content_security_policy = structuredClone(manifest.content_security_policy); },
+    value => { value.optional_permissions = ['tabs']; },
+    value => { value.optional_host_permissions = ['https://slither.io/*']; },
+    value => { value.externally_connectable = { matches: ['https://slither.io/*'] }; },
+    value => { value.content_scripts = []; },
+  ]) {
+    const changed = structuredClone(firefoxManifest); mutate(changed);
+    assert.throws(() => extensionPolicy(changed, 'firefox'));
   }
 });
 test('native extension identity must come from an extension origin with unchanged policy', () => {
-  const audit = { policy: extensionPolicy(manifest) };
+  const audit = { policy: extensionPolicy(manifest, 'chrome') };
   const native = { id: 'authored-id', manifest, launcherUrl: 'chrome-extension://authored-id/launcher.html' };
   assert.equal(installedIdentity(native, audit).id, native.id);
   assert.throws(() => installedIdentity({ ...native, launcherUrl: 'http://127.0.0.1/launcher.html' }, audit));
   assert.throws(() => installedIdentity({ ...native, manifest: { ...manifest, manifest_version: 2 } }, audit));
+  for (const mutate of [
+    value => { value.host_permissions = ['<all_urls>']; },
+    value => { delete value.background; },
+    value => { value.background.type = 'classic'; },
+    value => { value.optional_host_permissions = ['https://extra.invalid/*']; },
+  ]) {
+    const changed = structuredClone(manifest); mutate(changed);
+    assert.throws(() => installedIdentity({ ...native, manifest: changed }, audit));
+  }
+  const firefoxAudit = { policy: extensionPolicy(firefoxManifest, 'firefox') };
+  const firefoxNative = { id: 'authored-firefox-id', manifest: firefoxManifest, launcherUrl: 'moz-extension://authored-uuid/launcher.html' };
+  assert.equal(installedIdentity(firefoxNative, firefoxAudit).id, firefoxNative.id);
+  assert.throws(() => installedIdentity({ ...firefoxNative, launcherUrl: native.launcherUrl }, firefoxAudit));
 });
 function authoredDriver({ wasm = true, external = false, registrations = 0 } = {}) {
   const url = 'chrome-extension://authored-id/launcher.html'; const calls = [];
@@ -49,14 +100,14 @@ function authoredDriver({ wasm = true, external = false, registrations = 0 } = {
 }
 test('callable installed checks distinguish preview from blocked game activation', async () => {
   const driver = authoredDriver();
-  const result = await checkInstalledPreview(driver, { policy: extensionPolicy(manifest) }, { origin: 'http://127.0.0.1:1234' }, '/authored-output');
+  const result = await checkInstalledPreview(driver, { policy: extensionPolicy(manifest, 'chrome') }, { origin: 'http://127.0.0.1:1234' }, '/authored-output');
   assert.match(result.activation, /BLOCKED_OFFLINE/); assert.match(result.limits, /no canonical-host/);
   assert.deepEqual(driver.calls.map(row => row[0]), ['open', 'open', 'click', 'screenshot']);
 });
 test('installed checks reject registration changes and external preview resources without screenshot acceptance', async () => {
   for (const options of [{ registrations: 1 }, { external: true }]) {
     const driver = authoredDriver(options);
-    await assert.rejects(checkInstalledPreview(driver, { policy: extensionPolicy(manifest) }, { origin: 'http://127.0.0.1:1234' }, '/authored-output'));
+    await assert.rejects(checkInstalledPreview(driver, { policy: extensionPolicy(manifest, 'chrome') }, { origin: 'http://127.0.0.1:1234' }, '/authored-output'));
     assert.equal(driver.calls.some(row => row[0] === 'screenshot'), false);
   }
 });
