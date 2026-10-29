@@ -252,6 +252,9 @@ for (const [name, change, expected] of [
   ['non-Wasm bytes', f => f.write('dist/web/slither_client_bg.wasm', Buffer.from('not Wasm')), /valid version-1 WebAssembly/],
   ['truncated Wasm', f => f.write('dist/web/slither_client_bg.wasm', syntheticWasm().subarray(0, 10)), /valid version-1 WebAssembly/],
   ['empty valid Wasm', f => f.write('dist/web/slither_client_bg.wasm', syntheticWasm().subarray(0, 8)), /Wasm\/glue export mismatch/],
+  ['missing JavaScript desktop input export',
+    f => f.write('dist/web/slither_client.js', syntheticGlue.replace('export class DesktopInput {}\n', '')),
+    /generated web entrypoint/],
   ['missing JavaScript desktop sizing export',
     f => f.write('dist/web/slither_client.js', syntheticGlue.replace('export function desktop_backing_size() {}\n', '')),
     /generated web entrypoint/],
@@ -281,7 +284,7 @@ for (const [name, change, expected] of [
   });
 }
 
-for (const name of ['animatedscene_control_view', 'animatedscene_advance_with_control', 'animatedscene_reset_lag',
+for (const name of ['desktopinput_new', 'animatedscene_control_view', 'animatedscene_advance_with_control', 'animatedscene_reset_lag',
   'animatedscene_set_background_backdrop',
   'animatedscene_enable_nicknames',
     'animatedscene_enable_announcement_tracking', 'animatedscene_announcement_view',
