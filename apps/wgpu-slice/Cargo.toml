@@ -13,6 +13,10 @@ crate-type = ["rlib", "cdylib"]
 name = "slither-wgpu-desktop"
 path = "src/main.rs"
 
+[[bin]]
+name = "slither-wgpu-diagnostic"
+path = "src/diagnostic_main.rs"
+
 [dependencies]
 slither-client = { path = "../.." }
 wgpu = { version = "=30.0.1", default-features = false, features = ["std", "wgsl", "dx12", "vulkan", "webgpu"] }
@@ -20,6 +24,7 @@ wgpu = { version = "=30.0.1", default-features = false, features = ["std", "wgsl
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 winit = { version = "=0.30.13", default-features = false, features = ["rwh_06"] }
 pollster = "=0.4.0"
+tungstenite = { version = "=0.30.0", default-features = false, features = ["handshake"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "=0.2.129"

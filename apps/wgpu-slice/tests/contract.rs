@@ -20,6 +20,7 @@ fn asset() -> BodyAsset {
 }
 fn draw() -> Draw {
     Draw {
+        corners: None,
         asset: asset(),
         source: None,
         destination: BodyRect {
@@ -133,7 +134,7 @@ fn premultiplication_and_unsupported_operations_are_explicit() {
     };
     assert_eq!(materialize(&r).unwrap().pixels, [100, 50, 25, 128]);
     let mut invalid = r;
-    invalid.commands.push(PaintCommand::MoveTo([0., 0.]));
+    invalid.commands.push(PaintCommand::Composite("xor"));
     assert!(materialize(&invalid).unwrap_err().contains("unsupported"));
 }
 #[test]
@@ -153,7 +154,7 @@ fn body_disk_is_covered_and_food_gradients_are_not_flat() {
             .iter()
             .any(|p| p[3] > 0 && p[3] < 255)
     );
-    assert!(materialize(&r.body_sources.palettes[10].variants[0]).is_err());
+    assert!(materialize(&r.body_sources.palettes[10].variants[0]).is_ok());
 }
 #[test]
 fn shared_host_pacing_has_bounded_catchup_and_pause() {

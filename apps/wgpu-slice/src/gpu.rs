@@ -20,6 +20,8 @@ struct Texture {
     bind: wgpu::BindGroup,
 }
 pub struct Renderer {
+    pub sample_count: u32,
+    format: wgpu::TextureFormat,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub adapter_info: wgpu::AdapterInfo,
@@ -48,6 +50,15 @@ impl Renderer {
     }
     async fn from_adapter(adapter: wgpu::Adapter, format: wgpu::TextureFormat) -> Result<Self> {
         let info = adapter.get_info();
+        let supported = adapter.get_texture_format_features(format).flags;
+        let sample_count = if supported.contains(
+            wgpu::TextureFormatFeatureFlags::MULTISAMPLE_X4
+                | wgpu::TextureFormatFeatureFlags::MULTISAMPLE_RESOLVE,
+        ) {
+            4
+        } else {
+            1
+        };
         if info.device_type == wgpu::DeviceType::Cpu {
             return Err("software/CPU adapter is not GPU success".into());
         }
@@ -95,8 +106,9 @@ impl Renderer {
             label: Some("quad"),
             source: wgpu::ShaderSource::Wgsl(include_str!("quad.wgsl").into()),
         });
-        let pipeline = |blend| {
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let pipeline =
+            |blend| {
+                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("ordered paint"),
                 layout: Some(&pipeline_layout),
                 vertex: wgpu::VertexState {
@@ -111,7 +123,7 @@ impl Renderer {
                 },
                 primitive: Default::default(),
                 depth_stencil: None,
-                multisample: Default::default(),
+                multisample: wgpu::MultisampleState{count:sample_count,..Default::default()},
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
                     entry_point: Some("fs"),
@@ -125,7 +137,7 @@ impl Renderer {
                 multiview_mask: None,
                 cache: None,
             })
-        };
+            };
         let over = pipeline(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING);
         let add = wgpu::BlendComponent {
             src_factor: wgpu::BlendFactor::One,
@@ -137,6 +149,8 @@ impl Renderer {
             alpha: add,
         });
         Ok(Self {
+            sample_count,
+            format,
             device,
             queue,
             adapter_info: info,
@@ -171,8 +185,17 @@ impl Renderer {
         {
             return Err("duplicate/stale immutable resource revision".into());
         }
-        if self.textures.len() >= 128 && !self.textures.keys().any(|k| k.handle == a.handle) {
+        if self.textures.len() >= 2048 && !self.textures.keys().any(|k| k.handle == a.handle) {
             return Err("texture count budget".into());
+        }
+        let retained = self
+            .textures
+            .values()
+            .filter(|t| t.asset.handle != a.handle)
+            .map(|t| t.asset.width as usize * t.asset.height as usize * 4)
+            .sum::<usize>();
+        if retained + r.image.pixels.len() > crate::bank::PIXEL_BUDGET {
+            return Err("Resident GPU pixel budget".into());
         }
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("authored RGBA"),
@@ -243,6 +266,32 @@ impl Renderer {
     pub fn release(&mut self, key: ResourceKey) -> bool {
         self.textures.remove(&key).is_some()
     }
+    pub fn sync_resources(&mut self, resources: &[Resource]) -> Result<()> {
+        if resources.len() > 2048
+            || resources
+                .iter()
+                .map(|r| r.image.pixels.len())
+                .sum::<usize>()
+                > crate::bank::PIXEL_BUDGET
+        {
+            return Err("Active GPU resource budget".into());
+        }
+        let wanted: std::collections::BTreeSet<_> = resources
+            .iter()
+            .map(|r| ResourceKey::from(r.asset))
+            .collect();
+        self.textures.retain(|key, _| wanted.contains(key));
+        for r in resources {
+            if let Some(t) = self.textures.get(&r.asset.into()) {
+                if t.asset != r.asset {
+                    return Err("Resident resource metadata changed".into());
+                }
+            } else {
+                self.upload(r)?;
+            }
+        }
+        Ok(())
+    }
     pub fn render(&self, frame: &Frame, target: &wgpu::TextureView) -> Result<()> {
         if self.lost.load(Ordering::SeqCst) {
             return Err("GPU device lost; no gameplay reset/retry".into());
@@ -255,6 +304,14 @@ impl Renderer {
         let quads = frame.quads(&resident)?;
         if frame.extent.contains(&0) {
             return Ok(());
+        }
+        if u64::from(frame.extent[0])
+            * u64::from(frame.extent[1])
+            * 4
+            * u64::from(self.sample_count)
+            > 128 * 1024 * 1024
+        {
+            return Err("Render attachment budget".into());
         }
         let bytes: Vec<u8> = quads
             .iter()
@@ -272,13 +329,34 @@ impl Renderer {
                 usage: wgpu::BufferUsages::VERTEX,
             });
         let mut encoder = self.device.create_command_encoder(&Default::default());
+        let multisample = if self.sample_count > 1 {
+            Some(self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("quad edge coverage"),
+                size: wgpu::Extent3d {
+                    width: frame.extent[0],
+                    height: frame.extent[1],
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: self.sample_count,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            }))
+        } else {
+            None
+        };
+        let msaa_view = multisample
+            .as_ref()
+            .map(|t| t.create_view(&Default::default()));
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("offline gameplay"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target,
+                    view: msaa_view.as_ref().unwrap_or(target),
                     depth_slice: None,
-                    resolve_target: None,
+                    resolve_target: msaa_view.as_ref().map(|_| target),
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
                             r: 0.035,

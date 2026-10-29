@@ -25,6 +25,8 @@ impl From<BodyAsset> for ResourceKey {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Draw {
+    /// Backend polygon corners only for existing arena path tessellation; images keep None.
+    pub corners: Option<[[f64; 2]; 4]>,
     pub asset: BodyAsset,
     pub source: Option<BodyRect>,
     pub destination: BodyRect,
@@ -37,6 +39,7 @@ pub struct Draw {
 impl From<&BodyImageCommand> for Draw {
     fn from(c: &BodyImageCommand) -> Self {
         Self {
+            corners: None,
             asset: c.asset,
             source: c.source_rect,
             destination: c.destination,
@@ -65,6 +68,7 @@ impl From<&FoodImageCommand> for Draw {
             } => (Some(source), destination),
         };
         Self {
+            corners: None,
             asset: c.source.asset(),
             source,
             destination,
@@ -152,10 +156,15 @@ impl Frame {
                     .into_iter()
                     .enumerate()
                 {
-                    let x = r.x + u * r.width;
-                    let y = r.y + v * r.height;
+                    let [x, y] = d
+                        .corners
+                        .map_or([r.x + u * r.width, r.y + v * r.height], |p| p[i]);
+                    if !x.is_finite() || !y.is_finite() {
+                        return Err("nonfinite polygon corner".into());
+                    }
+                    let local_x = x;
                     let x = d.translation[0] + cos * x - sin * y;
-                    let y = d.translation[1] + sin * (r.x + u * r.width) + cos * y;
+                    let y = d.translation[1] + sin * local_x + cos * y;
                     let values = [
                         2. * (x * self.viewport_scale) / f64::from(self.extent[0]) - 1.,
                         1. - 2. * (y * self.viewport_scale) / f64::from(self.extent[1]),

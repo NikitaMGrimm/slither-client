@@ -1,90 +1,129 @@
-# Shared offline gameplay rendering slice
+# Shared local gameplay with wgpu
 
-This separate crate consumes the existing `slither-client` pure Rust core by
-path dependency. It does not change the root Cargo files, Canvas entry, generated
-Canvas payload, protocol, simulator, extension or accepted local test bundle.
-All fixture packets are original synthetic inputs. No game connections exist.
+This isolated app consumes the existing pure Rust core by path dependency. It
+does not change root Cargo files, the Canvas entry/payload, simulator, extension
+or previously accepted local bundles. Windows and browser use `game::LocalGame`,
+the same actual protocol ingress, session/input/HUD policies and ordered plans.
+No socket exists at startup. Only explicit Play to an entered
+`ws://127.0.0.1:<port>/slither` endpoint can construct one, after the initial
+reset frame is successfully presented. There is no automatic reconnect, remote
+profile, official-server adapter or client-authoritative movement.
 
-Both hosts use `scene::Scene`: the same Setup, skin-zero appearance,48 foods,
-absolute anchor packet schedule, received-speed transitions, `AnimatedClient`,
-fixed 1000/60ms updates, sampled geometry, camera, `plan_standard_body` and
-`plan_food`. Tick120 enables boost; tick360 returns to cruise; tick600 stops the
-finite packet/update schedule. This is not a server responding to host input.
-No keyboard/pointer control is claimed by this slice. Paired eyes, prey, UI text,
-antennae, other skins and live transport are not rendered here.
+## Gameplay and adapters
 
-## Shared boundary and material limits
+`LocalGame` uses `SessionPolicy` for phases, budgets, death/return, ping/lag and
+launch/reset commits. It sends the existing negotiation prefixes, solves the
+received challenge in Rust, then sends the existing login with authored local
+zero credentials. Both hosts use the negotiated header-free framing and admit
+protocol19. The core atomically ingests actual Setup/spawn/update/food/prey/HUD
+packets. No fixture is injected into the playable owner.
 
-`Frame` carries identity, tick, backing extent, viewport scale and ordered draws.
-Food outlines/bodies precede snakes; late food glows follow snakes. Every body
-pass stays in its original position. Source handles and revisions remain full
-`u64`; readiness, dimensions and the exact revision must match resident textures.
-Create/update retires older revisions of the same handle only after validation;
-release is explicit, and dropping the renderer releases all its owned objects.
-At most128 textures,512x512 per texture,8192 draws and8192 backing pixels per axis
-are admitted. No regrouping or texture sorting occurs.
+The existing transactional `advance_with_control` callback is first probed and
+aborted before entity updates, to obtain the actual core step without adding a
+second clock or planner API. `DesktopInput` accumulates debt and stages keyboard,
+ping, boost, then heading packets. Each effect is acknowledged outside Rust
+borrows before the next phase. After all sends, one candidate world update and
+draw are prepared. Successful presentation commits that candidate and consumes
+session actions; surface timeout retains it without a second update. Failure
+commits terminal state and closes the owned socket, cancelling the candidate.
+Packet-time Setup pictures preserve the core callback order. Resize supersedes
+queued intermediate pictures while retaining the admitted packet state.
 
-Crop UVs, translations/rotation and destination corners are calculated from
-the core's f64 plans. Only final clip/UV/alpha vertices convert to f32, with
-overflow/nonfinite rejection. Positive in-bounds crops and nonnegative destination
-sizes are supported; other image-overload cases fail explicitly. Zero backing
-extent suspends rendering and fixture updates, without surface configuration.
+Windows uses thin winit pointer/key/window glue and a native tungstenite
+transport. The connector has a1s TCP deadline plus an absolute2s HTTP handshake
+deadline (including slow-drip peers); cancellation/join is bounded by them.
+After handshake, all I/O is nonblocking. A WouldBlock write remains owned by
+tungstenite and is never duplicated. Binary frames, receive bursts and pending
+writes are bounded. Remote close drops socket ownership; later Play is explicit.
 
-The CPU recipe adapter uses the existing Rust-authored RGBA samples and only the
-operations needed by palette-zero body/effects/food: full-circle fills/masks,
-constant colors, concentric radial gradients, full-source rectangles and black
-disk shadows. Circle coverage uses4x4 samples; blur uses a separable Gaussian
-with sigma=blur/2 truncated at3sigma. This is a declared raster approximation,
-not proof of Canvas pixels. Unsupported polygons (including star decorations),
-general paths/gradients/shadows, text and native images return errors. No selected
-body/boost/food pass is silently omitted or replaced with stand-in artwork.
+The browser owns DOM, WebSocket, RAF and backing size/DPR only. Copied effect
+IDs remain full-u64 BigInts. Socket callbacks are generation/lifetime fenced;
+listeners detach before close/free. The first thrown JS value is retained
+separately, including `undefined`. GPU failure stops render attempts and disables
+Play; there is no Canvas/software fallback presented as GPU success. The input
+policy's existing focus-loss semantics are preserved (blur invents no release).
 
-Source samples become premultiplied encoded-sRGB RGBA bytes in `Rgba8Unorm`
-textures. Linear clamp sampling uses one mip level. Targets must expose encoded
-`Bgra8Unorm`/`Rgba8Unorm`; there is no automatic sRGB decode/encode. SourceOver
-uses premultiplied One/OneMinusSrcAlpha; Lighter uses One/One for color and alpha,
-clamped by the unorm attachment. These conventions are explicit comparison
-inputs, not a universal Canvas color-management equivalence claim.
+## Represented visuals and limits
 
-## Hosts and lifecycle
+The renderer consumes existing normal/boost/death body, early/late food/prey,
+paired-eye layout and arena-edge plans. The42 authored body families and existing
+skin runs keep their actual palette IDs and order. Only resources used by a
+frame are materialized/resident; this does not eagerly rasterize the catalogue.
+There is no JS numeric fallback. Admitted local face behavior remains the core's
+ordinary paired eyes (including25/44/63/64); image faces27/40/41 remain plain.
+No antenna art, official images or complete cosmetic chooser is added.
 
-Windows uses winit0.30.13 and wgpu30.0.1 DX12/Vulkan. Browser uses WebGPU only,
-standalone wasm-bindgen0.2.129, web-sys/js-sys0.3.106 and futures0.4.79. CPU/software
-adapters and unsupported WebGPU report errors; no Canvas/WebGL/software fallback
-is labelled success. Dependencies are isolated in this crate's Cargo.lock.
+The small original bitmap HUD shows Rust current/final length, rank/population,
+the first projected leaderboard row and session status. Native title and browser
+DOM also expose the full Rust text. The bitmap font covers ASCII, substitutes a
+visible question glyph for other characters, and clips to80columns/four lines.
+This is a functional slice, not a complete scoreboard/menu/text system.
 
-The shared Driver admits monotonic host timestamps, performs at most8 fixed
-ticks per pump, preserves bounded catch-up debt, and pauses after gaps over250ms.
-This pauses fixture time rather than inventing packets or resetting gameplay.
-Windows resize uses physical backing dimensions and scale factor. Web copies CSS
-extent times DPR into the backing canvas; all scene/clock math stays Rust-owned.
-Surface timeout/occlusion skips presentation. Outdated configuration reconfigures
-without changing the scene. Lost surface/device or validation error stops the
-host explicitly: no automatic gameplay reset, connection or device retry.
-Close/pagehide cancels the owned scheduling and drops/frees GPU/scene owners.
+`Frame` keeps full-u64 handle/revision, backing extent, viewport scale, ordered
+crops/transforms/effective alpha and SourceOver/Lighter. No draw regrouping occurs.
+The final vertex submission is the sole f64-to-f32 conversion. CPU materialization
+uses the existing original Rust recipes: RGBA pixels, circles, concentric radial
+gradients, single-contour nonzero polygon fills (authored stars), full rectangles
+and colored disk shadows. Circle/polygon coverage uses4x4samples; blur is the
+existing separable Gaussian approximation, sigma=blur/2, truncated at3sigma.
+Unsupported Canvas operations fail explicitly. Paired eyes use sampled disks;
+arena fill uses the core path strips, and stroke uses segment quads with butt
+joins. These raster approximations do not establish Canvas pixel parity.
 
-## Build and later run vectors
+Textures contain premultiplied encoded-sRGB RGBA8, linear clamp sampling, one mip
+level. Targets are encoded-unorm, with no implicit sRGB conversion. SourceOver
+uses One/OneMinusSrcAlpha; Lighter uses One/One for color/alpha. Supported4xMSAA
+improves quad-edge coverage; unsupported formats explicitly report1sample.
+Limits:2048active sources,64MiB active CPU/GPU pixels,512px per source axis,
+8192ordered draws,8192backing pixels per axis and128MiB render attachment.
+Queued Setup pictures share a64MiB aggregate pixel bound. Zero backing suspends
+updates/presentation without resetting session/world; packets still admit.
+Timeout/occlusion/outdated surface retains work. Lost surface/device stops the
+host, without a new connection or gameplay reset/retry.
 
-Run from this directory with Rust1.99.0, one Cargo lane and a fresh external
-`CARGO_TARGET_DIR`. Native and web commands must be serialized:
+## Isolated builds and offline checks
+
+Rust1.99.0, wgpu30.0.1, winit0.30.13, tungstenite0.30.0 (handshake/no TLS),
+wasm-bindgen0.2.129, futures0.4.79 and web-sys/js-sys0.3.106 are pinned in this
+crate/lock. Native DX12/Vulkan and browser WebGPU share frame/resource/render code.
+Use one isolated Cargo lane; never overwrite the root Canvas target/generated
+files. From this app directory:
 
 ```powershell
 $env:CARGO_BUILD_JOBS = '1'
 $env:RUST_TEST_THREADS = '1'
-cargo test --locked --lib --tests -- --test-threads=1
-cargo build --locked --bin slither-wgpu-desktop
+$env:CARGO_TARGET_DIR = '<new-internal-target>'
+cargo fmt --all --check
+node --test --test-concurrency=1 tests/local-host.test.mjs
+cargo test --locked --all-targets -- --test-threads=1
+cargo test --locked --doc
 cargo clippy --locked --all-targets -- -D warnings
-cargo build --locked --target wasm32-unknown-unknown --lib
-& $env:WASM_BINDGEN --target web --out-dir web-dist/pkg --out-name slither_wgpu_slice <matching-target>/wasm32-unknown-unknown/debug/slither_wgpu_slice.wasm
+cargo clippy --locked --lib --target wasm32-unknown-unknown -- -D warnings
+cargo build --locked --bins
+cargo build --locked --lib --target wasm32-unknown-unknown
+& $env:WASM_BINDGEN --target web --out-dir '<new-web-dir>/pkg' --out-name slither_wgpu_slice '<new-internal-target>/wasm32-unknown-unknown/debug/slither_wgpu_slice.wasm'
 ```
 
-Copy `web/index.html` and `web/entry.mjs` into `web-dist` alongside that new pkg
-directory. Do not copy or overwrite root `dist/web`. These are manual build
-vectors, not permission to launch a window, browser or listener.
+Copy the authored `web/*.mjs` and `web/*.html` alongside that new pkg directory.
+These build vectors do not authorize a window, browser, listener or game attempt.
+The ordinary desktop entry's `--help` exits before creating an event loop/window.
+The retained `slither-wgpu-diagnostic` and `diagnostic.html` use the original
+finite synthetic Scene and are labelled diagnostics, not playable server modes.
 
-After separate root review/resource approval, the desktop executable opens a
-window; the standalone web directory needs an approved secure/local serving
-surface. No server is included. Native window and browser WebGPU execution,
-resize/DPR/cleanup, matched Canvas captures, visual fidelity and performance
-remain separate runtime gates. Neither a compile nor offscreen readback closes
-player-visible appearance acceptance. No mobile SDK/platform acceptance claimed.
+After separate root review/resource gates, a manual native vector is:
+
+```text
+slither-wgpu-desktop --endpoint ws://127.0.0.1:<separately-owned-port>/slither --nickname Player --skin 0
+```
+
+Enter starts; Escape stops; arrows/pointer/Space feed existing Rust input.
+For browser, serve only this standalone web output on a separately owned secure
+or loopback route, enter that separately owned simulator endpoint, then Play.
+No simulator/listener is included or automatically started. Never attach to
+another user's server or reuse their processes/ports.
+
+Normal tests are offline original synthetic packets and labelled host doubles.
+They verify state/effect/geometry/material contracts, not actual network or UI.
+Actual local handshake/control/gameplay, both host runtimes, visual fidelity,
+player feel, performance and official-server acceptance remain distinct gates.
+No mobile SDK/device/signing work is part of this milestone.

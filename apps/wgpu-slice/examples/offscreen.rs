@@ -17,6 +17,7 @@ async fn check() -> Result<()> {
     let i = instance();
     let mut renderer = Renderer::new(&i, None, wgpu::TextureFormat::Rgba8Unorm).await?;
     println!("actual_adapter={:?}", renderer.adapter_info);
+    println!("actual_sample_count={}", renderer.sample_count);
     let validation = renderer
         .device
         .push_error_scope(wgpu::ErrorFilter::Validation);

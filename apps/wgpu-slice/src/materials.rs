@@ -97,6 +97,7 @@ pub fn materialize(recipe: &CanvasRecipe) -> Result<RgbaImage> {
     let mut alpha = 1.;
     let mut destination_in = false;
     let mut circle = None;
+    let mut polygon: Vec<[f64; 2]> = Vec::new();
     let mut shadow = None;
     for cmd in &recipe.commands {
         match cmd {
@@ -122,13 +123,30 @@ pub fn materialize(recipe: &CanvasRecipe) -> Result<RgbaImage> {
             PaintCommand::Composite("destination-in") => destination_in = true,
             PaintCommand::FillStyle(s) => fill = Fill::Solid(color(s)?),
             PaintCommand::GlobalAlpha(a) if (0. ..=1.).contains(a) => alpha = *a,
-            PaintCommand::BeginPath => circle = None,
+            PaintCommand::BeginPath => {
+                circle = None;
+                polygon.clear();
+            }
+            PaintCommand::MoveTo(p)
+                if polygon.is_empty() && circle.is_none() && p.iter().all(|v| v.is_finite()) =>
+            {
+                polygon.push(*p)
+            }
+            PaintCommand::LineTo(p)
+                if !polygon.is_empty()
+                    && polygon.len() < 128
+                    && p.iter().all(|v| v.is_finite()) =>
+            {
+                polygon.push(*p)
+            }
+            PaintCommand::ClosePath if polygon.len() >= 3 => {}
             PaintCommand::Arc(c)
                 if c.iter().all(|v| v.is_finite())
                     && c[2] > 0.
                     && c[3] == 0.
                     && c[4] == std::f64::consts::TAU
-                    && circle.is_none() =>
+                    && circle.is_none()
+                    && polygon.is_empty() =>
             {
                 circle = Some(*c)
             }
@@ -162,10 +180,9 @@ pub fn materialize(recipe: &CanvasRecipe) -> Result<RgbaImage> {
                 && *blur > 0.
                 && *blur <= 32.
                 && offset_y.is_finite()
-                && offset_y.abs() <= 32.
-                && s == "#000000" =>
+                && offset_y.abs() <= 32. =>
             {
-                shadow = Some((*blur, *offset_y))
+                shadow = Some((*blur, *offset_y, color(s)?))
             }
             PaintCommand::Fill | PaintCommand::FillRect(_) => {
                 let rect = if let PaintCommand::FillRect(r) = cmd {
@@ -173,8 +190,8 @@ pub fn materialize(recipe: &CanvasRecipe) -> Result<RgbaImage> {
                 } else {
                     None
                 };
-                if rect.is_none() && circle.is_none() {
-                    return Err("missing full circle".into());
+                if rect.is_none() && circle.is_none() && polygon.len() < 3 {
+                    return Err("missing full circle or polygon".into());
                 }
                 if let Some(r) = rect
                     && r != [0., 0., w as f64, h as f64]
@@ -185,21 +202,24 @@ pub fn materialize(recipe: &CanvasRecipe) -> Result<RgbaImage> {
                     if rect.is_some() {
                         return 1.;
                     }
-                    let c = circle.expect("validated circle");
                     let mut n = 0.;
                     for sy in 0..4 {
                         for sx in 0..4 {
-                            if (x + (sx as f64 + 0.5) / 4. - c[0])
-                                .hypot(y + (sy as f64 + 0.5) / 4. - c[1])
-                                <= c[2]
-                            {
+                            let px = x + (sx as f64 + 0.5) / 4.;
+                            let py = y + (sy as f64 + 0.5) / 4.;
+                            let inside = if let Some(c) = circle {
+                                (px - c[0]).hypot(py - c[1]) <= c[2]
+                            } else {
+                                winding(&polygon, px, py) != 0
+                            };
+                            if inside {
                                 n += 1.;
                             }
                         }
                     }
                     n / 16.
                 };
-                if let Some((blur, offset)) = shadow {
+                if let Some((blur, offset, shadow_color)) = shadow {
                     if destination_in || rect.is_some() {
                         return Err("unsupported shadow composite".into());
                     }
@@ -228,7 +248,7 @@ pub fn materialize(recipe: &CanvasRecipe) -> Result<RgbaImage> {
                                     a += horizontal[yy as usize * w + x] * weight / sum;
                                 }
                             }
-                            over(&mut pixels[y * w + x], [0., 0., 0., 1.], a, alpha, false);
+                            over(&mut pixels[y * w + x], shadow_color, a, alpha, false);
                         }
                     }
                 }
@@ -255,4 +275,19 @@ pub fn materialize(recipe: &CanvasRecipe) -> Result<RgbaImage> {
             .flat_map(|p| p.map(|v| (v.clamp(0., 1.) * 255.).round() as u8))
             .collect(),
     })
+}
+
+fn winding(points: &[[f64; 2]], x: f64, y: f64) -> i32 {
+    let mut n = 0;
+    for i in 0..points.len() {
+        let a = points[i];
+        let b = points[(i + 1) % points.len()];
+        let cross = (b[0] - a[0]) * (y - a[1]) - (x - a[0]) * (b[1] - a[1]);
+        if a[1] <= y && b[1] > y && cross > 0. {
+            n += 1;
+        } else if a[1] > y && b[1] <= y && cross < 0. {
+            n -= 1;
+        }
+    }
+    n
 }
