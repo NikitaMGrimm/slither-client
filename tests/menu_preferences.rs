@@ -72,7 +72,7 @@ fn native_actions_keep_stock_runs_and_local_family_bounds() {
         let mut p = MenuPreferences::new(local);
         p.set_nickname("Saved").unwrap();
         p.action("previous-skin").unwrap();
-        assert_eq!(p.view().skin, if local { 2 } else { 65 });
+        assert_eq!(p.view().skin, 65);
         p.action("next-skin").unwrap();
         assert_eq!(p.view().skin, 0);
         p.action("build").unwrap();
@@ -131,7 +131,7 @@ fn every_stock_choice_and_custom_palette_reuses_the_existing_resolver() {
         }
     }
     let mut local = MenuPreferences::new(true);
-    for skin in 3..=255 {
+    for skin in 66..=255 {
         assert!(local.select(skin, &[]).is_err());
     }
     for palette in 3..=255 {
@@ -171,4 +171,59 @@ fn arbitrary_bounded_restore_inputs_never_publish_partial_choices() {
         p.action(action).unwrap();
         assert_eq!(p, before, "disabled action {action}");
     }
+}
+
+#[test]
+fn local_represented_patterns_cycle_restore_and_keep_existing_custom_namespace() {
+    let mut p = MenuPreferences::new(true);
+    p.set_nickname("Saved").unwrap();
+    p.action("previous-skin").unwrap();
+    assert_eq!(p.view().skin, 65);
+    p.action("next-skin").unwrap();
+    assert_eq!(p.view().skin, 0);
+    for skin in 0..=65 {
+        assert_eq!(p.view().skin, skin);
+        assert_eq!(p.view().title, format!("Skin {} of 66", skin + 1));
+        let saved = p.serialize();
+        assert_eq!(MenuPreferences::restore(true, &saved), p);
+        p.action("next-skin").unwrap();
+    }
+    assert_eq!(p.view().skin, 0);
+    for skin in [0, 1, 2, 9, 10, 15, 29, 65] {
+        let saved = format!("1:5361766564:{skin:02x}:");
+        let restored = MenuPreferences::restore(true, &saved);
+        assert_eq!(restored.view().skin, skin);
+        assert_eq!(restored.view().nickname, "Saved");
+        assert_eq!(restored.serialize(), saved);
+    }
+    let mut bytes = [vec![0; 8], vec![2, 0, 3, 1, 4, 2]].concat();
+    p.select(65, &bytes).unwrap();
+    bytes[8] = 0;
+    let mut copy = p.view();
+    copy.custom_skin[9] = 2;
+    assert_eq!(p.view().custom_skin[8..], [2, 0, 3, 1, 4, 2]);
+    let prior = p.clone();
+    for skin in 66..=255 {
+        assert!(p.select(skin, &[]).is_err());
+        assert_eq!(p, prior);
+        assert_eq!(
+            MenuPreferences::restore(true, &format!("1:5361766564:{skin:02x}:")),
+            MenuPreferences::new(true)
+        );
+    }
+    for custom in [
+        [vec![0; 8], vec![1, 3]].concat(),
+        [vec![0; 8], vec![0, 0]].concat(),
+        [vec![0; 8], vec![1]].concat(),
+    ] {
+        assert!(p.select(65, &custom).is_err());
+        assert_eq!(p, prior);
+    }
+    assert_eq!(
+        MenuPreferences::restore(true, "1:5361766564:41:00000000000000000103"),
+        MenuPreferences::new(true)
+    );
+    let stock = MenuPreferences::restore(false, "1:5361766564:41:00000000000000000103");
+    assert_eq!(stock.view().skin, 65);
+    assert_eq!(stock.view().custom_skin[9], 3);
 }

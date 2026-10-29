@@ -185,3 +185,65 @@ test('queued undefined render failure remains authoritative over later native fr
     assert.equal(runtime.diagnostics().captureHeld, false); assert.equal(graph.f.sockets, 0); runtime.dispose();
   });
 });
+
+test('local pattern controls restore reload preview and explicit Play retain full IDs without implicit connection', async () => {
+  await runGameModuleTest(async ({assert,createGraph}) => {
+    async function launch(saved){
+      const graph=createGraph({hudNative:true,ownedHudNative:true,ownedPlayNative:true,minimapNative:true});graph.hudWasm();
+      if(saved!==undefined)graph.f.realm.localStorage.setItem('slither-client.menu.v1',saved);
+      // Routing-only ABI capability DOUBLE; numeric pattern rendering is verified separately.
+      graph.wasm.api.resolve_local_skin=function(){throw Error('No numeric resolver execution in this routing-only test');};
+      const logins=[],recipes=[],encode=graph.wasm.api.encode_login;
+      graph.wasm.api.encode_login=(version,password,nickname,skin,custom)=>{logins.push({nickname,skin,custom:[...custom]});return encode(version,password,nickname,skin,custom);};
+      const realm={...graph.f.realm,location:{href:'http://127.0.0.1:18884/'}};realm.top=realm;
+      const gate=graph.f.gate,metadata=gate.metadata(),endpoint='ws://127.0.0.1:19400/slither';
+      const localHost={endpoint,profile:{clientVersion:1,password:new Uint8Array(20),protocolVersion:19},
+        bindSkinPolicy(){},isCurrentDocument:()=>true,dispose(){},
+        presetEndpoint(node){graph.f.edit.inputValue(node).value=endpoint;},
+        gate:{metadata:()=>metadata,claim:()=>gate.claim(metadata.id)},
+        sources:{palettes:[graph.f.canvas(),graph.f.canvas(),graph.f.canvas()],background:new graph.f.realm.HTMLImageElement(),
+          adapter:{beginOperation(){return{};},endOperation(){},resolveAppearance(){},resolveAntennaRandom(){},
+            resolveRecipe(request){recipes.push({skin:request.skin,custom:[...request.customBytes],own:request.own});return{status:'ready'};}},
+          hostAssets:{resolveFood(){},resolvePrey(){}}}};
+      const {startGamePage}=await graph.load('runtime.mjs');
+      const runtime=await startGamePage({realm,localHost,initialize(){},wasmApi:graph.wasm.api,hudReadout:true,
+        ownedHudUi:true,ownedPlayUi:true,ownedMenuUi:true,ownedAppearancePreview:true});
+      const panel=graph.f.document.getElementById('slither-client-root').children.at(-1),menu=panel.children[4];
+      const text=node=>graph.f.edit.hud.character(node.children[0]).data;
+      const click=label=>{const button=menu.children.slice(3,-1).find(node=>text(node)===label);assert.ok(button,label);
+        graph.f.edit.dispatch('click',{target:button,button:0,trusted:true});graph.f.flush();};
+      graph.f.flush();
+      return{graph,runtime,logins,recipes,panel,menu,text,click};
+    }
+    for(const seed of[undefined,'1:5361766564:41:','1:5361766564:09:','1:5361766564:0a:','1:5361766564:0f:','1:5361766564:1d:',
+      '1:5361766564:00:','1:5361766564:01:','1:5361766564:02:']){
+      const f=await launch(seed);
+      try{
+        let id=seed?Number.parseInt(seed.split(':')[2],16):0;
+        assert.equal(f.recipes.at(-1).skin,id);assert.equal(f.recipes.at(-1).own,false);
+        if(seed)assert.equal(f.graph.f.realm.localStorage.getItem('slither-client.menu.v1'),seed);
+        if(id===0){f.click('Previous skin');id=65;assert.equal(f.recipes.at(-1).skin,65);
+          f.click('Next skin');id=0;assert.equal(f.recipes.at(-1).skin,0);}
+        for(const chosen of[9,10,15,29,65]){
+          while(id!==chosen){f.click('Next skin');id=(id+1)%66;}
+          assert.equal(f.recipes.at(-1).skin,chosen);assert.equal(f.text(f.menu.children[1]),`Skin ${chosen+1} of 66`);
+          assert.equal(f.graph.f.sockets,0);assert.deepEqual(f.logins,[]);
+        }
+        f.click('Build a skin');f.click('Next color');f.click('Longer stripe');f.click('Add stripe');
+        const expected=[0,0,0,0,0,0,0,0,2,1,1,1];assert.deepEqual(f.recipes.at(-1),{skin:65,custom:expected,own:false});
+        const saved=f.graph.f.realm.localStorage.getItem('slither-client.menu.v1');
+        assert.equal(saved.split(':')[2],'41');assert.equal(f.graph.f.sockets,0);assert.deepEqual(f.logins,[]);
+        const reload=await launch(saved);
+        try{
+          assert.deepEqual(reload.recipes.at(-1),{skin:65,custom:expected,own:false});
+          assert.equal(reload.graph.f.sockets,0);assert.deepEqual(reload.logins,[]);
+          reload.graph.f.edit.dispatch('click',{target:reload.panel.children[2],button:0,trusted:true});reload.graph.f.flush();
+          assert.deepEqual(reload.logins,[{nickname:seed?'Saved':'',skin:65,custom:expected}]);
+          assert.equal(reload.graph.f.sockets,0,'the existing native frame commit still precedes construction');
+          reload.graph.f.frame(8);reload.graph.f.flush();assert.equal(reload.graph.f.sockets,1);
+          assert.equal(reload.logins.length,1);reload.runtime.dispose();reload.graph.f.flush();assert.equal(reload.graph.f.sockets,1,'no reconnect');
+        }finally{reload.runtime.dispose();}
+      }finally{f.runtime.dispose();}
+    }
+  });
+});

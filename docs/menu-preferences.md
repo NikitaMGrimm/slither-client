@@ -21,10 +21,13 @@ an authored zero-filled eight-byte prefix. At most 123 pairs fit the existing
 255-byte login limit. No accessory ID is inferred from these bytes. Existing
 custom composition/session request APIs retain their broader inputs unchanged.
 
-The local menu exposes only the existing three authored families and their
-stripe combinations. It does not substitute the local modulo-three resolver for
-stock selection, or claim stock artwork. Restoring a choice unsupported by the
-current route resets the complete preference record to defaults.
+The local menu also exposes the 66 represented built-in IDs, 0 through 65,
+through its existing Previous/Next controls and saved preferences. Their run
+patterns project over the same three authored palettes; this adds no artwork,
+unlocks, special faces or antennas. Local custom colors remain exactly 0, 1 and
+2, while the stock custom palette namespace above is unchanged. IDs 66 through
+255 are not chooser choices. Restoring a choice or custom pattern unsupported
+by the current route resets the complete preference record to defaults.
 
 Nicknames retain the existing 24-byte ASCII domain, including DEL. Existing
 native editing policy still normalizes input; the Rust menu validates its copied
@@ -60,9 +63,9 @@ storage, quota failure, stale controls, native-default eligibility and locks.
 The standard real-Wasm smoke includes policy/copy/restore/session-shape checks.
 These tests do not execute a browser or establish installed/native-control pixels.
 
-Graphical stock/color preview, original-style menu/loading, a full stock palette
-and special artwork in the local route remain missing features. This first pass
-uses native buttons and indexed skin/color labels; it has no graphical preview,
+The existing passive chooser preview follows restored and edited selections.
+A full stock palette and special artwork in the local route remain missing.
+Native buttons and indexed skin/color labels provide the choices; there is no
 technical JSON/byte editor, downloader, secondary renderer or automatic Play.
 Browser after-checks, trusted installed editing and loading/chooser visual
 coverage remain separate. No reference or server execution is part of testing.

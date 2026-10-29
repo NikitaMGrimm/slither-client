@@ -38,7 +38,7 @@ fn invalid_selection_preserves_last_valid_revision_and_draw_commit() {
     let revision = preview.select(2, &[]).unwrap();
     preview.mark_drawn(revision).unwrap();
     for (skin, custom) in [
-        (3, vec![]),
+        (66, vec![]),
         (0, vec![0; 256]),
         (0, vec![0; 9]),
         (0, vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 3]),

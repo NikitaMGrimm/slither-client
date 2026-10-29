@@ -18,9 +18,10 @@ run counts/order and the cycle seam project over its three existing authored
 families, without merging palette collisions. Built-ins retain seven-variant
 ping-pong shading; admitted custom stripes retain first-variant shading and their
 existing admission/projection rules. Plain paired faces, default body style and
-no antenna or face images remain. The local chooser still admits only its three
-existing selections and custom edits; this slice adds no chooser choices. These
-are authored stand-ins, not stock 42-color artwork. The stock route uses the same
+no antenna or face images remain. The local chooser exposes the 66 represented
+built-in IDs through its existing controls and persistence. Local custom colors
+remain 0, 1 and 2; values 66 through 255 are not chooser choices. These patterns
+use authored stand-ins, not stock 42-color artwork. The stock route uses the same
 existing ready borrowed provider objects as gameplay, including represented face
 families and ordinary
 antennas. Stock preview requests `own: true` and cosmetic zero, borrowing the

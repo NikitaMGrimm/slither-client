@@ -128,3 +128,18 @@ test('reentrant teardown defers Wasm free until render and source retention unwi
   try { f.jobs.shift()(); } catch (error) { thrown = true; assert.equal(error, undefined); }
   assert(thrown); assert.equal(f.calls.filter(entry => entry[0] === 'free').length, 1); assert.deepEqual(f.menu.children, []);
 });
+
+test('local preview lease carries represented ID65 and owned custom bytes without remapping', () => {
+  const f=fixture(), lease=createAppearancePreview(f.options);lease.mount(f.menu);
+  try{
+    for(const skin of[9,10,15,29,65]){
+      const bytes=new Uint8Array();lease.select(skin,bytes);f.jobs.shift()();
+      const request=f.calls.filter(row=>row[0]==='recipe').at(-1)[1];
+      assert.equal(request.skin,skin);assert.equal(request.own,false);assert.equal(request.cosmetic,0);
+    }
+    const custom=Uint8Array.of(0,0,0,0,0,0,0,0,2,0,3,1,4,2);
+    lease.select(65,custom);custom.fill(0);f.jobs.shift()();
+    const request=f.calls.filter(row=>row[0]==='recipe').at(-1)[1];
+    assert.equal(request.skin,65);assert.deepEqual([...request.customBytes],[0,0,0,0,0,0,0,0,2,0,3,1,4,2]);
+  }finally{lease.dispose();}
+});

@@ -13,18 +13,27 @@ export function createMenuPreferencesDouble() {
         };
         const name = String.fromCharCode(...decode(parts[1])), skin = decode(parts[2]);
         const custom = decode(parts[3]);
-        if (skin.length !== 1 || skin[0] >= (local ? 3 : 66) || custom.length > 254
-          || custom.length && (custom.length < 10 || custom.length % 2 || custom.slice(0, 8).some(Boolean))) return;
-        this.set_nickname(name); this.skin = skin[0]; this.custom = custom;
+        if (skin.length !== 1) return;
+        this.set_nickname(name); this.select(skin[0], custom);
       } catch { this.nickname = ''; this.skin = 0; this.custom = []; }
     }
     set_nickname(value) {
       if (typeof value !== 'string' || value.length > 24 || /[^\x20-\x7f]/.test(value)) throw Error('synthetic nickname');
       this.nickname = value;
     }
+    select(skin, custom) {
+      const bytes = Array.from(custom), palettes = this.local ? [0, 1, 2] : [...Array(36).keys(), 37, 39, 41];
+      if (!Number.isInteger(skin) || skin < 0 || skin >= 66 || bytes.length > 255
+        || bytes.some(byte => !Number.isInteger(byte) || byte < 0 || byte > 255)
+        || bytes.length && (bytes.length < 10 || bytes.length % 2 || bytes.slice(0, 8).some(Boolean)
+          || bytes.slice(8).some((byte, index) => index % 2 ? !palettes.includes(byte) : byte === 0))) {
+        throw Error('synthetic menu appearance');
+      }
+      this.skin = skin; this.custom = bytes; this.stripe = 0;
+    }
     action(action) {
       if (!this.view().controls.find(control => control.action === action)?.enabled) return;
-      const count = this.local ? 3 : 66, offset = 8 + this.stripe * 2;
+      const count = 66, offset = 8 + this.stripe * 2;
       if (action === 'next-skin' || action === 'previous-skin') { this.skin = (this.skin + (action === 'next-skin' ? 1 : count - 1)) % count; this.custom = []; this.stripe = 0; }
       if (action === 'build') { this.custom = [0, 0, 0, 0, 0, 0, 0, 0, 1, 0]; this.stripe = 0; }
       if (action === 'next-stripe') this.stripe = (this.stripe + 1) % ((this.custom.length - 8) / 2);
@@ -52,7 +61,7 @@ export function createMenuPreferencesDouble() {
         ['add-stripe', 'Add stripe', custom && runs < 123], ['remove-stripe', 'Remove stripe', runs > 1], ['reset', 'Reset appearance', true]]
         .map(([action, label, enabled]) => Object.freeze({ action, label, enabled }));
       return Object.freeze({ nickname: this.nickname, skin: this.skin, customSkin: Uint8Array.from(this.custom),
-        title: custom ? 'Custom skin' : `Skin ${this.skin + 1} of ${this.local ? 3 : 66}`,
+        title: custom ? 'Custom skin' : `Skin ${this.skin + 1} of 66`,
         detail: custom ? `Stripe ${this.stripe + 1} of ${runs} · Color ${this.custom[9 + 2 * this.stripe] + 1} · Length ${length}` : '',
         controls: Object.freeze(controls) });
     }

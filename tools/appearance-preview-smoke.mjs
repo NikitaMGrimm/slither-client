@@ -98,7 +98,7 @@ export function appearancePreviewSmoke(wasm) {
     }
     rejects(() => local.render(revision - 1n, target, world, resolveLocal, prepare));
     rejects(() => local.render(revision, world, world, resolveLocal, prepare));
-    rejects(() => local.select(3, new Uint8Array())); equal(local.revision(), revision);
+    rejects(() => local.select(66, new Uint8Array())); equal(local.revision(), revision);
     const aliased = { ...bodySources, palettes: bodySources.palettes.map((palette, index) => index === 2
       ? { ...palette, variants: palette.variants.map(() => world) } : palette) };
     const aliasResolver = createLocalBodyResolver(aliased, realm, wasm.resolve_local_skin), beforeAlias = prepared;
@@ -113,6 +113,18 @@ export function appearancePreviewSmoke(wasm) {
     } catch (error) { threw = true; equal(error, undefined); }
     equal(threw, true); equal(local.needs_draw(revision), true); equal(target.context.stack.length, 0);
     target.context.onImage = undefined;
+
+    // The chooser admits the represented local IDs without changing their wire value.
+    for (const skin of [9, 10, 15, 29, 65]) {
+      const ticket = local.select(skin, new Uint8Array());
+      equal(local.render(ticket, target, world, request => {
+        equal(request.skin, skin); equal(request.own, false);
+        return resolveLocal(request);
+      }, prepare).visible, true);
+      equal(target.context.images.length > 0, true);
+    }
+    const lastLocal = local.revision();
+    rejects(() => local.select(66, new Uint8Array())); equal(local.revision(), lastLocal);
 
     // Synthetic ready full stock source route, separate from the three local families.
     const readiness = [];
