@@ -485,7 +485,14 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     native.status(code);
     checkHudOperation();
   };
-  const size = () => desktopBackingSize(realm.innerWidth, realm.innerHeight);
+  let projectDesktopSize;
+  const size = () => {
+    if (projectDesktopSize === undefined) {
+      projectDesktopSize = descriptor(wasmApi, 'desktop_backing_size')?.value;
+      if (!synchronous(projectDesktopSize)) throw new TypeError('Desktop layout Wasm capability required');
+    }
+    return desktopBackingSize(realm.innerWidth, realm.innerHeight, projectDesktopSize);
+  };
   native.setInput(event => {
     if (hudReadout && (hudOperation || nativeOperation || sourceOperation || playOperation)) guardNicknameOperation();
     if (event.type === 'click' && event.target === reload) { native.ordinaryReload(); return; }

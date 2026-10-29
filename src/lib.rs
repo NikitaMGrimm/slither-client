@@ -12,6 +12,7 @@ mod math;
 mod accessory_browser;
 
 pub mod challenge;
+pub mod desktop_layout;
 pub mod menu_preferences;
 pub mod presentation;
 pub mod protocol;
@@ -23,6 +24,9 @@ mod start_page_browser;
 
 #[cfg(target_arch = "wasm32")]
 mod menu_preferences_browser;
+
+#[cfg(target_arch = "wasm32")]
+mod desktop_layout_browser;
 
 #[cfg(target_arch = "wasm32")]
 mod browser;

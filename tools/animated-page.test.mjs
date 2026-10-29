@@ -8,6 +8,7 @@ import { createSyntheticBodyResolver } from '../web/synthetic-body.mjs';
 import { createSyntheticFoodResolver } from '../web/synthetic-food.mjs';
 import { createSyntheticPreyResolver, syntheticPreyCommands } from '../web/synthetic-prey.mjs';
 import { desktopBackingSize } from '../web/desktop-layout.mjs';
+import { desktopBackingOracle } from './fixtures/desktop-layout-fixture.mjs';
 
 // Original synthetic page/Wasm doubles. No generated bindings, browser or sockets.
 // Execute the authored page body with its imports supplied in the isolated realm.
@@ -220,7 +221,7 @@ function pageFixture(t, { initialize = async () => {}, decode = async () => {},
   }
   class PageImage { decode() { return decode(); } }
   const ready = pageScript.runInNewContext({
-    init: initialize, wasm: { AnimatedScene, DesktopQuality }, syntheticScene, syntheticStep,
+    init: initialize, wasm: { AnimatedScene, DesktopQuality, desktop_backing_size: desktopBackingOracle }, syntheticScene, syntheticStep,
     createSyntheticBodyResolver, createSyntheticFoodResolver, createSyntheticPreyResolver, syntheticPreyCommands, desktopBackingSize,
     loopbackEndpoint, sceneHeading, connectLoopback, window, AbortController,
     document: {

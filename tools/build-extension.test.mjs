@@ -46,7 +46,7 @@ function syntheticWasm(omit) {
     'animatedscene_enable_announcement_tracking', 'animatedscene_announcement_view',
     'animatedscene_enable_minimap_tracking', 'animatedscene_observe_minimap_ui_fraction', 'animatedscene_minimap_view',
     'encode_login', 'solve_challenge', 'decode_frame', 'setup_protocol_version',
-    'resolve_skin', 'resolve_local_skin', 'stock_accessory_id', 'stock_accessory_forward', 'start_page_view', 'endscreenprojector_new', 'endscreenprojector_project', '__wbg_endscreenprojector_free'].filter(name => name !== omit);
+    'resolve_skin', 'resolve_local_skin', 'stock_accessory_id', 'stock_accessory_forward', 'start_page_view', 'desktop_backing_size', 'endscreenprojector_new', 'endscreenprojector_project', '__wbg_endscreenprojector_free'].filter(name => name !== omit);
   return Buffer.from([0, 97, 115, 109, 1, 0, 0, 0,
     ...section(1, [1, 0x60, 0, 0]),
     ...section(3, [2, 0, 0]),
@@ -59,6 +59,7 @@ const syntheticGlue = `// Original synthetic package-validation fixture; not gen
 import { copyHudIngressPlan, copyHudIngressReport } from './${snippetName}';
 export class AnimatedScene {}
 export class DesktopQuality {}
+export function desktop_backing_size() {}
 const url = new URL('slither_client_bg.wasm', import.meta.url);
 async function __wbg_init() {}
 export { __wbg_init as default };
@@ -250,6 +251,9 @@ for (const [name, change, expected] of [
   ['non-Wasm bytes', f => f.write('dist/web/slither_client_bg.wasm', Buffer.from('not Wasm')), /valid version-1 WebAssembly/],
   ['truncated Wasm', f => f.write('dist/web/slither_client_bg.wasm', syntheticWasm().subarray(0, 10)), /valid version-1 WebAssembly/],
   ['empty valid Wasm', f => f.write('dist/web/slither_client_bg.wasm', syntheticWasm().subarray(0, 8)), /Wasm\/glue export mismatch/],
+  ['missing JavaScript desktop sizing export',
+    f => f.write('dist/web/slither_client.js', syntheticGlue.replace('export function desktop_backing_size() {}\n', '')),
+    /generated web entrypoint/],
   ['wrong generated URL', f => f.write('dist/web/slither_client.js', syntheticGlue.replace('slither_client_bg.wasm', 'elsewhere.wasm')), /generated web entrypoint/],
   ['mismatched glue exports', f => f.write('dist/web/slither_client.js', `${syntheticGlue}\nwasm.absent();`), /Wasm\/glue export mismatch: absent/],
   ['remote module', f => f.write('web/animated.mjs', "import init from 'https://example.invalid/client.js';"), /Nonlocal module import/],
@@ -283,7 +287,7 @@ for (const name of ['animatedscene_control_view', 'animatedscene_advance_with_co
   'animatedscene_enable_minimap_tracking', 'animatedscene_observe_minimap_ui_fraction', 'animatedscene_minimap_view',
   'animatedscene_apply_frame_and_render_standard_with_face_presentation_and_prey_and_hud',
   'encode_login', 'solve_challenge', 'decode_frame', 'setup_protocol_version',
-  'resolve_skin', 'resolve_local_skin', 'stock_accessory_id', 'stock_accessory_forward', 'endscreenprojector_new', 'endscreenprojector_project', '__wbg_endscreenprojector_free']) {
+  'resolve_skin', 'resolve_local_skin', 'stock_accessory_id', 'stock_accessory_forward', 'desktop_backing_size', 'endscreenprojector_new', 'endscreenprojector_project', '__wbg_endscreenprojector_free']) {
   test(`missing production gameplay ABI ${name} fails before package output`, t => {
     const f = fixture(t);
     f.write('dist/web/slither_client_bg.wasm', syntheticWasm(name));
