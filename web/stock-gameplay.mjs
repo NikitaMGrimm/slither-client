@@ -98,7 +98,8 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
   const profileOptions = liveProfile === undefined ? undefined
     : ownRecord(liveProfile, ['capabilities', 'isCurrentDocument']);
   if (profileOptions && typeof profileOptions.isCurrentDocument !== 'function') throw new TypeError('Current-document checker required');
-  const input = createClientInput({ protocolVersion: 19 });
+  const input = createClientInput({ protocolVersion: 19, InputPolicy: wasm.DesktopInput });
+  try {
   let session = createStockSession({ wasm, createSocket, now });
   let disposed = false, active = false, queued = false, dirty = true, hasFatal = false, fatal, uiTimer;
   let fatalNotified = false;
@@ -266,6 +267,7 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
     cleanup(unsubscribe);
     cleanup(() => input.pagehide());
     cleanup(() => session.close('host-disposed'));
+    cleanup(() => input.dispose());
     if (hasFatal && !fatalNotified) {
       fatalNotified = true;
       try { onFatal(fatal); } catch { /* Notification cannot replace its primary. */ }
@@ -529,4 +531,8 @@ export function createStockGameplay({ scene, quality, controller, wasm, createSo
     diagnostics: () => Object.freeze({ disposed, active, profilePhase, session: session.snapshot(), input: input.snapshot() }),
     dispose,
   });
+  } catch (error) {
+    try { input.dispose(); } catch { /* Construction failure remains primary, even undefined. */ }
+    throw error;
+  }
 }

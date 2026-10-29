@@ -271,7 +271,7 @@ export async function stockProfileSmoke(wasm) {
       'movbulb', 'bonkbulb', 'sest', 'jsebi', 'jsepi']) host[slot] = source;
     const raw = { revision: 1, normalGameplay: true, ownAccessory: -1, host,
       readiness: [{ source, state: 'ready', revision: 'authored-flat-source' }] };
-    const actualAdapter = createStockSkinAdapter({ realm, random: () => 0.25, readSnapshot() {
+    const actualAdapter = createStockSkinAdapter({ resolveSkin: wasm.resolve_skin, validateCustomPaletteMask: wasm.stock_custom_palette_mask_valid, realm, random: () => 0.25, readSnapshot() {
       eq(held, false); held = true; captures++; return raw;
     } });
     const adapter = {

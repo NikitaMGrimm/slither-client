@@ -1,4 +1,4 @@
-//! Numeric normal-gameplay selection from the authored `web/stock-skin-rules.mjs`.
+//! Authoritative normal-gameplay numeric skin selection, independent of browser sources.
 //! Sources remain caller-owned; no cosmetic wire byte selects a static accessory.
 
 use std::{error::Error, fmt};
@@ -178,6 +178,20 @@ pub fn resolve_authored_local_skin(
     Ok(descriptor)
 }
 
+fn normal_custom_palette(palette: u8) -> bool {
+    matches!(palette, 0..=35 | 37 | 39 | 41)
+}
+
+/// Admit the host custom-palette mask against the same policy used by custom runs.
+/// Source identities and byte-array admission remain the caller's responsibility.
+pub fn stock_custom_palette_mask_valid(mask: &[u8]) -> bool {
+    mask.len() == 256
+        && mask
+            .iter()
+            .zip(0..=u8::MAX)
+            .all(|(&value, palette)| value == u8::from(normal_custom_palette(palette)))
+}
+
 /// Select the authored normal-gameplay recipe without inspecting any sources.
 ///
 /// The first eight custom bytes are opaque. Subsequent complete count/palette
@@ -196,7 +210,7 @@ pub fn resolve_skin(
     for pair in custom_bytes.get(8..).unwrap_or_default().as_chunks::<2>().0 {
         let count = usize::from(pair[0]);
         let palette = usize::from(pair[1]);
-        if count == 0 || !matches!(palette, 0..=35 | 37 | 39 | 41) {
+        if count == 0 || !normal_custom_palette(pair[1]) {
             continue;
         }
         if let Some(previous) = runs.last_mut().filter(|run| run.palette == palette) {
