@@ -558,16 +558,35 @@ activation and forged public wake hints alone start no acquisition. The backgrou
 checks browser sender identity, top frame and exact document, then claims one
 private gate-issued pending Play. Before that UI exists, the isolated extension
 closure creates a random document key and sends it only through private extension
-IPC. The worker first privately injects the same authored gate function with that
-key, then bootstraps the MAIN runtime. The published gate will not release its
-native capabilities without the already closed-over key; public runtime/receiver
-construction cannot choose a different key. A pre-existing page gate makes the
-injection fail closed instead of accepting it. Construction binds the receiver's
-expected authority once. Public claim/delivery exports only
-compare against it and can never install or retrieve authority. Importing the
-receiver before bootstrap or racing the first public wake does not grant access.
-Chrome-com's registered MAIN file preserves the nonsecret arm until this private
-construction. The isolated document-start link requests it immediately. Missing
+IPC. At document start, before page code, Chrome-com's registered MAIN gate keeps
+the nonsecret arm and occupies a non-configurable record of pure native captures;
+it holds no key, state or callback. The worker later privately injects the same
+authored gate function with the key. Until the gate owns its copy, that injection
+uses only syntax and this record, so no page-replaceable helper sees the key; a
+missing or incomplete record fails closed first. Key and password admission,
+copies, comparisons and clears in the gate and receiver use these captures. The
+worker then injects one self-contained function built by pinned esbuild from the
+actual packaged bootstrap, complete authored dependency graph and matching Wasm
+glue/helper. No MAIN module import or page import map selects a key/password
+recipient. Wasm exports use direct lexical bindings in an own-data record; no
+bundler namespace getter selects them. Each module's resource URL still points
+to its exact packaged Wasm/logo path. This creates only one private runtime and
+Wasm instance for the HTTP-com entry. The worker passes the gate it privately
+installed, re-read through the early record; a key-bearing claim never resolves
+the gate through mutable globals. The published gate will not release its native
+capabilities without the already closed-over key, and its claimed capabilities
+inherit nothing from page prototypes. Public runtime/receiver construction cannot
+choose a different key. A pre-existing page gate, including an accessor, makes the
+injection fail closed without being invoked. Construction binds the receiver's
+expected authority once. The same private key authenticates one receiver binding
+in the genuine gate; its extra binding copy clears immediately. Later privileged
+delivery calls that immutable gate directly, without importing a receiver module.
+The gate retains the bundled receiver privately, whose operations compare the
+already bound key and cannot install or retrieve authority. Public ESM imports
+have separate module state. Importing a receiver before bootstrap or racing the
+first public wake does not grant access.
+The isolated document-start link starts this only from its own read of such an
+arm; a later, possibly page-forged, status message never starts it. Missing
 the existing early host-startup window fails closed; no original callbacks are
 replayed and no alternate bootstrap or acquisition retries are added. This timing
 and installed CSP compatibility require separate browser evidence.
@@ -588,7 +607,9 @@ No source/profile/password is returned through runtime messages, public status o
 diagnostics. Only the separate document authentication key crosses private
 isolated-to-worker runtime IPC and privileged bootstrap/delivery scripting IPC.
 Chrome's host grant is origin-wide `https://slither.io/*`, while authored fetch is
-one-path-only. Its module worker and private transport are not web-accessible.
+one-path-only. Its module worker, private transport and generated bootstrap
+injection are not web-accessible. The generated function is serialized by Chrome's
+scripting API; it contains no eval, Function constructor or residual imports.
 Firefox retains its old permissions and fails closed for HTTP-com live Play.
 This source/synthetic contract does not establish installed CSP, live response
 fingerprint/freshness or game-server acceptance; those need separate evidence.

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkEntry } from './repository-policy.mjs';
 import { privateProfileGateModule } from './profile-gate-source.mjs';
+import { buildProfileInjection } from './profile-injection-build.mjs';
 
 const defaultRoot = fileURLToPath(new URL('..', import.meta.url));
 const pageFiles = [
@@ -69,12 +70,7 @@ function validateModules(files) {
     if (!/\.(?:mjs|js)$/.test(name)) continue;
     const source = bytes.toString('utf8');
     const dynamic = [...source.matchAll(/\bimport\s*\(/g)];
-    if (dynamic.length && !(name === 'game/profile-transport.mjs' && dynamic.length === 2
-      && source.includes('const receiver = await import(receiverURL);')
-      && source.includes('const bootstrap = await import(bootstrapURL);')
-      && source.includes("globalThis.location.href !== 'http://slither.com/io'"))) {
-      throw new Error(`Dynamic imports require package review: ${name}`);
-    }
+    if (dynamic.length) throw new Error(`Dynamic imports require package review: ${name}`);
     for (const match of source.matchAll(/^\s*(?:import|export)\s+(?:[^'";]*?\sfrom\s*)?['"]([^'"]+)['"]/gm)) {
       const specifier = match[1];
       if (!specifier.startsWith('./') && !specifier.startsWith('../')) throw new Error(`Nonlocal module import: ${name}: ${specifier}`);
@@ -227,7 +223,11 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, g
     if (browser === 'chrome') for (const name of ['profile-worker.mjs', 'profile-broker.mjs', 'profile-transport.mjs']) {
       browserFiles.set(`game/${name}`, readFile(path.join(projectRoot, 'extension', name)));
     }
-    if (browser === 'chrome') browserFiles.set('game/profile-gate.mjs', Buffer.from(privateProfileGateModule(common.get('game/gate.js').toString('utf8'))));
+    if (browser === 'chrome') {
+      browserFiles.set('game/profile-gate.mjs', Buffer.from(privateProfileGateModule(common.get('game/gate.js').toString('utf8'))));
+      const injection = buildProfileInjection(common);
+      browserFiles.set('game/profile-bootstrap-injection.mjs', Buffer.from(injection.source));
+    }
     validateModules(browserFiles);
     for (const [name, bytes] of browserFiles) {
       if (!name.endsWith('.wasm')) {

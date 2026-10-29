@@ -2,8 +2,9 @@
 let destination;
 const failure = () => new Error('Extension profile unavailable');
 
-export function createExtensionProfileReceiver(native, isCurrentDocument, bootstrapAuthority) {
-  if (destination || globalThis[Symbol.for('slither.client.gate.v1')]?.verifyExtensionProfile?.(native) !== true) throw failure();
+export function createExtensionProfileReceiver(native, isCurrentDocument, bootstrapAuthority, profileGate) {
+  const gate = profileGate ?? globalThis[Symbol.for('slither.client.gate.v1')];
+  if (destination || gate?.verifyExtensionProfile?.(native) !== true) throw failure();
   const { freeze, octets } = native;
   if (!octets(bootstrapAuthority, 16)) throw failure();
   // Authority is bound during private bootstrap, never installed by public claim.
@@ -104,6 +105,9 @@ export function createExtensionProfileReceiver(native, isCurrentDocument, bootst
       }
     },
   };
+  if (profileGate && profileGate.bindExtensionProfile(bootstrapAuthority, destination) !== true) {
+    acquirer.dispose(); destination = undefined; throw failure();
+  }
   return freeze({ acquirer, bytes: native.bytes, isCurrentDocument });
 }
 

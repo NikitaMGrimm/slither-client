@@ -5,7 +5,7 @@ import { loopbackEndpoint } from './loopback-session.mjs';
 import { readAuthoredSourceRecipes } from './authored-source-recipes.mjs';
 
 /** One package entry supplies the authored HUD, Play controls, leaderboard and minimap. */
-export async function startGamePage({ realm = globalThis, initialize = init, wasmApi = wasm, localHost, profileAuthority } = {}) {
+export async function startGamePage({ realm = globalThis, initialize = init, wasmApi = wasm, localHost, profileAuthority, profileGate } = {}) {
   let initializeRuntime = initialize;
   if (localHost === undefined && /^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}(?:[/?#]|$)/.test(realm.location?.href ?? '')) {
     let documentFence;
@@ -40,7 +40,7 @@ export async function startGamePage({ realm = globalThis, initialize = init, was
   }
   return startRuntime({ realm, initialize: initializeRuntime, wasmApi, hudReadout: true, diagnosticUi: false,
     ownedHudUi: true, ownedPlayUi: true, ownedMenuUi: true, ownedAppearancePreview: true, ownedLoadingUi: true, ownedLeaderboardUi: true, ownedMinimapUi: true, ownedAnnouncementUi: true, ownedEndScreenUi: true,
-    ...(localHost ? { localHost } : {}), ...(profileAuthority ? { profileAuthority } : {}) });
+    ...(localHost ? { localHost } : {}), ...(profileAuthority ? { profileAuthority, profileGate } : {}) });
 }
 
 // Trusted MAIN modules share the default entry's single local startup promise.

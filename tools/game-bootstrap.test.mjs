@@ -688,14 +688,15 @@ test('actual isolated link loads exactly one fixed MAIN module and accepts bound
 });
 
 test('HTTP-com isolated link keeps document key private and cannot take a key from public wake', async () => {
-  const f = fixture({ href: 'http://slither.com/io', profileBroker: true }), sent = [], owned = [];
+  // The isolated link reads the arm the classic document-start gate retained for private construction.
+  const f = fixture({ href: 'http://slither.com/io', profileBroker: true, deferPrivateGate: true }), sent = [], owned = [];
   let acknowledge;
   const chrome = { runtime: { getManifest: () => ({background:{service_worker:'game/profile-worker.mjs'}}),
     getURL: name => `chrome-extension://${'a'.repeat(32)}/${name}`,
     sendMessage(message) { sent.push(structuredClone(message)); owned.push(message.authority);
       return message.type==='slither-client-profile-bootstrap'?new Promise(resolve=>{acknowledge=resolve;}):Promise.resolve(true); },
   } };
-  const context = createContext({ document:f.document,location:f.realm.location,URL,chrome,globalThis:{chrome},window:f.realm,
+  const context = createContext({ document:f.document,location:f.realm.location,sessionStorage:f.realm.sessionStorage,URL,chrome,globalThis:{chrome},window:f.realm,
     crypto:{getRandomValues(value){owned.push(value);value.fill(37);return value;}},setTimeout:()=>1,clearTimeout(){},Set });
   new Script(readFileSync(new URL('../extension/game-link.js',import.meta.url),'utf8')).runInContext(context);
   assert.equal(sent.length,1);assert.equal(sent[0].type,'slither-client-profile-bootstrap');
@@ -714,12 +715,12 @@ test('HTTP-com isolated link keeps document key private and cannot take a key fr
 });
 
 test('HTTP-com failed private construction never forwards a page wake with authority',async()=>{
-  const f=fixture({href:'http://slither.com/io',profileBroker:true}),sent=[],owned=[];
+  const f=fixture({href:'http://slither.com/io',profileBroker:true,deferPrivateGate:true}),sent=[],owned=[];
   const create=f.document.createElement.bind(f.document);
   f.document.createElement=name=>{const node=create(name);if(name==='p')node.style={setProperty(){}};return node;};
   const chrome={runtime:{getManifest:()=>({background:{service_worker:'game/profile-worker.mjs'}}),
     sendMessage(message){sent.push(message.type);owned.push(message.authority);return Promise.resolve(false);}}};
-  const context=createContext({document:f.document,location:f.realm.location,URL,chrome,globalThis:{chrome},window:f.realm,
+  const context=createContext({document:f.document,location:f.realm.location,sessionStorage:f.realm.sessionStorage,URL,chrome,globalThis:{chrome},window:f.realm,
     crypto:{getRandomValues(value){owned.push(value);value.fill(37);return value;}},setTimeout:()=>1,clearTimeout(){},Set});
   new Script(readFileSync(new URL('../extension/game-link.js',import.meta.url),'utf8')).runInContext(context);
   await new Promise(resolve=>setImmediate(resolve));

@@ -1,7 +1,7 @@
-import { profileDelivery, profileBootstrap } from './profile-transport.mjs';
+import { profileDelivery } from './profile-transport.mjs';
 
 /** Fixed-purpose background owner; only browser sender metadata selects a document. */
-export function createProfileBroker({ api, native, initialize, Parser, createAcquirer, installGate }) {
+export function createProfileBroker({ api, native, initialize, Parser, createAcquirer, installGate, bootstrap }) {
   const active = new Map();
   const receiverURL = api.runtime.getURL('game/profile-receiver.mjs');
   const keyOf = sender => {
@@ -68,7 +68,7 @@ export function createProfileBroker({ api, native, initialize, Parser, createAcq
         const copy = Array.from(token); serialized.push(copy);
         const result = await api.scripting.executeScript({
           target: { tabId: sender.tab.id, documentIds: [sender.documentId] }, world: 'MAIN',
-          func: profileBootstrap, args: [api.runtime.getURL('game/bootstrap.mjs'), copy],
+          func: bootstrap, args: [api.runtime.getURL('game/bootstrap.mjs'), copy],
         });
         return !cancelled && result.length === 1 && result[0].frameId === 0 && result[0].documentId === sender.documentId
           && !result[0].error && result[0].result === true;

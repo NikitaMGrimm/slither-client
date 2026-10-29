@@ -38,6 +38,15 @@ pull requests, and manual dispatch. Normal tests and CI require no external
 reference and do not connect to game servers. Dependency and toolchain setup may
 access package sources. Release-plz remains dormant.
 
+Extension packaging also uses pinned esbuild to close Chrome's private HTTP-com
+bootstrap dependency graph into one scripting-injection function. The inert
+`http-com-module-integrity` and private-authority tests execute that emitted
+artifact with labelled native/IPC/parser/Wasm doubles, including page module-map
+substitution, helper/accessor races and genuine owned-Play delivery ordering.
+They make no profile request. These checks do not establish installed Chrome
+document-start timing, CSP/Wasm loading or live/server compatibility. A matching
+Rust/glue/helper build may be reused only with exact compiled input identities.
+
 ## Default runtime and local Play status
 
 The selected implementation uses one default bootstrap for HUD, Play and a

@@ -1,47 +1,96 @@
 // Runs before host startup only on an explicitly armed document. No host callback is invoked.
 (function installGameGate(profileAuthority) {
   'use strict';
-  const realm = globalThis;
+  const captures = '__slitherClientGateNativesV1';
+  let natives, gateAuthority, receiverAuthority, profileDestination;
+  if (profileAuthority !== undefined) {
+    // Chrome's later private injection can follow page code. Until the key is owned here,
+    // use only syntax and the non-configurable document-start record, never page helpers.
+    let fixed;
+    try { fixed = !delete window[captures]; } catch { fixed = true; }
+    natives = fixed ? window[captures] : undefined;
+    const admitted = typeof natives === 'object' && natives !== null && natives.arm !== undefined
+      && window === window.top && natives.arm.expires > Date.now()
+      && natives.descriptor(window, natives.slot) === undefined && natives.octets(profileAuthority, 16);
+    if (admitted) {
+      gateAuthority = natives.bytes.allocate(16);
+      receiverAuthority = natives.bytes.allocate(16);
+      for (let i = 0; i < 16; i++) gateAuthority[i] = receiverAuthority[i] = profileAuthority[i];
+    }
+    for (let i = 0; i < 16; i++) profileAuthority[i] = 0;
+    profileAuthority = undefined;
+    if (!admitted) return false;
+  }
+  const realm = natives ? window : globalThis;
   if (realm !== realm.top) return;
-  const url = new URL(realm.location.href);
+  const url = natives ? natives.url : new URL(realm.location.href);
   const home = url.origin === 'http://slither.com' ? url.pathname === '/io'
     : ['http://slither.io', 'https://slither.io', 'http://www.slither.io', 'https://www.slither.io'].includes(url.origin)
       && ['/', '/index.html'].includes(url.pathname);
   if (!home || url.search || url.hash || url.username || url.password) return;
   const key = '__slitherClientArmV1';
   let arm;
-  try {
+  if (natives) {
+    arm = natives.arm;
+    try { realm.sessionStorage.removeItem(key); } catch { /* The arm was already admitted at document start. */ }
+  } else try {
     const text = realm.sessionStorage.getItem(key);
     if (text === null) return;
     realm.sessionStorage.removeItem(key);
     if (text.length > 512) return;
     arm = JSON.parse(text);
-    if (arm.schema !== 1 || arm.build !== 'gamepage-v1' || arm.url !== url.href
-      || !/^[a-f0-9]{32}$/.test(arm.id) || !Number.isSafeInteger(arm.expires)
-      || arm.expires <= Date.now() || arm.expires > Date.now() + 30000) return;
-    if (arm.profileBroker === true && url.href === 'http://slither.com/io' && profileAuthority === undefined) {
-      // Chrome's private document-targeted injection, not a public initializer,
-      // constructs this gate with authority. Keep the nonsecret arm for it.
+    const valid = arm.schema === 1 && arm.build === 'gamepage-v1' && arm.url === url.href
+      && /^[a-f0-9]{32}$/.test(arm.id) && Number.isSafeInteger(arm.expires)
+      && arm.expires > Date.now() && arm.expires <= Date.now() + 30000;
+    if (arm.profileBroker === true && url.href === 'http://slither.com/io') {
+      // Chrome's private document-targeted injection, not a public initializer, constructs
+      // this gate with authority. Any arm the isolated link may accept occupies the record.
+      publishNatives(valid ? arm : undefined);
+      if (!valid) return;
       realm.sessionStorage.setItem(key, text);
       return false;
     }
+    if (!valid) return;
   } catch { return; }
-  const slot = Symbol.for('slither.client.gate.v1');
-  if (realm[slot]) return false;
-  const privateProfile = arm.profileBroker === true && url.href === 'http://slither.com/io';
-  let gateAuthority;
-  if (privateProfile) {
-    if (!realm.Array.isArray(profileAuthority) || profileAuthority.length !== 16) return false;
-    gateAuthority = new realm.Uint8Array(16);
-    for (let i = 0; i < 16; i++) {
-      if (!realm.Number.isInteger(profileAuthority[i]) || profileAuthority[i] < 0 || profileAuthority[i] > 255) {
-        for (let j = 0; j < 16; j++) gateAuthority[j] = profileAuthority[j] = 0;
-        return false;
-      }
-      gateAuthority[i] = profileAuthority[i]; profileAuthority[i] = 0;
-    }
-    profileAuthority = undefined;
+  function publishNatives(admitted) {
+    // Document start precedes page code. Publish pure helpers only: no key, state or callback.
+    let value = null;
+    try {
+      const define = Object.defineProperty, descriptor = Object.getOwnPropertyDescriptor, freeze = Object.freeze;
+      const apply = Reflect.apply, own = Object.hasOwn, isArray = Array.isArray, integer = Number.isInteger, text = String;
+      const Bytes = realm.Uint8Array, typed = Object.getPrototypeOf(Bytes.prototype);
+      const length = descriptor(typed, 'length').get, tag = descriptor(typed, Symbol.toStringTag).get;
+      const buffer = descriptor(typed, 'buffer').get, capacity = descriptor(realm.ArrayBuffer.prototype, 'byteLength').get;
+      const copy = typed.set, clear = typed.fill;
+      const bytes = freeze({
+        allocate: size => new Bytes(size),
+        length(item) {
+          if (apply(tag, item, []) !== 'Uint8Array') throw new TypeError('Native bytes required');
+          apply(capacity, apply(buffer, item, []), []);
+          return apply(length, item, []);
+        },
+        copy: (target, source, offset) => apply(copy, target, [source, offset]),
+        clear: item => apply(clear, item, [0]),
+      });
+      const octets = (item, size) => {
+        if (!isArray(item) || descriptor(item, 'length')?.value !== size) return false;
+        for (let i = 0; i < size; i++) {
+          const field = descriptor(item, text(i));
+          if (!field || !own(field, 'value') || !integer(field.value) || field.value < 0 || field.value > 255) return false;
+        }
+        return true;
+      };
+      value = freeze({ __proto__: null, slot: Symbol.for('slither.client.gate.v1'), define, descriptor, own, apply, freeze, bytes, octets,
+        url: freeze({ __proto__: null, href: url.href, origin: url.origin, pathname: url.pathname, search: url.search,
+          hash: url.hash, username: url.username, password: url.password }),
+        arm: admitted ? freeze({ __proto__: null, schema: admitted.schema, build: admitted.build, id: admitted.id,
+          url: admitted.url, expires: admitted.expires, profileBroker: true }) : undefined });
+    } catch { /* An incomplete capture still occupies the record and fails private construction. */ }
+    Object.defineProperty(realm, captures, { __proto__: null, value, writable: false, enumerable: false, configurable: false });
   }
+  const slot = natives ? natives.slot : Symbol.for('slither.client.gate.v1');
+  if (!natives && realm[slot]) return false;
+  const privateProfile = natives !== undefined;
   const clearGateAuthority = () => {
     if (gateAuthority) { for (let i = 0; i < 16; i++) gateAuthority[i] = 0; gateAuthority = undefined; }
   };
@@ -59,9 +108,9 @@
   let controlsLease, pendingPlay, controlsOperation, playFence;
   let ownedPlayCallback = false, profileIssued = false;
   let ended = false, gateRecord, delivery, sinking = 0;
-  const apply = Reflect.apply, descriptor = Object.getOwnPropertyDescriptor;
+  const apply = natives ? natives.apply : Reflect.apply, descriptor = natives ? natives.descriptor : Object.getOwnPropertyDescriptor;
   const ownKeys = Reflect.ownKeys, prototype = Object.getPrototypeOf, recordPrototype = Object.prototype;
-  const freeze = Object.freeze;
+  const freeze = natives ? natives.freeze : Object.freeze;
   const getter = (owner, name) => {
     const operation = descriptor(owner, name)?.get;
     if (typeof operation !== 'function') throw new TypeError('Native edit getter unavailable');
@@ -909,33 +958,12 @@
     } catch { return; }
   }
   function captureExtensionProfile() {
-    if (arm.profileBroker !== true || url.href !== 'http://slither.com/io') return;
+    if (!privateProfile) return;
     try {
-      const Bytes = realm.Uint8Array, typed = prototype(Bytes.prototype);
-      const length = descriptor(typed, 'length').get, tag = descriptor(typed, Symbol.toStringTag).get;
-      const buffer = descriptor(typed, 'buffer').get, capacity = descriptor(realm.ArrayBuffer.prototype, 'byteLength').get;
-      const copy = typed.set, clear = typed.fill, post = realm.postMessage.bind(realm);
-      const isArray = realm.Array.isArray, integer = realm.Number.isInteger;
-      const own = realm.Object.hasOwn, text = realm.String;
-      const bytes = freeze({
-        allocate: size => new Bytes(size),
-        length(value) {
-          if (apply(tag, value, []) !== 'Uint8Array') throw new TypeError('Native bytes required');
-          apply(capacity, apply(buffer, value, []), []);
-          return apply(length, value, []);
-        },
-        copy: (target, source, offset) => apply(copy, target, [source, offset]),
-        clear: value => apply(clear, value, [0]),
-      });
-      return freeze({ bytes, freeze, now: native.now, setTimeout: native.setTimeout, clearTimeout: native.clearTimeout,
-        octets(value, size) {
-          if (!isArray(value) || descriptor(value, 'length')?.value !== size) return false;
-          for (let i = 0; i < size; i++) {
-            const field = descriptor(value, text(i));
-            if (!field || !own(field, 'value') || !integer(field.value) || field.value < 0 || field.value > 255) return false;
-          }
-          return true;
-        },
+      const post = realm.postMessage.bind(realm);
+      // Key/password admission, copies and clears use only document-start captures.
+      return freeze({ bytes: natives.bytes, freeze, now: native.now, setTimeout: native.setTimeout, clearTimeout: native.clearTimeout,
+        octets: natives.octets,
         authorize() {
           if (!ownedPlayCallback || profileIssued || ended || !claimed) throw new Error('Owned Play required');
           profileIssued = true;
@@ -1276,7 +1304,9 @@
       realm.addEventListener(type, sink, { capture: true, passive: false });
     }
     realm.addEventListener('pagehide', () => {
-      ended = true; revoke(); revokeControls();
+      ended = true;
+      if (receiverAuthority) { natives.bytes.clear(receiverAuthority); receiverAuthority = undefined; }
+      profileDestination = undefined; revoke(); revokeControls();
       clearGateAuthority();
     }, { capture: true });
     realm.document.addEventListener('DOMContentLoaded', () => { completed = true; completedAt = revision; }, { once: true });
@@ -1285,9 +1315,31 @@
         || Object.keys(event.data).length !== 2 || event.data.schema !== 1) return;
       status(phase);
     });
-    gateRecord = Object.freeze({
+    gateRecord = freeze({
       requiresProfileBootstrap: () => arm.profileBroker === true && url.href === 'http://slither.com/io',
       verifyExtensionProfile: value => claimed && value === native.extensionProfile && value !== undefined,
+      bindExtensionProfile(authority, destination) {
+        if (!privateProfile || !claimed || !receiverAuthority || profileDestination || ended || !natives.octets(authority, 16)) return false;
+        let mismatch = 0;
+        for (let i = 0; i < 16; i++) mismatch |= receiverAuthority[i] ^ authority[i];
+        if (mismatch) return false;
+        // Only the privately authenticated bundled runtime can bind this once.
+        profileDestination = destination;
+        natives.bytes.clear(receiverAuthority); receiverAuthority = undefined;
+        return true;
+      },
+      clearExtensionProfileBinding(authority) {
+        if (!privateProfile || !receiverAuthority || !natives.octets(authority, 16)) return;
+        let mismatch = 0;
+        for (let i = 0; i < 16; i++) mismatch |= receiverAuthority[i] ^ authority[i];
+        if (mismatch) return;
+        natives.bytes.clear(receiverAuthority); receiverAuthority = undefined;
+      },
+      deliverExtensionProfile(operation, authority, version, protocol, password) {
+        if (!privateProfile || ended || !profileDestination) return false;
+        return operation === 'claim' ? profileDestination.claim(authority)
+          : profileDestination.accept(operation, authority, version, protocol, password);
+      },
       metadata: () => Object.freeze({ schema: 1, id: arm.id, code: phase }),
       claim(id, authority) {
         if (id !== arm.id || claimed) throw new Error('Game document already claimed');
@@ -1299,7 +1351,8 @@
           clearGateAuthority();
         }
         claimed = true;
-        return Object.freeze({ ...native,
+        // A private claim result has no page-inherited capability, such as liveProfile.
+        return freeze({ __proto__: privateProfile ? null : recordPrototype, ...native,
           completed: () => completed,
           revision: () => revision,
           stamp: source => writes.get(source)?.revision ?? 0,
@@ -1318,15 +1371,18 @@
         });
       },
     });
-    Object.defineProperty(realm, slot, { value: gateRecord });
+    if (natives) natives.define(realm, slot, { __proto__: null, value: gateRecord, writable: false, enumerable: false, configurable: false });
+    else Object.defineProperty(realm, slot, { value: gateRecord });
     status('held');
     return true;
   } catch {
     clearGateAuthority();
+    if (receiverAuthority) { natives.bytes.clear(receiverAuthority); receiverAuthority = undefined; }
+    profileDestination = undefined;
     // Keep any installed holds; replaying the original host is not a recovery path.
-    Object.defineProperty(realm, slot, { value: Object.freeze({
-      metadata: () => Object.freeze({ schema: 1, id: arm.id, code: 'gate-unavailable' }),
-    }) });
+    const unavailable = Object.freeze({ metadata: () => Object.freeze({ schema: 1, id: arm.id, code: 'gate-unavailable' }) });
+    if (natives) natives.define(realm, slot, { __proto__: null, value: unavailable, writable: false, enumerable: false, configurable: false });
+    else Object.defineProperty(realm, slot, { value: unavailable });
     status('gate-unavailable');
     return false;
   }

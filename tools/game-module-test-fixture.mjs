@@ -23,6 +23,7 @@ import { projectMenuLoadingDouble } from './menu-loading-view-double.mjs';
 import { createProfileBroker } from '../extension/profile-broker.mjs';
 import { createExtensionLiveProfileAcquirer } from '../web/stock-live-profile.mjs';
 import { privateProfileGateSource } from './profile-gate-source.mjs';
+import { buildProfileInjection } from './profile-injection-build.mjs';
 
 const root = new URL('../', import.meta.url);
 // The flagged ABI phase replays the same inert runtime requirements with real Rust admission.
@@ -136,7 +137,17 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
     const url = new URL('extension/' + file, root);
     sources.set(origin + name, readFileSync(url, 'utf8'));
   }
+  const injectionFiles = new Map([...sources].map(([url, source]) => ['game/' + url.slice(origin.length), Buffer.from(source)]));
+  // Only the generated-Wasm/native boundary is doubled. All authored executable
+  // recipients and their transitive imports use the actual emitted bundle.
+  f.realm.__syntheticWasmBoundary = wasm.api;
+  f.realm.__syntheticInitialize = () => { counts.initialize++; return initialize?.(); };
+  injectionFiles.set('game/pkg/slither_client.js', Buffer.from('export default function init(){return globalThis.__syntheticInitialize();}\n'
+    + Object.keys(wasm.api).map(name => 'export const ' + name + '=globalThis.__syntheticWasmBoundary.' + name + ';').join('\n')));
+  const injectionArtifact = buildProfileInjection(injectionFiles).source;
+  const profileBootstrapFunction = new vm.Script('(' + injectionArtifact.replace(/^.*?export default /s, '') + ')').runInThisContext();
   const modules = new Map();
+  const pageModuleMappings = new Map(); // Explicit Window import-map resolution double.
   const wasmUrl = origin + 'pkg/slither_client.js';
   const init = () => { counts.initialize++; return initialize?.(); };
   const generated = new vm.SyntheticModule(['default', ...Object.keys(wasm.api)], function () {
@@ -144,7 +155,8 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
     for (const [name, value] of Object.entries(wasm.api)) this.setExport(name, value);
   }, { context: f.context, identifier: wasmUrl });
   modules.set(wasmUrl, generated);
-  const get = url => {
+  const get = originalURL => {
+    const url = pageModuleMappings.get(originalURL) ?? originalURL;
     if (modules.has(url)) return modules.get(url);
     if (!sources.has(url)) throw new Error('Non-whitelisted authored module: ' + url);
     const module = new vm.SourceTextModule(sources.get(url), { context: f.context, identifier: url,
@@ -160,14 +172,15 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
     if (module.status === 'linked') await module.evaluate();
     return module.namespace;
   };
-  return { f, wasm, counts, minimap, announcements, previewCalls, load, sources,
+  return { f, wasm, counts, minimap, announcements, previewCalls, load, sources, pageModuleMappings, injectionArtifact, profileBootstrapFunction,
     privateGateFunction: new vm.Script('('+privateProfileGateSource(nativeSource)+')').runInThisContext(),
     run: source => vm.runInContext(source, f.context),
-    async injectProfile(func, args) {
+    async injectProfile(func, args, importOverride) {
       // Native scripting IPC double: a separate entry supplies browser-created
       // JSON copies; the function and its imports execute in the actual MAIN realm.
       const injection = new vm.Script(`(${func.toString()})`, {
         importModuleDynamically: async specifier => {
+          if (importOverride) return importOverride(specifier);
           const match = /^chrome-extension:\/\/[a-p]{32}\/game\/(bootstrap|profile-receiver)\.mjs$/.exec(specifier);
           if (!match) throw new Error('Unexpected private IPC import');
           return load(match[1] + '.mjs');
@@ -175,6 +188,33 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
       });
       const values = vm.runInContext('JSON.parse', f.context)(JSON.stringify(args));
       return await injection.runInContext(f.context)(...values);
+    },
+    privateBroker({ capabilities, afterStage, importOverride } = {}) {
+      // Actual worker broker with a scripting IPC double into this MAIN realm.
+      const graph = this, id = 'a'.repeat(32), trace = [];
+      const sender = { id, frameId: 0, tab: { id: 7 }, documentId: 'synthetic-current-document',
+        url: 'http://slither.com/io', origin: 'http://slither.com' };
+      const api = { runtime: { id, getURL: name => `chrome-extension://${id}/${name}` }, scripting: { async executeScript(injection) {
+        assert.deepEqual(injection.target, { tabId: 7, documentIds: [sender.documentId] }); assert.equal(injection.world, 'MAIN');
+        const stage = injection.args.length === 1 ? 'gate' : injection.args.length === 2 ? 'bootstrap' : injection.args[1];
+        trace.push(stage);
+        const result = await graph.injectProfile(injection.func, injection.args, importOverride);
+        if (stage === 'gate' && result === true) { f.host(); f.complete(); }
+        afterStage?.(stage, result);
+        return [{ frameId: 0, documentId: sender.documentId, result }];
+      } } };
+      const broker = createProfileBroker({ api, native: { now: () => 0, setTimeout: () => 1, clearTimeout() {}, capabilities },
+        initialize: async () => {}, Parser: ProfileLiteralParserDouble, createAcquirer: createExtensionLiveProfileAcquirer,
+        installGate: graph.privateGateFunction, bootstrap: graph.profileBootstrapFunction });
+      return { broker, trace, sender, id };
+    },
+    isolatedLink(chrome, crypto) {
+      // Isolated-world double: separate JS globals share only the synthetic DOM,
+      // session storage and Window events with the actual MAIN realm.
+      const context = vm.createContext({ document: f.document, location: f.realm.location, sessionStorage: f.realm.sessionStorage,
+        URL, chrome, globalThis: { chrome }, window: f.realm, crypto, setTimeout: () => 1, clearTimeout() {}, Set });
+      new vm.Script(readFileSync(new URL('extension/game-link.js', root), 'utf8')).runInContext(context);
+      return context;
     },
     message(values) {
       // Native WebSocket delivery supplies an ArrayBuffer from the document's own realm.

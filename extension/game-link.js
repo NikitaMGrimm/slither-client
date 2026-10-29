@@ -93,14 +93,13 @@
     if (activation !== undefined && activation !== data.id) return;
     activation = data.id;
     if (data.code === 'held' && !loaded) {
+      // Chrome HTTP-com starts only from its own document-start arm read below. A later,
+      // possibly page-forged, status never starts key-bearing work.
+      if (privateProfile) return;
       const parent = document.head ?? document.documentElement;
       if (!parent) return;
       loaded = true;
       try {
-        if (privateProfile) {
-          startPrivate();
-          return;
-        }
         const script = document.createElement('script');
         script.type = 'module';
         script.src = api.runtime.getURL('game/bootstrap.mjs');
@@ -125,10 +124,12 @@
     clearTimeout(timer); window.removeEventListener('message', receive);
   }, { once: true });
   // The private gate is installed by browser scripting before MAIN bootstrap;
-  // this public record carries only activation metadata, never the key.
+  // this public record carries only activation metadata, never the key. Accept only
+  // arms for which the document-start gate occupies its native capture record.
   if (privateProfile) try {
-    const arm = JSON.parse(sessionStorage.getItem('__slitherClientArmV1'));
-    if (arm?.schema === 1 && arm.build === 'gamepage-v1' && arm.url === url.href
+    const text = sessionStorage.getItem('__slitherClientArmV1');
+    const arm = text !== null && text.length <= 512 ? JSON.parse(text) : null;
+    if (arm?.schema === 1 && arm.build === 'gamepage-v1' && arm.profileBroker === true && arm.url === url.href
       && /^[a-f0-9]{32}$/.test(arm.id) && Number.isSafeInteger(arm.expires)
       && arm.expires > Date.now() && arm.expires <= Date.now() + 30000) {
       activation = arm.id; startPrivate();

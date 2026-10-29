@@ -28,7 +28,7 @@ const editNotifications = new Set(['keypress', 'beforeinput', 'input', 'composit
   'dragstart', 'drag', 'dragenter', 'dragleave', 'dragover', 'drop', 'dragend']);
 
 /** Local runtime factory. Importing this module performs no page ownership work. */
-export async function startGamePage({ realm = globalThis, initialize, wasmApi, hudReadout = false, ownedHudUi = false, ownedPlayUi = false, ownedMenuUi = false, ownedAppearancePreview = false, ownedLoadingUi = false, ownedLeaderboardUi = false, ownedMinimapUi = false, ownedAnnouncementUi = false, ownedEndScreenUi = false, diagnosticUi = true, localHost, profileAuthority } = {}) {
+export async function startGamePage({ realm = globalThis, initialize, wasmApi, hudReadout = false, ownedHudUi = false, ownedPlayUi = false, ownedMenuUi = false, ownedAppearancePreview = false, ownedLoadingUi = false, ownedLeaderboardUi = false, ownedMinimapUi = false, ownedAnnouncementUi = false, ownedEndScreenUi = false, diagnosticUi = true, localHost, profileAuthority, profileGate } = {}) {
   if (typeof hudReadout !== 'boolean') throw new TypeError('Explicit hudReadout boolean required');
   if (typeof diagnosticUi !== 'boolean') throw new TypeError('Explicit diagnosticUi boolean required');
   if (typeof initialize !== 'function' || wasmApi === null || typeof wasmApi !== 'object') {
@@ -62,7 +62,9 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
       throw new TypeError('Local host requires a literal top-level http://127.0.0.1:<port> document');
     }
   }
-  const gate = localHost ? localHost.gate : realm[Symbol.for('slither.client.gate.v1')];
+  // Private authority goes only to the gate its private bootstrap passed, never a global lookup.
+  if (profileAuthority !== undefined && (localHost || profileGate === undefined)) throw new Error('Private profile bootstrap required');
+  const gate = localHost ? localHost.gate : profileAuthority !== undefined ? profileGate : realm[Symbol.for('slither.client.gate.v1')];
   if (!gate || gate.metadata().code !== 'held') throw new Error('Armed document-start gate required');
   if (gate.requiresProfileBootstrap?.() && profileAuthority === undefined) throw new Error('Private profile bootstrap required');
   const armed = gate.metadata(), document = realm.document, pageUrl = realm.location.href;
@@ -914,7 +916,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
         },
       }) } : {}),
       ...(localHost ? {} : native.liveProfile !== undefined ? { liveProfile: { capabilities: native.liveProfile, isCurrentDocument } }
-        : native.extensionProfile !== undefined ? { liveProfile: extensionReceiver = createExtensionProfileReceiver(native.extensionProfile, isCurrentDocument, profileAuthority) } : {}) });
+        : native.extensionProfile !== undefined ? { liveProfile: extensionReceiver = createExtensionProfileReceiver(native.extensionProfile, isCurrentDocument, profileAuthority, gate) } : {}) });
     const tick = now => {
       frame = undefined;
       if (disposed) return;

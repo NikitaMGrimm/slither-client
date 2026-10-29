@@ -62,6 +62,13 @@ It never appears in the public arm, page messages, globals, DOM or status. Publi
 receiver calls can only compare against that already bound key, never set or
 retrieve it. Worker restarts reuse the isolated key without resetting the one-use
 MAIN intent; terminal MAIN/worker paths and isolated pagehide clear owned copies.
+The privileged HTTP-com bootstrap is a self-contained Chrome-injected function,
+bundled from the packaged authored dependencies and matching generated Wasm glue.
+It resolves no MAIN modules. Page import maps and module namespaces cannot choose
+the key/password consumer. A key-authenticated, one-time gate binding retains the
+bundled receiver privately; subsequent delivery uses that same immutable gate,
+without a module import or public first-caller initializer. The generated script
+is private extension output, not web-accessible or downloaded program source.
 Public wake hints carry no profile authority. No source bytes cross IPC. Raw source and
 credentials never traverse the page-visible status/message bridge or DOM, globals,
 storage or diagnostics. Worker and MAIN owned buffers clear explicitly, including

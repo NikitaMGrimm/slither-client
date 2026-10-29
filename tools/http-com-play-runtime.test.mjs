@@ -8,7 +8,7 @@ test('HTTP-com genuine owned click stages privately and keeps reset/socket behin
     graph.hudWasm();
     const factory=await graph.load('runtime.mjs');
     const runtime=await factory.startGamePage({initialize(){},wasmApi:graph.wasm.api,hudReadout:true,
-      ownedHudUi:true,ownedPlayUi:true,diagnosticUi:false,profileAuthority:Array(16).fill(1)});
+      ownedHudUi:true,ownedPlayUi:true,diagnosticUi:false,profileAuthority:Array(16).fill(1),profileGate:graph.f.gate});
     const receiver=await graph.load('profile-receiver.mjs');
     const mount=graph.f.document.getElementById('slither-client-root').children.at(-1);
     const endpoint=mount.children[0].children[1],nickname=mount.children[1].children[1],button=mount.children[2];
@@ -63,7 +63,8 @@ test('private bootstrap and actual broker defeat public first-claim, then comple
       if(stage==='gate'&&result===true) {
         assert.throws(()=>g.f.gate.claim(id,Array(16).fill(7)),/Private gate authority required/);
         const publicRuntime=await g.load('runtime.mjs');
-        await assert.rejects(publicRuntime.startGamePage({initialize(){},wasmApi:g.wasm.api,profileAuthority:Array(16).fill(7)}),/Private gate authority required/);
+        await assert.rejects(publicRuntime.startGamePage({initialize(){},wasmApi:g.wasm.api,profileAuthority:Array(16).fill(7)}),/Private profile bootstrap required/);
+        await assert.rejects(publicRuntime.startGamePage({initialize(){},wasmApi:g.wasm.api,profileAuthority:Array(16).fill(7),profileGate:g.f.gate}),/Private gate authority required/);
         g.f.host();g.f.complete();
       }
       if(injection.args[1]==='deliver') {g.f.frame();assert.equal(g.f.sockets,0,'acquiring fence remains until finish');}
@@ -71,7 +72,7 @@ test('private bootstrap and actual broker defeat public first-claim, then comple
     }}};
     const create=()=>createProfileBroker({api,native:{now:()=>0,setTimeout:()=>1,clearTimeout(){},capabilities:caps},
       initialize:async()=>{},Parser:ProfileLiteralParserDouble,createAcquirer:createExtensionLiveProfileAcquirer,
-      installGate:g.privateGateFunction});
+      installGate:g.privateGateFunction,bootstrap:g.profileBootstrapFunction});
     let broker=create();
     const privateMessage=type=>({type,schema:1,activationId:id,authority:[...privateKey]});
     assert.equal(await broker(privateMessage('slither-client-profile-bootstrap'),sender),true);
@@ -109,7 +110,7 @@ test('private bootstrap rejects a pre-existing page gate without claiming or sta
     const id='a'.repeat(32),stages=[];
     const broker=createProfileBroker({api:{runtime:{id,getURL:n=>`chrome-extension://${id}/${n}`},
       scripting:{async executeScript(injection){stages.push(injection.args.length);return[{frameId:0,documentId:'synthetic',result:await g.injectProfile(injection.func,injection.args)}];}}},
-      native:{now:()=>0,setTimeout:()=>1,clearTimeout(){}},initialize(){throw Error('No parser initialization');},installGate:g.privateGateFunction});
+      native:{now:()=>0,setTimeout:()=>1,clearTimeout(){}},initialize(){throw Error('No parser initialization');},installGate:g.privateGateFunction,bootstrap:g.profileBootstrapFunction});
     assert.equal(await broker({type:'slither-client-profile-bootstrap',schema:1,activationId:id,authority:Array(16).fill(37)},
       {id,frameId:0,tab:{id:7},documentId:'synthetic',origin:'http://slither.com',url:'http://slither.com/io'}),false);
     assert.deepEqual(stages,[1]);assert.equal(g.f.sockets,0);assert.equal(g.counts.initialize,0);

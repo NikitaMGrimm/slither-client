@@ -2,6 +2,7 @@ import init, { ProfileLiteralParser } from './pkg/slither_client.js';
 import { createProfileBroker } from './profile-broker.mjs';
 import { createExtensionLiveProfileAcquirer } from './stock-live-profile.mjs';
 import installProfileGate from './profile-gate.mjs';
+import profileBootstrap from './profile-bootstrap-injection.mjs';
 
 const bytes = Object.freeze({ allocate: size => new Uint8Array(size), length: value => value.byteLength,
   copy: (target, source, offset) => target.set(source, offset), clear: value => value.fill(0) });
@@ -22,7 +23,7 @@ const capabilities = Object.freeze({
 });
 let initialized;
 const receive = createProfileBroker({ api: chrome, Parser: ProfileLiteralParser,
-  installGate: installProfileGate,
+  installGate: installProfileGate, bootstrap: profileBootstrap,
   createAcquirer: createExtensionLiveProfileAcquirer,
   initialize: () => initialized ??= init(),
   native: { capabilities, now, random: value => crypto.getRandomValues(value), setTimeout, clearTimeout } });
