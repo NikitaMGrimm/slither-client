@@ -1,4 +1,5 @@
 import { createLeaderboardHistoryDouble } from './leaderboard-history-double.mjs';
+import { TestDesktopInput } from './fixtures/client-input-fixture.mjs';
 import { createHudHistoryDouble } from './hud-history-double.mjs';
 // Entirely authored fixtures. Actual gate/bootstrap/gameplay/session/acquirer run
 // with synthetic DOM, scheduling, byte source, digest and socket/Wasm API doubles.
@@ -28,8 +29,8 @@ const gateSource=readFileSync(new URL('../extension/game-gate.js',import.meta.ur
 const bootstrapSource=readFileSync(new URL('../extension/game-runtime.mjs',import.meta.url),'utf8');
 const testSource=readFileSync(new URL('./game-bootstrap.test.mjs',import.meta.url),'utf8');
 const hostFunctions=testSource.slice(testSource.indexOf('function fixture('),testSource.indexOf("\ntest('an unarmed"));
-const {fixture,wasmDouble}=new Script(`(function(gateSource,Script,createContext,runInContext,assert,createGateTestDom,attachGateTestRealm,createHudHistoryDouble,createLeaderboardHistoryDouble){
-  ${hostFunctions}\nreturn {fixture,wasmDouble};})`).runInThisContext()(gateSource,Script,createContext,runInContext,assert,createGateTestDom,attachGateTestRealm,createHudHistoryDouble,createLeaderboardHistoryDouble);
+const {fixture,wasmDouble}=new Script(`(function(gateSource,Script,createContext,runInContext,assert,createGateTestDom,attachGateTestRealm,createHudHistoryDouble,createLeaderboardHistoryDouble,TestDesktopInput){
+  ${hostFunctions}\nreturn {fixture,wasmDouble};})`).runInThisContext()(gateSource,Script,createContext,runInContext,assert,createGateTestDom,attachGateTestRealm,createHudHistoryDouble,createLeaderboardHistoryDouble,TestDesktopInput);
 // Keep the actual modules and data records in ONE JS realm. Only the synthetic
 // Window/native boundary below is adapted; no acquirer/factory override exists.
 const makeBootstrap=new Script(`(function(init,wasm,createStockHostSnapshot,createStockSkinAdapter,

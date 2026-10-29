@@ -1,6 +1,5 @@
-// Caller-clocked desktop input intents. This module owns no socket or scheduler.
-const TAU = Math.PI * 2;
-
+// Rust owns input state, arithmetic and packet attempts. JS owns scalar/record
+// admission, arbitrary token identity and synchronous host callback boundaries.
 function finite(value, label) {
   if (typeof value !== 'number' || !Number.isFinite(value)) throw new TypeError(`Invalid ${label}`);
   return value;
@@ -27,215 +26,127 @@ function stepCount(value) {
   return value;
 }
 
-/** CSS/window pointer units deliberately remain separate from backing-canvas pixels. */
-export function desktopPointer({ clientX, clientY, viewportWidth, viewportHeight,
-  follow, camera, head, zoom }) {
-  finite(clientX, 'pointer x');
-  finite(clientY, 'pointer y');
-  finite(viewportWidth, 'viewport width');
-  finite(viewportHeight, 'viewport height');
+
+function pointerValues({ clientX, clientY, viewportWidth, viewportHeight, follow, camera, head, zoom }) {
+  finite(clientX, 'pointer x'); finite(clientY, 'pointer y');
+  finite(viewportWidth, 'viewport width'); finite(viewportHeight, 'viewport height');
   if (viewportWidth <= 0 || viewportHeight <= 0) throw new RangeError('Invalid viewport size');
   boolean(follow, 'follow preference');
-  let x = clientX - viewportWidth / 2;
-  let y = clientY - viewportHeight / 2;
+  let cx = 0, cy = 0, hx = 0, hy = 0, scale = 0;
   if (!follow && head != null) {
-    finite(camera?.x, 'camera x');
-    finite(camera?.y, 'camera y');
-    finite(head.x, 'head x');
-    finite(head.y, 'head y');
-    finite(zoom, 'zoom');
-    if (zoom <= 0) throw new RangeError('Invalid zoom');
-    x += (camera.x - head.x) * zoom;
-    y += (camera.y - head.y) * zoom;
+    cx = finite(camera?.x, 'camera x'); cy = finite(camera?.y, 'camera y');
+    hx = finite(head.x, 'head x'); hy = finite(head.y, 'head y'); scale = finite(zoom, 'zoom');
+    if (scale <= 0) throw new RangeError('Invalid zoom');
   }
-  finite(x, 'pointer displacement x');
-  finite(y, 'pointer displacement y');
-  finite(x * x + y * y, 'pointer squared distance');
-  return { x, y, gazeHeading: Math.atan2(y, x) };
+  return new Float64Array([clientX, clientY, viewportWidth, viewportHeight, Number(follow), Number(head != null), cx, cy, hx, hy, scale]);
 }
 
-/** Explicit sends commit their attempt state before invoking the trusted capability. */
-export function createClientInput({ protocolVersion = 19 } = {}) {
-  let protocol = version(protocolVersion);
-  let connected = false;
-  let own = null;
-  let pointer = { x: 0, y: 0 };
-  let comparedPointer = { x: 0, y: 0 };
-  let wantHeading = false;
-  let lastHeadingMs = 0;
-  let lastBoostMs = 0;
-  let lastTurnMs = 0;
-  let lastQuantizedHeading = 0;
-  let leftHeld = false;
-  let rightHeld = false;
-  let boostKeyHeld = false;
-  let leftSteps = 0;
-  let rightSteps = 0;
-  let ticking = false;
+/** Standalone CSS projection through an explicitly supplied Rust capability. */
+export function desktopPointer(input, InputPolicy) {
+  if (typeof InputPolicy?.project_pointer !== 'function') throw new TypeError('Rust desktop input capability required');
+  return InputPolicy.project_pointer(pointerValues(input));
+}
 
-  function requireIdle() {
-    if (ticking) throw new Error('Input tick is already active');
-  }
-
-  function pendingArrowSteps(count) {
-    const eligible = connected && own !== null;
-    const left = leftSteps + (eligible && leftHeld ? count : 0);
-    const right = rightSteps + (eligible && rightHeld ? count : 0);
-    if (!Number.isSafeInteger(left) || !Number.isSafeInteger(right)) {
-      throw new RangeError('Keyboard step accumulation overflow');
-    }
-    return [left, right];
-  }
-
-  function setBoost(value) {
-    if (own) own.requestedBoost = value;
-  }
-
-  function updatePointer(input) {
-    // No-own pointer movement still updates global coordinates, without a head offset.
-    if (own && input.follow === false && input.head == null) throw new TypeError('Expected raw own head');
-    const point = desktopPointer(own ? input : { ...input, head: null });
-    pointer = { x: point.x, y: point.y };
-    return point;
-  }
-
-  function snapshot() {
-    return { protocolVersion: protocol, connected,
-      pointer: { ...pointer }, comparedPointer: { ...comparedPointer }, wantHeading,
-      lastHeadingMs, lastBoostMs, lastTurnMs, lastQuantizedHeading,
-      leftHeld, rightHeld, boostKeyHeld, leftSteps, rightSteps,
-      own: own ? { ...own } : null };
-  }
-
+/** Each phase returns from Rust before invoking a callback; throws stay untouched. */
+export function createClientInput({ protocolVersion = 19, InputPolicy } = {}) {
+  version(protocolVersion);
+  if (typeof InputPolicy !== 'function') throw new TypeError('Rust desktop input capability required');
+  const free = InputPolicy.prototype?.free;
+  if (typeof free !== 'function') throw new TypeError('Rust desktop input release capability required');
+  let state = new InputPolicy(protocolVersion);
+  let token;
+  // This lease owns resource release only; Rust remains the tick/reentry owner.
+  let tickLease = false, releaseRequested = false, retiredView;
+  const copyView = view => ({ ...view, pointer: { ...view.pointer }, comparedPointer: { ...view.comparedPointer },
+    own: view.own ? { ...view.own } : null });
+  const live = () => {
+    if (!state || releaseRequested) throw new Error('Input disposed');
+    return state;
+  };
+  const release = () => {
+    if (!state) return;
+    const owned = state, identity = token;
+    state = null; token = undefined;
+    let failed = false, primary;
+    try {
+      const view = owned.snapshot();
+      if (view.own) view.own = { token: identity, ...view.own };
+      // A terminal copied observation preserves gameplay diagnostics after free;
+      // it is never used for input updates or packet decisions.
+      retiredView = view;
+    } catch (error) { failed = true; primary = error; }
+    try { Reflect.apply(free, owned, []); }
+    catch (error) { if (!failed) { failed = true; primary = error; } }
+    if (failed) throw primary;
+  };
+  const values = input => {
+    if (state.has_own() && input.follow === false && input.head == null) throw new TypeError('Expected raw own head');
+    return pointerValues(state.has_own() ? input : { ...input, head: null });
+  };
   return {
-    setProtocolVersion(value) { protocol = version(value); },
-    setConnected(value) { connected = boolean(value, 'connection state'); },
+    setProtocolVersion(value) { live().set_protocol_version(version(value)); },
+    setConnected(value) { live().set_connected(boolean(value, 'connection state')); },
     setOwn(value) {
-      if (value === null) { own = null; return; }
+      live();
+      if (value === null) { state.clear_own(); token = undefined; return; }
       if (!value || value.token == null) throw new TypeError('Invalid own appearance');
-      const next = {
-        token: value.token,
-        wantedHeading: finite(value.wantedHeading, 'wanted heading'),
-        gazeHeading: finite(value.gazeHeading, 'gaze heading'),
-        dead: boolean(value.dead, 'death state'),
-        turnRate: nonnegative(value.turnRate, 'turn rate'),
-        sizeTurnFactor: nonnegative(value.sizeTurnFactor, 'size turn factor'),
-        speedTurnFactor: nonnegative(value.speedTurnFactor, 'speed turn factor'),
-      };
-      if (own && Object.is(own.token, next.token)) {
-        next.gazeHeading = own.gazeHeading;
-        next.requestedBoost = own.requestedBoost;
-        next.sentBoost = own.sentBoost;
-      } else {
-        next.requestedBoost = false;
-        next.sentBoost = false;
+      const next = { token: value.token, wantedHeading: finite(value.wantedHeading, 'wanted heading'),
+        gazeHeading: finite(value.gazeHeading, 'gaze heading'), dead: boolean(value.dead, 'death state'),
+        turnRate: nonnegative(value.turnRate, 'turn rate'), sizeTurnFactor: nonnegative(value.sizeTurnFactor, 'size turn factor'),
+        speedTurnFactor: nonnegative(value.speedTurnFactor, 'speed turn factor') };
+      live().set_own(new Float64Array([next.wantedHeading, next.gazeHeading, Number(next.dead), next.turnRate, next.sizeTurnFactor, next.speedTurnFactor]), Object.is(token, next.token));
+      token = next.token;
+    },
+    pointer(input) { live(); const copied = values(input); return live().pointer(copied); },
+    keyDown(code) { live(); return typeof code === 'string' ? state.key_down(code) : false; },
+    keyUp(code) { live(); return typeof code === 'string' ? state.key_up(code) : false; },
+    mouseDown(input) { live(); if (state.has_own()) { const copied = values(input); live().mouse_down(copied); } },
+    mouseUp() { live().mouse_up(); }, blur() { live().blur(); }, pagehide() { live().pagehide(); },
+    reset() { live().reset(); token = undefined; },
+    dispose() {
+      if (releaseRequested) return;
+      releaseRequested = true;
+      let failed = false, primary;
+      try { state.pagehide(); } catch (error) { failed = true; primary = error; }
+      if (!tickLease) {
+        try { release(); } catch (error) { if (!failed) { failed = true; primary = error; } }
       }
-      own = next;
+      if (failed) throw primary;
     },
-    pointer: updatePointer,
-    keyDown(code) {
-      if (code === 'ArrowLeft') leftHeld = true;
-      else if (code === 'ArrowRight') rightHeld = true;
-      else if (code === 'ArrowUp' || code === 'Space') { boostKeyHeld = true; setBoost(true); }
-      else return false;
-      return true;
+    snapshot() {
+      if (!state) { if (!retiredView) throw new Error('Input disposed'); return copyView(retiredView); }
+      const result = state.snapshot(); if (result.own) result.own = { token, ...result.own }; return result;
     },
-    keyUp(code) {
-      if (code === 'ArrowLeft') leftHeld = false;
-      else if (code === 'ArrowRight') rightHeld = false;
-      else if (code === 'ArrowUp' || code === 'Space') { boostKeyHeld = false; setBoost(false); }
-      else return false;
-      return true;
-    },
-    mouseDown(input) {
-      if (own) { updatePointer(input); setBoost(true); }
-    },
-    mouseUp() { setBoost(false); },
-    // The desktop source installs no global focus-loss release handler.
-    blur() {},
-    // Extension teardown only gates future sends; it invents no final packet.
-    pagehide() { connected = false; },
-    reset() { connected = false; own = null; },
-    snapshot,
-    // This phase precedes session close/reset; a later send phase must use zero steps.
-    accumulateStep({ wholeSteps }) {
-      requireIdle();
-      const [left, right] = pendingArrowSteps(stepCount(wholeSteps));
-      leftSteps = left;
-      rightSteps = right;
-    },
+    accumulateStep({ wholeSteps }) { if (state) state.ensure_idle(); live().accumulate_step(stepCount(wholeSteps)); },
     tick({ nowMs, wholeSteps }, send, betweenKeyboardAndBoost) {
-      requireIdle();
-      ticking = true;
+      if (!state) throw new Error('Input disposed');
+      const owned = state;
+      owned.enter_tick(); tickLease = true;
+      let failed = false;
       try {
-        finite(nowMs, 'timestamp');
-        stepCount(wholeSteps);
+        live();
+        finite(nowMs, 'timestamp'); stepCount(wholeSteps); state.validate_tick(nowMs, wholeSteps);
         if (typeof send !== 'function') throw new TypeError('Expected synchronous send capability');
-        if (betweenKeyboardAndBoost !== undefined && typeof betweenKeyboardAndBoost !== 'function') {
-          throw new TypeError('Expected synchronous input phase hook');
-        }
+        if (betweenKeyboardAndBoost !== undefined && typeof betweenKeyboardAndBoost !== 'function') throw new TypeError('Expected synchronous input phase hook');
         const intents = [];
-        if (!connected) return { gazeHeading: own?.gazeHeading ?? null, intents };
-        const emit = bytes => { intents.push(bytes.slice()); send(bytes); };
-        if (own) {
-          const [nextLeft, nextRight] = pendingArrowSteps(wholeSteps);
-          if ((nextLeft > 0 || nextRight > 0) && nowMs - lastTurnMs > 50) {
-            // Strict comparisons intentionally leave equal positive debts uncancelled.
-            let left = nextLeft;
-            let right = nextRight;
-            if (right > 0 && left > right) { left -= right; right = 0; }
-            if (left > 0 && right > left) { right -= left; left = 0; }
-            const count = Math.min(127, left > 0 ? left : right);
-            const increasing = left === 0;
-            const displacement = own.turnRate * count * own.sizeTurnFactor * own.speedTurnFactor;
-            const gaze = increasing ? own.gazeHeading + displacement : own.gazeHeading - displacement;
-            finite(displacement, 'keyboard gaze displacement');
-            finite(gaze, 'keyboard gaze');
-            lastTurnMs = nowMs;
-            leftSteps = left - (increasing ? 0 : count);
-            rightSteps = right - (increasing ? count : 0);
-            own.gazeHeading = gaze;
-            emit(protocol >= 5
-              ? Uint8Array.of(252, increasing ? count + 128 : count)
-              : Uint8Array.of(increasing ? 114 : 108, count));
-          } else {
-            leftSteps = nextLeft;
-            rightSteps = nextRight;
-          }
+        if (!state.is_connected()) return { gazeHeading: state.gaze() ?? null, intents };
+        const emit = bytes => { live(); intents.push(bytes.slice()); send(bytes); live(); };
+        const keyboard = state.keyboard_phase(nowMs, wholeSteps); if (keyboard.length) emit(keyboard);
+        if (betweenKeyboardAndBoost !== undefined) betweenKeyboardAndBoost(Object.freeze({ nowMs, protocolVersion: state.protocol_version() }), emit);
+        live();
+        if (!state.has_own()) return { gazeHeading: null, intents };
+        const boost = state.boost_phase(nowMs); if (boost.length) emit(boost);
+        const heading = state.heading_phase(nowMs); if (heading.length) emit(heading);
+        return { gazeHeading: state.required_gaze(), intents };
+      } catch (error) { failed = true; throw error; }
+      finally {
+        let cleanupFailed = false, primary;
+        try { owned.leave_tick(); } catch (error) { cleanupFailed = true; primary = error; }
+        tickLease = false;
+        if (releaseRequested) {
+          try { release(); } catch (error) { if (!cleanupFailed) { cleanupFailed = true; primary = error; } }
         }
-        // Session ping is connected-only, including Setup before the first own appearance.
-        if (betweenKeyboardAndBoost !== undefined) {
-          betweenKeyboardAndBoost(Object.freeze({ nowMs, protocolVersion: protocol }), emit);
-        }
-        if (!own) return { gazeHeading: null, intents };
-        if (own.sentBoost !== own.requestedBoost && nowMs - lastBoostMs > 50) {
-          own.sentBoost = own.requestedBoost;
-          lastBoostMs = nowMs;
-          emit(protocol >= 5
-            ? Uint8Array.of(own.sentBoost ? 253 : 254)
-            : Uint8Array.of(109, own.sentBoost ? 1 : 0));
-        }
-        if (pointer.x !== comparedPointer.x || pointer.y !== comparedPointer.y) wantHeading = true;
-        own.gazeHeading = Math.atan2(pointer.y, pointer.x);
-        if (wantHeading && nowMs - lastHeadingMs > 33) {
-          wantHeading = false;
-          lastHeadingMs = nowMs;
-          comparedPointer = { ...pointer };
-          const distanceSquared = pointer.x * pointer.x + pointer.y * pointer.y;
-          let angle = distanceSquared > 256 ? Math.atan2(pointer.y, pointer.x) : own.wantedHeading;
-          angle %= TAU;
-          if (angle < 0) angle += TAU;
-          const quantized = protocol >= 5 ? Math.floor((250 + 1) * angle / TAU)
-            : Math.floor(16777215 * angle / TAU);
-          if (quantized !== lastQuantizedHeading) {
-            lastQuantizedHeading = quantized;
-            emit(protocol >= 5 ? Uint8Array.of(quantized & 255)
-              : Uint8Array.of(101, (quantized >> 16) & 255, (quantized >> 8) & 255, quantized & 255));
-          }
-        }
-        return { gazeHeading: own.gazeHeading, intents };
-      } finally {
-        ticking = false;
+        if (!failed && cleanupFailed) throw primary;
       }
     },
   };

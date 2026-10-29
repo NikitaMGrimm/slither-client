@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { test, after } from 'node:test';
 import { Script, createContext, runInContext } from 'node:vm';
 import { createGateTestDom, attachGateTestRealm } from './game-gate-test-fixture.mjs';
-import { createClientInput } from '../web/client-input.mjs';
+import { createClientInput, TestDesktopInput } from './fixtures/client-input-fixture.mjs';
 import { createStockHostSnapshot } from '../web/stock-host-snapshot.mjs';
 import { createStockSkinAdapter } from '../web/stock-skin-provider.mjs';
 import { createStockClient } from '../web/stock-client.mjs';
@@ -28,15 +28,15 @@ after(() => {
 const gateSource = readFileSync(new URL('../extension/game-gate.js', import.meta.url), 'utf8');
 const source = readFileSync(new URL('./game-bootstrap.test.mjs', import.meta.url), 'utf8');
 const functions = source.slice(source.indexOf('function fixture('), source.indexOf("\ntest('an unarmed"));
-const makeFixture = new Script(`(function(gateSource,Script,createContext,runInContext,assert,createGateTestDom,attachGateTestRealm,createHudHistoryDouble,createLeaderboardHistoryDouble){
+const makeFixture = new Script(`(function(gateSource,Script,createContext,runInContext,assert,createGateTestDom,attachGateTestRealm,createHudHistoryDouble,createLeaderboardHistoryDouble,TestDesktopInput){
   ${functions}\nreturn {fixture,wasmDouble};})`).runInThisContext();
 const { fixture: fixtureFactory, wasmDouble } = makeFixture(gateSource, Script, createContext, runInContext, assert,
-  createGateTestDom, attachGateTestRealm, createHudHistoryDouble, createLeaderboardHistoryDouble);
+  createGateTestDom, attachGateTestRealm, createHudHistoryDouble, createLeaderboardHistoryDouble, TestDesktopInput);
 
 function harness({ prepare, contextSetup, ...options } = {}) {
   const fixture = prepare || contextSetup ? makeFixture(gateSource, Script, realm => {
     const context = createContext(realm); contextSetup?.(context); return context;
-  }, runInContext, assert, () => { const dom = createGateTestDom(); prepare?.(dom); return dom; }, attachGateTestRealm, createHudHistoryDouble, createLeaderboardHistoryDouble).fixture : fixtureFactory;
+  }, runInContext, assert, () => { const dom = createGateTestDom(); prepare?.(dom); return dom; }, attachGateTestRealm, createHudHistoryDouble, createLeaderboardHistoryDouble, TestDesktopInput).fixture : fixtureFactory;
   const f = fixture(options), native = f.gate.claim(f.gate.metadata().id);
   const parent = f.document.createElement('div'), field = f.document.createElement('input');
   f.document.body.appendChild(parent); parent.appendChild(field);

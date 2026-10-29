@@ -105,6 +105,7 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, g
   const exports = new Set(WebAssembly.Module.exports(new WebAssembly.Module(wasm)).map(entry => entry.name));
   const glue = bindings.get('slither_client.js').toString('utf8');
   if (!/export class AnimatedScene\b/.test(glue) || !/export class DesktopQuality\b/.test(glue)
+    || !/export class DesktopInput\b/.test(glue)
     || !/new URL\(['"]slither_client_bg\.wasm['"], import\.meta\.url\)/.test(glue)
     || !/export\s*\{[^}]*\b__wbg_init as default\s*\}/.test(glue)) {
     throw new Error('Expected the generated web entrypoint for slither_client');
@@ -121,7 +122,7 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, g
     throw new Error('Generated HUD validator differs from its authored source; rebuild before packaging');
   }
   bindings.set(snippetName, snippet);
-  for (const name of ['memory', 'animatedscene_new', 'desktopquality_new',
+  for (const name of ['memory', 'animatedscene_new', 'desktopquality_new', 'desktopinput_new',
     'animatedscene_apply_frame_and_render_standard_with_face_presentation_and_prey',
     'animatedscene_apply_frame_and_render_standard_with_face_presentation_and_prey_and_hud',
     'animatedscene_render_standard_with_face_presentation_at_size',

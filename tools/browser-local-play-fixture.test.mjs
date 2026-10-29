@@ -115,7 +115,7 @@ if (process.env.SLITHER_LOCAL_PLAY_WASM === '1') {
     const { createStockSession } = await import('../web/stock-session.mjs');
     const { createClientInput } = await import('../web/client-input.mjs');
     const fixture = createBrowserLocalPlayFixture(), receipt = createPeerReceipt(), peers = [], errors = [];
-    const scene = new wasm.AnimatedScene(0), input = createClientInput(); let clock = 0;
+    const scene = new wasm.AnimatedScene(0), input = createClientInput({InputPolicy:wasm.DesktopInput}); let clock = 0;
     const createSession = () => createStockSession({ wasm, now: () => clock, createSocket() {
       let peer;
       const socket = { readyState: 0, bufferedAmount: 0,
@@ -160,6 +160,6 @@ if (process.env.SLITHER_LOCAL_PLAY_WASM === '1') {
       replaceSession(); assert.equal(receipt.connections, 1);
       play(); tick(6225); await settle(); assert.equal(receipt.connections, 2); assert.equal(receipt.logins, 2);
       assert.equal(session.snapshot().phase, 'playing'); assert.deepEqual(errors, []); assert.deepEqual(receipt.errors, []);
-    } finally { session.close(); scene.free(); }
+    } finally { try { session.close(); } finally { try { input.dispose(); } finally { scene.free(); } } }
   });
 }

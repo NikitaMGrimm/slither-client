@@ -9,6 +9,7 @@
 mod math;
 
 pub mod challenge;
+pub mod desktop_input;
 pub mod presentation;
 pub mod protocol;
 pub mod start_page;
@@ -19,6 +20,9 @@ mod start_page_browser;
 
 #[cfg(target_arch = "wasm32")]
 mod browser;
+
+#[cfg(target_arch = "wasm32")]
+mod desktop_input_browser;
 
 #[cfg(target_arch = "wasm32")]
 mod canvas_browser;

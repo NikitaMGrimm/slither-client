@@ -35,7 +35,7 @@ function syntheticWasm(omit) {
   const leb = value => value < 128 ? [value] : [(value & 127) | 128, ...leb(value >>> 7)];
   const section = (id, bytes) => [id, ...leb(bytes.length), ...bytes];
   const entry = (name, kind, index) => [name.length, ...text(name), kind, index];
-  const functions = ['animatedscene_new', 'desktopquality_new',
+  const functions = ['animatedscene_new', 'desktopquality_new', 'desktopinput_new',
     'animatedscene_apply_frame_and_render_standard_with_face_presentation_and_prey',
     'animatedscene_apply_frame_and_render_standard_with_face_presentation_and_prey_and_hud',
     'animatedscene_render_standard_with_face_presentation_at_size',
@@ -58,6 +58,7 @@ const syntheticGlue = `// Original synthetic package-validation fixture; not gen
 import { copyHudIngressPlan, copyHudIngressReport } from './${snippetName}';
 export class AnimatedScene {}
 export class DesktopQuality {}
+export class DesktopInput {}
 const url = new URL('slither_client_bg.wasm', import.meta.url);
 async function __wbg_init() {}
 export { __wbg_init as default };

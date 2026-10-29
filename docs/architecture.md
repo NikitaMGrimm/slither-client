@@ -12,7 +12,6 @@ the following exceptions:
 | `web/stock-session.mjs` | Mixed socket/callback plumbing and handshake, ping/lag, death/return and command-time lifecycle policy. |
 | `web/stock-gameplay.mjs` | Mixed capability/scheduling glue and input/session reconciliation, reset ordering and staged HUD state publication. |
 | `web/stock-client.mjs` | Mixed borrowed-source/Canvas/Wasm glue and update/draw/quality ordering with successful-draw statistics counters. |
-| `web/client-input.mjs` | Retained key/pointer/boost state, turn debt, timing gates, heading quantization and packet intents. |
 | `web/handshake-session.mjs` | Challenge/login/setup state machine and frame limits; Rust already owns encoding, decoding and challenge arithmetic. |
 | `web/stock-hud-view.mjs` | Binding/readiness composition around Rust-formatted current/final HUD values. |
 | `web/stock-skin-rules.mjs` | Appearance selection and numeric recipe policy; borrowed DOM source capture remains separate. |
@@ -27,6 +26,13 @@ identity checks and DOM binding readiness composition. The same default runtime
 consumes the copied Rust output. See [leaderboard history](leaderboard-state.md).
 New local-host work is browser/DOM/capability glue; it must not introduce new
 game-domain logic.
+Browser-free `desktop_input` owns CSS pointer arithmetic, key/boost state,
+retained own metadata, turn debt, strict timing gates and versioned packet intents.
+The copied `DesktopInput` Wasm API commits keyboard, boost and heading phases
+before returning to synchronous host callbacks. `web/client-input.mjs` retains
+scalar/record admission, arbitrary `Object.is` token identity and callback order;
+it contains no numeric policy fallback. Session ping remains between keyboard
+and boost, and callbacks can update public input setters between phases.
 See the [roadmap](roadmap.md) for remaining work.
 
 Local rendering binds a pure Rust skin resolver after Wasm initialization. Rust

@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { createLocalGameHost } from '../web/local-game-host.mjs';
 import { createGateTestDom, issuedMinimapViewDouble } from './game-gate-test-fixture.mjs';
 import { createOwnedMinimapUi } from '../extension/game-owned-minimap-ui.mjs';
-import { createClientInput } from '../web/client-input.mjs';
+import { createClientInput } from './fixtures/client-input-fixture.mjs';
 
 // Explicit DOM, generated-source and browser-capability doubles; no real sockets.
 function fixture({ href = 'http://127.0.0.1:18884/game', decode, minimap = false } = {}) {

@@ -1,8 +1,9 @@
 // Authored synthetic desktop input schedules and hand-derived packet values.
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { test } from 'node:test';
-import { createClientInput, desktopPointer } from '../web/client-input.mjs';
+import { test, after } from 'node:test';
+import { createClientInput, desktopPointer, releaseTestInputs } from './fixtures/client-input-fixture.mjs';
+after(releaseTestInputs);
 
 const TAU = Math.PI * 2;
 const own = (extra = {}) => ({ token: 1n, wantedHeading: 0, gazeHeading: 0, dead: false,
