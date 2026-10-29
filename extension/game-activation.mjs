@@ -5,7 +5,7 @@ export const gateBuild = 'gamepage-v1';
 
 export function gamePage(value) {
   const url = new URL(value);
-  const home = url.origin === 'http://slither.com' ? url.pathname === '/io'
+  const home = url.origin === 'http://slither.com' ? url.href === 'http://slither.com/io'
     : gameOrigins.includes(url.origin) && ['/', '/index.html'].includes(url.pathname);
   if (!home
     || url.search || url.hash || url.username || url.password) throw new Error('Select the supported game home page');
@@ -16,7 +16,7 @@ export function gamePage(value) {
 export function armDocument(record) {
   const url = new URL(location.href);
   const origins = ['http://slither.io', 'https://slither.io', 'http://www.slither.io', 'https://www.slither.io'];
-  const home = url.origin === 'http://slither.com' ? url.pathname === '/io'
+  const home = url.origin === 'http://slither.com' ? url.href === 'http://slither.com/io'
     : origins.includes(url.origin) && ['/', '/index.html'].includes(url.pathname);
   if (window !== window.top || !home
     || url.search || url.hash || url.username || url.password || record.url !== url.href

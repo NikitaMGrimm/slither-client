@@ -34,6 +34,7 @@ test('com entry: activation admits only the observed origin/path pair and retain
     'http://slither.com/IO', 'http://slither.com/%69o', 'https://slither.com/io', 'http://www.slither.com/io',
     'http://slither.io/io', 'https://www.slither.io/io', 'http://slither.com:81/io',
     'http://user@slither.com/io', 'http://slither.com/io?x=1', 'http://slither.com/io#x',
+    'http://slither.com/io?', 'http://slither.com/io#',
     'http://slither.com.evil.invalid/io', 'http://evil.slither.com/io']) {
     assert.throws(() => gamePage(href), /supported game home page/, href);
   }
@@ -63,6 +64,10 @@ test('com entry: serialized arm retains exact URL, top-level, identity and expir
   const f = arm(), result = f.run();
   assert.equal(result.url, href); assert.equal(result.id, good.id); assert.equal(f.writes.length, 1);
   assert.equal(f.writes[0][0], '__slitherClientArmV1'); assert.deepEqual(JSON.parse(f.writes[0][1]), good);
+  for (const url of [href + '?', href + '#']) {
+    const bad = arm({ url, record: { ...good, url } });
+    assert.throws(bad.run, /changed or activation expired/); assert.equal(bad.writes.length, 0);
+  }
   for (const options of [{ nested: true }, { url: 'http://slither.com/' }, { url: 'https://slither.com/io' },
     { url: 'http://www.slither.com/io' }, { url: href + '?x=1' }, { url: href + '#x' },
     ...[{ url: 'http://slither.io/' }, { schema: 2 }, { build: 'other' }, { id: 'a' },

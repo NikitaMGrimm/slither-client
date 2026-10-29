@@ -332,6 +332,118 @@ fn zero_resize_retry_retains_generation_state_and_pending_world() {
     assert_eq!(g.phase(), Phase::Playing);
     assert!(g.effect().is_none());
 }
+fn received_food(index: u16) -> Vec<u8> {
+    let mut packet = food();
+    packet[2..4].copy_from_slice(&(1200 + index).to_be_bytes());
+    packet
+}
+fn stalled_ingress_case(zero: bool, setup_picture: bool) {
+    let mut game = playing();
+    let mut control = playing();
+    let generation = game.generation();
+    if setup_picture {
+        for g in [&mut game, &mut control] {
+            g.receive(g.generation(), &bundle(&[setup()]), 30.).unwrap();
+        }
+        pictures(&mut control);
+    } else {
+        for g in [&mut game, &mut control] {
+            g.begin_frame(40., [960, 540], 1.).unwrap();
+            effects(g);
+        }
+        pictures(&mut control);
+        if !zero {
+            let frame = game.take_frame().unwrap();
+            game.retry_frame(frame).unwrap();
+        }
+    }
+    if zero {
+        game.viewport([0, 0], 1.).unwrap();
+    }
+    for i in 0..80 {
+        let packet = bundle(&[received_food(i)]);
+        for g in [&mut game, &mut control] {
+            g.receive(g.generation(), &packet, 50. + f64::from(i))
+                .unwrap();
+        }
+    }
+    assert_eq!(game.phase(), Phase::Playing);
+    assert_eq!(game.generation(), generation);
+    assert!(game.failure.is_none());
+    assert!(game.effect().is_none());
+    assert_eq!(game.client().foods().foods().len(), 81);
+    assert_eq!(
+        format!("{:?}", game.client().foods().foods()),
+        format!("{:?}", control.client().foods().foods())
+    );
+    assert_eq!(
+        game.client().control_view().own.unwrap().raw_head,
+        control.client().control_view().own.unwrap().raw_head
+    );
+    assert_eq!(game.hud_text(), control.hud_text());
+    pump(&mut game, 140.);
+    pump(&mut control, 140.);
+    assert_eq!(
+        game.client().control_view().own.unwrap().raw_head,
+        control.client().control_view().own.unwrap().raw_head
+    );
+    assert_eq!(game.phase(), Phase::Playing);
+    assert!(game.failure.is_none());
+}
+#[test]
+fn presentation_retry_pressure_preserves_all_packets_and_one_model_update() {
+    stalled_ingress_case(false, false);
+}
+#[test]
+fn zero_backing_with_prepared_work_recovers_ingress_without_disconnect() {
+    stalled_ingress_case(true, false);
+}
+#[test]
+fn queued_setup_picture_pressure_preserves_the_admitted_world() {
+    stalled_ingress_case(false, true);
+}
+#[test]
+fn new_ingress_cannot_overtake_older_deferred_packets() {
+    let mut game = playing();
+    let mut control = playing();
+    for g in [&mut game, &mut control] {
+        g.begin_frame(40., [960, 540], 1.).unwrap();
+        effects(g);
+    }
+    pictures(&mut control);
+    let first = bundle(&[received_food(1)]);
+    game.receive(game.generation(), &first, 41.).unwrap();
+    control.receive(control.generation(), &first, 41.).unwrap();
+    pictures(&mut game);
+    let second = bundle(&[received_food(2)]);
+    game.receive(game.generation(), &second, 42.).unwrap();
+    control.receive(control.generation(), &second, 42.).unwrap();
+    pump(&mut game, 60.);
+    pump(&mut control, 60.);
+    assert_eq!(
+        format!("{:?}", game.client().foods().foods()),
+        format!("{:?}", control.client().foods().foods())
+    );
+}
+#[test]
+fn ingress_budget_never_cancels_a_host_owned_picture() {
+    let mut g = playing();
+    g.begin_frame(40., [960, 540], 1.).unwrap();
+    effects(&mut g);
+    let frame = g.take_frame().unwrap();
+    for _ in 0..64 {
+        g.receive(g.generation(), &bundle(&[vec![b'p']]), 41.)
+            .unwrap();
+    }
+    let error = g
+        .receive(g.generation(), &bundle(&[vec![b'p']]), 42.)
+        .unwrap_err();
+    assert_eq!(error, "Deferred receive budget");
+    g.retry_frame(frame).unwrap();
+    pictures(&mut g);
+    pump(&mut g, 60.);
+    assert_eq!(g.phase(), Phase::Playing);
+}
 #[test]
 fn death_final_score_and_explicit_stop() {
     let mut g = playing();

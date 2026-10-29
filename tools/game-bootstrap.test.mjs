@@ -328,7 +328,8 @@ test('com entry: actual gate and link refuse unpaired routes before holding or l
   for (const href of ['http://slither.com/', 'http://slither.com/index.html', 'http://slither.com/io/',
     'https://slither.com/io', 'http://www.slither.com/io', 'http://slither.io/io',
     'http://slither.com:81/io', 'http://user@slither.com/io', 'http://slither.com/io?x=1',
-    'http://slither.com/io#x', 'http://slither.com.evil.invalid/io']) {
+    'http://slither.com/io#x', 'http://slither.com/io?', 'http://slither.com/io#',
+    'http://slither.com.evil.invalid/io']) {
     const f = fixture({ href }); assert.equal(f.gate, undefined, href);
     assert.equal(f.realm.requestAnimationFrame, f.nativeRaf);
     const context = createContext({ document: f.document, location: f.realm.location, URL,

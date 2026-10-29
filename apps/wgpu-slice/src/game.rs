@@ -364,7 +364,17 @@ impl LocalGame {
         if !now.is_finite() || bytes.len() > protocol::MAX_FRAME_BYTES {
             return Err("Invalid packet/time".into());
         }
-        if self.work.is_some() || self.inflight != 0 || !self.packet_frames.is_empty() {
+        if self.deferred.len() >= 64
+            || self.deferred_bytes + bytes.len() > protocol::MAX_FRAME_BYTES
+        {
+            self.release_stalled_presentation()?;
+        }
+        if self.work.is_some()
+            || self.inflight != 0
+            || !self.packet_frames.is_empty()
+            || !self.effects.is_empty()
+            || !self.deferred.is_empty()
+        {
             if self.deferred.len() >= 64
                 || self.deferred_bytes + bytes.len() > protocol::MAX_FRAME_BYTES
             {
@@ -375,6 +385,34 @@ impl LocalGame {
             return Ok(());
         }
         self.ingest(bytes, now)
+    }
+    fn release_stalled_presentation(&mut self) -> Result<()> {
+        // Only a fully prepared connected frame may be superseded. Never bypass
+        // the initial reset/Connect barrier, a host-owned picture or pending I/O.
+        if !self.session.view().connected || self.inflight != 0 || !self.effects.is_empty() {
+            return Ok(());
+        }
+        if let Some(work) = &self.work {
+            if work.world.is_none() || work.prepared.is_none() || work.reset_rows {
+                return Ok(());
+            }
+            // Input effects and the model update already completed. Keep that
+            // update exactly once, without claiming a successful GPU present.
+            self.commit_work()?;
+        }
+        self.packet_frames.clear();
+        while let Some((generation, bytes, now)) = self.deferred.pop_front() {
+            self.deferred_bytes -= bytes.len();
+            if self.active(generation) {
+                self.ingest(&bytes, now)?;
+            }
+            // Setup pictures are superseded, not their admitted world/HUD state.
+            self.packet_frames.clear();
+            if !self.effects.is_empty() {
+                break;
+            }
+        }
+        Ok(())
     }
     fn ingest(&mut self, bytes: &[u8], now: f64) -> Result<()> {
         let mut session = self.session.clone();
@@ -601,7 +639,9 @@ impl LocalGame {
         }
         while let Some((g, b, t)) = self.deferred.pop_front() {
             self.deferred_bytes -= b.len();
-            self.receive(g, &b, t)?;
+            if self.active(g) {
+                self.ingest(&b, t)?;
+            }
             if !self.packet_frames.is_empty() || !self.effects.is_empty() {
                 return Ok(());
             }
@@ -818,6 +858,9 @@ impl LocalGame {
         if kind == 1 {
             return Ok(());
         }
+        self.commit_work()
+    }
+    fn commit_work(&mut self) -> Result<()> {
         let w = self.work.take().ok_or("Missing frame work")?;
         self.client = w.world.ok_or("Missing world candidate")?;
         self.hud = w.hud;

@@ -15,7 +15,7 @@ profile, official-server adapter or client-authoritative movement.
 launch/reset commits. It sends the existing negotiation prefixes, solves the
 received challenge in Rust, then sends the existing login with authored local
 zero credentials. Both hosts use the negotiated header-free framing and admit
-protocol19. The core atomically ingests actual Setup/spawn/update/food/prey/HUD
+protocol 19. The core atomically ingests actual Setup/spawn/update/food/prey/HUD
 packets. No fixture is injected into the playable owner.
 
 The existing transactional `advance_with_control` callback is first probed and
@@ -24,19 +24,19 @@ second clock or planner API. `DesktopInput` accumulates debt and stages keyboard
 ping, boost, then heading packets. Each effect is acknowledged outside Rust
 borrows before the next phase. After all sends, one candidate world update and
 draw are prepared. Successful presentation commits that candidate and consumes
-session actions; surface timeout retains it without a second update. Failure
+session actions; surface timeout normally retains it without a second update. Failure
 commits terminal state and closes the owned socket, cancelling the candidate.
 Packet-time Setup pictures preserve the core callback order. Resize supersedes
 queued intermediate pictures while retaining the admitted packet state.
 All staged Setup pictures, HUD/resources and the aggregate pixel charge validate
 before publishing packet world/history/serial/RNG and the complete picture queue.
-Draining exactly16 admitted pictures succeeds; the limit check does not take an
+Draining exactly 16 admitted pictures succeeds; the limit check does not take an
 extra unacknowledged picture.
 
 Host clock contract: call `construct(generation, effect_id, fresh_now_ms)` once
 immediately before executing an issued Connect, then acknowledge the effect.
 `opened(generation, fresh_now_ms)` and `receive(..., fresh_now_ms)` fence late
-handshake callbacks. `observe_time(fresh_now_ms)` checks the absolute3333ms expiry
+handshake callbacks. `observe_time(fresh_now_ms)` checks the absolute 3333 ms expiry
 without advancing the model, including during retained/zero-size waits.
 `begin_frame` also checks expiry before those waits. Work keeps its original model
 timestamp; successful presentation only issues Connect, whose fresh constructor
@@ -44,7 +44,7 @@ boundary starts the handshake budget. Wasm `flush(now_ms,width,height,dpr)` carr
 fresh time before presentation-only work; `presented(bool)` remains unchanged.
 
 Windows uses thin winit pointer/key/window glue and a native tungstenite
-transport. The connector has a1s TCP deadline plus an absolute2s HTTP handshake
+transport. The connector has a 1 s TCP deadline plus an absolute 2 s HTTP handshake
 deadline (including slow-drip peers); cancellation/join is bounded by them.
 After handshake, all I/O is nonblocking. A WouldBlock write remains owned by
 tungstenite and is never duplicated. Binary frames, receive bursts and pending
@@ -60,17 +60,17 @@ policy's existing focus-loss semantics are preserved (blur invents no release).
 ## Represented visuals and limits
 
 The renderer consumes existing normal/boost/death body, early/late food/prey,
-paired-eye layout and arena-edge plans. The42 authored body families and existing
+paired-eye layout and arena-edge plans. The 42 authored body families and existing
 skin runs keep their actual palette IDs and order. Only resources used by a
 frame are materialized/resident; this does not eagerly rasterize the catalogue.
 There is no JS numeric fallback. Admitted local face behavior remains the core's
-ordinary paired eyes (including25/44/63/64); image faces27/40/41 remain plain.
+ordinary paired eyes (including 25/44/63/64); image faces 27/40/41 remain plain.
 No antenna art, official images or complete cosmetic chooser is added.
 
 The small original bitmap HUD shows Rust current/final length, rank/population,
 the first projected leaderboard row and session status. Native title and browser
 DOM also expose the full Rust text. The bitmap font covers ASCII, substitutes a
-visible question glyph for other characters, and clips to80columns/four lines.
+visible question glyph for other characters, and clips to 80 columns/four lines.
 This is a functional slice, not a complete scoreboard/menu/text system.
 
 `Frame` keeps full-u64 handle/revision, backing extent, viewport scale, ordered
@@ -78,27 +78,32 @@ crops/transforms/effective alpha and SourceOver/Lighter. No draw regrouping occu
 The final vertex submission is the sole f64-to-f32 conversion. CPU materialization
 uses the existing original Rust recipes: RGBA pixels, circles, concentric radial
 gradients, single-contour nonzero polygon fills (authored stars), full rectangles
-and colored disk shadows. Circle/polygon coverage uses4x4samples; blur is the
-existing separable Gaussian approximation, sigma=blur/2, truncated at3sigma.
+and colored disk shadows. Circle/polygon coverage uses 4x4 samples; blur is the
+existing separable Gaussian approximation, sigma=blur/2, truncated at 3 sigma.
 Unsupported Canvas operations fail explicitly. Paired eyes use sampled disks;
 arena fill uses the core path strips, and stroke uses segment quads with butt
 joins. These raster approximations do not establish Canvas pixel parity.
 
 Textures contain premultiplied encoded-sRGB RGBA8, linear clamp sampling, one mip
 level. Targets are encoded-unorm, with no implicit sRGB conversion. SourceOver
-uses One/OneMinusSrcAlpha; Lighter uses One/One for color/alpha. Supported4xMSAA
-improves quad-edge coverage; unsupported formats explicitly report1sample.
-Limits:2048active sources,64MiB active CPU/GPU pixels,512px per source axis,
-8192ordered draws,8192backing pixels per axis and128MiB render attachment.
-Queued Setup pictures share a64MiB aggregate pixel bound. Zero backing suspends
+uses One/OneMinusSrcAlpha; Lighter uses One/One for color/alpha. Supported 4x MSAA
+improves quad-edge coverage; unsupported formats explicitly report 1 sample.
+Limits: 2048 active sources, 64 MiB active CPU/GPU pixels, 512 px per source axis,
+8192 ordered draws, 8192 backing pixels per axis and 128 MiB render attachment.
+Queued Setup pictures share a 64 MiB aggregate pixel bound. Zero backing suspends
 updates/presentation without resetting session/world; packets still admit.
-Timeout/occlusion/outdated surface retains work. Lost surface/device stops the
-host, without a new connection or gameplay reset/retry.
+Timeout/occlusion/outdated surface normally retains work. At deferred-ingress
+capacity, a fully prepared connected model update commits once and its unseen
+picture is superseded; queued packets then apply in FIFO order without a second
+model advance. This also covers zero backing with retained work. Initial reset/
+Connect, pending host effects and host-owned pictures keep their existing
+barriers and bounded errors. No successful GPU presentation is inferred.
+Lost surface/device stops the host, without a new connection or gameplay reset/retry.
 
 ## Isolated builds and offline checks
 
-Rust1.99.0, wgpu30.0.1, winit0.30.13, tungstenite0.30.0 (handshake/no TLS),
-wasm-bindgen0.2.129, futures0.4.79 and web-sys/js-sys0.3.106 are pinned in this
+Rust 1.99.0, wgpu 30.0.1, winit 0.30.13, tungstenite 0.30.0 (handshake/no TLS),
+wasm-bindgen 0.2.129, futures 0.4.79 and web-sys/js-sys 0.3.106 are pinned in this
 crate/lock. Native DX12/Vulkan and browser WebGPU share frame/resource/render code.
 Use one isolated Cargo lane; never overwrite the root Canvas target/generated
 files. From this app directory:

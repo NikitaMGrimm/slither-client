@@ -3,7 +3,7 @@
   'use strict';
   if (window !== window.top) return;
   const url = new URL(location.href);
-  const home = url.origin === 'http://slither.com' ? url.pathname === '/io'
+  const home = url.origin === 'http://slither.com' ? url.href === 'http://slither.com/io'
     : ['http://slither.io', 'https://slither.io', 'http://www.slither.io', 'https://www.slither.io'].includes(url.origin)
       && ['/', '/index.html'].includes(url.pathname);
   if (!home || url.search || url.hash || url.username || url.password) return;
