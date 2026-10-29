@@ -2,7 +2,7 @@
 use crate::{
     Result,
     frame::{Frame, ResourceKey},
-    materials::{RgbaImage, materialize},
+    materials::materialize,
     scene::Resource,
 };
 use slither_client::{
@@ -51,20 +51,7 @@ impl Bank {
             cache: BTreeMap::new(),
             disks: BTreeMap::new(),
             solids: BTreeMap::new(),
-            hud: Resource {
-                asset: BodyAsset {
-                    handle: 0x3000_0000_0000_0000,
-                    revision: 0,
-                    width: 480,
-                    height: 40,
-                    status: BodyAssetStatus::Ready,
-                },
-                image: RgbaImage {
-                    width: 480,
-                    height: 40,
-                    pixels: vec![0; 480 * 40 * 4],
-                },
-            },
+            hud: crate::hud::resource(),
         };
         for p in r.body_sources.palettes {
             let variants = p.variants.into_iter().map(|r| b.add(r)).collect();

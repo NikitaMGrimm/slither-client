@@ -325,11 +325,34 @@ pub fn prepare(
         draws,
     })
 }
-pub fn finish(mut frame: Frame, bank: &mut Bank, hud: &str) -> Result<PreparedFrame> {
-    crate::hud::bitmap(hud, &mut bank.hud)?;
-    frame
-        .draws
-        .push(image(bank.hud.asset, 8., 8., 480., 40., 1.));
+fn finish_plan(
+    mut frame: Frame,
+    bank: &mut Bank,
+    plan: &crate::hud::Plan,
+) -> Result<PreparedFrame> {
+    crate::hud::rasterize(plan, &mut bank.hud)?;
+    for panel in &plan.panels {
+        let mut command = image(
+            bank.hud.asset,
+            panel.destination.x,
+            panel.destination.y,
+            panel.destination.width,
+            panel.destination.height,
+            1.,
+        );
+        command.source = Some(panel.source());
+        frame.draws.push(command);
+    }
     let resources = bank.resources(&frame)?;
     Ok(PreparedFrame { frame, resources })
+}
+/// Retained string-only entry for existing callers; no domain parsing of text.
+pub fn finish(frame: Frame, bank: &mut Bank, hud: &str) -> Result<PreparedFrame> {
+    let plan = crate::hud::plan_text(hud, frame.extent, frame.viewport_scale)?;
+    finish_plan(frame, bank, &plan)
+}
+/// Ordinary native/web gameplay shares this complete Rust projection and composition.
+pub fn finish_hud(frame: Frame, bank: &mut Bank, hud: &crate::hud::View) -> Result<PreparedFrame> {
+    let plan = crate::hud::plan(hud, frame.extent, frame.viewport_scale)?;
+    finish_plan(frame, bank, &plan)
 }

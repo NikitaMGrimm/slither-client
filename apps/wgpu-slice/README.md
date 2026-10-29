@@ -67,11 +67,33 @@ There is no JS numeric fallback. Admitted local face behavior remains the core's
 ordinary paired eyes (including 25/44/63/64); image faces 27/40/41 remain plain.
 No antenna art, official images or complete cosmetic chooser is added.
 
-The small original bitmap HUD shows Rust current/final length, rank/population,
-the first projected leaderboard row and session status. Native title and browser
-DOM also expose the full Rust text. The bitmap font covers ASCII, substitutes a
-visible question glyph for other characters, and clips to 80 columns/four lines.
-This is a functional slice, not a complete scoreboard/menu/text system.
+The shared in-game HUD places current/final length, rank/population and session
+status at bottom left, with the existing top ten leaderboard rows at top right.
+Row order, identity, name/score text and own-row marker are copied from Rust's
+existing projections, without sorting or rescoring. The own row has a `>` marker
+and flat highlight. Numeric columns have fixed positions and fit the full signed
+safe-integer text contract; names clip within their own column. When a tiny
+numeric column cannot hold its value it shows dots, never a different decimal
+suffix. No panel covers the scene center.
+
+At a 960x540 logical viewport all ten rows fit and original 5x7 glyphs render at
+14 logical pixels high, with 18 pixel line spacing. Smaller heights reduce rows in
+order; below 600 logical pixels wide the leaderboard is omitted. Score fields
+reduce by available height, prioritizing current length, status, rank then final
+length. Very small views (under 48x40) omit HUD submission. Logical size accounts
+for viewport scale/DPR; high-density targets use the same linearly sampled
+original bitmap texture, not a new native-font rasterizer. ASCII letters use the
+original uppercase glyphs; unsupported Unicode scalars visibly become `?`.
+The full projected strings remain intact even when their glyphs are clipped.
+
+Both hosts consume the same typed `hud::View` through ordinary `LocalGame`
+frame/Setup/resize composition. Additive `hud_view()` and `render::finish_hud`
+carry full rows; existing compact `hud_text()` and `render::finish(...,&str)`
+remain compatible. Native title/browser DOM keep their compact diagnostic text.
+One lazy HUD atlas remains within 512x512 and is drawn as at most two cropped
+corner quads. Its full-u64 handle stays fixed; dimensions and pixels publish with
+one new revision only when visible content changes. An omitted HUD allocates no
+new atlas. This is a bounded in-game readout, not a complete menu/text framework.
 
 `Frame` keeps full-u64 handle/revision, backing extent, viewport scale, ordered
 crops/transforms/effective alpha and SourceOver/Lighter. No draw regrouping occurs.
