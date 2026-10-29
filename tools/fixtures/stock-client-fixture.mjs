@@ -9,5 +9,11 @@ export function createStockClient(options) {
   const owner = adapter({ ...options, StockControllerPolicy: options.StockControllerPolicy ?? Policy });
   owners.push(owner); return owner;
 }
-after(() => { for (const owner of owners.splice(0)) owner.dispose(); });
+after(() => {
+  const failures = [];
+  for (const owner of owners.splice(0)) {
+    try { owner.dispose(); } catch (error) { failures.push(error); }
+  }
+  if (failures.length) throw new AggregateError(failures, 'Stock client fixture cleanup failed');
+});
 export { TestStockControllerPolicy };
