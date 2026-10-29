@@ -166,26 +166,39 @@ export async function createLocalGameHost({ realm = globalThis, endpoint, source
       throw new TypeError('Local control in its original document and parent required');
     }
   }
-  function createControlsLease({ schema, endpoint: field, endpointParent, button: play, buttonParent, onPlay }) {
+  function createControlsLease({ schema, endpoint: field, endpointParent, button: play, buttonParent, onPlay, actions = [] }) {
     current();
-    if (schema !== 1 || typeof onPlay !== 'function') throw new TypeError('Local Play control lease required');
+    if (![1, 2].includes(schema) || typeof onPlay !== 'function' || !Array.isArray(actions) || actions.length > 16
+      || schema === 1 && actions.length) throw new TypeError('Local Play control lease required');
     child(field, endpointParent); child(play, buttonParent);
-    let unlisten, ended = false;
-    const control = { button: play, parent: buttonParent, field, fieldParent: endpointParent };
+    const copied = actions.map(({ button, parent, onPress }) => {
+      child(button, parent); child(parent, buttonParent);
+      if (dom.localName(button) !== 'button' || typeof onPress !== 'function') throw new TypeError('Local menu action required');
+      return { button, parent, onPress };
+    });
+    if (new Set([play, ...copied.map(item => item.button)]).size !== copied.length + 1) throw new TypeError('Distinct local menu buttons required');
+    let unlisteners = [], ended = false;
+    const control = { button: play, parent: buttonParent, field, fieldParent: endpointParent, actions: copied };
+    const checkActions = () => { for (const action of copied) { child(action.button, action.parent); child(action.parent, buttonParent); } };
     const unregister = () => {
       ended = true; if (playControl === control) playControl = undefined;
-      unlisten?.(); unlisten = undefined; cleanups.delete(unregister);
+      for (const unlisten of unlisteners) unlisten(); unlisteners = []; cleanups.delete(unregister);
     };
     cleanups.add(unregister);
     return freeze({
       bind() {
         current();
-        if (ended || unlisten) throw new Error('Local Play lease already bound or released');
-        unlisten = listen(play, 'click', event => {
-          if (!isCurrentDocument() || ended || !event.isTrusted) return;
-          child(field, endpointParent); child(play, buttonParent);
-          onPlay();
-        });
+        if (ended || unlisteners.length) throw new Error('Local Play lease already bound or released');
+        checkActions();
+        for (const action of [{ button: play, parent: buttonParent, onPress: onPlay }, ...copied]) {
+          unlisteners.push(listen(action.button, 'click', event => {
+            if (!isCurrentDocument() || ended || !event.isTrusted || event.defaultPrevented
+              || matches(action.button, ':disabled') || closest(action.button, '[inert]') !== null
+              || !visible(action.button, { opacityProperty: true, visibilityProperty: true, contentVisibilityAuto: true })) return;
+            child(field, endpointParent); child(play, buttonParent); checkActions(); child(action.button, action.parent);
+            action.onPress();
+          }));
+        }
         playControl = control;
       },
       unregister,
@@ -217,14 +230,16 @@ export async function createLocalGameHost({ realm = globalThis, endpoint, source
     inputInstalled = true;
     const nativePlayDefault = event => {
       const control = playControl;
-      return event.code === 'Space' && control && event.target === control.button
+      const action = control && (event.target === control.button ? { button: control.button, parent: control.parent }
+        : control.actions.find(action => action.button === event.target));
+      return event.code === 'Space' && action
         && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && !event.isComposing
-        && dom.ownerDocument(control.button) === document && dom.isConnected(control.button)
-        && dom.parentNode(control.button) === control.parent && activeElement(document) === control.button
+        && dom.ownerDocument(action.button) === document && dom.isConnected(action.button)
+        && dom.parentNode(action.button) === action.parent && activeElement(document) === action.button
         && dom.ownerDocument(control.field) === document && dom.isConnected(control.field)
         && dom.parentNode(control.field) === control.fieldParent
-        && !matches(control.button, ':disabled') && closest(control.button, '[inert]') === null
-        && visible(control.button, { opacityProperty: true, visibilityProperty: true, contentVisibilityAuto: true })
+        && !matches(action.button, ':disabled') && closest(action.button, '[inert]') === null
+        && visible(action.button, { opacityProperty: true, visibilityProperty: true, contentVisibilityAuto: true })
         && isCurrentDocument() && playControl === control;
     };
     const deliver = event => {
@@ -303,7 +318,31 @@ export async function createLocalGameHost({ realm = globalThis, endpoint, source
     });
     sources = { palettes, background, backgroundImage, adapter, hostAssets };
   }
-  const native = freeze({ ...scheduling, now, random, setInput, registerNicknameEditField,
+  let preferenceStorage, readPreference, writePreference;
+  try {
+    preferenceStorage = realm.localStorage;
+    readPreference = realm.Storage?.prototype.getItem;
+    writePreference = realm.Storage?.prototype.setItem;
+  } catch { /* Optional persistence keeps local in-memory choices usable. */ }
+  const preferenceKey = 'slither-client.menu.v1';
+  const menuPreferences = freeze({ schema: 1, document,
+    read() {
+      current(); let saved = null;
+      try { if (typeof readPreference === 'function') saved = apply(readPreference, preferenceStorage, [preferenceKey]); } catch { /* Optional persistence. */ }
+      current(); return typeof saved === 'string' && saved.length <= 600 ? saved : null;
+    },
+    write(value) {
+      current(); if (typeof value !== 'string' || value.length > 600) throw new TypeError('Bounded menu record required');
+      let stored = false;
+      try { if (typeof writePreference === 'function') { apply(writePreference, preferenceStorage, [preferenceKey, value]); stored = true; } } catch { /* Optional quota/permission failure. */ }
+      current(); return stored;
+    },
+    setNickname(receiver, value) {
+      current(); if (typeof value !== 'string' || value.length > 24 || dom.ownerDocument(receiver) !== document || !dom.isConnected(receiver)) throw new TypeError('Current menu nickname field required');
+      setInputValue(receiver, value); current();
+    },
+  });
+  const native = freeze({ ...scheduling, now, random, setInput, registerNicknameEditField, menuPreferences,
     hudDom: freeze({ schema: 1, document, dom, isCurrentDocument }),
     ...(minimapDom ? { minimapDom } : {}),
     ownedHudDom: freeze({ schema: 1, document, dom: construct }),

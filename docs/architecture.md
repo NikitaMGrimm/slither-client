@@ -27,6 +27,9 @@ identity checks and DOM binding readiness composition. The same default runtime
 consumes the copied Rust output. See [leaderboard history](leaderboard-state.md).
 New local-host work is browser/DOM/capability glue; it must not introduce new
 game-domain logic.
+The default [player menu](menu-preferences.md) keeps appearance selection, custom
+run editing and bounded preference restore in Rust. Captured DOM/storage glue
+restores nickname/appearance and passes their copied bytes to explicit Play.
 See the [roadmap](roadmap.md) for remaining work.
 
 Local rendering binds a pure Rust skin resolver after Wasm initialization. Rust
