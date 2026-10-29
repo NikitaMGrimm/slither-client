@@ -4,6 +4,8 @@ import { desktopBackingOracle } from './fixtures/desktop-layout-fixture.mjs';
 import { createLeaderboardHistoryDouble } from './leaderboard-history-double.mjs';
 import { createHudHistoryDouble } from './hud-history-double.mjs';
 import { createMenuPreferencesDouble } from './menu-preferences-double.mjs';
+import { createPlayAdmissionDouble } from './play-admission-double.mjs';
+import { loadWasm } from './reference-context.mjs';
 // Authored Node-only full ESM graph boundary. No browser or production Wasm proof.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -13,6 +15,11 @@ import { createGateTestDom, attachGateTestRealm, issuedMinimapViewDouble } from 
 import { projectStartPageDouble } from './start-page-view-double.mjs';
 
 const root = new URL('../', import.meta.url);
+// The flagged ABI phase replays the same inert runtime requirements with real Rust admission.
+const realPlayAdmission = process.env.SLITHER_PLAY_ADMISSION_WASM === '1' ? (await loadWasm()).PlayAdmission : undefined;
+if (process.env.SLITHER_PLAY_ADMISSION_WASM === '1' && typeof realPlayAdmission !== 'function') {
+  throw new Error('Real PlayAdmission Wasm export required; no test-double fallback in ABI phase');
+}
 const webNames = ['stock-skin-provider.mjs', 'stock-client.mjs', 'stock-food-provider.mjs',
   'stock-host-snapshot.mjs', 'desktop-layout.mjs', 'stock-gameplay.mjs', 'stock-hud-dom.mjs',
   'stock-hud-view.mjs', 'stock-skin-rules.mjs', 'stock-accessory-selection.mjs', 'stock-cached-accessory.mjs', 'stock-accessory-load.mjs', 'stock-prey-provider.mjs', 'stock-asset-sources.mjs',
@@ -76,6 +83,7 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
   });
   wasm.api.start_page_view = vm.runInContext('(' + projectStartPageDouble.toString() + ')', f.context);
   wasm.api.MenuPreferences = vm.runInContext('(' + createMenuPreferencesDouble.toString() + ')()', f.context);
+  wasm.api.PlayAdmission = realPlayAdmission ?? vm.runInContext('(' + createPlayAdmissionDouble.toString() + ')()', f.context);
   const minimap = { enabled: 0, reads: [], fractions: [], view: {
     schema: 1, enabled: true, imageRevision: 0n, dimension: null,
     baseRgba: new Uint8Array(), alternateRgba: new Uint8Array(), widget: null,

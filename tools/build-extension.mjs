@@ -108,6 +108,7 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, g
   if (!/export class AnimatedScene\b/.test(glue) || !/export class DesktopQuality\b/.test(glue)
     || !/export class DesktopInput\b/.test(glue)
     || !/export function desktop_backing_size\b/.test(glue)
+    || !/export class PlayAdmission\b/.test(glue)
     || !/new URL\(['"]slither_client_bg\.wasm['"], import\.meta\.url\)/.test(glue)
     || !/export\s*\{[^}]*\b__wbg_init as default\s*\}/.test(glue)) {
     throw new Error('Expected the generated web entrypoint for slither_client');
@@ -136,6 +137,8 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, g
     'encode_login', 'solve_challenge', 'decode_frame', 'setup_protocol_version',
     'resolve_skin', 'resolve_local_skin', 'stock_custom_palette_mask_valid', 'stock_accessory_id', 'stock_accessory_forward', 'start_page_view', 'desktop_backing_size',
     'endscreenprojector_new', 'endscreenprojector_project', '__wbg_endscreenprojector_free',
+    'playadmission_new', 'playadmission_available', 'playadmission_accepted', 'playadmission_nickname_valid',
+    'playadmission_accept', 'playadmission_lock_unavailable', 'playadmission_return_ready', 'playadmission_complete_return', '__wbg_playadmission_free',
     ...Array.from(glue.matchAll(/\bwasm\.([A-Za-z_]\w*)/g), match => match[1])]) {
     if (!exports.has(name)) throw new Error(`Wasm/glue export mismatch: ${name}`);
   }

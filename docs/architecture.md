@@ -14,7 +14,6 @@ the following exceptions:
 | `web/stock-client.mjs` | Mixed borrowed-source/Canvas/Wasm glue and update/draw/quality ordering with successful-draw statistics counters. |
 | `web/handshake-session.mjs` | Challenge/login/setup state machine and frame limits; Rust already owns encoding, decoding and challenge arithmetic. |
 | `web/stock-hud-view.mjs` | Binding/readiness composition around Rust-formatted current/final HUD values. |
-| `extension/game-runtime.mjs` | Mixed entry/DOM/capability plumbing and Play admission/availability state. |
 
 The browser-free Rust leaderboard owner retains command-ordered Setup/table and
 board history, one-use prepared operations, revisions, name/text/style policy and
@@ -34,6 +33,11 @@ and boost, and callbacks can update public input setters between phases.
 The default [player menu](menu-preferences.md) keeps appearance selection, custom
 run editing and bounded preference restore in Rust. Captured DOM/storage glue
 restores nickname/appearance and passes their copied bytes to explicit Play.
+The browser-free [Play admission owner](play-admission.md) retains availability,
+accepted attempts and local explicit-return admission. Its primitive Wasm boundary
+releases each Rust borrow before UI locking, status, unlock or launch effects.
+Runtime JS retains native security/generation guards, URL/capability admission,
+session observations, promises and browser effects; it has no admission fallback.
 `desktop_layout::desktop_backing_size` owns desktop viewport arithmetic in
 browser-free Rust. Its pure Wasm export returns a fresh copied width/height
 record; `web/desktop-layout.mjs` admits primitive inputs and copies that output
