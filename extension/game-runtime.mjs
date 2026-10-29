@@ -8,6 +8,7 @@ import { bindStockHudDom } from './stock-hud-dom.mjs';
 import { projectHudView } from './stock-hud-view.mjs';
 import { createOwnedHudUi } from './owned-hud-ui.mjs';
 import { createOwnedPlayUi } from './owned-play-ui.mjs';
+import { createOwnedAppearanceUi } from './owned-appearance-ui.mjs';
 import { createOwnedLeaderboardUi } from './owned-leaderboard-ui.mjs';
 import { createOwnedMinimapUi } from './owned-minimap-ui.mjs';
 import { createOwnedAnnouncementUi } from './owned-announcement-ui.mjs';
@@ -23,7 +24,7 @@ const editNotifications = new Set(['keypress', 'beforeinput', 'input', 'composit
   'dragstart', 'drag', 'dragenter', 'dragleave', 'dragover', 'drop', 'dragend']);
 
 /** Local runtime factory. Importing this module performs no page ownership work. */
-export async function startGamePage({ realm = globalThis, initialize, wasmApi, hudReadout = false, ownedHudUi = false, ownedPlayUi = false, ownedLeaderboardUi = false, ownedMinimapUi = false, ownedAnnouncementUi = false, ownedEndScreenUi = false, diagnosticUi = true, localHost } = {}) {
+export async function startGamePage({ realm = globalThis, initialize, wasmApi, hudReadout = false, ownedHudUi = false, ownedPlayUi = false, ownedMenuUi = false, ownedLeaderboardUi = false, ownedMinimapUi = false, ownedAnnouncementUi = false, ownedEndScreenUi = false, diagnosticUi = true, localHost } = {}) {
   if (typeof hudReadout !== 'boolean') throw new TypeError('Explicit hudReadout boolean required');
   if (typeof diagnosticUi !== 'boolean') throw new TypeError('Explicit diagnosticUi boolean required');
   if (typeof initialize !== 'function' || wasmApi === null || typeof wasmApi !== 'object') {
@@ -35,6 +36,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
   if (typeof ownedPlayUi !== 'boolean' || (ownedPlayUi && (!hudReadout || !ownedHudUi))) {
     throw new TypeError('Explicit ownedPlayUi boolean requires hudReadout and ownedHudUi');
   }
+  if (typeof ownedMenuUi !== 'boolean' || ownedMenuUi && !ownedPlayUi) throw new TypeError('Explicit ownedMenuUi requires ownedPlayUi');
   if (typeof ownedLeaderboardUi !== 'boolean' || (ownedLeaderboardUi && (!hudReadout || !ownedHudUi || !ownedPlayUi))) {
     throw new TypeError('Explicit ownedLeaderboardUi boolean requires hudReadout, ownedHudUi and ownedPlayUi');
   }
@@ -63,6 +65,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
   let nickname, bindingOperation, handlingNickname, routing = 0;
   let hud, ownedUi, constructCapabilities, hudOperation, nativeOperation, sourceOperation, hudCapabilities, cleanupActive = false;
   let playUi, controlsLease, playCapabilities, playOperation, playNodes;
+  let menuUi, menuCapabilities, MenuPolicy, menuMethods, menuActions = [];
   let leaderboardUi, leaderboardProperties, projector, Projector, projectScores, freeProjector;
   let minimapUi, minimapCanvas, readMinimapView;
   let announcementUi, readAnnouncementView;
@@ -386,6 +389,11 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     }
     leaderboardProperties = undefined;
     if (playUi !== undefined) {
+      if (menuUi !== undefined) {
+        const lease = menuUi; menuUi = undefined;
+        cleanup(() => lease.dispose());
+      }
+      menuActions = []; menuCapabilities = MenuPolicy = menuMethods = undefined;
       const lease = playUi; playUi = undefined;
       cleanup(() => lease.dispose());
     }
@@ -489,6 +497,9 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
         handlingNickname = operation;
         try {
           apply(value.handleInput, undefined, [event]);
+          if (menuUi && event.type === 'input' && event.target === playNodes.nickname) {
+            menuUi.rememberNickname(playCapabilities.controls.inputValue(playNodes.nickname));
+          }
           if (operation.failed) throw operation.primary;
         } catch (error) {
           if (operation.failed) error = operation.primary;
@@ -498,6 +509,9 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
         } finally { handlingNickname = undefined; operation.primary = undefined; }
       }
       if (editNotifications.has(event.type)) return;
+      // Keep menu presses out of steering/boost; releases still clear existing held input.
+      if (menuUi && menuActions.some(action => action.button === event.target)
+        && !['keyup', 'mouseup', 'pointerup', 'blur'].includes(event.type)) return;
       if (disposed || !controller) return;
       if (event.type === 'resize') {
         try {
@@ -580,6 +594,19 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
         for (const name of names) controls[name] = guarded(controls[name]);
         playCapabilities = { controls: freeze(controls), createControlsLease: guarded(group.createControlsLease) };
         playAvailable = Boolean(localHost) || native.liveProfile !== undefined;
+        if (ownedMenuUi) {
+          const raw = descriptor(native, 'menuPreferences')?.value;
+          const group = copyRecord(raw, ['schema', 'document', 'read', 'write', 'setNickname']);
+          if (group.schema !== 1 || group.document !== document || !Object.isFrozen(raw)
+            || ['read', 'write', 'setNickname'].some(name => !synchronous(group[name]))) throw new TypeError('Captured menu preferences required');
+          menuCapabilities = freeze(Object.fromEntries(['read', 'write', 'setNickname'].map(name => [name, guarded(group[name])])));
+          MenuPolicy = descriptor(wasmApi, 'MenuPreferences')?.value;
+          const methods = typeof MenuPolicy === 'function' && descriptor(MenuPolicy, 'prototype')?.value;
+          if (!synchronous(MenuPolicy) || ['view', 'action', 'set_nickname', 'serialize', 'free']
+            .some(name => !synchronous(methods && descriptor(methods, name)?.value))) throw new TypeError('Captured Rust menu policy required');
+          menuMethods = freeze(Object.fromEntries(['view', 'action', 'set_nickname', 'serialize', 'free']
+            .map(name => [name, descriptor(methods, name).value])));
+        }
       }
       if (ownedEndScreenUi) {
         const constructor = descriptor(wasmApi, 'EndScreenProjector');
@@ -829,10 +856,11 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
               if (typeof nickname !== 'string' || nickname.length > 24 || /[^\x20-\x7f]/.test(nickname)) {
                 playUi.setStatus('invalid-nickname'); return;
               }
+              const selection = menuUi ? menuUi.selection(nickname) : { nickname, skin: 0, customSkin: new Uint8Array() };
               playAccepted = true;
               playUi.lock();
               playUi.setStatus('preparing');
-              request = { endpoint, nickname, skin: 0, customSkin: new Uint8Array(),
+              request = { endpoint, ...selection,
                 ...(localHost ? { profile: localHost.profile } : {}) };
             } finally { endpoint = nickname = undefined; }
           });
@@ -851,7 +879,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
         playUi = createOwnedPlayUi({ document: hudCapabilities.document, parent: root,
           dom: hudCapabilities.dom, construct: constructCapabilities,
           controls: playCapabilities.controls, isCurrentDocument: hudCapabilities.isCurrentDocument,
-          projectStartPage: wasmApi.start_page_view }, diagnosticUi);
+          projectStartPage: wasmApi.start_page_view }, diagnosticUi, value => menuUi?.setDisabled(value));
         checkHudOperation();
         const mounted = playUi.mount();
         checkHudOperation();
@@ -874,12 +902,24 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
           localHost.presetEndpoint(nodes.endpoint);
           checkHudOperation();
         }
+        if (ownedMenuUi) {
+          menuUi = createOwnedAppearanceUi({ document, parent: nodes.mount, nickname: nodes.nickname,
+            dom: hudCapabilities.dom, construct: constructCapabilities, controls: playCapabilities.controls,
+            capabilities: menuCapabilities, Policy: MenuPolicy, policyMethods: menuMethods, local: Boolean(localHost),
+            isCurrentDocument: hudCapabilities.isCurrentDocument });
+          menuActions = menuUi.mount().map(action => freeze({ button: action.button, parent: action.parent,
+            onPress() {
+              if (disposed || cleanupActive || generation !== playGeneration || playAccepted) return;
+              try { runPlay(() => action.onPress()); } catch (error) { fail(error); }
+            } }));
+        }
       });
       runtime.bindNicknameField({ schema: 1, element: playNodes.nickname, parent: playNodes.nicknameParent });
       runPlay(() => {
-        const raw = playCapabilities.createControlsLease({ schema: 1,
+        const raw = playCapabilities.createControlsLease({ schema: ownedMenuUi ? 2 : 1,
           endpoint: playNodes.endpoint, endpointParent: playNodes.endpointParent,
-          button: playNodes.button, buttonParent: playNodes.buttonParent, onPlay });
+          button: playNodes.button, buttonParent: playNodes.buttonParent, onPlay,
+          ...(ownedMenuUi ? { actions: menuActions } : {}) });
         // Retain cleanup authority before binding can publish native effects.
         controlsLease = copyRecord(raw, ['bind', 'unregister']);
         if (!Object.isFrozen(raw) || !synchronous(controlsLease.bind) || !synchronous(controlsLease.unregister)) {

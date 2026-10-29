@@ -110,11 +110,34 @@ test('capture and inert preparation perform no native operations or scheduling; 
   assert.deepEqual(f.calls, old.calls); assert.deepEqual(f.dom.hud.trace, []); assert.deepEqual(f.dom.ownedPlay.trace, []);
   assert.equal(JSON.stringify(f.edit.listeners.map(({ type, options }) => [type, options])),
     JSON.stringify(old.edit.listeners.map(({ type, options }) => [type, options])));
-  assert.deepEqual(Reflect.ownKeys(f.native).filter(key => key !== 'ownedPlayDom'), Reflect.ownKeys(old.native));
+  assert.deepEqual(Reflect.ownKeys(f.native).filter(key => !['ownedPlayDom', 'menuPreferences'].includes(key)), Reflect.ownKeys(old.native));
+  exact(f.native.menuPreferences, ['schema', 'document', 'read', 'write', 'setNickname']);
   const h = controls(f), before = { ...f.calls }; f.dom.hud.trace.length = f.dom.ownedPlay.trace.length = 0;
   const lease = f.cap.createControlsLease(h.request); exact(lease, ['bind', 'unregister']);
   assert.deepEqual(f.calls, before); assert.deepEqual(f.dom.hud.trace, []); assert.deepEqual(f.dom.ownedPlay.trace, []);
   lease.unregister(); lease.unregister(); assert.throws(() => lease.bind());
+});
+
+test('schema2 menu actions are bounded copied own data and retain trusted queued button admission', () => {
+  const f = fixture(), h = controls(f);
+  const construct = f.native.ownedHudDom.dom;
+  const parent = construct.createElement(f.document, 'div'), button = construct.createElement(f.document, 'button');
+  construct.appendChild(h.mount, parent); construct.appendChild(parent, button);
+  let presses = 0, getters = 0;
+  const action = () => Object.assign(Object.create(null), { button, parent, onPress() { presses++; } });
+  const request = actions => Object.assign(Object.create(null), h.request, { schema: 2, actions });
+  for (const actions of [[], new Array(17), [action(), action()],
+    [Object.assign(action(), { onPress: async () => {} })],
+    [Object.defineProperty(action(), 'onPress', { get() { getters++; throw Error('getter invoked'); } })]]) {
+    assert.throws(() => f.cap.createControlsLease(request(actions)));
+  }
+  assert.equal(getters, 0); assert.equal(presses, 0);
+  const supplied = [action()], lease = f.cap.createControlsLease(request(supplied));
+  supplied[0].onPress = () => { throw Error('late mutable callback'); }; lease.bind();
+  f.edit.dispatch('click', { target: button, trusted: false }); f.flush(); assert.equal(presses, 0);
+  f.edit.dispatch('click', { target: button, trusted: true }); assert.equal(presses, 0);
+  f.flush(); assert.equal(presses, 1);
+  lease.unregister(); f.edit.dispatch('click', { target: button, trusted: true }); f.flush(); assert.equal(presses, 1);
 });
 
 for (const [owner, property, kind] of descriptors) {

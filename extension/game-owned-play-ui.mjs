@@ -47,8 +47,9 @@ function synchronous(callback) {
 }
 
 /** Native failures unwind to the retaining runtime; this view never cleans up an active operation. */
-export function createOwnedPlayUi(input, showEndpoint = true) {
+export function createOwnedPlayUi(input, showEndpoint = true, menuDisabled) {
   if (typeof showEndpoint !== 'boolean') invalid();
+  if (menuDisabled !== undefined) synchronous(menuDisabled);
   let options = record(input, ['document', 'parent', 'dom', 'construct', 'controls', 'isCurrentDocument', 'projectStartPage']);
   input = undefined;
   let document = options.document;
@@ -78,6 +79,7 @@ export function createOwnedPlayUi(input, showEndpoint = true) {
     return result;
   };
   const render = projection => {
+    if (menuDisabled !== undefined) menuDisabled(projection.disabled);
     call('setText', statusText, projection.status);
     call('setText', buttonText, projection.button);
     if (projection.disabled !== appliedDisabled) {
