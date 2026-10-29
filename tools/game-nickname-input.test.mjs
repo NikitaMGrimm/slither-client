@@ -1,3 +1,4 @@
+import { stockSkinWasmDouble } from './stock-skin-policy-double.mjs';
 import { desktopBackingOracle } from './fixtures/desktop-layout-fixture.mjs';
 import { createLeaderboardHistoryDouble } from './leaderboard-history-double.mjs';
 import { createHudHistoryDouble } from './hud-history-double.mjs';
@@ -29,15 +30,15 @@ after(() => {
 const gateSource = readFileSync(new URL('../extension/game-gate.js', import.meta.url), 'utf8');
 const source = readFileSync(new URL('./game-bootstrap.test.mjs', import.meta.url), 'utf8');
 const functions = source.slice(source.indexOf('function fixture('), source.indexOf("\ntest('an unarmed"));
-const makeFixture = new Script(`(function(gateSource,Script,createContext,runInContext,assert,createGateTestDom,attachGateTestRealm,createHudHistoryDouble,createLeaderboardHistoryDouble,TestDesktopInput,desktopBackingOracle){
+const makeFixture = new Script(`(function(gateSource,Script,createContext,runInContext,assert,createGateTestDom,attachGateTestRealm,createHudHistoryDouble,createLeaderboardHistoryDouble,TestDesktopInput,desktopBackingOracle,stockSkinWasmDouble){
   ${functions}\nreturn {fixture,wasmDouble};})`).runInThisContext();
 const { fixture: fixtureFactory, wasmDouble } = makeFixture(gateSource, Script, createContext, runInContext, assert,
-  createGateTestDom, attachGateTestRealm, createHudHistoryDouble, createLeaderboardHistoryDouble, TestDesktopInput,desktopBackingOracle);
+  createGateTestDom, attachGateTestRealm, createHudHistoryDouble, createLeaderboardHistoryDouble, TestDesktopInput,desktopBackingOracle,stockSkinWasmDouble);
 
 function harness({ prepare, contextSetup, ...options } = {}) {
   const fixture = prepare || contextSetup ? makeFixture(gateSource, Script, realm => {
     const context = createContext(realm); contextSetup?.(context); return context;
-  }, runInContext, assert, () => { const dom = createGateTestDom(); prepare?.(dom); return dom; }, attachGateTestRealm, createHudHistoryDouble, createLeaderboardHistoryDouble, TestDesktopInput,desktopBackingOracle).fixture : fixtureFactory;
+  }, runInContext, assert, () => { const dom = createGateTestDom(); prepare?.(dom); return dom; }, attachGateTestRealm, createHudHistoryDouble, createLeaderboardHistoryDouble, TestDesktopInput,desktopBackingOracle,stockSkinWasmDouble).fixture : fixtureFactory;
   const f = fixture(options), native = f.gate.claim(f.gate.metadata().id);
   const parent = f.document.createElement('div'), field = f.document.createElement('input');
   f.document.body.appendChild(parent); parent.appendChild(field);

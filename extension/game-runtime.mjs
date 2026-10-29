@@ -695,6 +695,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     }
     if (disposed) return Object.freeze({ dispose });
     const adapter = localHost ? localHost.sources.adapter : createStockSkinAdapter({ realm, random: native.random,
+      resolveSkin: wasmApi.resolve_skin, validateCustomPaletteMask: wasmApi.stock_custom_palette_mask_valid,
       appearanceMode: initial.appearanceMode ?? 'face', resolveAccessoryForward: wasmApi.stock_accessory_forward, readSnapshot() {
       if (held) throw new Error('Stock capture already held');
       held = captureReady();

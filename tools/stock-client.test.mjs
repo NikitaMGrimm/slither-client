@@ -1,3 +1,4 @@
+import { stockSkinPolicyDouble } from './stock-skin-policy-double.mjs';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createStockClient } from '../web/stock-client.mjs';
@@ -474,7 +475,7 @@ test('active controller integrates stock resolver and exact borrowed sources thr
     per_color_imgs: Array.from({ length: 42 }, (_, p) => ({ kmcs: Array(p === 36 ? 60 : 7).fill(source), klp: p !== 36, kfmc: source })),
     komc: source, ksmc: source, kdmc: source, acbulb: source, sest: source, jsebi: base, jsepi: pupil };
   let revision = 1, captures = 0, randomUnits = 0;
-  const adapter = createStockSkinAdapter({ realm: { HTMLCanvasElement, HTMLImageElement },
+  const adapter = createStockSkinAdapter({ ...stockSkinPolicyDouble, realm: { HTMLCanvasElement, HTMLImageElement },
     readSnapshot() { captures++; return { revision, normalGameplay: true, ownAccessory: -1, host,
       readiness: [source, base, pupil].map((source, i) => ({ source, state: 'ready',
         revision: ['body-content', 'base-content', 'pupil-content'][i] })) }; },

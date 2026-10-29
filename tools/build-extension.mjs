@@ -134,7 +134,7 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, g
     'animatedscene_enable_announcement_tracking', 'animatedscene_announcement_view',
     'animatedscene_enable_minimap_tracking', 'animatedscene_observe_minimap_ui_fraction', 'animatedscene_minimap_view',
     'encode_login', 'solve_challenge', 'decode_frame', 'setup_protocol_version',
-    'resolve_skin', 'resolve_local_skin', 'stock_accessory_id', 'stock_accessory_forward', 'start_page_view', 'desktop_backing_size',
+    'resolve_skin', 'resolve_local_skin', 'stock_custom_palette_mask_valid', 'stock_accessory_id', 'stock_accessory_forward', 'start_page_view', 'desktop_backing_size',
     'endscreenprojector_new', 'endscreenprojector_project', '__wbg_endscreenprojector_free',
     ...Array.from(glue.matchAll(/\bwasm\.([A-Za-z_]\w*)/g), match => match[1])]) {
     if (!exports.has(name)) throw new Error(`Wasm/glue export mismatch: ${name}`);

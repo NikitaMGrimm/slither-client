@@ -1,3 +1,4 @@
+import { stockSkinPolicyDouble } from './stock-skin-policy-double.mjs';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createStockHostSnapshot } from '../web/stock-host-snapshot.mjs';
@@ -43,7 +44,7 @@ function fixture() {
     painted: source => { calls.push(['painted', source]); return painted.has(source); },
     stamp: source => stamps.get(source) ?? 0 };
   const reader = createStockHostSnapshot({ realm, observer, readAccessory: () => accessory });
-  const adapter = createStockSkinAdapter({ realm, random: () => { throw new Error('Unexpected random'); },
+  const adapter = createStockSkinAdapter({ ...stockSkinPolicyDouble, realm, random: () => { throw new Error('Unexpected random'); },
     readSnapshot: () => { captures++; return reader.capture(); } });
   return { realm, observer, reader, adapter, generated, painted, stamps, calls, canvas, downloads,
     set complete(value) { complete = value; }, set accessory(value) { accessory = value; }, get captures() { return captures; } };

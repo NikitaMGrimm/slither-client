@@ -20,6 +20,12 @@ pub fn resolve_local_skin(skin: u8, custom_bytes: &[u8]) -> Result<JsValue, JsVa
     skin_record(resolve_authored_local_skin(skin, custom_bytes).map_err(error)?)
 }
 
+/// Pure host-mask admission sharing the native custom-run palette policy.
+#[wasm_bindgen]
+pub fn stock_custom_palette_mask_valid(mask: &[u8]) -> bool {
+    crate::presentation::stock_custom_palette_mask_valid(mask)
+}
+
 fn skin_fade_record(fade: Option<BodyFade>) -> Result<JsValue, JsValue> {
     match fade {
         None => Ok(JsValue::NULL),

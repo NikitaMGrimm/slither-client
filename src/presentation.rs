@@ -139,7 +139,7 @@ pub use score::{ScoreError, ScoreTables};
 pub use single_eye::{FaceGeometry, SingleEyeGeometry, SingleEyeLayout};
 pub use skin::{
     SkinAntenna, SkinDescriptor, SkinError, SkinFaceSources, SkinImage, SkinSourceRole,
-    resolve_authored_local_skin, resolve_skin,
+    resolve_authored_local_skin, resolve_skin, stock_custom_palette_mask_valid,
 };
 pub use snake::{AnchorView, SnakeMetrics, SnakePresentation};
 pub use static_accessory::{StaticHeadAccessoryGeometry, StaticHeadAccessoryLayout};

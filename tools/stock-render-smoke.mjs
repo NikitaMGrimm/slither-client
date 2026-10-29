@@ -222,7 +222,7 @@ export function stockRenderSmoke(wasm, { control = true } = {}) {
     const events = [], recipes = [], foods = [], preys = [], tapes = [], steps = [];
     let captures = 0, ends = 0, units = 0;
     const random = () => { units++; return (units % 32) / 32; };
-    const actualAdapter = createStockSkinAdapter({ realm, random, readSnapshot() {
+    const actualAdapter = createStockSkinAdapter({ resolveSkin: wasm.resolve_skin, validateCustomPaletteMask: wasm.stock_custom_palette_mask_valid, realm, random, readSnapshot() {
       assert.equal(held, null, 'No stale held capture'); captures++; held = raw; events.push('capture'); return held;
     } });
     const adapter = {
