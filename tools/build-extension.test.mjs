@@ -59,6 +59,7 @@ const syntheticGlue = `// Original synthetic package-validation fixture; not gen
 import { copyHudIngressPlan, copyHudIngressReport } from './${snippetName}';
 export class AnimatedScene {}
 export class DesktopQuality {}
+export function desktop_backing_size() {}
 const url = new URL('slither_client_bg.wasm', import.meta.url);
 async function __wbg_init() {}
 export { __wbg_init as default };
@@ -250,6 +251,9 @@ for (const [name, change, expected] of [
   ['non-Wasm bytes', f => f.write('dist/web/slither_client_bg.wasm', Buffer.from('not Wasm')), /valid version-1 WebAssembly/],
   ['truncated Wasm', f => f.write('dist/web/slither_client_bg.wasm', syntheticWasm().subarray(0, 10)), /valid version-1 WebAssembly/],
   ['empty valid Wasm', f => f.write('dist/web/slither_client_bg.wasm', syntheticWasm().subarray(0, 8)), /Wasm\/glue export mismatch/],
+  ['missing JavaScript desktop sizing export',
+    f => f.write('dist/web/slither_client.js', syntheticGlue.replace('export function desktop_backing_size() {}\n', '')),
+    /generated web entrypoint/],
   ['wrong generated URL', f => f.write('dist/web/slither_client.js', syntheticGlue.replace('slither_client_bg.wasm', 'elsewhere.wasm')), /generated web entrypoint/],
   ['mismatched glue exports', f => f.write('dist/web/slither_client.js', `${syntheticGlue}\nwasm.absent();`), /Wasm\/glue export mismatch: absent/],
   ['remote module', f => f.write('web/animated.mjs', "import init from 'https://example.invalid/client.js';"), /Nonlocal module import/],

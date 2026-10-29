@@ -106,6 +106,7 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, g
   const exports = new Set(WebAssembly.Module.exports(new WebAssembly.Module(wasm)).map(entry => entry.name));
   const glue = bindings.get('slither_client.js').toString('utf8');
   if (!/export class AnimatedScene\b/.test(glue) || !/export class DesktopQuality\b/.test(glue)
+    || !/export function desktop_backing_size\b/.test(glue)
     || !/new URL\(['"]slither_client_bg\.wasm['"], import\.meta\.url\)/.test(glue)
     || !/export\s*\{[^}]*\b__wbg_init as default\s*\}/.test(glue)) {
     throw new Error('Expected the generated web entrypoint for slither_client');
