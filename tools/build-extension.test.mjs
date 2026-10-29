@@ -283,7 +283,7 @@ for (const name of ['animatedscene_control_view', 'animatedscene_advance_with_co
   'animatedscene_enable_minimap_tracking', 'animatedscene_observe_minimap_ui_fraction', 'animatedscene_minimap_view',
   'animatedscene_apply_frame_and_render_standard_with_face_presentation_and_prey_and_hud',
   'encode_login', 'solve_challenge', 'decode_frame', 'setup_protocol_version',
-  'resolve_skin', 'resolve_local_skin', 'stock_accessory_id', 'stock_accessory_forward', 'endscreenprojector_new', 'endscreenprojector_project', '__wbg_endscreenprojector_free']) {
+  'resolve_skin', 'resolve_local_skin', 'stock_accessory_id', 'stock_accessory_forward', 'desktop_backing_size', 'endscreenprojector_new', 'endscreenprojector_project', '__wbg_endscreenprojector_free']) {
   test(`missing production gameplay ABI ${name} fails before package output`, t => {
     const f = fixture(t);
     f.write('dist/web/slither_client_bg.wasm', syntheticWasm(name));
