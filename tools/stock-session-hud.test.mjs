@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import vm from 'node:vm';
-import { createStockSession } from '../web/stock-session.mjs';
+import { createStockSession } from './fixtures/session-policy-fixture.mjs';
 import { createStockClient } from '../web/stock-client.mjs';
 import { copyHudIngressPlan, copyHudIngressReport } from '../web/stock-hud-contract.mjs';
 

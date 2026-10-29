@@ -1,4 +1,5 @@
 import { authoredSourceRecipesDouble } from './fixtures/authored-source-fixture.mjs';
+import { TestSessionPolicy } from './fixtures/session-policy-double.mjs';
 import { stockSkinPolicyDouble, stockSkinWasmDouble } from './stock-skin-policy-double.mjs';
 import { TestDesktopInput } from './fixtures/client-input-fixture.mjs';
 import { createLeaderboardHistoryDouble } from './leaderboard-history-double.mjs';
@@ -253,7 +254,7 @@ function wasmDouble(f) {
     begin_connection() { calls.push('quality.connection'); }
     free() { qualityFrees++; f.faults.cleanup?.('quality.free'); }
   }
-  const api = { authored_source_recipes: authoredSourceRecipesDouble, ...stockSkinWasmDouble, DesktopInput: TestDesktopInput, AnimatedScene, DesktopQuality, HudHistory: createHudHistoryDouble(), LeaderboardHistory: createLeaderboardHistoryDouble(),
+  const api = { authored_source_recipes: authoredSourceRecipesDouble, ...stockSkinWasmDouble, DesktopInput: TestDesktopInput, SessionPolicy: TestSessionPolicy, AnimatedScene, DesktopQuality, HudHistory: createHudHistoryDouble(), LeaderboardHistory: createLeaderboardHistoryDouble(),
     desktop_backing_size: desktopBackingOracle,
     encode_login() { return Uint8Array.of(115, 1); }, solve_challenge() { return new Uint8Array(27); },
     setup_protocol_version() { return 19; },

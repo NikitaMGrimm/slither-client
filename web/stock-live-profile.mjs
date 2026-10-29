@@ -12,6 +12,8 @@ const bufferLength = Object.getOwnPropertyDescriptor(ArrayBuffer.prototype, 'byt
 const setBytes = typed.set;
 const fillBytes = typed.fill;
 const then = Promise.prototype.then;
+const nativeCall = Function.prototype.call;
+const nativeBind = Function.prototype.bind;
 
 const PIN = freeze({ expectedBytes: 224092,
   sha256: '5ad8aa8f06d1e71bad2945001bab077f8d4d279c093a046d19b6f26ac6b62095',
@@ -83,61 +85,67 @@ function checkedPin(value, size) {
   if (size !== pin.expectedBytes) throw failure('bad-size');
   return { ...pin, ...spans(freeze({ version: pin.version, password: pin.password }), size) };
 }
-const space = byte => byte === 32 || byte === 9 || byte === 10 || byte === 13;
-const digit = byte => byte >= 48 && byte <= 57;
-const initial = byte => (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte === 95 || byte === 36;
-function cursor(source, span) {
-  let offset = span.start;
-  const reject = () => { throw failure('bad-literal'); };
-  function ws(required = false) {
-    const before = offset;
-    while (offset < span.end && space(source[offset])) offset++;
-    if (required && before === offset) reject();
-  }
-  function token(text) {
-    for (let i = 0; i < text.length; i++) {
-      if (offset >= span.end || source[offset++] !== text.charCodeAt(i)) reject();
+function literalPolicy(Parser) {
+  try {
+    if (typeof Parser !== 'function') throw 0;
+    const prototype = Object.getOwnPropertyDescriptor(Parser, 'prototype');
+    if (!prototype || !Object.hasOwn(prototype, 'value')) throw 0;
+    const methods = {};
+    for (const name of ['write', 'parse_version', 'parse_password', 'password_byte', 'protocol_version', 'clear', 'free']) {
+      const field = Object.getOwnPropertyDescriptor(prototype.value, name);
+      if (!field || !Object.hasOwn(field, 'value') || typeof field.value !== 'function') throw 0;
+      methods[name] = Reflect.apply(nativeBind, nativeCall, [field.value]);
     }
-  }
-  function identifier() {
-    if (offset >= span.end || !initial(source[offset])) reject();
-    let count = 0;
-    while (offset < span.end && (initial(source[offset]) || digit(source[offset]))) {
-      if (++count > 64) reject();
-      offset++;
-    }
-  }
-  function decimal(maxDigits, maximum) {
-    if (offset >= span.end || !digit(source[offset])) reject();
-    const zero = source[offset] === 48;
-    let count = 0, value = 0;
-    while (offset < span.end && digit(source[offset])) {
-      if (++count > maxDigits || (zero && count > 1)) reject();
-      value = value * 10 + source[offset++] - 48;
-      if (value > maximum) reject();
-    }
-    return value;
-  }
-  function begin() { ws(); token('var'); ws(true); identifier(); ws(); token('='); ws(); }
-  function end() { ws(); token(';'); ws(); if (offset !== span.end) reject(); }
-  return { ws, token, decimal, begin, end };
+    return { create() { try { return new Parser(); } catch { throw failure('unavailable-native'); } }, methods };
+  } catch { throw failure('unavailable-native'); }
 }
-function extract(source, parts, bytes, own) {
-  const version = cursor(source, parts.version);
-  version.begin();
-  const clientVersion = version.decimal(5, 65535);
-  version.end();
-  const password = own(bytes.allocate(20));
-  if (bytes.length(password) !== 20) throw failure('unavailable-native');
-  const parser = cursor(source, parts.password);
-  parser.begin(); parser.token('['); parser.ws();
-  for (let i = 0; i < 20; i++) {
-    if (i) { parser.token(','); parser.ws(); }
-    password[i] = parser.decimal(3, 255);
-    parser.ws();
+function extract(source, parts, bytes, own, policy) {
+  const parser = policy.create();
+  const call = (name, first, second) => {
+    // Scalar native arguments avoid extra authored JS arrays containing source bytes.
+    try {
+      const result = policy.methods[name](parser, first, second);
+      if ((result !== null && typeof result === 'object') || typeof result === 'function') {
+        drain(result); throw failure('bad-literal');
+      }
+      return result;
+    }
+    catch { throw failure('bad-literal'); }
+  };
+  try {
+    const copy = (span, offset) => {
+      for (let i = 0; i < span.end - span.start; i++) {
+        if (call('write', offset + i, source[span.start + i]) !== true) throw failure('bad-literal');
+      }
+    };
+    copy(parts.version, 0);
+    const clientVersion = call('parse_version', parts.version.end - parts.version.start);
+    if (clientVersion === -1) throw failure('bad-literal');
+    if (!Number.isInteger(clientVersion) || clientVersion < 0 || clientVersion > 65535) throw failure('bad-literal');
+    // Keep the captured native password allocation at its existing version-before-password boundary.
+    const password = own(bytes.allocate(20));
+    if (bytes.length(password) !== 20) throw failure('unavailable-native');
+    copy(parts.password, 128);
+    if (call('parse_password', parts.password.end - parts.password.start) !== true) throw failure('bad-literal');
+    for (let i = 0; i < 20; i++) {
+      const byte = call('password_byte', i);
+      if (!Number.isInteger(byte) || byte < 0 || byte > 255) throw failure('bad-literal');
+      password[i] = byte;
+    }
+    const protocolVersion = call('protocol_version');
+    if (protocolVersion !== 19) throw failure('bad-literal');
+    return freeze({ clientVersion, password, protocolVersion });
+  } finally {
+    // Zero live Wasm storage before releasing it, even after partial writes or rejection.
+    let cleared = true;
+    for (const method of [policy.methods.clear, policy.methods.free]) {
+      try {
+        const result = method(parser);
+        if (result !== undefined) { drain(result); cleared = false; }
+      } catch { cleared = false; }
+    }
+    if (!cleared) throw failure('cleanup-failed');
   }
-  parser.token(']'); parser.end();
-  return freeze({ clientVersion, password, protocolVersion: 19 });
 }
 function ownership(bytes) {
   const buffers = new Set();
@@ -155,13 +163,13 @@ function ownership(bytes) {
 }
 
 /** Pure offline parser. Caller owns input and the returned password; no hash/fetch authority. */
-export function parseClosedProfileDeclarations(source, frozenSpans) {
+export function parseClosedProfileDeclarations(source, frozenSpans, ProfileLiteralParser) {
   const owned = ownership(offlineBytes);
-  try { return extract(source, spans(frozenSpans, offlineBytes.length(source)), offlineBytes, owned.own); }
+  try { return extract(source, spans(frozenSpans, offlineBytes.length(source)), offlineBytes, owned.own, literalPolicy(ProfileLiteralParser)); }
   catch (error) { owned.clearAll(); throw error instanceof ProfileFailure ? error : failure('bad-literal'); }
 }
 
-async function verified(source, pin, digest, bytes, owned, checkpoint) {
+async function verified(source, pin, digest, bytes, owned, checkpoint, policy) {
   const metadata = checkedPin(pin, bytes.length(source));
   let result;
   try { result = await digest('SHA-256', source); } catch { throw failure('digest-failed'); }
@@ -174,7 +182,7 @@ async function verified(source, pin, digest, bytes, owned, checkpoint) {
   if (mismatch) throw failure('hash-mismatch');
   owned.clear(hash);
   checkpoint();
-  return extract(source, metadata, bytes, owned.own);
+  return extract(source, metadata, bytes, owned.own, policy);
 }
 function consume(consumer, profile) {
   let result;
@@ -186,10 +194,10 @@ function consume(consumer, profile) {
 export async function verifyAndConsumeProfileBytes(options) {
   const owned = ownership(offlineBytes);
   try {
-    const args = data(options, ['source', 'pin', 'digest', 'consumeProfile'], [], 'bad-pin');
+    const args = data(options, ['source', 'pin', 'digest', 'consumeProfile', 'literalParser'], [], 'bad-pin');
     const source = owned.own(args.source);
     if (typeof args.digest !== 'function' || typeof args.consumeProfile !== 'function') throw failure('consumer-failed');
-    const profile = await verified(source, args.pin, args.digest, offlineBytes, owned, () => {});
+    const profile = await verified(source, args.pin, args.digest, offlineBytes, owned, () => {}, literalPolicy(args.literalParser));
     owned.clear(source);
     consume(args.consumeProfile, profile);
   } catch (error) { throw error instanceof ProfileFailure ? error : failure('bad-literal'); }
@@ -198,7 +206,8 @@ export async function verifyAndConsumeProfileBytes(options) {
 
 /** One explicit Play acquisition; all browser authority is privately captured by the gate. */
 export function createStockLiveProfileAcquirer(options) {
-  const args = data(options, ['capabilities', 'isCurrentDocument']);
+  const args = data(options, ['capabilities', 'isCurrentDocument', 'literalParser']);
+  const policy = literalPolicy(args.literalParser);
   if (typeof args.isCurrentDocument !== 'function') throw failure('unavailable-native');
   const currentDocument = args.isCurrentDocument;
   const raw = data(args.capabilities, ['fetch', 'digest', 'createAbort', 'setTimeout', 'clearTimeout', 'now',
@@ -292,7 +301,7 @@ export function createStockLiveProfileAcquirer(options) {
       }
       if (count !== PIN.expectedBytes) throw failure('bad-size');
       const source = op.source;
-      const profile = await verified(source, PIN, caps.digest, bytes, op.owned, () => check(op));
+      const profile = await verified(source, PIN, caps.digest, bytes, op.owned, () => check(op), policy);
       check(op); environment();
       op.owned.clear(source); op.source = undefined;
       check(op);

@@ -1,7 +1,7 @@
 // Authored synthetic fixtures and structural Wasm/socket doubles only. No native or network execution.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createStockSession } from '../web/stock-session.mjs';
+import { createStockSession } from './fixtures/session-policy-fixture.mjs';
 
 const setup = [97, ...new Array(22).fill(0), 19, 42];
 const request = () => ({ endpoint: 'ws://192.0.2.9:1234/slither',

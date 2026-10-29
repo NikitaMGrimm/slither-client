@@ -59,7 +59,7 @@ function reportAdditionalFailures(message, failures) {
 export async function stockProfileSmoke(wasm) {
   if (running) throw new Error('Profile smoke already active');
   for (const name of ['AnimatedScene', 'DesktopQuality', 'encode_login', 'solve_challenge',
-    'decode_frame', 'setup_protocol_version']) {
+    'decode_frame', 'setup_protocol_version', 'ProfileLiteralParser']) {
     if (typeof wasm?.[name] !== 'function') throw new TypeError(`Real Wasm capability required: ${name}`);
   }
   if (typeof wasm.AnimatedScene.prototype.advance_with_control !== 'function') {

@@ -9,12 +9,10 @@ the following exceptions:
 
 | JavaScript module | State or logic still outside Rust |
 | --- | --- |
-| `web/stock-session.mjs` | Mixed socket/callback plumbing and handshake, ping/lag, death/return and command-time lifecycle policy. |
 | `web/stock-gameplay.mjs` | Mixed capability/scheduling glue and input/session reconciliation, reset ordering and staged HUD state publication. |
 | `web/stock-client.mjs` | Mixed borrowed-source/Canvas/Wasm glue and update/draw/quality ordering with successful-draw statistics counters. |
-| `web/handshake-session.mjs` | Challenge/login/setup state machine and frame limits; Rust already owns encoding, decoding and challenge arithmetic. |
+| `web/handshake-session.mjs` | Standalone probe-only challenge/login/setup sequencing; production uses only packed-ABI record admission from this module. |
 | `web/stock-hud-view.mjs` | Binding/readiness composition around Rust-formatted current/final HUD values. |
-| `extension/game-runtime.mjs` | Mixed entry/DOM/capability plumbing and Play admission/availability state. |
 
 The browser-free Rust leaderboard owner retains command-ordered Setup/table and
 board history, one-use prepared operations, revisions, name/text/style policy and
@@ -31,9 +29,30 @@ before returning to synchronous host callbacks. `web/client-input.mjs` retains
 scalar/record admission, arbitrary `Object.is` token identity and callback order;
 it contains no numeric policy fallback. Session ping remains between keyboard
 and boost, and callbacks can update public input setters between phases.
+Browser-free `session_policy` owns production session phases, launch/reset commit,
+Setup and canonical-control admission, handshake budgets, pending action revisions,
+ping/lag thresholds and command-time death/final/return history. Its copied
+`SessionPolicy` Wasm stages return before socket, packet, HUD or state callbacks;
+terminal flags commit before detach, reset intents and close/notification effects.
+`web/stock-session.mjs` retains socket/listener/clock/send/close capabilities,
+URL/buffer/record admission, generation and callback-resource fences, issued
+action-record identity and exact JS errors. An accessor's uncoerced final ping-clock
+value remains an opaque host value; Rust owns its marker, pending intent and
+threshold gates. Necessary host arithmetic coercion runs at the original later
+boundaries, outside Rust borrows. There is no production policy fallback.
+Close and native resets retain the owner; explicit disposal releases it once,
+with active resource leases deferring release and preserving primary failures.
+The separate `HandshakeSession` class is used only by standalone probes, never
+production gameplay. Its probe sequencing remains outside this migration.
+
 The default [player menu](menu-preferences.md) keeps appearance selection, custom
 run editing and bounded preference restore in Rust. Captured DOM/storage glue
 restores nickname/appearance and passes their copied bytes to explicit Play.
+The browser-free [Play admission owner](play-admission.md) retains availability,
+accepted attempts and local explicit-return admission. Its primitive Wasm boundary
+releases each Rust borrow before UI locking, status, unlock or launch effects.
+Runtime JS retains native security/generation guards, URL/capability admission,
+session observations, promises and browser effects; it has no admission fallback.
 `desktop_layout::desktop_backing_size` owns desktop viewport arithmetic in
 browser-free Rust. Its pure Wasm export returns a fresh copied width/height
 record; `web/desktop-layout.mjs` admits primitive inputs and copies that output
@@ -121,6 +140,16 @@ wasm-bindgen 0.2.129 and web-sys 0.3.106.
 - `challenge::solve_challenge` accepts at most 512 encoded bytes and a closed
   token grammar with two fixed-length literals and a fixed copy loop. It rejects
   unsupported syntax without evaluating a general program.
+- `profile_literals` owns only the existing closed decimal declaration grammar:
+  bounded ASCII identifiers, four whitespace bytes, a u16 client version and
+  exactly twenty u8 password values. The Wasm `ProfileLiteralParser` copies at
+  most the admitted 128/256-byte spans through scalar calls into bounded scratch;
+  no source string or generated slice allocation crosses that API. It clears
+  each parsed input region and the JS adapter explicitly clears then frees the
+  complete scratch owner before publishing its copied profile. URL/origin/pin,
+  size/span/digest admission, native buffers, acquisition, deadline, cancellation
+  and consumers remain in the browser boundary. Production requires initialized
+  Wasm; the previous authored JS grammar exists only as a tools-only test oracle.
 - `protocol::decode_frame` requires an explicit elapsed-header mode and validates
   the entire frame before returning borrowed command slices. Frames are limited
   to 1 MiB and 4096 commands. It checks framing and setup field boundaries;

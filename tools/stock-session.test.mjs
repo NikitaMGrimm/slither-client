@@ -1,7 +1,7 @@
 // Original synthetic fixtures and socket/Wasm doubles; no source archive or network.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createStockSession, stockEndpoint } from '../web/stock-session.mjs';
+import { createStockSession, stockEndpoint } from './fixtures/session-policy-fixture.mjs';
 import { createClientInput } from './fixtures/client-input-fixture.mjs';
 
 const packed = commands => Uint8Array.from(commands.flatMap(command => [0, 0, command.length >> 8, command.length & 255, ...command]));

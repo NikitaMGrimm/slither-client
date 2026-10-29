@@ -144,7 +144,7 @@ export function stockSessionSmoke(wasm) {
       },
       dispose() {
         let failed=false,primary;
-        for(const cleanup of [()=>session.close('smoke-cleanup'),unsubscribe,()=>input.dispose(),()=>scene.free()]){
+        for(const cleanup of [()=>session.dispose('smoke-cleanup'),unsubscribe,()=>input.dispose(),()=>scene.free()]){
           try{cleanup();}catch(error){if(!failed){failed=true;primary=error;}}
         }
         if(failed)throw primary;

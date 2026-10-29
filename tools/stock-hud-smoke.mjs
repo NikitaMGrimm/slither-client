@@ -329,6 +329,7 @@ export function stockHudSmoke(wasm) {
         close() { this.closes++; this.readyState = 3; } };
       sockets.push(socket); return socket;
     } });
+    owners.push({ free: () => session.dispose() });
     const unsubscribe = session.subscribeWithLeaderboardRows({
       packet(bytes, elapsed, packetPlan) {
         rowTrace.push('packet'); eq(packetPlan.schema, 2);

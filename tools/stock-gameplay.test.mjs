@@ -1,3 +1,4 @@
+import { TestSessionPolicy } from './fixtures/session-policy-double.mjs';
 import { TestDesktopInput } from './fixtures/client-input-fixture.mjs';
 // Original synthetic protocol, scene and native scheduling doubles; no real socket.
 import assert from 'node:assert/strict';
@@ -87,7 +88,7 @@ function harness({ useStockController = false, InputPolicy = TestDesktopInput } 
   }
   const gameplay = createStockGameplay({ scene, controller,
     quality,
-    wasm: { DesktopInput: InputPolicy,
+    wasm: { DesktopInput: InputPolicy, SessionPolicy: TestSessionPolicy,
       encode_login() { return Uint8Array.of(115, 1); }, solve_challenge() { return new Uint8Array(27); },
       setup_protocol_version() { return 19; },
       decode_frame(bytes) {

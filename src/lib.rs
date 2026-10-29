@@ -19,8 +19,11 @@ pub mod challenge;
 pub mod desktop_input;
 pub mod desktop_layout;
 pub mod menu_preferences;
+pub mod play_admission;
 pub mod presentation;
+pub mod profile_literals;
 pub mod protocol;
+pub mod session_policy;
 pub mod start_page;
 pub mod state;
 
@@ -31,13 +34,22 @@ mod start_page_browser;
 mod menu_preferences_browser;
 
 #[cfg(target_arch = "wasm32")]
+mod play_admission_browser;
+
+#[cfg(target_arch = "wasm32")]
 mod desktop_layout_browser;
+
+#[cfg(target_arch = "wasm32")]
+mod profile_literals_browser;
 
 #[cfg(target_arch = "wasm32")]
 mod browser;
 
 #[cfg(target_arch = "wasm32")]
 mod desktop_input_browser;
+
+#[cfg(target_arch = "wasm32")]
+mod session_policy_browser;
 
 #[cfg(target_arch = "wasm32")]
 mod canvas_browser;

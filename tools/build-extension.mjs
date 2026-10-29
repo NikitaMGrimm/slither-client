@@ -106,9 +106,12 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, g
   const exports = new Set(WebAssembly.Module.exports(new WebAssembly.Module(wasm)).map(entry => entry.name));
   const glue = bindings.get('slither_client.js').toString('utf8');
   if (!/export class AnimatedScene\b/.test(glue) || !/export class DesktopQuality\b/.test(glue)
+    || !/export class ProfileLiteralParser\b/.test(glue)
     || !/export class DesktopInput\b/.test(glue)
     || !/export function authored_source_recipes\b/.test(glue)
+    || !/export class SessionPolicy\b/.test(glue)
     || !/export function desktop_backing_size\b/.test(glue)
+    || !/export class PlayAdmission\b/.test(glue)
     || !/new URL\(['"]slither_client_bg\.wasm['"], import\.meta\.url\)/.test(glue)
     || !/export\s*\{[^}]*\b__wbg_init as default\s*\}/.test(glue)) {
     throw new Error('Expected the generated web entrypoint for slither_client');
@@ -125,7 +128,7 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, g
     throw new Error('Generated HUD validator differs from its authored source; rebuild before packaging');
   }
   bindings.set(snippetName, snippet);
-  for (const name of ['memory', 'animatedscene_new', 'desktopquality_new', 'desktopinput_new',
+  for (const name of ['memory', 'animatedscene_new', 'desktopquality_new', 'desktopinput_new', 'sessionpolicy_new', 'sessionpolicy_prepare_controls', 'sessionpolicy_commit_controls', 'sessionpolicy_commit_control', 'sessionpolicy_protocol_allowed', 'sessionpolicy_negotiation_packet', 'sessionpolicy_commit_ping', 'sessionpolicy_ping_external', 'sessionpolicy_ping_due_elapsed', 'sessionpolicy_commit_opaque_ping', 'sessionpolicy_lag_check_needed', 'sessionpolicy_observe_lag_elapsed', 'sessionpolicy_death_time', 'sessionpolicy_death_elapsed', 'sessionpolicy_advance_step_elapsed', 'sessionpolicy_valid_input', '__wbg_sessionpolicy_free',
     'animatedscene_apply_frame_and_render_standard_with_face_presentation_and_prey',
     'animatedscene_apply_frame_and_render_standard_with_face_presentation_and_prey_and_hud',
     'animatedscene_render_standard_with_face_presentation_at_size',
@@ -136,7 +139,17 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, g
     'animatedscene_enable_minimap_tracking', 'animatedscene_observe_minimap_ui_fraction', 'animatedscene_minimap_view',
     'encode_login', 'solve_challenge', 'decode_frame', 'setup_protocol_version',
     'resolve_skin', 'resolve_local_skin', 'stock_custom_palette_mask_valid', 'authored_source_recipes', 'stock_accessory_id', 'stock_accessory_forward', 'start_page_view', 'desktop_backing_size',
+    'profileliteralparser_new',
+    'profileliteralparser_write',
+    'profileliteralparser_parse_version',
+    'profileliteralparser_parse_password',
+    'profileliteralparser_password_byte',
+    'profileliteralparser_protocol_version',
+    'profileliteralparser_clear',
+    '__wbg_profileliteralparser_free',
     'endscreenprojector_new', 'endscreenprojector_project', '__wbg_endscreenprojector_free',
+    'playadmission_new', 'playadmission_available', 'playadmission_accepted', 'playadmission_nickname_valid',
+    'playadmission_accept', 'playadmission_lock_unavailable', 'playadmission_return_ready', 'playadmission_complete_return', '__wbg_playadmission_free',
     ...Array.from(glue.matchAll(/\bwasm\.([A-Za-z_]\w*)/g), match => match[1])]) {
     if (!exports.has(name)) throw new Error(`Wasm/glue export mismatch: ${name}`);
   }

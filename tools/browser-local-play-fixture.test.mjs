@@ -160,6 +160,6 @@ if (process.env.SLITHER_LOCAL_PLAY_WASM === '1') {
       replaceSession(); assert.equal(receipt.connections, 1);
       play(); tick(6225); await settle(); assert.equal(receipt.connections, 2); assert.equal(receipt.logins, 2);
       assert.equal(session.snapshot().phase, 'playing'); assert.deepEqual(errors, []); assert.deepEqual(receipt.errors, []);
-    } finally { try { session.close(); } finally { try { input.dispose(); } finally { scene.free(); } } }
+    } finally { try { session.dispose(); } finally { try { input.dispose(); } finally { scene.free(); } } }
   });
 }

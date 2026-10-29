@@ -1,7 +1,7 @@
 // Original synthetic fixtures and opaque Wasm/transport doubles; no reference or network.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createStockSession } from '../web/stock-session.mjs';
+import { createStockSession } from './fixtures/session-policy-fixture.mjs';
 
 function request(nickname) {
   return { endpoint: 'ws://192.0.2.9:1234/slither',
