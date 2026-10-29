@@ -76,7 +76,9 @@ outline, shadow and death-highlight canvases; JavaScript binds those source
 objects through the existing provider. Admitted custom runs use first-variant
 shading and project each palette modulo three, preserving admitted run counts
 and order without merging projection collisions. Empty or rejected custom data
-keeps the existing `skin % 3` selection. These authored families do not imply
+uses the requested built-in run pattern with each palette projected modulo three,
+preserving run counts, order and cycle seams with seven-variant shading. The local
+chooser still offers its three existing selections. These authored families do not imply
 stock 42-color equivalence. The production stock adapter separately binds the
 existing Rust resolve_skin for built-in/custom runs, face/antenna geometry and
 rotation policy, and validates the host custom mask through the same Rust

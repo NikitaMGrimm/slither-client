@@ -7,6 +7,25 @@ DOM constructors from the trusted page realm, and a bounded asset catalog.
 It is not a sandbox for callbacks, proxies, getters, patched builtins, or an
 arbitrary page. The caller is responsible for authorization and host compatibility.
 
+The local source binder uses the pure Rust `resolve_local_skin` policy for both
+gameplay and admitted local preview selections. Without admitted custom data,
+it preserves the requested built-in's ordered positive run counts and cycle
+seam, projecting each palette ID modulo three onto the existing authored source
+families. Projection collisions stay separate, including adjacent equal palettes
+and equal cycle endpoints. For example, built-in 10 becomes runs `(0,5), (1,5),
+(1,5)`, with base palette zero. Seven-variant ping-pong shading, default body
+style, plain paired eyes and no antenna remain the local policy, including for
+stock selections that normally require special artwork or dense sources.
+
+Admitted custom runs keep their existing normal palette admission, adjacent
+coalescing before projection, ignored unmatched final byte and 255-byte bound.
+They project modulo three without further merging and use first-variant shading.
+The requested skin byte stays unchanged. This adds built-in stripe layouts over
+three stand-in families, not stock colors, image roles, catalog/unlock authority
+or more local chooser choices. The real-Wasm smoke source covers the policy and
+existing source binding; it requires a fresh matching build to validate changed
+Rust code. Inert provider tests alone do not establish that ABI or browser pixels.
+
 ```ts
 type Status = 'ready' | 'pending' | 'unsupported';
 type Revision = string | number;

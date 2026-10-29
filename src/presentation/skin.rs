@@ -156,11 +156,12 @@ impl fmt::Display for SkinError {
 
 impl Error for SkinError {}
 
-/// Preserve the current authored local three-color stand-in selection.
+/// Project skin patterns over the three existing authored local stand-in families.
 ///
-/// Without admitted custom runs, select `skin % 3` and seven ping-pong variants.
-/// Otherwise reuse normal custom admission, projecting each admitted palette
-/// modulo three without merging the resulting runs, with first-variant shading.
+/// Preserve built-in run counts and order, projecting only their palettes modulo
+/// three, with seven ping-pong variants. Admitted custom runs use the same palette
+/// projection after normal admission, with first-variant shading. Neither path
+/// merges projection collisions or the cycle seam.
 /// Both paths retain plain paired eyes, no antenna and the requested skin byte.
 /// These authored family IDs do not claim stock 42-palette color equivalence.
 pub fn resolve_authored_local_skin(
@@ -169,12 +170,13 @@ pub fn resolve_authored_local_skin(
 ) -> Result<SkinDescriptor, SkinError> {
     let mut descriptor = resolve_skin(skin % 3, custom_bytes, false)?;
     descriptor.skin = skin;
-    if descriptor.custom {
-        for run in &mut descriptor.runs {
-            run.palette %= 3;
-        }
-        descriptor.base_palette = descriptor.runs[0].palette;
+    if !descriptor.custom {
+        descriptor.runs = builtin(skin);
     }
+    for run in &mut descriptor.runs {
+        run.palette %= 3;
+    }
+    descriptor.base_palette = descriptor.runs[0].palette;
     Ok(descriptor)
 }
 
