@@ -15,6 +15,7 @@ test('local provider preserves built-in stripes and projection collisions over e
   };
   const calls = [];
   const resolve = createLocalBodyResolver(bodySources, realm, (skin, bytes) => {
+    assert(bytes instanceof Uint8Array, 'explicit custom byte array reaches the local policy');
     calls.push({ skin, bytes }); return resolveLocalSkinDouble(skin, bytes);
   });
   for (const [skin, runs] of [
@@ -24,7 +25,7 @@ test('local provider preserves built-in stripes and projection collisions over e
     [29, [{ palette: 2, count: 2 }, { palette: 1, count: 1 }, { palette: 2, count: 4 }, { palette: 1, count: 1 }, { palette: 2, count: 2 }]],
     [20, [{ palette: 0, count: 5 }, { palette: 0, count: 5 }]],
   ]) {
-    const { recipe, status } = resolve({ skin, cosmetic: 0 });
+    const { recipe, status } = resolve({ skin, customBytes: new Uint8Array(), cosmetic: 0 });
     assert.equal(status, 'ready'); assert.equal(calls.at(-1).skin, skin);
     assert.deepEqual(recipe.runs, runs); assert.equal(recipe.basePalette, runs[0].palette);
     assert.equal(recipe.custom, false); assert.equal(recipe.variantMode, 'ping-pong'); assert.equal(recipe.variantPeriod, 7);

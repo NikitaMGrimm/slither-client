@@ -80,7 +80,7 @@ export function skinPolicySmoke(wasm) {
   const bind = createLocalBodyResolver(bodySources,
     { HTMLCanvasElement: Canvas, HTMLImageElement: Image }, wasm.resolve_local_skin);
   for (const skin of [9, 10, 15, 20, 29, 60]) {
-    const { recipe, status } = bind({ skin });
+    const { recipe, status } = bind({ skin, customBytes: new Uint8Array() });
     equal(status, 'ready', 'local builtin through actual Wasm/provider');
     equal(recipe.runs, resolveLocalSkinDouble(skin).runs, 'builtin run boundaries survive source binding');
     equal([recipe.variantMode, recipe.variantPeriod, recipe.eyes.kind, recipe.attachment],
