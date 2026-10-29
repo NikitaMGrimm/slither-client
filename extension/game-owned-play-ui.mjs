@@ -1,4 +1,5 @@
 import { startPageLayout } from './start-page-layout.mjs';
+import { createOwnedLoadingUi } from './game-owned-loading-ui.mjs';
 
 // Retain the inert lease before guarded native work.
 const freeze = Object.freeze;
@@ -47,8 +48,9 @@ function synchronous(callback) {
 }
 
 /** Native failures unwind to the retaining runtime; this view never cleans up an active operation. */
-export function createOwnedPlayUi(input, showEndpoint = true, menuDisabled) {
+export function createOwnedPlayUi(input, showEndpoint = true, menuDisabled, showBusyIndicator = false) {
   if (typeof showEndpoint !== 'boolean') invalid();
+  if (typeof showBusyIndicator !== 'boolean') invalid();
   if (menuDisabled !== undefined) synchronous(menuDisabled);
   let options = record(input, ['document', 'parent', 'dom', 'construct', 'controls', 'isCurrentDocument', 'projectStartPage']);
   input = undefined;
@@ -69,6 +71,7 @@ export function createOwnedPlayUi(input, showEndpoint = true, menuDisabled) {
   options = undefined;
   let attempted = false, disposed = false, active = false, mounted = false, locked = false;
   let ownedMount, endpointRow, button, buttonText, status, statusText;
+  let busyUi, busyNode;
   let state = 'ready', playing = false, appliedDisabled = false;
 
   const view = (nextState = state, nextLocked = locked, nextPlaying = playing) => {
@@ -80,7 +83,8 @@ export function createOwnedPlayUi(input, showEndpoint = true, menuDisabled) {
   };
   const render = projection => {
     if (menuDisabled !== undefined) menuDisabled(projection.disabled);
-    call('setText', statusText, projection.status);
+    if (busyUi) busyUi.render({ visible: true, busy: projection.busy, text: projection.status });
+    else call('setText', statusText, projection.status);
     call('setText', buttonText, projection.button);
     if (projection.disabled !== appliedDisabled) {
       // Consume before a native setter that may throw after its effect.
@@ -120,12 +124,15 @@ export function createOwnedPlayUi(input, showEndpoint = true, menuDisabled) {
   const requireMounted = () => {
     if (!mounted) throw new Error('Owned Play panel not mounted');
     requireCurrent();
-    if (!currentMount() || !connectedHere(button) || !connectedHere(status) || !connectedHere(statusText)
+    if (!currentMount() || !connectedHere(button) || !connectedHere(status)
       || call('parentNode', button) !== ownedMount || call('parentNode', status) !== ownedMount
-      || call('parentNode', statusText) !== status || call('firstChild', status) !== statusText
-      || call('nextSibling', statusText) !== null
       || !connectedHere(buttonText) || call('parentNode', buttonText) !== button
       || call('firstChild', button) !== buttonText || call('nextSibling', buttonText) !== null) invalid();
+    if (busyUi) {
+      busyUi.current();
+      if (call('firstChild', status) !== busyNode || call('nextSibling', busyNode) !== null) invalid();
+    } else if (!connectedHere(statusText) || call('parentNode', statusText) !== status
+      || call('firstChild', status) !== statusText || call('nextSibling', statusText) !== null) invalid();
   };
 
   function mount() {
@@ -201,6 +208,14 @@ export function createOwnedPlayUi(input, showEndpoint = true, menuDisabled) {
       if (!currentMount()) invalid();
       requireCurrent();
       mounted = true;
+      if (showBusyIndicator) {
+        busyUi = createOwnedLoadingUi({ document, parent: status, dom, construct, isCurrentDocument: checker });
+        apply(construct.removeChild, undefined, [status, statusText]);
+        statusText = undefined;
+        busyNode = busyUi.mount();
+        busyUi.render({ visible: true, busy: false, text: view().status });
+        requireMounted();
+      }
       return nodes;
     } finally {
       active = false;
@@ -277,14 +292,19 @@ export function createOwnedPlayUi(input, showEndpoint = true, menuDisabled) {
     if (disposed) return;
     disposed = true;
     active = true;
+    let failed = false, primary;
+    try { busyUi?.dispose(); } catch (error) { failed = true; primary = error; }
     try {
       if (ownedMount !== undefined && current() && currentMount()) {
         apply(construct.removeChild, undefined, [parent, ownedMount]);
       }
-    } finally {
+    } catch (error) { if (!failed) { failed = true; primary = error; } }
+    finally {
+      busyUi = busyNode = undefined;
       ownedMount = endpointRow = button = buttonText = status = statusText = document = parent = dom = construct = controls = checker = project = undefined;
       active = false;
     }
+    if (failed) throw primary;
   }
 
   return freeze({ mount, setStatus, setPlaying, lock, unlock, dispose });

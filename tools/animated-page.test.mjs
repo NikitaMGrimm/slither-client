@@ -1,3 +1,5 @@
+import { authoredSourceRecipesDouble } from './fixtures/authored-source-fixture.mjs';
+import { readAuthoredSourceRecipes } from '../web/authored-source-recipes.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
@@ -221,8 +223,8 @@ function pageFixture(t, { initialize = async () => {}, decode = async () => {},
   }
   class PageImage { decode() { return decode(); } }
   const ready = pageScript.runInNewContext({
-    init: initialize, wasm: { AnimatedScene, DesktopQuality, desktop_backing_size: desktopBackingOracle }, syntheticScene, syntheticStep,
-    createSyntheticBodyResolver, createSyntheticFoodResolver, createSyntheticPreyResolver, syntheticPreyCommands, desktopBackingSize,
+    init: initialize, wasm: { authored_source_recipes: authoredSourceRecipesDouble, AnimatedScene, DesktopQuality, desktop_backing_size: desktopBackingOracle }, syntheticScene, syntheticStep,
+    readAuthoredSourceRecipes, createSyntheticBodyResolver, createSyntheticFoodResolver, createSyntheticPreyResolver, syntheticPreyCommands, desktopBackingSize,
     loopbackEndpoint, sceneHeading, connectLoopback, window, AbortController,
     document: {
       querySelector(selector) {

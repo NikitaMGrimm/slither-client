@@ -3,6 +3,9 @@
 #slither-client-root p { position: absolute; left: 8px; top: 8px; margin: 0; pointer-events: none; white-space: pre; }
 #slither-client-root button { position: absolute; right: 8px; top: 8px; border-radius: 0; }
 #slither-client-root #slither-client-reload[hidden] { display: none; }
+/* Static pre-Wasm fallback uses the same authored composition as the owned lease. */
+#slither-client-root p.slither-client-loading { left: 50%; top: clamp(48px, 18vh, 180px); transform: translateX(-50%); width: min(420px, calc(100% - 32px)); box-sizing: border-box; padding-top: 112px; text-align: center; white-space: normal; font: 16px Arial, sans-serif; background: url('../assets/logo.svg') center top / 100% auto no-repeat; }
+#slither-client-root p.slither-client-loading progress { width: 64px; height: 8px; margin-left: 8px; vertical-align: middle; border-radius: 0; }
 /* Keep current labels hidden until the renderer populates every current value. */
 #slither-client-root > div > div:has(> div > span + b):has(> div > :empty) { display: none !important; }
 /* Override the owned final row's inline display until its value is populated. */

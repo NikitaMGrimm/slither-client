@@ -1,3 +1,4 @@
+import { authoredSourcesSmoke } from './authored-source-smoke.mjs';
 import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
@@ -24,17 +25,20 @@ import { skinPolicySmoke } from './skin-policy-smoke.mjs';
 import { startPageSmoke } from './start-page-smoke.mjs';
 import { endScreenSmoke } from './end-screen-smoke.mjs';
 import { menuPreferencesSmoke } from './menu-preferences-smoke.mjs';
+import { appearancePreviewSmoke } from './appearance-preview-smoke.mjs';
 import { desktopLayoutSmoke } from './desktop-layout-smoke.mjs';
 import { sessionPolicySmoke } from './session-policy-smoke.mjs';
 import { sessionPolicyRecordSmoke } from './session-policy-record-smoke.mjs';
 import { sessionPolicyLifetimeSmoke } from './session-policy-lifetime-smoke.mjs';
 import { profileLiteralsSmoke } from './profile-literals-smoke.mjs';
 import { playAdmissionSmoke } from './play-admission-smoke.mjs';
+import { menuLoadingSmoke } from './menu-loading-smoke.mjs';
 import { desktopInputSmoke } from './desktop-input-smoke.mjs';
 import { desktopInputLifetimeSmoke } from './desktop-input-lifetime-smoke.mjs';
 
 // Entirely synthetic ABI integration; no reference files or network are used.
 const wasm = await loadWasm();
+console.log('Synthetic real-Wasm authored source recipes passed:', await authoredSourcesSmoke(wasm));
 desktopLayoutSmoke(wasm);
 console.log('Synthetic real-Wasm session equivalence passed:', sessionPolicySmoke(wasm));
 console.log('Synthetic real-Wasm session lifetime passed:', sessionPolicyLifetimeSmoke(wasm));
@@ -51,6 +55,12 @@ const profileLiteralResult = execFileSync(process.execPath,
   { encoding: 'utf8', env: { ...process.env, SLITHER_PROFILE_LITERALS_WASM: '1' }, maxBuffer: 4 * 1024 * 1024 });
 console.log('Synthetic real-Wasm profile/acquirer lifetime requirements passed:',
   profileLiteralResult.split(/\r?\n/).filter(line => /^# (tests|pass|fail|skipped) /.test(line)).join(', '));
+menuLoadingSmoke(wasm);
+const menuLoadingResult = execFileSync(process.execPath,
+  ['--test', '--test-reporter=tap', fileURLToPath(new URL('./game-menu-loading-runtime.test.mjs', import.meta.url))],
+  { encoding: 'utf8', env: { ...process.env, SLITHER_MENU_LOADING_WASM: '1' }, maxBuffer: 4 * 1024 * 1024 });
+console.log('Synthetic loading/runtime requirements with real Rust projection passed:',
+  menuLoadingResult.split(/\r?\n/).filter(line => /^# (tests|pass|fail|skipped) /.test(line)).join(', '));
 menuPreferencesSmoke(wasm);
 playAdmissionSmoke(wasm);
 const playAdmissionResult = execFileSync(process.execPath,
@@ -59,6 +69,7 @@ const playAdmissionResult = execFileSync(process.execPath,
   { encoding: 'utf8', env: { ...process.env, SLITHER_PLAY_ADMISSION_WASM: '1' }, maxBuffer: 4 * 1024 * 1024 });
 console.log('Synthetic runtime Play requirements with real Rust admission passed:',
   playAdmissionResult.split(/\r?\n/).filter(line => /^# (tests|pass|fail|skipped) /.test(line)).join(', '));
+console.log('Synthetic appearance preview ABI passed:', appearancePreviewSmoke(wasm));
 console.log('Synthetic real-Wasm desktop input equivalence passed:', desktopInputSmoke(wasm));
 console.log('Synthetic real-Wasm desktop input release passed:', desktopInputLifetimeSmoke(wasm));
 const inputRequirements = execFileSync(process.execPath,

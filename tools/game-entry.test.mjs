@@ -12,11 +12,13 @@ test('local setup failures are visible and retain their original rejection', asy
       const status = { textContent: 'Loading local client…' };
       const realm = { location: { href: 'http://127.0.0.1:18884/' }, fetch,
         document: { getElementById: () => status } };
+      realm.top = realm;
       await assert.rejects(entry.startGamePage({ realm }), /configuration|simulator-port/);
       assert.notEqual(status.textContent, 'Loading local client…');
     }
     const realm = { location: { href: 'http://127.0.0.1:18884/' },
       fetch: async () => { throw primary; }, document: { getElementById: () => null } };
+    realm.top = realm;
     await assert.rejects(entry.startGamePage({ realm }), error => error === primary);
     assert.equal(graph.counts.initialize, 0);
   });
@@ -34,6 +36,9 @@ test('actual default graph mounts HUD, Play and leaderboard with one claim, scen
     const hud = graph.hudWasm();
     const entry = await graph.load('bootstrap.mjs');
     assert.notEqual(graph.f.gate.metadata().code, 'held'); assert.equal(graph.counts.initialize, 1);
+    const startup = graph.f.document.getElementById('slither-client-status');
+    assert.equal(startup.children[0].children[1].localName, 'progress');
+    assert.equal(graph.f.edit.hud.character(startup.children[0].children[0]).data, 'Loading client…');
     assert.equal(graph.wasm.calls.includes('scene'), false);
     await assert.rejects(entry.startGamePage(), /Armed document-start gate/);
     assert.notEqual(graph.f.gate.metadata().code, 'held');
@@ -51,7 +56,7 @@ test('actual default graph mounts HUD, Play and leaderboard with one claim, scen
     assert.equal(root.children.length, 9, 'existing scene nodes plus HUD, Play, leaderboard, minimap, end-screen and announcement mounts');
     const [hudMount, playMount, leaderboardMount, minimapMount, endScreenMount, announcementMount] = root.children.slice(3);
     assert.equal(hudMount.children.length, 2); assert.equal(playMount.children.length, 5);
-    assert.equal(playMount.children[4].children.length, 14, 'default menu has three labels and eleven native action buttons');
+    assert.equal(playMount.children[4].children.length, 15, 'default menu keeps three labels and eleven action buttons, followed by one passive preview');
     assert.equal(graph.f.document.getElementById('slither-client-reload').hidden, true);
     assert.equal(graph.f.edit.hud.style(playMount.children[0].style).get('display'), 'none');
     assert.equal(graph.f.edit.hud.style(playMount.children[1].style).get('display'), 'block');
@@ -62,7 +67,13 @@ test('actual default graph mounts HUD, Play and leaderboard with one claim, scen
     assert.equal(announcementMount.children.length, 3);
     assert.equal(graph.minimap.enabled, 1); assert.equal(graph.minimap.reads.length, 1);
     assert.equal(graph.f.edit.ownedPlay.buttonState(playMount.children[2]).disabled, true);
-    assert.equal(graph.f.edit.hud.character(playMount.children[3].children[0]).data, 'Play unavailable on this page.');
+    assert.equal(graph.f.edit.hud.character(playMount.children[3].children[0].children[0]).data, 'Play unavailable on this page.');
+    assert.equal(graph.f.edit.hud.style(startup.style).get('display'), 'none');
+    assert.equal(graph.previewCalls.filter(row => row[0] === 'select').length, 1);
+    assert.equal(graph.previewCalls.filter(row => row[0] === 'render').length, 0);
+    graph.f.flush();
+    assert.equal(graph.previewCalls.filter(row => row[0] === 'render').length, 1);
+    assert.equal(runtime.diagnostics().captureHeld, false);
     const repeated = await graph.load('bootstrap.mjs');
     assert.equal(repeated.gamePageRuntime, entry.gamePageRuntime);
     assert.equal(await repeated.gamePageRuntime, runtime); assert.notEqual(graph.f.gate.metadata().code, 'held');

@@ -53,6 +53,10 @@ accepted attempts and local explicit-return admission. Its primitive Wasm bounda
 releases each Rust borrow before UI locking, status, unlock or launch effects.
 Runtime JS retains native security/generation guards, URL/capability admission,
 session observations, promises and browser effects; it has no admission fallback.
+The authored [startup/loading surface](menu-loading.md) projects existing status
+and completed DOM-owner mounts in Rust, reusing StartPageView. Native labelled
+indeterminate progress and static pre-Wasm markup add no timer, clock, admission
+or acquisition policy. JavaScript retains captured DOM effects and failure cleanup.
 `desktop_layout::desktop_backing_size` owns desktop viewport arithmetic in
 browser-free Rust. Its pure Wasm export returns a fresh copied width/height
 record; `web/desktop-layout.mjs` admits primitive inputs and copies that output
@@ -81,6 +85,14 @@ borrowed source lookup/readiness/identity, without a numeric policy fallback.
 The former authored JavaScript policy is a tools-only differential oracle.
 This cutover does not expand the local stand-ins or establish stock artwork,
 loading or installed-host acceptance.
+
+Browser-free authored_sources owns the numeric plans for the existing local
+RGB families, shaded body/effect sprites, hexagon tile, backdrop and food/prey
+sources. The pure authored_source_recipes Wasm export returns fresh copied
+operands. JavaScript admits own-data output, allocates/paints the same native
+Canvas objects and performs the two existing generated-image decodes; there is
+no JavaScript numeric fallback. Local skin selection and the source adapter
+lease stay separate, and the diagnostic flat body resolver is unchanged.
 
 The default runtime enables Rust-owned nickname presentation before ingress.
 Each retained snake appearance owns its text and fade state, independently of
