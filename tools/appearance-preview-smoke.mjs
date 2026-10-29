@@ -191,10 +191,18 @@ export function appearancePreviewSmoke(wasm) {
     const cached = createStockSkinAdapter({ resolveSkin: wasm.resolve_skin,
       validateCustomPaletteMask: wasm.stock_custom_palette_mask_valid, resolveAccessoryForward: wasm.stock_accessory_forward,
       realm, appearanceMode: 'accessory', readSnapshot: () => cachedSnapshot, random() { random++; return .5; } });
-    for (const skin of [0, 40, 41]) {
+    // Start away from the already-drawn skin 0 so every cached case gets a fresh ticket.
+    for (const skin of [40, 0, 41]) {
+      const beforePrepared = prepared; let cachedReads = 0;
       ticket = stock.select(skin, new Uint8Array()); cached.beginOperation();
-      try { equal(stock.render(ticket, target, world, cached.resolveRecipe, prepare).visible, true); }
+      try {
+        const rendered = stock.render(ticket, target, world, request => {
+          cachedReads++; return cached.resolveRecipe(request);
+        }, prepare);
+        equal(rendered.visible, true); equal(rendered.changed, true);
+      }
       finally { cached.endOperation(); }
+      equal(cachedReads, 1); equal(prepared, beforePrepared + 1);
       const image = target.context.images.find(row => row.source === chosen);
       equal(image.transforms[1], ['translate', 280 + wasm.stock_accessory_forward(skin, new Uint8Array()), 64]);
     }
