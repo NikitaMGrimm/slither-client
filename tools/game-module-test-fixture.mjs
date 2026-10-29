@@ -13,12 +13,17 @@ import { Worker, isMainThread, parentPort, workerData } from 'node:worker_thread
 import * as vm from 'node:vm';
 import { createGateTestDom, attachGateTestRealm, issuedMinimapViewDouble } from './game-gate-test-fixture.mjs';
 import { projectStartPageDouble } from './start-page-view-double.mjs';
+import { projectMenuLoadingDouble } from './menu-loading-view-double.mjs';
 
 const root = new URL('../', import.meta.url);
 // The flagged ABI phase replays the same inert runtime requirements with real Rust admission.
 const realPlayAdmission = process.env.SLITHER_PLAY_ADMISSION_WASM === '1' ? (await loadWasm()).PlayAdmission : undefined;
 if (process.env.SLITHER_PLAY_ADMISSION_WASM === '1' && typeof realPlayAdmission !== 'function') {
   throw new Error('Real PlayAdmission Wasm export required; no test-double fallback in ABI phase');
+}
+const realMenuLoading = process.env.SLITHER_MENU_LOADING_WASM === '1' ? (await loadWasm()).menu_loading_view : undefined;
+if (process.env.SLITHER_MENU_LOADING_WASM === '1' && typeof realMenuLoading !== 'function') {
+  throw new Error('Real menu_loading_view Wasm export required; no ABI-phase test-double fallback');
 }
 const webNames = ['stock-skin-provider.mjs', 'stock-client.mjs', 'stock-food-provider.mjs',
   'stock-host-snapshot.mjs', 'desktop-layout.mjs', 'stock-gameplay.mjs', 'stock-hud-dom.mjs',
@@ -30,6 +35,7 @@ const webNames = ['stock-skin-provider.mjs', 'stock-client.mjs', 'stock-food-pro
 const entryNames = { 'bootstrap.mjs': 'game-bootstrap.mjs', 'runtime.mjs': 'game-runtime.mjs',
   'owned-hud-ui.mjs': 'game-owned-hud-ui.mjs', 'owned-play-ui.mjs': 'game-owned-play-ui.mjs',
   'owned-appearance-ui.mjs': 'game-owned-appearance-ui.mjs',
+  'game-owned-loading-ui.mjs': 'game-owned-loading-ui.mjs',
   'start-page-layout.mjs': 'start-page-layout.mjs',
   'owned-leaderboard-ui.mjs': 'game-owned-leaderboard-ui.mjs',
   'owned-announcement-ui.mjs': 'game-owned-announcement-ui.mjs',
@@ -82,6 +88,9 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
     announcement_view() { announcements.reads++; return announcements.view; },
   });
   wasm.api.start_page_view = vm.runInContext('(' + projectStartPageDouble.toString() + ')', f.context);
+  wasm.api.menu_loading_view = realMenuLoading
+    ? vm.runInContext('(project => function(code, mounted) { const view=project(code,mounted); return Object.freeze({visible:view.visible,busy:view.busy,text:view.text}); })', f.context)(realMenuLoading)
+    : vm.runInContext('(' + projectMenuLoadingDouble.toString() + ')', f.context);
   wasm.api.MenuPreferences = vm.runInContext('(' + createMenuPreferencesDouble.toString() + ')()', f.context);
   wasm.api.PlayAdmission = realPlayAdmission ?? vm.runInContext('(' + createPlayAdmissionDouble.toString() + ')()', f.context);
   const minimap = { enabled: 0, reads: [], fractions: [], view: {

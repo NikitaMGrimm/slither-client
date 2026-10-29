@@ -38,6 +38,10 @@ accepted attempts and local explicit-return admission. Its primitive Wasm bounda
 releases each Rust borrow before UI locking, status, unlock or launch effects.
 Runtime JS retains native security/generation guards, URL/capability admission,
 session observations, promises and browser effects; it has no admission fallback.
+The authored [startup/loading surface](menu-loading.md) projects existing status
+and completed DOM-owner mounts in Rust, reusing StartPageView. Native labelled
+indeterminate progress and static pre-Wasm markup add no timer, clock, admission
+or acquisition policy. JavaScript retains captured DOM effects and failure cleanup.
 `desktop_layout::desktop_backing_size` owns desktop viewport arithmetic in
 browser-free Rust. Its pure Wasm export returns a fresh copied width/height
 record; `web/desktop-layout.mjs` admits primitive inputs and copies that output

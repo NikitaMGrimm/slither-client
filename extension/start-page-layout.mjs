@@ -2,6 +2,18 @@
 const logo = new URL('../assets/logo.svg', import.meta.url).href;
 const freeze = entries => Object.freeze(entries.map(entry => Object.freeze(entry)));
 export const startPageLayout = Object.freeze({
+  loadingSurface: freeze([
+    ['position', 'absolute'], ['left', '50%'], ['top', 'clamp(48px, 18vh, 180px)'],
+    ['transform', 'translateX(-50%)'], ['width', 'min(420px, calc(100% - 32px))'],
+    ['box-sizing', 'border-box'], ['padding-top', '112px'], ['margin', '0'],
+    ['font-family', 'Arial, sans-serif'], ['font-size', '16px'], ['text-align', 'center'],
+    ['white-space', 'normal'], ['pointer-events', 'none'],
+    ['background-image', `url("${logo}")`], ['background-repeat', 'no-repeat'],
+    ['background-position', 'center top'], ['background-size', '100% auto'],
+  ]),
+  loadingLabel: freeze([['display', 'block'], ['font-family', 'inherit'], ['text-align', 'center']]),
+  loadingProgress: freeze([['display', 'inline-block'], ['width', '64px'], ['height', '8px'],
+    ['margin-left', '8px'], ['vertical-align', 'middle'], ['border-radius', '0']]),
   panel: freeze([
     ['position', 'absolute'], ['left', '50%'], ['top', 'clamp(48px, 18vh, 180px)'],
     ['transform', 'translateX(-50%)'], ['width', 'min(420px, calc(100% - 32px))'],

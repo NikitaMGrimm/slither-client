@@ -26,12 +26,19 @@ import { endScreenSmoke } from './end-screen-smoke.mjs';
 import { menuPreferencesSmoke } from './menu-preferences-smoke.mjs';
 import { desktopLayoutSmoke } from './desktop-layout-smoke.mjs';
 import { playAdmissionSmoke } from './play-admission-smoke.mjs';
+import { menuLoadingSmoke } from './menu-loading-smoke.mjs';
 import { desktopInputSmoke } from './desktop-input-smoke.mjs';
 import { desktopInputLifetimeSmoke } from './desktop-input-lifetime-smoke.mjs';
 
 // Entirely synthetic ABI integration; no reference files or network are used.
 const wasm = await loadWasm();
 desktopLayoutSmoke(wasm);
+menuLoadingSmoke(wasm);
+const menuLoadingResult = execFileSync(process.execPath,
+  ['--test', '--test-reporter=tap', fileURLToPath(new URL('./game-menu-loading-runtime.test.mjs', import.meta.url))],
+  { encoding: 'utf8', env: { ...process.env, SLITHER_MENU_LOADING_WASM: '1' }, maxBuffer: 4 * 1024 * 1024 });
+console.log('Synthetic loading/runtime requirements with real Rust projection passed:',
+  menuLoadingResult.split(/\r?\n/).filter(line => /^# (tests|pass|fail|skipped) /.test(line)).join(', '));
 menuPreferencesSmoke(wasm);
 playAdmissionSmoke(wasm);
 const playAdmissionResult = execFileSync(process.execPath,

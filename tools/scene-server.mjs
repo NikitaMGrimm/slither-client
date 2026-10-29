@@ -19,7 +19,7 @@ const routes = new Map([
     ['owned-hud-ui', 'game-owned-hud-ui'], ['owned-play-ui', 'game-owned-play-ui'],
     ['owned-appearance-ui', 'game-owned-appearance-ui'],
     ['owned-announcement-ui', 'game-owned-announcement-ui'],
-    ['start-page-layout', 'start-page-layout'],
+    ['start-page-layout', 'start-page-layout'], ['game-owned-loading-ui', 'game-owned-loading-ui'],
     ['owned-leaderboard-ui', 'game-owned-leaderboard-ui'], ['owned-minimap-ui', 'game-owned-minimap-ui'],
     ['owned-end-screen-ui', 'game-owned-end-screen-ui']]
     .map(([route, name]) => [`/game/${route}.mjs`, [`extension/${name}.mjs`, 'text/javascript; charset=utf-8']]),

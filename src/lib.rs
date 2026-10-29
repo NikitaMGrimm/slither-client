@@ -14,6 +14,7 @@ mod accessory_browser;
 pub mod challenge;
 pub mod desktop_input;
 pub mod desktop_layout;
+pub mod menu_loading;
 pub mod menu_preferences;
 pub mod play_admission;
 pub mod presentation;
@@ -26,6 +27,9 @@ mod start_page_browser;
 
 #[cfg(target_arch = "wasm32")]
 mod menu_preferences_browser;
+
+#[cfg(target_arch = "wasm32")]
+mod menu_loading_browser;
 
 #[cfg(target_arch = "wasm32")]
 mod play_admission_browser;
