@@ -1,4 +1,5 @@
 import { authoredSourcesSmoke } from './authored-source-smoke.mjs';
+import { selectedAccessoryRequestSmoke } from './selected-accessory-request-smoke.mjs';
 import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
@@ -38,6 +39,7 @@ import { desktopInputLifetimeSmoke } from './desktop-input-lifetime-smoke.mjs';
 
 // Entirely synthetic ABI integration; no reference files or network are used.
 const wasm = await loadWasm();
+console.log('Synthetic selected accessory request ABI passed:', selectedAccessoryRequestSmoke(wasm));
 console.log('Synthetic real-Wasm authored source recipes passed:', await authoredSourcesSmoke(wasm));
 desktopLayoutSmoke(wasm);
 console.log('Synthetic real-Wasm session equivalence passed:', sessionPolicySmoke(wasm));

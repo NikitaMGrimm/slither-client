@@ -878,6 +878,134 @@
       });
     } catch { return; }
   }
+  // The URL remains inside this one-entry native capability, never a caller argument.
+  function captureSelectedAccessoryRequest(readAccessory) {
+    try {
+      const Image = realm.HTMLImageElement, image = Image.prototype;
+      const initialDocument = realm.document, initialLocation = realm.location;
+      const readDocument = getter(realm, 'document'), readLocation = getter(realm, 'location');
+      const readHref = getter(initialLocation, 'href'), initialHref = readHref(initialLocation);
+      const create = descriptor(realm.Document.prototype, 'createElement')?.value;
+      const src = descriptor(image, 'src'), add = realm.EventTarget.prototype.addEventListener;
+      const remove = realm.EventTarget.prototype.removeEventListener;
+      const scalars = ['complete', 'width', 'height', 'naturalWidth', 'naturalHeight', 'currentSrc']
+        .map(name => descriptor(image, name)?.get);
+      const define = Object.defineProperty, extensible = Object.isExtensible, same = Object.is;
+      if ([create, src?.get, src?.set, add, remove, ...scalars].some(fn => typeof fn !== 'function')) return;
+      const data = (object, key) => {
+        const value = descriptor(object, key);
+        if (!value || !Object.hasOwn(value, 'value')) throw new TypeError('Selected accessory own data required');
+        return value.value;
+      };
+      const writable = (object, key, absent = false) => {
+        const value = descriptor(object, key);
+        if (!value ? !absent || !extensible(object) : !Object.hasOwn(value, 'value') || value.writable !== true) {
+          throw new TypeError('Selected accessory writable own slot required');
+        }
+      };
+      const set = (object, key, value, absent = false) => {
+        writable(object, key, absent);
+        const old = descriptor(object, key);
+        define(object, key, old ? { value } : { value, writable: true, enumerable: true, configurable: true });
+      };
+      let opened = false;
+      return freeze({ open(resolveId) {
+        if (opened) throw new Error('Selected accessory request already captured');
+        opened = true;
+        const raw = readAccessory();
+        let count = 0, id = -1, table, entry, url, geometry, source, candidate, allocated = false, owned = false, published = false, requested = false;
+        let expectedLoaded, expectedExtents, fingerprint, loadExtents;
+        const none = raw === null || raw === '-1';
+        if (!none) {
+          count = data(realm, 'a_ct');
+          if (!Number.isInteger(count) || count < 1 || count > 4096) throw new TypeError('Selected accessory table count invalid');
+          id = resolveId(raw, count);
+          if (!Number.isInteger(id) || id < 0 || id >= count) throw new TypeError('Selected accessory ID invalid');
+          table = data(realm, 'a_imgs');
+          if (!Array.isArray(table) || table.length !== count) throw new TypeError('Selected accessory table unavailable');
+          entry = data(table, String(id));
+          url = data(entry, 'u');
+          geometry = ['sc', 'px', 'py'].map(key => data(entry, key));
+          if (typeof url !== 'string' || geometry.some(value => typeof value !== 'number')) throw new TypeError('Selected accessory resource metadata invalid');
+          source = data(entry, 'img'); expectedLoaded = data(entry, 'loaded');
+          if (typeof expectedLoaded !== 'boolean' || source != null && !(source instanceof Image)
+            || source == null && expectedLoaded) throw new TypeError('Selected accessory initial source invalid');
+          if (source == null) { writable(entry, 'img'); writable(entry, 'loaded'); writable(entry, 'ww', true); writable(entry, 'hh', true); }
+        }
+        function fresh() {
+          if (readDocument(realm) !== initialDocument || readLocation(realm) !== initialLocation
+            || readHref(initialLocation) !== initialHref || !same(readAccessory(), raw)) throw new Error('Selected accessory document/selection changed');
+          if (none) return;
+          if (data(realm, 'a_ct') !== count || data(realm, 'a_imgs') !== table || table.length !== count
+            || data(table, String(id)) !== entry || !same(data(entry, 'u'), url)
+            || ['sc', 'px', 'py'].some((key, index) => !same(data(entry, key), geometry[index]))
+            || !same(data(entry, 'img'), source)) throw new Error('Selected accessory binding changed');
+          if (owned) {
+            if (data(entry, 'loaded') !== expectedLoaded) throw new Error('Selected accessory loaded flag changed');
+            if (requested && apply(src.get, source, []) !== url) throw new Error('Selected accessory source changed');
+            if (published && (['ww', 'hh'].some((key, index) => !same(data(entry, key), expectedExtents[index]))
+              || scalars.some((read, index) => !same(apply(read, source, []), fingerprint[index])))) throw new Error('Selected accessory extent/load changed');
+            for (let index = 0; index < count; index++) if (index !== id && data(data(table, String(index)), 'img') === source) {
+              throw new Error('Selected accessory image aliases another entry');
+            }
+          }
+        }
+        const binding = freeze({
+          prepare(policy, now) { fresh(); return policy.prepare(raw, count, none ? 0 : source == null ? 0 : expectedLoaded ? 2 : 1,
+            none ? '' : url, ...(none ? [1, 0, 0] : geometry), now); },
+          assertCurrent: fresh,
+          create() {
+            fresh();
+            if (allocated || source != null) throw new Error('Selected native image creation already attempted or unnecessary');
+            allocated = true;
+            const value = apply(create, initialDocument, ['img']);
+            fresh();
+            if (!(value instanceof Image) || source != null) throw new TypeError('Fresh native accessory image required');
+            // Retain privately until the explicit cache-img publication step.
+            candidate = value;
+          },
+          publishImage() {
+            const value = candidate;
+            if (!(value instanceof Image)) throw new Error('Created selected image required');
+            if (source != null) throw new Error('Selected accessory image replaced during creation');
+            fresh(); writable(entry, 'img'); set(entry, 'img', value); source = value; candidate = undefined; owned = true; fresh();
+          },
+          listen(load, error) {
+            fresh(); apply(add, source, ['load', load]);
+            try { apply(add, source, ['error', error]); }
+            catch (primary) { try { apply(remove, source, ['load', load]); } catch {} throw primary; }
+            return () => {
+              let failed = false, primary;
+              for (const [type, listener] of [['load', load], ['error', error]]) {
+                try { apply(remove, source, [type, listener]); } catch (value) { if (!failed) { failed = true; primary = value; } }
+              }
+              if (failed) throw primary;
+            };
+          },
+          request() {
+            fresh();
+            if (requested || !owned) throw new Error('Selected native src assignment already attempted or not owned');
+            requested = true; apply(src.set, source, [url]); fresh();
+          },
+          extents() { fresh(); loadExtents = scalars.map(read => apply(read, source, [])); return loadExtents.slice(0, 5); },
+          publishLoaded() {
+            fresh();
+            const values = scalars.map(read => apply(read, source, []));
+            if (!loadExtents || values.some((value, index) => !same(value, loadExtents[index]))) {
+              throw new Error('Selected accessory native extents changed before publication');
+            }
+            writable(entry, 'ww', true); writable(entry, 'hh', true); writable(entry, 'loaded');
+            set(entry, 'ww', values[1], true); fresh();
+            set(entry, 'hh', values[2], true); fresh();
+            set(entry, 'loaded', true); expectedLoaded = true;
+            expectedExtents = [values[1], values[2]]; fingerprint = values; published = true; fresh();
+          },
+          matches(value) { fresh(); return !none && source === value; },
+        });
+        return binding;
+      } });
+    } catch { return; }
+  }
   try {
     if (realm.document.readyState !== 'loading' || ownValue(realm, 'oef') !== undefined || ownValue(realm, 'ws')) {
       throw new Error('Document-start ownership missed');
@@ -898,6 +1026,8 @@
     const getItem = realm.Storage?.prototype.getItem;
     if (!storage || typeof getItem !== 'function') throw new Error('Native storage reader unavailable');
     native.readAccessory = () => Reflect.apply(getItem, storage, ['cosmetic']);
+    const selectedAccessoryRequest = captureSelectedAccessoryRequest(native.readAccessory);
+    if (selectedAccessoryRequest) native.selectedAccessoryRequest = selectedAccessoryRequest;
     // Optional one-image load commitment. The pinned host uses these cached
     // images once per load; this does not fence arbitrary image mutations.
     try {

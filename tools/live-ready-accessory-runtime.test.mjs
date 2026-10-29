@@ -12,7 +12,7 @@ test('remote runtime propagates the captured mode to both adapter and controller
       }
       graph.sources.set(origin + 'stock-host-snapshot.mjs', `
         import {createStockHostSnapshot as actual} from './stock-host-snapshot-actual.mjs';
-        export {isPendingStockCapture} from './stock-host-snapshot-actual.mjs';
+        export {isPendingStockCapture,assertStockHostCapture} from './stock-host-snapshot-actual.mjs';
         export function createStockHostSnapshot(options) {
           const reader=actual(options);
           return {...reader,capture(){const snapshot=reader.capture();return ${mode === 'face' ? 'snapshot' : "{...snapshot,appearanceMode:'accessory'}"};}};

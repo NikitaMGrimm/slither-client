@@ -1,7 +1,8 @@
 import { createStockSkinAdapter, isUnsupportedStockAccessoryFace } from './stock-skin-provider.mjs';
 import { createStockClient } from './stock-client.mjs';
 import { createStockEntityAssets } from './stock-food-provider.mjs';
-import { createStockHostSnapshot, isPendingStockCapture } from './stock-host-snapshot.mjs';
+import { createStockHostSnapshot, isPendingStockCapture, assertStockHostCapture } from './stock-host-snapshot.mjs';
+import { createStockAccessoryRequest, hasFailedStockAccessoryRequest } from './stock-accessory-request.mjs';
 import { desktopBackingSize } from './desktop-layout.mjs';
 import { createStockGameplay } from './stock-gameplay.mjs';
 import { bindStockHudDom } from './stock-hud-dom.mjs';
@@ -66,6 +67,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
   const native = gate.claim(armed.id);
   let scene, quality, controller, gameplay, held, frame, waiting, wakeWaiting, reload, output;
   let disposed = false;
+  let requestOwner, requestStartupFailed = false;
   let nickname, bindingOperation, handlingNickname, routing = 0;
   let hud, ownedUi, constructCapabilities, hudOperation, nativeOperation, sourceOperation, hudCapabilities, cleanupActive = false;
   let playUi, controlsLease, playCapabilities, playOperation, playNodes;
@@ -753,15 +755,30 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     }
     if (ownedLeaderboardUi) runNative(() => { projector = new Projector(); });
     if (ownedEndScreenUi) runNative(() => { endScreenProjector = new EndScreenProjector(); });
-    const reader = localHost ? undefined : createStockHostSnapshot({ realm, observer: native,
-      readAccessory: () => native.readAccessory(), resolveAccessoryId: wasmApi.stock_accessory_id,
-      accessorySource: native.accessorySource });
-    if (reader) listeners.push(() => reader.dispose());
     const started = native.now();
+    let reader;
     let context;
     const pendingCaptures = new WeakSet();
     const captureReady = () => {
       if (localHost && !localHost.isCurrentDocument()) throw new Error('Current local game document required');
+      if (!localHost && !reader) {
+        // Keep the existing startup waiter; do not inspect/allocate a lazy entry
+        // before the held host has finished constructing its cache.
+        if (!native.completed()) {
+          const error = new Error('Waiting for host asset construction'); error.status = 'pending'; throw error;
+        }
+        if (native.selectedAccessoryRequest) assertStockHostCapture(realm, native);
+        try {
+          requestOwner = !native.selectedAccessoryRequest ? undefined : createStockAccessoryRequest({
+            native: native.selectedAccessoryRequest, clock: native, Request: wasmApi.SelectedAccessoryRequest,
+            resolveId: wasmApi.stock_accessory_id, started, deadline: started + 10000 });
+          if (requestOwner) listeners.push(() => requestOwner.dispose());
+          reader = createStockHostSnapshot({ realm, observer: native, requestOwner,
+            readAccessory: () => native.readAccessory(), resolveAccessoryId: wasmApi.stock_accessory_id,
+            accessorySource: native.accessorySource });
+          listeners.push(() => reader.dispose());
+        } catch (error) { requestStartupFailed = true; throw error; }
+      }
       const capture = localHost ? localHost.sources : reader.capture();
       if (context && (capture.background !== context.background
         || capture.backgroundImage !== context.backgroundImage
@@ -778,6 +795,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     let initial;
     while (!disposed) {
       try { initial = captureReady(); break; } catch (error) {
+        if (requestStartupFailed || requestOwner && hasFailedStockAccessoryRequest(requestOwner)) throw error;
         if (error.status !== 'pending' || native.now() - started >= 10000) { error.status = 'unsupported'; throw error; }
         report('waiting-assets');
         await new Promise(resolve => { wakeWaiting = resolve; waiting = native.setTimeout(resolve, 50); });
@@ -1163,7 +1181,8 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     return runtime ?? createRuntime();
   } catch (error) {
     let code = 'csp-or-module-unavailable';
-    try { if (error?.status === 'unsupported') code = 'host-unavailable'; } catch { /* Classification is best effort. */ }
+    if (requestStartupFailed || requestOwner && hasFailedStockAccessoryRequest(requestOwner)) code = 'host-unavailable';
+    else try { if (error?.status === 'unsupported') code = 'host-unavailable'; } catch { /* Classification is best effort. */ }
     try { dispose(code); } catch { /* Cleanup cannot replace the startup primary. */ }
     throw error;
   }

@@ -254,7 +254,8 @@ test('local host selects explicit accessory dispatch, ready sources and profile;
       ['stock-skin-provider.mjs','createStockSkinAdapter'], ['stock-food-provider.mjs','createStockEntityAssets']]) {
       graph.sources.set(origin + name, `export function ${factory}(){throw Error('Remote source factory used locally');}`);
       if (name === 'stock-host-snapshot.mjs') graph.sources.set(origin + name, graph.sources.get(origin + name)
-        + `export function isPendingStockCapture(){throw Error('Remote pending capture classifier used locally');}`);
+        + `export function isPendingStockCapture(){throw Error('Remote pending capture classifier used locally');}
+           export function assertStockHostCapture(){throw Error('Remote admission used locally');}`);
       if (name === 'stock-skin-provider.mjs') graph.sources.set(origin + name, graph.sources.get(origin + name)
         + `export function isUnsupportedStockAccessoryFace(){throw Error('Remote accessory classifier used locally');}`);
     }

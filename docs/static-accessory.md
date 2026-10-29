@@ -210,3 +210,47 @@ pixels nor pre-event mutation protection. No source/attribute setter fencing is
 provided. Startup loading, installed-host behavior, original artwork/pixels and
 gameplay acceptance remain separate. Synthetic native/Wasm and inert gate tests
 establish only their documented inputs; see [verification](verification.md).
+
+## One selected missing-image request
+
+The stock bootstrap can now create one missing selected-entry image through a
+separate captured native capability. It waits for the existing host-construction
+signal and reuses the existing host mode/quiescence admission before inspecting
+the cache. The initial ten-second startup bound and 50 ms waiter are unchanged.
+Local authored sources never open this capability. None requires no request;
+an existing ready image follows the ready-only path above. A non-null unloaded
+image stays pending without replacement, callback takeover or a second request.
+
+Browser-free `SelectedAccessoryRequest` owns initial-resource shape admission,
+one consumed attempt, generation, deadline and terminal/publication/handoff
+transitions. The native gate privately retains one trusted selected table entry
+and its exact resource string. There is no caller-supplied URL, token, entry or
+image factory; matching a resource shape alone grants no native request. The
+source-established initial HTTP route is assigned unchanged. Platform redirects,
+mixed-content handling and final response origin remain unverified; this is not
+an all-hops resource fence or arbitrary-host resource authority.
+
+The sole request consumes its attempt before allocation, publishes the new native
+image into its original slot, attaches captured load/error guards, then assigns
+`src` once. Selection, table/count, entry, resource, geometry, document and image
+identities are rechecked at effect and publication boundaries; aliasing rejects.
+Only the matching load with complete positive intrinsic dimensions equal to
+native element extents can publish `ww/hh`, followed by `loaded=true`. Own data
+slot writes avoid inherited setters. Partial failures do not clear the image or
+reset the attempt. Duplicate/error events, drift, deadline, reentry and disposal
+cannot restore readiness.
+
+Producer guards stay until that same image's existing decode-lease listeners are
+installed. The private issued-owner handoff then retires producer listeners and
+the startup watchdog; the unchanged ready-only lease still must commit before
+a recipe can borrow the source. A request generation or loaded flag is never a
+content revision. Arbitrary and falsy failures retain exact primary precedence;
+cleanup removes owned callbacks/timers and makes late events inert. Disposal does
+not attest cancellation of an already-issued native transport request.
+
+This remains one selected-entry feature, without catalog/chooser/unlock data,
+download retries, artwork imports, layout changes or a general loader. Paired,
+Mouth, custom eligibility and selected SingleImage behavior stay in the existing
+Rust skin/accessory policy. The trusted load-once and same-URL pre-event limitation
+above still applies. Focused native and inert composition checks are separate
+from the authored, unrun real-Wasm smoke and later browser/artwork acceptance.
