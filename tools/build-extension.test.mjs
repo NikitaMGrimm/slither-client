@@ -112,7 +112,7 @@ test('default packages have a closed deterministic inventory and preserve module
     'game/pkg/slither_client.js', 'game/pkg/slither_client_bg.wasm', `game/pkg/${snippetName}`].sort();
   const result = f.build();
   assert.deepEqual(result.files.map(file => file.path), ['chrome', 'firefox'].flatMap(browser => expectedPerBrowser.map(name => `${browser}/${name}`)));
-  assert.equal(result.files.length, 130);
+  assert.equal(result.files.length, 132);
   assert(result.files.every(file => file.bytes > 0 && /^[a-f0-9]{64}$/.test(file.sha256)));
   assert.deepEqual(f.build(), result, 'an identical rerun neither accumulates nor changes files');
   for (const browser of ['chrome', 'firefox']) {
@@ -151,7 +151,7 @@ test('generated validator paths remain exact, byte-preserved and independent of 
     output.web_accessible_resources[0].resources.pop();
     assert.deepEqual(output, source, 'all source manifest fields remain intact');
   }
-  assert.equal(result.files.length, 130);
+  assert.equal(result.files.length, 132);
 });
 
 test('changing the authored HUD validator makes the generated pair stale', t => {
@@ -347,19 +347,19 @@ test('CLI requires unambiguous paths and confines outputs to the ignored extensi
   }
   for (const outputDir of ['dist/elsewhere', '.', 'dist/extension/../../outside']) assert.throws(() => f.build({ outputDir }), /must stay inside/);
   assert.throws(() => f.build({ webDir: 'dist/extension' }), /must be separate/);
-  assert.equal(f.build({ outputDir: 'dist/extension/fresh' }).files.length, 130);
+  assert.equal(f.build({ outputDir: 'dist/extension/fresh' }).files.length, 132);
 });
 
 test('one default package copies the actual bootstrap and all owned UI helpers in both browsers', t => {
   const f = fixture(t), outputDir = 'dist/extension/default';
   const result = f.build({ outputDir });
-  assert.equal(result.files.length, 130);
+  assert.equal(result.files.length, 132);
   for (const browser of ['chrome', 'firefox']) {
     const game = path.join(f.root, outputDir, browser, 'game');
     for (const [source, destination] of gameSources) {
       assert.deepEqual(fs.readFileSync(path.join(game, destination)), fs.readFileSync(path.join(f.root, 'extension', source)));
     }
-    assert.equal(result.files.filter(file => file.path.startsWith(browser + '/')).length, 65);
+    assert.equal(result.files.filter(file => file.path.startsWith(browser + '/')).length, 66);
     assert.deepEqual(fs.readdirSync(game).filter(name => /(?:bootstrap|entry)/.test(name)), ['bootstrap.mjs']);
     const bytes = fs.readFileSync(path.join(game, 'bootstrap.mjs'));
     const stamp = fs.statSync(path.join(game, 'bootstrap.mjs')).mtimeMs;
