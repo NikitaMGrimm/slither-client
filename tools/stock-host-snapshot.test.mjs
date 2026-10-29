@@ -140,7 +140,7 @@ test('cached selection admission rejects wrong/missing entries before any load c
     change(f);
     const reader = createStockHostSnapshot({ realm: f.realm, observer: f.observer, readAccessory: () => '0',
       resolveAccessoryId: () => 0, accessorySource: new Proxy({}, { get() { assert.fail('Load capability reached before admission'); } }) });
-    assert.throws(() => reader.capture(), error => error.status === status);
+    assert.throws(() => reader.capture(), error => error.code !== 'ERR_ASSERTION' && error.status === status);
     reader.dispose();
   }
 });
