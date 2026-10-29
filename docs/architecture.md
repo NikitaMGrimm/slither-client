@@ -1,5 +1,30 @@
 # Architecture
 
+## Shared desktop and browser rendering
+
+`apps/wgpu-slice` is an additive crate with its own lockfile and a path dependency
+on the existing browser-free Rust client. Its Windows host and standalone WebGPU
+host consume the same `AnimatedClient`, fixed synthetic packet schedule, camera,
+skin-zero resolver and ordered body/food paint plans. The Canvas application and
+root Cargo dependencies remain separate.
+
+The small `Frame`/`Draw` boundary retains backing extent, viewport scale, frame
+and tick identities, full `u64` asset handles/revisions, readiness, dimensions,
+crops, transforms, effective alpha, blend and draw order. Only final submission
+vertices convert from validated `f64` to `f32`. The selected material adapter
+interprets the existing Rust-authored recipes for body-zero variants/effects and
+food-zero sources; it does not convert arbitrary Canvas operations automatically.
+Encoded-sRGB premultiplied textures, sampling and composition conventions are
+explicit. Circle coverage, blur and quad-edge raster differences remain bounded
+comparison inputs.
+
+This first slice is offline rendering, without input-driven gameplay, UI/HUD or
+transport. The next step reuses existing Rust input/session policies around
+platform socket, input and lifecycle effects. Windows leads development, with
+early browser checks of the shared owner. Mobile integration comes later. See
+[the slice](../apps/wgpu-slice/README.md), [verification](verification.md#shared-wgpu-rendering-slice)
+and [roadmap](roadmap.md).
+
 ## Ownership decision
 
 Game, HUD and presentation state and logic belong in Rust, exposed through the

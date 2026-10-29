@@ -38,6 +38,48 @@ pull requests, and manual dispatch. Normal tests and CI require no external
 reference and do not connect to game servers. Dependency and toolchain setup may
 access package sources. Release-plz remains dormant.
 
+## Shared wgpu rendering slice
+
+The separate [`apps/wgpu-slice`](../apps/wgpu-slice/README.md) crate has its own
+locked native/Wasm build and focused checks. It does not rebuild or replace the
+Canvas payload. Its final source passes 11 focused native tests, formatting,
+strict native/Wasm Clippy, both builds and matching bindgen generation.
+Independent source review found no supported P1/P2 in the represented slice.
+The Windows CI job now includes its format, offline tests, Clippy and executable
+build; the WebAssembly job checks and builds the shared library and generates
+matching web bindings. These checks do not open a window or initialize a GPU.
+
+On 2026-10-29, the final executable rendered its synthetic body/food scene in a
+Windows Vulkan window on an NVIDIA GeForce RTX 5070 Ti, resized and exited
+normally. A separate, nonexclusive background-browser check executed the final
+WebGPU payload through the public Rust host API. It rendered ticks 60 and 240,
+checked resize and scale arguments, retained tick 240 through zero size and
+restore, and freed its owner. The renderer reported `BrowserWebGpu` without a
+device name; a separate default-adapter query reported NVIDIA/Blackwell.
+The browser's actual display DPR was 1; scale-2 backing-size calls exercise the
+API and do not establish a real monitor-DPR transition.
+
+The controlled comparison uses 960x540, DPR 1, fixed quality and 62 selected
+authored sources. It aligns the initial tick-zero draw before the 240 updates;
+matching tick labels alone would not establish the same draw-preparation
+history. The normal/boost keyframes contain 312/459 ordered draws. Canvas first
+submits the same exported texture pixels, then materializes the same recipes
+through the actual Canvas Wasm and production Canvas painter. All selected
+recipe operands match. The CPU texture/Canvas recipe raster difference is at
+most 7/6 channel levels at the two keyframes; larger differences remain at GPU
+quad edges. All image pixels, including the background, remain in the comparison.
+No differences are discarded as a universal tolerance or promoted into overall
+visual acceptance.
+
+These are original synthetic packets and selected body-zero/food-zero
+materials. Eyes, prey, other skins, antennas, UI, player input and transport are
+outside this first slice. The native window observation, browser checks and
+Canvas comparison establish neither complete gameplay nor official-client
+fidelity, server compatibility, performance or mobile support. Earlier offscreen
+evidence remains tied to its recorded source; the fresh browser result does not
+rewrite that history. Temporary agent-owned browser/listener resources closed;
+the user's windows, test folders, processes and ports were preserved.
+
 ## Default runtime and local Play status
 
 The selected implementation uses one default bootstrap for HUD, Play and a

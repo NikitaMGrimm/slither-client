@@ -22,8 +22,9 @@ Browser-free presentation already produces ordered body, food and prey plans.
 `BodyAsset` uses opaque `u64` handles and revisions with dimensions and readiness;
 body commands retain source rectangles, transforms, effective alpha, composition
 and order. These are reusable foundations, rather than a completed portable
-renderer. Current submission is wasm32 `web_sys` Canvas2D in the browser-specific
-modules. Native unit-test success does not demonstrate a native game window.
+renderer. The main browser application submits through wasm32 `web_sys`
+Canvas2D; the additive shared slice now supplies wgpu submission on Windows and
+WebGPU. Native unit-test success alone does not demonstrate a native game window.
 
 Canvas remains the reference backend. Continue the bounded default-appearance
 feedback and controlled same-scene comparison. Procedural artwork, original
@@ -36,21 +37,30 @@ one browser adapter lane. Preserve their safe checkpoints and withhold rejected
 packages. Their completion is not a prerequisite for the shared core, standalone
 browser client or native desktop renderer.
 
-## Next milestone: one shared wgpu gameplay-rendering slice
+## Shared wgpu gameplay-rendering slice
 
-Implement one narrow renderer used by a Windows host and a standalone browser
-canvas. Use `wgpu` for this bounded slice while preserving the existing core;
-do not build a generic engine. Keep its dependencies and
-artifacts separate from the accepted Canvas path where practical.
+The first bounded slice is implemented in
+[`apps/wgpu-slice`](../apps/wgpu-slice/README.md). A final-source Windows Vulkan
+window and browser WebGPU execution have been observed, including resize and
+cleanup. Matched Canvas checks cover two selected normal/boost keyframes using
+the same authored resources and draw plans. Source-raster and one-pixel
+quad-edge differences remain recorded; this does not establish whole-game
+fidelity. Input, local transport, HUD and broader presentation are the next
+implementation milestone. Detailed limits are in
+[verification](verification.md#shared-wgpu-rendering-slice).
 
-The first slice must consume the existing Rust scene/presentation path and
-original, explicitly synthetic gameplay events. Draw an animated standard snake
-with normal/boost passes and food, rather than stopping at a triangle. Use the
-same scene, resources and update times on desktop and web. It is an offline
-gameplay-rendering slice; live networking is a later integration step. Do not add
-client-side authoritative physics or modify the separate simulator.
+The narrow renderer is used by a Windows host and a standalone browser canvas.
+It uses `wgpu` while preserving the existing core. Its dependencies and artifacts
+stay separate from the accepted Canvas path; no generic engine is introduced.
 
-The smallest common frame/resource boundary should contain:
+The first slice consumes the existing Rust scene/presentation path and original,
+explicitly synthetic gameplay events. It draws an animated standard snake with
+normal/boost passes and food, using the same scene, resources and update times
+on desktop and web. It is an offline gameplay-rendering slice; local networking
+is the next integration step. Authoritative simulation stays in the separate
+simulator.
+
+The common frame/resource boundary contains:
 
 - A frame identity, backing extent, viewport scale and explicit clock/update
   inputs. Rust retains the presentation clock and geometry decisions.
@@ -87,7 +97,14 @@ includes Windows, browser, Android and Apple backends. Actual feature support an
 fallbacks need target-specific checks; a browser WebGPU result does not establish
 WebGL2, Firefox, Safari or mobile acceptance.
 
-## Following desktop/browser integration
+## Next milestone: playable shared local client
+
+Develop the shared gameplay owner through native CLI tests and offscreen checks,
+with small browser checks at input, session and rendering milestones. Reuse the
+existing local-session path, input policy and presentation plans. Both hosts
+should consume the same Rust behavior; platform networking, window/DOM effects
+and event delivery stay in their adapters. Desktop automation is not required
+to make progress on the shared owner.
 
 After the shared rendering slice, keep these as explicit integration tasks:
 
