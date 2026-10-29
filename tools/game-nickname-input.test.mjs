@@ -1,3 +1,4 @@
+import { TestGameplayPolicy } from './fixtures/gameplay-policy-double.mjs';
 import { TestStockControllerPolicy } from './fixtures/stock-controller-double.mjs';
 import { TestSessionPolicy } from './fixtures/session-policy-double.mjs';
 import { stockSkinWasmDouble } from './stock-skin-policy-double.mjs';
@@ -16,7 +17,7 @@ import { createStockSkinAdapter } from '../web/stock-skin-provider.mjs';
 import { createStockClient } from './fixtures/stock-client-fixture.mjs';
 import { createStockEntityAssets } from '../web/stock-food-provider.mjs';
 import { desktopBackingSize } from '../web/desktop-layout.mjs';
-import { createStockGameplay } from '../web/stock-gameplay.mjs';
+import { createStockGameplay } from './fixtures/stock-gameplay-fixture.mjs';
 
 const networkGlobals = ['fetch', 'WebSocket'].map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)]);
 let networkCalls = 0;
@@ -32,15 +33,15 @@ after(() => {
 const gateSource = readFileSync(new URL('../extension/game-gate.js', import.meta.url), 'utf8');
 const source = readFileSync(new URL('./game-bootstrap.test.mjs', import.meta.url), 'utf8');
 const functions = source.slice(source.indexOf('function fixture('), source.indexOf("\ntest('an unarmed"));
-const makeFixture = new Script(`(function(gateSource,Script,createContext,runInContext,assert,createGateTestDom,attachGateTestRealm,createHudHistoryDouble,createLeaderboardHistoryDouble,TestDesktopInput,desktopBackingOracle,TestSessionPolicy,stockSkinWasmDouble,TestStockControllerPolicy){
+const makeFixture = new Script(`(function(gateSource,Script,createContext,runInContext,assert,createGateTestDom,attachGateTestRealm,createHudHistoryDouble,createLeaderboardHistoryDouble,TestDesktopInput,desktopBackingOracle,TestSessionPolicy,stockSkinWasmDouble,TestStockControllerPolicy,TestGameplayPolicy){
   ${functions}\nreturn {fixture,wasmDouble};})`).runInThisContext();
 const { fixture: fixtureFactory, wasmDouble } = makeFixture(gateSource, Script, createContext, runInContext, assert,
-  createGateTestDom, attachGateTestRealm, createHudHistoryDouble, createLeaderboardHistoryDouble, TestDesktopInput,desktopBackingOracle,TestSessionPolicy,stockSkinWasmDouble,TestStockControllerPolicy);
+  createGateTestDom, attachGateTestRealm, createHudHistoryDouble, createLeaderboardHistoryDouble, TestDesktopInput,desktopBackingOracle,TestSessionPolicy,stockSkinWasmDouble,TestStockControllerPolicy,TestGameplayPolicy);
 
 function harness({ prepare, contextSetup, ...options } = {}) {
   const fixture = prepare || contextSetup ? makeFixture(gateSource, Script, realm => {
     const context = createContext(realm); contextSetup?.(context); return context;
-  }, runInContext, assert, () => { const dom = createGateTestDom(); prepare?.(dom); return dom; }, attachGateTestRealm, createHudHistoryDouble, createLeaderboardHistoryDouble, TestDesktopInput,desktopBackingOracle,TestSessionPolicy,stockSkinWasmDouble,TestStockControllerPolicy).fixture : fixtureFactory;
+  }, runInContext, assert, () => { const dom = createGateTestDom(); prepare?.(dom); return dom; }, attachGateTestRealm, createHudHistoryDouble, createLeaderboardHistoryDouble, TestDesktopInput,desktopBackingOracle,TestSessionPolicy,stockSkinWasmDouble,TestStockControllerPolicy,TestGameplayPolicy).fixture : fixtureFactory;
   const f = fixture(options), native = f.gate.claim(f.gate.metadata().id);
   const parent = f.document.createElement('div'), field = f.document.createElement('input');
   f.document.body.appendChild(parent); parent.appendChild(field);

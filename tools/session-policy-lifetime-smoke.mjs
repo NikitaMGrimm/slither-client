@@ -22,16 +22,16 @@ export function sessionPolicyLifetimeSmoke(wasm){let cases=0;
   const{Policy,counts}=tracked(wasm.SessionPolicy),h=harness(Policy);h.connect();const seen=[];Object.defineProperty(h.socket,'onopen',{configurable:true,set(){h.session.dispose();seen.push(h.session.pendingActions);throw undefined;}});h.session.close();assert.equal(counts.freed,1);assert.equal(h.errors.length,1);assert.equal(h.errors[0],undefined);assert.equal(h.session.snapshot().phase,'disconnected');assert.equal(seen.length,1);cases++;
  }
  for(const primary of [undefined,false,{authored:'construction primary'}]){
-  const session=tracked(wasm.SessionPolicy,{failFree:true,freeFailure:{secondary:true}}),input=tracked(wasm.DesktopInput);const result=capture(()=>gameplay({...capabilities(session.Policy),DesktopInput:input.Policy},{late:true,primary}));assert(result.thrown);assert.equal(result.value,primary);assert.equal(session.counts.freed,1);assert.equal(input.counts.freed,1);cases++;
+  const session=tracked(wasm.SessionPolicy,{failFree:true,freeFailure:{secondary:true}}),input=tracked(wasm.DesktopInput);const result=capture(()=>gameplay({...capabilities(session.Policy),DesktopInput:input.Policy,GameplayPolicy:wasm.GameplayPolicy},{late:true,primary}));assert(result.thrown);assert.equal(result.value,primary);assert.equal(session.counts.freed,1);assert.equal(input.counts.freed,1);cases++;
  }
  {
-  const input=tracked(wasm.DesktopInput);class Broken extends wasm.SessionPolicy{constructor(){throw undefined;}}const result=capture(()=>gameplay({...capabilities(Broken),DesktopInput:input.Policy}));assert(result.thrown);assert.equal(result.value,undefined);assert.equal(input.counts.freed,1);cases++;
+  const input=tracked(wasm.DesktopInput);class Broken extends wasm.SessionPolicy{constructor(){throw undefined;}}const result=capture(()=>gameplay({...capabilities(Broken),DesktopInput:input.Policy,GameplayPolicy:wasm.GameplayPolicy}));assert(result.thrown);assert.equal(result.value,undefined);assert.equal(input.counts.freed,1);cases++;
  }
  {
-  const session=tracked(wasm.SessionPolicy),input=tracked(wasm.DesktopInput),owner=gameplay({...capabilities(session.Policy),DesktopInput:input.Policy});owner.dispose();owner.dispose();assert.equal(session.counts.freed,1);assert.equal(input.counts.freed,1);assert.equal(owner.diagnostics().session.phase,'disconnected');cases++;
+  const session=tracked(wasm.SessionPolicy),input=tracked(wasm.DesktopInput),owner=gameplay({...capabilities(session.Policy),DesktopInput:input.Policy,GameplayPolicy:wasm.GameplayPolicy});owner.dispose();owner.dispose();assert.equal(session.counts.freed,1);assert.equal(input.counts.freed,1);assert.equal(owner.diagnostics().session.phase,'disconnected');cases++;
  }
  {
-  const session=tracked(wasm.SessionPolicy,{failFree:true,freeFailure:undefined}),input=tracked(wasm.DesktopInput),owner=gameplay({...capabilities(session.Policy),DesktopInput:input.Policy});const result=capture(()=>owner.dispose());assert(result.thrown);assert.equal(result.value,undefined);assert.equal(session.counts.freed,1);assert.equal(input.counts.freed,1);owner.dispose();cases++;
+  const session=tracked(wasm.SessionPolicy,{failFree:true,freeFailure:undefined}),input=tracked(wasm.DesktopInput),owner=gameplay({...capabilities(session.Policy),DesktopInput:input.Policy,GameplayPolicy:wasm.GameplayPolicy});const result=capture(()=>owner.dispose());assert(result.thrown);assert.equal(result.value,undefined);assert.equal(session.counts.freed,1);assert.equal(input.counts.freed,1);owner.dispose();cases++;
  }
  {
   const{Policy,counts}=tracked(wasm.SessionPolicy,{failFree:true,freeFailure:{secondary:true}});

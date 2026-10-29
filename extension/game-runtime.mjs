@@ -785,7 +785,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
         return true;
       } catch { return false; }
     };
-    gameplay = createStockGameplay({ scene, quality, controller, wasm: wasmApi,
+    gameplay = createStockGameplay({ GameplayPolicy: wasmApi.GameplayPolicy, scene, quality, controller, wasm: wasmApi,
       createSocket: native.createSocket, now: native.now,
       defer: hudReadout ? callback => native.queueMicrotask(() => {
         if (disposed) return;

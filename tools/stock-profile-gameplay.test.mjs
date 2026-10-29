@@ -8,7 +8,7 @@ import { TestDesktopInput } from './fixtures/client-input-fixture.mjs';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { setImmediate as nextTurn } from 'node:timers/promises';
-import { createStockGameplay } from '../web/stock-gameplay.mjs';
+import { createStockGameplay } from './fixtures/stock-gameplay-fixture.mjs';
 
 const HASH = '5ad8aa8f06d1e71bad2945001bab077f8d4d279c093a046d19b6f26ac6b62095';
 const request = () => ({ endpoint: 'ws://192.0.2.9:1234/slither', nickname: 'Synthetic live',

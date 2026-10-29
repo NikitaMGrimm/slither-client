@@ -14,6 +14,7 @@ mod accessory_browser;
 pub mod challenge;
 pub mod desktop_input;
 pub mod desktop_layout;
+pub mod gameplay_policy;
 pub mod menu_preferences;
 pub mod play_admission;
 pub mod presentation;
@@ -50,6 +51,9 @@ mod session_policy_browser;
 
 #[cfg(target_arch = "wasm32")]
 mod stock_controller_policy_browser;
+
+#[cfg(target_arch = "wasm32")]
+mod gameplay_policy_browser;
 
 #[cfg(target_arch = "wasm32")]
 mod canvas_browser;
