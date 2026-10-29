@@ -42,5 +42,38 @@ export function menuPreferencesSmoke(wasm) {
     assert.throws(() => p.action('connect'));
     p.reset(); assert.equal(p.view().nickname, '');
   } finally { restored?.free(); p.free(); }
+  const local = new wasm.MenuPreferences(true, '');
+  try {
+    local.action('previous-skin'); assert.equal(local.view().skin, 65);
+    local.action('next-skin'); assert.equal(local.view().skin, 0);
+    for (let skin = 0; skin <= 65; skin++) {
+      local.select(skin, new Uint8Array());
+      const saved = local.serialize(), restored = new wasm.MenuPreferences(true, saved);
+      try { assert.equal(restored.view().skin, skin); assert.equal(restored.serialize(), saved); }
+      finally { restored.free(); }
+    }
+    local.set_nickname('Saved');
+    const bytes = Uint8Array.of(0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 3, 1, 4, 2);
+    local.select(65, bytes); bytes[8] = 0;
+    const prior = local.serialize();
+    for (const [skin, custom] of [[66, new Uint8Array()], [255, new Uint8Array()],
+      [65, Uint8Array.of(0, 0, 0, 0, 0, 0, 0, 0, 1, 3)]]) {
+      assert.throws(() => local.select(skin, custom)); assert.equal(local.serialize(), prior);
+    }
+    let encoded, attempts = 0;
+    const session = createStockSession({ wasm: { ...wasm, encode_login(...args) {
+      encoded = wasm.encode_login(...args); return encoded;
+    } }, now: () => 0, createSocket() { attempts++; throw Error('No transport in local menu policy smoke'); } });
+    const unsubscribe = session.subscribe({ packet() {}, state() {}, error(error) { throw error; } });
+    try {
+      const selected = local.view(), custom = selected.customSkin.slice();
+      session.play({ endpoint: 'ws://192.0.2.1:1234/slither',
+        profile: { clientVersion: 1, password: new Uint8Array(20), protocolVersion: 19 },
+        nickname: selected.nickname, skin: selected.skin, customSkin: selected.customSkin });
+      selected.customSkin.fill(0);
+      assert.equal(encoded[24], 65); assert.deepEqual(encoded.slice(-custom.length), custom);
+      assert.equal(attempts, 0);
+    } finally { session.dispose('local-menu-smoke-cleanup'); unsubscribe(); }
+  } finally { local.free(); }
   console.log('Synthetic real-Wasm menu selection, copied runs, bounded restore and stock-session login bytes passed.');
 }

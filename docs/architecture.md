@@ -78,7 +78,7 @@ shading and project each palette modulo three, preserving admitted run counts
 and order without merging projection collisions. Empty or rejected custom data
 uses the requested built-in run pattern with each palette projected modulo three,
 preserving run counts, order and cycle seams with seven-variant shading. The local
-chooser still offers its three existing selections. These authored families do not imply
+chooser offers all 66 represented authored-pattern choices over the same three palettes, with plain paired faces and no antenna. These authored families do not imply
 stock 42-color equivalence. The production stock adapter separately binds the
 existing Rust resolve_skin for built-in/custom runs, face/antenna geometry and
 rotation policy, and validates the host custom mask through the same Rust

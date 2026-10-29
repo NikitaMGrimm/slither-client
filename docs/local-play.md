@@ -80,9 +80,12 @@ transport and do not substitute for the default game path.
 
 The default local body path uses three authored color families, with seven shaded
 variants, separate boost glow and shared outline/shadow/death sources from the
-single asset map. Rust owns the three-color selection and shading cadence;
-browser code binds the source objects after Wasm initialization. Without admitted
-custom runs, selection remains `skin % 3` with seven ping-pong shading variants.
+single asset map. Rust owns pattern selection and shading cadence; browser code
+binds the source objects after Wasm initialization. The menu exposes represented
+built-in IDs 0 through 65, retaining each requested pattern's run counts, order
+and seams while projecting its colors modulo three, with seven ping-pong shading
+variants. Previous/Next wrap within these 66 choices and saved preferences retain
+the selected ID. No additional IDs, artwork or unlocks are introduced.
 Custom data uses the existing Rust admission: at most 255 bytes, an opaque
 eight-byte header, then complete positive count/palette pairs from the supported
 normal palette set. Adjacent equal admitted palettes merge before projection.
@@ -90,7 +93,9 @@ Each admitted palette is then projected modulo three into the existing authored
 families, retaining run counts, order and boundaries without another merge.
 The first projected family supplies the body base and existing nickname tint
 base. Custom bodies use the first shading variant; empty or wholly rejected
-custom data retains the default appearance.
+custom data retains the requested built-in pattern. The menu's existing custom
+editor remains limited to colors 0, 1 and 2 and its existing zero-filled prefix;
+the stock menu's custom palette namespace is unchanged.
 
 This displays custom stripe structure in the authored palette namespace; it does
 not reproduce the stock 42-color palette. Plain paired faces remain selected;

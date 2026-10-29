@@ -178,3 +178,34 @@ test('menu disposal attempts Rust release without replacing a prior native failu
     runtime.dispose(); assert.equal(frees, 1);
   });
 });
+// Explicit tools-only MenuPreferences ABI double; not native Rust execution.
+import assert from 'node:assert/strict';
+import {createMenuPreferencesDouble} from './menu-preferences-double.mjs';
+
+test('local pattern menu exposes all represented IDs and keeps custom restore atomic', () => {
+  const Policy=createMenuPreferencesDouble(), p=new Policy(true,'');
+  p.action('previous-skin');assert.equal(p.view().skin,65,'0 wraps to represented boundary65');
+  p.action('next-skin');assert.equal(p.view().skin,0,'65 wraps to0');
+  for(let id=0;id<66;id++){
+    assert.equal(p.view().skin,id);assert.equal(p.view().title,`Skin ${id+1} of 66`);
+    const saved=p.serialize(), restored=new Policy(true,saved);
+    assert.equal(restored.view().skin,id);assert.equal(restored.serialize(),saved);restored.free();p.action('next-skin');
+  }
+  assert.equal(p.view().skin,0);
+  for(const id of[0,1,2,9,10,15,29,65]){
+    const saved=`1:5361766564:${id.toString(16).padStart(2,'0')}:`;
+    const restored=new Policy(true,saved);assert.equal(restored.view().skin,id);assert.equal(restored.view().nickname,'Saved');
+    assert.equal(restored.serialize(),saved);restored.free();
+  }
+  const bytes=Uint8Array.of(0,0,0,0,0,0,0,0,2,0,3,1,4,2);p.select(65,bytes);bytes[8]=0;
+  assert.equal(p.view().customSkin[8],2);const copy=p.view().customSkin;copy[9]=2;assert.equal(p.view().customSkin[9],0);
+  const prior=p.serialize();
+  for(const [skin,custom]of[[66,new Uint8Array()],[255,new Uint8Array()],[65,Uint8Array.of(0,0,0,0,0,0,0,0,1,3)],
+    [65,Uint8Array.of(0,0,0,0,0,0,0,0,0,0)]]){assert.throws(()=>p.select(skin,custom));assert.equal(p.serialize(),prior);}
+  for(const saved of['1:5361766564:42:','1:5361766564:ff:','1:5361766564:41:00000000000000000103',
+    '1:5361766564:41:00000000000000000000','2:5361766564:41:']){
+    const restored=new Policy(true,saved);assert.equal(restored.serialize(),'1::00:');restored.free();
+  }
+  const stock=new Policy(false,'1:5361766564:41:00000000000000000103');
+  assert.equal(stock.view().skin,65);assert.equal(stock.view().customSkin[9],3);stock.free();p.free();
+});

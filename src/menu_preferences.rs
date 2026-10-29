@@ -70,9 +70,9 @@ impl MenuPreferences {
     }
 
     fn skin_count(&self) -> u8 {
-        // The authored stock resolver represents built-ins 0..=65 explicitly;
-        // the local host has only its three authored families.
-        if self.local { 3 } else { 66 }
+        // Both routes represent built-ins 0..=65. Local patterns project over
+        // three authored palettes; custom palette admission stays route-specific.
+        66
     }
 
     /// Validate a nickname without normalizing it or changing the wire domain.
