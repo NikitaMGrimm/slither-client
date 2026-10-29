@@ -25,6 +25,7 @@ import { startPageSmoke } from './start-page-smoke.mjs';
 import { endScreenSmoke } from './end-screen-smoke.mjs';
 import { menuPreferencesSmoke } from './menu-preferences-smoke.mjs';
 import { desktopLayoutSmoke } from './desktop-layout-smoke.mjs';
+import { profileLiteralsSmoke } from './profile-literals-smoke.mjs';
 import { playAdmissionSmoke } from './play-admission-smoke.mjs';
 import { desktopInputSmoke } from './desktop-input-smoke.mjs';
 import { desktopInputLifetimeSmoke } from './desktop-input-lifetime-smoke.mjs';
@@ -32,6 +33,13 @@ import { desktopInputLifetimeSmoke } from './desktop-input-lifetime-smoke.mjs';
 // Entirely synthetic ABI integration; no reference files or network are used.
 const wasm = await loadWasm();
 desktopLayoutSmoke(wasm);
+console.log('Synthetic closed profile literal/ownership ABI passed:', await profileLiteralsSmoke(wasm));
+const profileLiteralResult = execFileSync(process.execPath,
+  ['--test', '--test-reporter=tap', ...['stock-live-profile', 'stock-profile-gameplay']
+    .map(name => fileURLToPath(new URL(`./${name}.test.mjs`, import.meta.url)))],
+  { encoding: 'utf8', env: { ...process.env, SLITHER_PROFILE_LITERALS_WASM: '1' }, maxBuffer: 4 * 1024 * 1024 });
+console.log('Synthetic real-Wasm profile/acquirer lifetime requirements passed:',
+  profileLiteralResult.split(/\r?\n/).filter(line => /^# (tests|pass|fail|skipped) /.test(line)).join(', '));
 menuPreferencesSmoke(wasm);
 playAdmissionSmoke(wasm);
 const playAdmissionResult = execFileSync(process.execPath,

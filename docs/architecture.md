@@ -117,6 +117,16 @@ wasm-bindgen 0.2.129 and web-sys 0.3.106.
 - `challenge::solve_challenge` accepts at most 512 encoded bytes and a closed
   token grammar with two fixed-length literals and a fixed copy loop. It rejects
   unsupported syntax without evaluating a general program.
+- `profile_literals` owns only the existing closed decimal declaration grammar:
+  bounded ASCII identifiers, four whitespace bytes, a u16 client version and
+  exactly twenty u8 password values. The Wasm `ProfileLiteralParser` copies at
+  most the admitted 128/256-byte spans through scalar calls into bounded scratch;
+  no source string or generated slice allocation crosses that API. It clears
+  each parsed input region and the JS adapter explicitly clears then frees the
+  complete scratch owner before publishing its copied profile. URL/origin/pin,
+  size/span/digest admission, native buffers, acquisition, deadline, cancellation
+  and consumers remain in the browser boundary. Production requires initialized
+  Wasm; the previous authored JS grammar exists only as a tools-only test oracle.
 - `protocol::decode_frame` requires an explicit elapsed-header mode and validates
   the entire frame before returning borrowed command slices. Frames are limited
   to 1 MiB and 4096 commands. It checks framing and setup field boundaries;

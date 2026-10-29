@@ -48,7 +48,15 @@ function syntheticWasm(omit) {
     'encode_login', 'solve_challenge', 'decode_frame', 'setup_protocol_version',
     'resolve_skin', 'resolve_local_skin', 'stock_custom_palette_mask_valid', 'stock_accessory_id', 'stock_accessory_forward', 'start_page_view', 'desktop_backing_size', 'endscreenprojector_new', 'endscreenprojector_project', '__wbg_endscreenprojector_free',
     'playadmission_new', 'playadmission_available', 'playadmission_accepted', 'playadmission_nickname_valid',
-    'playadmission_accept', 'playadmission_lock_unavailable', 'playadmission_return_ready', 'playadmission_complete_return', '__wbg_playadmission_free'].filter(name => name !== omit);
+    'playadmission_accept', 'playadmission_lock_unavailable', 'playadmission_return_ready', 'playadmission_complete_return', '__wbg_playadmission_free',
+    'profileliteralparser_new',
+    'profileliteralparser_write',
+    'profileliteralparser_parse_version',
+    'profileliteralparser_parse_password',
+    'profileliteralparser_password_byte',
+    'profileliteralparser_protocol_version',
+    'profileliteralparser_clear',
+    '__wbg_profileliteralparser_free'].filter(name => name !== omit);
   return Buffer.from([0, 97, 115, 109, 1, 0, 0, 0,
     ...section(1, [1, 0x60, 0, 0]),
     ...section(3, [2, 0, 0]),
@@ -62,6 +70,7 @@ import { copyHudIngressPlan, copyHudIngressReport } from './${snippetName}';
 export class AnimatedScene {}
 export class DesktopQuality {}
 export class PlayAdmission {}
+export class ProfileLiteralParser {}
 export class DesktopInput {}
 export function desktop_backing_size() {}
 const url = new URL('slither_client_bg.wasm', import.meta.url);
@@ -264,6 +273,9 @@ for (const [name, change, expected] of [
   ['missing JavaScript Play admission export',
     f => f.write('dist/web/slither_client.js', syntheticGlue.replace('export class PlayAdmission {}\n', '')),
     /generated web entrypoint/],
+  ['missing JavaScript profile literal owner',
+    f => f.write('dist/web/slither_client.js', syntheticGlue.replace('export class ProfileLiteralParser {}\n', '')),
+    /generated web entrypoint/],
   ['wrong generated URL', f => f.write('dist/web/slither_client.js', syntheticGlue.replace('slither_client_bg.wasm', 'elsewhere.wasm')), /generated web entrypoint/],
   ['mismatched glue exports', f => f.write('dist/web/slither_client.js', `${syntheticGlue}\nwasm.absent();`), /Wasm\/glue export mismatch: absent/],
   ['remote module', f => f.write('web/animated.mjs', "import init from 'https://example.invalid/client.js';"), /Nonlocal module import/],
@@ -299,7 +311,15 @@ for (const name of ['desktopinput_new', 'animatedscene_control_view', 'animateds
   'encode_login', 'solve_challenge', 'decode_frame', 'setup_protocol_version',
   'resolve_skin', 'resolve_local_skin', 'stock_custom_palette_mask_valid', 'stock_accessory_id', 'stock_accessory_forward', 'desktop_backing_size', 'endscreenprojector_new', 'endscreenprojector_project', '__wbg_endscreenprojector_free',
   'playadmission_new', 'playadmission_available', 'playadmission_accepted', 'playadmission_nickname_valid',
-  'playadmission_accept', 'playadmission_lock_unavailable', 'playadmission_return_ready', 'playadmission_complete_return', '__wbg_playadmission_free']) {
+  'playadmission_accept', 'playadmission_lock_unavailable', 'playadmission_return_ready', 'playadmission_complete_return', '__wbg_playadmission_free',
+    'profileliteralparser_new',
+    'profileliteralparser_write',
+    'profileliteralparser_parse_version',
+    'profileliteralparser_parse_password',
+    'profileliteralparser_password_byte',
+    'profileliteralparser_protocol_version',
+    'profileliteralparser_clear',
+    '__wbg_profileliteralparser_free']) {
   test(`missing production gameplay ABI ${name} fails before package output`, t => {
     const f = fixture(t);
     f.write('dist/web/slither_client_bg.wasm', syntheticWasm(name));

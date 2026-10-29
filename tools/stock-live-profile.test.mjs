@@ -3,8 +3,15 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash, webcrypto } from 'node:crypto';
 import { setImmediate as nextTurn } from 'node:timers/promises';
-import { createStockLiveProfileAcquirer, parseClosedProfileDeclarations,
-  verifyAndConsumeProfileBytes } from '../web/stock-live-profile.mjs';
+import { createStockLiveProfileAcquirer, parseClosedProfileDeclarations as parseWithPolicy,
+  verifyAndConsumeProfileBytes as verifyWithPolicy } from '../web/stock-live-profile.mjs';
+import { ProfileLiteralParserDouble } from './fixtures/profile-literals-double.mjs';
+import { loadWasm } from './reference-context.mjs';
+// Normal Node runs are build-independent; only the full ABI runner explicitly selects real Wasm.
+const ProfileLiteralParser = process.env.SLITHER_PROFILE_LITERALS_WASM === '1'
+  ? (await loadWasm()).ProfileLiteralParser : ProfileLiteralParserDouble;
+const parseClosedProfileDeclarations = (source, spans) => parseWithPolicy(source, spans, ProfileLiteralParser);
+const verifyAndConsumeProfileBytes = options => verifyWithPolicy({ ...options, literalParser: ProfileLiteralParser });
 
 const EXPECTED_URL = 'https://slither.io/s/game1107249518.js';
 const PUBLIC_HASH_METADATA = '5ad8aa8f06d1e71bad2945001bab077f8d4d279c093a046d19b6f26ac6b62095';
@@ -103,7 +110,7 @@ function harness(options = {}) {
       clear(value) { options.beforeClear?.(); value.fill(0); trace.push(['wipe', value.length]); },
     }),
   };
-  const acquirer = createStockLiveProfileAcquirer({ capabilities: freeze(caps),
+  const acquirer = createStockLiveProfileAcquirer({ capabilities: freeze(caps), literalParser: options.literalParser ?? ProfileLiteralParser,
     isCurrentDocument: () => options.isCurrentDocument ? options.isCurrentDocument() : current });
   return { acquirer, caps, payload, trace, allocations, digests, emittedChunks, timers, started,
     setNow(value) { now = value; }, setCurrent(value) { current = value; },
@@ -130,6 +137,32 @@ test('closed parser accepts authored decimal data/whitespace and preserves calle
   const zero = fixture({ version: '0', password: new Array(20).fill(0).join(',') });
   const parsed = parseClosedProfileDeclarations(zero.source, zero.spans);
   assert.equal(parsed.clientVersion, 0); assert.equal(allZero(parsed.password), true);
+});
+
+test('captured password allocation keeps its original failure mapping and Wasm cleanup boundary', async () => {
+  for (const kind of ['throw', 'wrong-size']) {
+    const h = harness();
+    let passwordAllocations = 0, parser;
+    class Parser extends ProfileLiteralParserDouble { constructor() { super(); parser = this; } }
+    for (const [name, field] of Object.entries(Object.getOwnPropertyDescriptors(ProfileLiteralParserDouble.prototype))) {
+      if (name !== 'constructor') Object.defineProperty(Parser.prototype, name, field);
+    }
+    const bytes = {...h.caps.bytes, allocate(size) {
+      if (size === 20) {
+        passwordAllocations++;
+        if (kind === 'throw') throw new Error('PRIVATE captured native allocation fault');
+        return h.caps.bytes.allocate(19);
+      }
+      return h.caps.bytes.allocate(size);
+    }};
+    const acquirer = createStockLiveProfileAcquirer({capabilities: {...h.caps, bytes},
+      isCurrentDocument: () => true, literalParser: Parser});
+    await assert.rejects(acquirer.acquireForPlay(() => assert.fail('consumer after allocation failure')), error =>
+      error.code === (kind === 'throw' ? 'request-failed' : 'unavailable-native') && !String(error).includes('PRIVATE'));
+    assert.equal(passwordAllocations, 1); assert.equal(parser.freed, true);
+    assert.ok(parser.input.every(byte => byte === 0)); assert.ok(parser.output.every(byte => byte === 0));
+    h.assertWiped();
+  }
 });
 
 test('identifier bound is 64 ASCII bytes and spans/own data are bounded before parsing', () => {
@@ -233,10 +266,10 @@ test('constructor is inert, production pin non-overridable, callbacks/caps are e
   assert.equal(Object.isFrozen(h.acquirer.status()), true); assert.deepEqual(h.trace, []);
   await assert.rejects(h.acquirer.acquireForPlay(null), code('consumer-failed'));
   assert.deepEqual(h.trace, []); assert.equal(h.acquirer.status().state, 'idle');
-  assert.throws(() => createStockLiveProfileAcquirer({ capabilities: h.caps, isCurrentDocument: () => true, pin: {} }), code('unavailable-native'));
+  assert.throws(() => createStockLiveProfileAcquirer({ literalParser: ProfileLiteralParserDouble, capabilities: h.caps, isCurrentDocument: () => true, pin: {} }), code('unavailable-native'));
   const getter = { ...h.caps }; Object.defineProperty(getter, 'fetch', { get() { assert.fail('getter invoked'); } });
-  assert.throws(() => createStockLiveProfileAcquirer({ capabilities: getter, isCurrentDocument: () => true }), code('unavailable-native'));
-  assert.throws(() => createStockLiveProfileAcquirer({ capabilities: { ...h.caps, digest: null }, isCurrentDocument: () => true }), code('unavailable-native'));
+  assert.throws(() => createStockLiveProfileAcquirer({ literalParser: ProfileLiteralParserDouble, capabilities: getter, isCurrentDocument: () => true }), code('unavailable-native'));
+  assert.throws(() => createStockLiveProfileAcquirer({ literalParser: ProfileLiteralParserDouble, capabilities: { ...h.caps, digest: null }, isCurrentDocument: () => true }), code('unavailable-native'));
   h.acquirer.dispose(); h.acquirer.dispose(); assert.deepEqual(h.trace, []);
   await assert.rejects(h.acquirer.acquireForPlay(() => {}), code('already-used'));
 });

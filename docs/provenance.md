@@ -51,6 +51,19 @@ internal copies cannot be guaranteed erased. A matching fetch identifies only
 the returned bytes, not the executed page program, asset compatibility, server
 freshness or acceptance.
 
+The closed literal grammar runs in browser-free Rust. Only the two admitted
+declaration spans are scalar-copied to a new bounded Wasm scratch owner; the
+complete program is never copied into Wasm, decoded to a string or evaluated.
+Input regions clear after parsing, and the boundary explicitly clears live
+Wasm input/output storage before freeing it on success and failure. Its copied
+20-byte JS password retains the existing captured-native allocation and cleanup
+order. Source and digest buffers still clear before the synchronous consumer,
+and the borrowed password clears afterward. JS scalar arguments, compiler/register
+temporaries and browser/native internal copies cannot be guaranteed erased;
+this does not replace explicit clearing of authored owned buffers. The retained
+JS grammar oracle and ABI double are labelled tools-only synthetic test support,
+with no production import or fallback.
+
 The captured capabilities, acquirer and final session/bootstrap composition need
 independent current-code review before shipping. Agent-run HTTP verification
 requires a separate exact one-request/no-session/no-socket authorization. Game

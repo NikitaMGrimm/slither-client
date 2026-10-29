@@ -1,3 +1,7 @@
+import { ProfileLiteralParserDouble } from './fixtures/profile-literals-double.mjs';
+import { loadWasm } from './reference-context.mjs';
+const ProfileLiteralParser = process.env.SLITHER_PROFILE_LITERALS_WASM === '1'
+  ? (await loadWasm()).ProfileLiteralParser : ProfileLiteralParserDouble;
 import { TestDesktopInput } from './fixtures/client-input-fixture.mjs';
 // Actual authored acquirer/gameplay/session with synthetic bytes and inert socket/capability doubles.
 import assert from 'node:assert/strict';
@@ -93,6 +97,7 @@ function harness(options = {}) {
     },
   };
   const wasm = { DesktopInput: TestDesktopInput,
+    ProfileLiteralParser: options.literalParser ?? ProfileLiteralParser,
     encode_login(version, password, nickname, skin, custom) {
       encoded.push({ version, password: [...password], nickname, skin, custom: [...custom] });
       options.onEncode?.(h);
