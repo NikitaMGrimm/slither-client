@@ -51,7 +51,7 @@ test('actual default graph mounts HUD, Play and leaderboard with one claim, scen
     assert.equal(root.children.length, 9, 'existing scene nodes plus HUD, Play, leaderboard, minimap, end-screen and announcement mounts');
     const [hudMount, playMount, leaderboardMount, minimapMount, endScreenMount, announcementMount] = root.children.slice(3);
     assert.equal(hudMount.children.length, 2); assert.equal(playMount.children.length, 5);
-    assert.equal(playMount.children[4].children.length, 14, 'default menu has three labels and eleven native action buttons');
+    assert.equal(playMount.children[4].children.length, 15, 'default menu keeps three labels and eleven action buttons, followed by one passive preview');
     assert.equal(graph.f.document.getElementById('slither-client-reload').hidden, true);
     assert.equal(graph.f.edit.hud.style(playMount.children[0].style).get('display'), 'none');
     assert.equal(graph.f.edit.hud.style(playMount.children[1].style).get('display'), 'block');

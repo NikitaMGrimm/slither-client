@@ -18,6 +18,7 @@ const routes = new Map([
   ...[['bootstrap', 'game-bootstrap'], ['runtime', 'game-runtime'],
     ['owned-hud-ui', 'game-owned-hud-ui'], ['owned-play-ui', 'game-owned-play-ui'],
     ['owned-appearance-ui', 'game-owned-appearance-ui'],
+    ['appearance-preview', 'game-appearance-preview'],
     ['owned-announcement-ui', 'game-owned-announcement-ui'],
     ['start-page-layout', 'start-page-layout'],
     ['owned-leaderboard-ui', 'game-owned-leaderboard-ui'], ['owned-minimap-ui', 'game-owned-minimap-ui'],

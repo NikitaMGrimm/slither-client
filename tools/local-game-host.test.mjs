@@ -97,6 +97,25 @@ const endpoint = 'ws://127.0.0.1:8766/slither';
 const create = f => createLocalGameHost({ realm: f.realm, endpoint });
 const claim = host => host.gate.claim(host.gate.metadata().id);
 
+test('local preview captures an isolated native frame without changing the shared source adapter', async () => {
+  const f = fixture({ minimap: true }), host = await create(f), native = claim(host), c = f.controls();
+  const adapter = host.sources.adapter, cap = native.appearancePreviewDom;
+  assert.equal(cap.document, f.document); assert(Object.isFrozen(cap));
+  const canvas = f.document.createElement('canvas'); c.parent.appendChild(canvas);
+  const { Context, Canvas, trace } = f.dom.minimap;
+  const fail = () => { throw new Error('Late Canvas method lookup'); };
+  Canvas.prototype.getContext = fail; Context.prototype.save = fail; Context.prototype.restore = fail;
+  const frame = cap.prepare(canvas, 320, 128); frame.finish();
+  assert.equal(host.sources.adapter, adapter); assert.equal(f.sockets.length, 0);
+  assert.equal(trace.filter(row => row[0] === 'save').length, 1);
+  assert.equal(trace.filter(row => row[0] === 'restore').length, 1);
+  assert.throws(() => frame.finish(), /consumed/);
+  const next = cap.prepare(canvas, 320, 128); f.realm.location.href += '?stale';
+  assert.throws(() => next.finish(), /Current/);
+  assert.equal(trace.filter(row => row[0] === 'restore').length, 2, 'restoration precedes freshness rejection');
+  host.dispose();
+});
+
 test('local menu captures fixed-key bounded storage and schema2 buttons without automatic Play', async () => {
   const f = fixture(), host = await create(f), native = claim(host), c = f.controls();
   const menu = f.document.createElement('div'), action = f.document.createElement('button');

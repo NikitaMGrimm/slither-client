@@ -247,7 +247,7 @@ impl DrawLane<'_> {
     }
 }
 
-pub(super) enum FaceLayout {
+pub(crate) enum FaceLayout {
     Paired {
         eyes: Option<StandardEyeLayout>,
         decoration: Option<[PairedSideLayout; 2]>,
@@ -674,7 +674,7 @@ fn plan_face(
     }
 }
 
-fn submit_selected_face(
+pub(crate) fn submit_selected_face(
     sources: &BorrowedSources,
     context: &CanvasRenderingContext2d,
     face: Option<&FaceSources>,
@@ -1287,7 +1287,7 @@ pub(super) fn submit_plans(
     Ok(())
 }
 
-fn submit_antenna(
+pub(crate) fn submit_antenna(
     sources: &BorrowedSources,
     context: &CanvasRenderingContext2d,
     decoration: Option<&AntennaDecoration>,

@@ -139,6 +139,44 @@
     } catch { return; }
   }
   const hudDom = captureHudDom();
+  function captureAppearancePreviewDom() {
+    if (!hudDom) return;
+    try {
+      const canvas = realm.HTMLCanvasElement.prototype, context = realm.CanvasRenderingContext2D.prototype;
+      const getContext = method(canvas, 'getContext'), contextCanvas = getter(context, 'canvas');
+      const width = descriptor(canvas, 'width')?.set, height = descriptor(canvas, 'height')?.set;
+      const save = method(context, 'save'), restore = method(context, 'restore');
+      if (typeof width !== 'function' || typeof height !== 'function') return;
+      function owned(value) {
+        if (!hudDom.isCurrentDocument()) throw new Error('Current appearance preview document required');
+        const dom = hudDom.dom;
+        if (dom.nodeType(value) !== 1 || dom.ownerDocument(value) !== hudDom.document || !dom.isConnected(value)
+          || dom.namespaceURI(value) !== 'http://www.w3.org/1999/xhtml' || dom.localName(value) !== 'canvas') {
+          throw new TypeError('Current HTML appearance preview canvas required');
+        }
+        if (!hudDom.isCurrentDocument()) throw new Error('Current appearance preview document required');
+      }
+      return freeze({ schema: 1, document: hudDom.document, prepare(value, x, y) {
+        if (![x, y].every(size => Number.isInteger(size) && size > 0 && size <= 1024)) {
+          throw new TypeError('Bounded appearance preview dimensions required');
+        }
+        owned(value); apply(width, value, [x]); owned(value); apply(height, value, [y]); owned(value);
+        const result = getContext(value, '2d'); owned(value);
+        if (!result || contextCanvas(result) !== value) throw new TypeError('Appearance preview 2d context required');
+        let finished = false;
+        const finish = () => {
+          if (finished) throw new Error('Appearance preview frame consumed');
+          finished = true;
+          // Restore even if document freshness was lost during submission.
+          restore(result); owned(value);
+        };
+        try { save(result); owned(value); }
+        catch (error) { try { finish(); } catch { /* Preserve the first thrown value, including undefined. */ } throw error; }
+        return freeze({ context: result, finish });
+      } });
+    } catch { return; }
+  }
+  const appearancePreviewDom = captureAppearancePreviewDom();
   function captureMinimapDom() {
     if (!hudDom) return;
     try {
@@ -848,6 +886,7 @@
     native.now = realm.performance.now.bind(realm.performance);
     native.random = realm.Math.random.bind(realm.Math);
     if (hudDom !== undefined) native.hudDom = hudDom;
+    if (appearancePreviewDom !== undefined) native.appearancePreviewDom = appearancePreviewDom;
     if (minimapDom !== undefined) native.minimapDom = minimapDom;
     if (leaderboardDom !== undefined) native.leaderboardDom = leaderboardDom;
     if (ownedHudDom !== undefined) native.ownedHudDom = ownedHudDom;

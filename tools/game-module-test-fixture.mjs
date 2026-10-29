@@ -3,6 +3,7 @@ import { desktopBackingOracle } from './fixtures/desktop-layout-fixture.mjs';
 import { createLeaderboardHistoryDouble } from './leaderboard-history-double.mjs';
 import { createHudHistoryDouble } from './hud-history-double.mjs';
 import { createMenuPreferencesDouble } from './menu-preferences-double.mjs';
+import { createAppearancePreviewDouble } from './appearance-preview-double.mjs';
 // Authored Node-only full ESM graph boundary. No browser or production Wasm proof.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -22,6 +23,7 @@ const webNames = ['stock-skin-provider.mjs', 'stock-client.mjs', 'stock-food-pro
 const entryNames = { 'bootstrap.mjs': 'game-bootstrap.mjs', 'runtime.mjs': 'game-runtime.mjs',
   'owned-hud-ui.mjs': 'game-owned-hud-ui.mjs', 'owned-play-ui.mjs': 'game-owned-play-ui.mjs',
   'owned-appearance-ui.mjs': 'game-owned-appearance-ui.mjs',
+  'appearance-preview.mjs': 'game-appearance-preview.mjs',
   'start-page-layout.mjs': 'start-page-layout.mjs',
   'owned-leaderboard-ui.mjs': 'game-owned-leaderboard-ui.mjs',
   'owned-announcement-ui.mjs': 'game-owned-announcement-ui.mjs',
@@ -75,6 +77,8 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
   });
   wasm.api.start_page_view = vm.runInContext('(' + projectStartPageDouble.toString() + ')', f.context);
   wasm.api.MenuPreferences = vm.runInContext('(' + createMenuPreferencesDouble.toString() + ')()', f.context);
+  const previewCalls = [];
+  wasm.api.AppearancePreview = vm.runInContext('(' + createAppearancePreviewDouble.toString() + ')', f.context)(previewCalls);
   const minimap = { enabled: 0, reads: [], fractions: [], view: {
     schema: 1, enabled: true, imageRevision: 0n, dimension: null,
     baseRgba: new Uint8Array(), alternateRgba: new Uint8Array(), widget: null,
@@ -124,7 +128,7 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
     if (module.status === 'linked') await module.evaluate();
     return module.namespace;
   };
-  return { f, wasm, counts, minimap, announcements, load, sources, run: source => vm.runInContext(source, f.context),
+  return { f, wasm, counts, minimap, announcements, previewCalls, load, sources, run: source => vm.runInContext(source, f.context),
     message(values) {
       // Native WebSocket delivery supplies an ArrayBuffer from the document's own realm.
       const data = vm.runInContext(`(values => {

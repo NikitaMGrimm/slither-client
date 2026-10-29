@@ -23,6 +23,7 @@ const gameSources = [['game-activation.mjs', 'activation.mjs'], ['game-gate.js',
   ['game-link.js', 'link.js'], ['game-bootstrap.mjs', 'bootstrap.mjs'], ['game-runtime.mjs', 'runtime.mjs'],
   ['game-owned-hud-ui.mjs', 'owned-hud-ui.mjs'], ['game-owned-play-ui.mjs', 'owned-play-ui.mjs'],
   ['game-owned-appearance-ui.mjs', 'owned-appearance-ui.mjs'],
+  ['game-appearance-preview.mjs', 'appearance-preview.mjs'],
   ['start-page-layout.mjs', 'start-page-layout.mjs'],
   ['game-owned-leaderboard-ui.mjs', 'owned-leaderboard-ui.mjs'],
   ['game-owned-announcement-ui.mjs', 'owned-announcement-ui.mjs'],
@@ -46,7 +47,8 @@ function syntheticWasm(omit) {
     'animatedscene_enable_announcement_tracking', 'animatedscene_announcement_view',
     'animatedscene_enable_minimap_tracking', 'animatedscene_observe_minimap_ui_fraction', 'animatedscene_minimap_view',
     'encode_login', 'solve_challenge', 'decode_frame', 'setup_protocol_version',
-    'resolve_skin', 'resolve_local_skin', 'stock_accessory_id', 'stock_accessory_forward', 'start_page_view', 'desktop_backing_size', 'endscreenprojector_new', 'endscreenprojector_project', '__wbg_endscreenprojector_free'].filter(name => name !== omit);
+    'resolve_skin', 'resolve_local_skin', 'stock_accessory_id', 'stock_accessory_forward', 'start_page_view', 'desktop_backing_size', 'endscreenprojector_new', 'endscreenprojector_project', '__wbg_endscreenprojector_free',
+    'appearancepreview_new', 'appearancepreview_select', 'appearancepreview_revision', 'appearancepreview_needs_draw', 'appearancepreview_render', '__wbg_appearancepreview_free'].filter(name => name !== omit);
   return Buffer.from([0, 97, 115, 109, 1, 0, 0, 0,
     ...section(1, [1, 0x60, 0, 0]),
     ...section(3, [2, 0, 0]),
@@ -60,6 +62,7 @@ import { copyHudIngressPlan, copyHudIngressReport } from './${snippetName}';
 export class AnimatedScene {}
 export class DesktopQuality {}
 export class DesktopInput {}
+export class AppearancePreview {}
 export function desktop_backing_size() {}
 const url = new URL('slither_client_bg.wasm', import.meta.url);
 async function __wbg_init() {}
@@ -186,7 +189,7 @@ test('MV3 browser differences, explicit activation permissions, closed WAR and o
     assert.deepEqual(manifest.permissions, ['activeTab', 'scripting']);
     assert.deepEqual(manifest.web_accessible_resources, [{
       matches: ['http://slither.io/*', 'https://slither.io/*', 'http://www.slither.io/*', 'https://www.slither.io/*'],
-      resources: ['game/bootstrap.mjs', 'game/runtime.mjs', 'game/owned-hud-ui.mjs', 'game/owned-play-ui.mjs', 'game/owned-appearance-ui.mjs', 'game/start-page-layout.mjs', 'assets/logo.svg', 'game/owned-leaderboard-ui.mjs', 'game/owned-minimap-ui.mjs', 'game/owned-end-screen-ui.mjs', 'game/owned-announcement-ui.mjs', 'game/stock-host-snapshot.mjs', 'game/stock-client.mjs', 'game/stock-skin-provider.mjs',
+      resources: ['game/bootstrap.mjs', 'game/runtime.mjs', 'game/owned-hud-ui.mjs', 'game/owned-play-ui.mjs', 'game/owned-appearance-ui.mjs', 'game/appearance-preview.mjs', 'game/start-page-layout.mjs', 'assets/logo.svg', 'game/owned-leaderboard-ui.mjs', 'game/owned-minimap-ui.mjs', 'game/owned-end-screen-ui.mjs', 'game/owned-announcement-ui.mjs', 'game/stock-host-snapshot.mjs', 'game/stock-client.mjs', 'game/stock-skin-provider.mjs',
         'game/stock-skin-rules.mjs', 'game/stock-accessory-selection.mjs', 'game/stock-cached-accessory.mjs', 'game/stock-accessory-load.mjs', 'game/skin-provider.mjs', 'game/stock-food-provider.mjs', 'game/stock-prey-provider.mjs',
         'game/stock-asset-sources.mjs', 'game/desktop-layout.mjs', 'game/client-input.mjs',
         'game/stock-gameplay.mjs', 'game/stock-session.mjs', 'game/stock-hud-contract.mjs', 'game/stock-hud-state.mjs',
@@ -255,6 +258,9 @@ for (const [name, change, expected] of [
   ['missing JavaScript desktop input export',
     f => f.write('dist/web/slither_client.js', syntheticGlue.replace('export class DesktopInput {}\n', '')),
     /generated web entrypoint/],
+  ['missing JavaScript appearance preview export',
+    f => f.write('dist/web/slither_client.js', syntheticGlue.replace('export class AppearancePreview {}\n', '')),
+    /generated web entrypoint/],
   ['missing JavaScript desktop sizing export',
     f => f.write('dist/web/slither_client.js', syntheticGlue.replace('export function desktop_backing_size() {}\n', '')),
     /generated web entrypoint/],
@@ -291,7 +297,8 @@ for (const name of ['desktopinput_new', 'animatedscene_control_view', 'animateds
   'animatedscene_enable_minimap_tracking', 'animatedscene_observe_minimap_ui_fraction', 'animatedscene_minimap_view',
   'animatedscene_apply_frame_and_render_standard_with_face_presentation_and_prey_and_hud',
   'encode_login', 'solve_challenge', 'decode_frame', 'setup_protocol_version',
-  'resolve_skin', 'resolve_local_skin', 'stock_accessory_id', 'stock_accessory_forward', 'desktop_backing_size', 'endscreenprojector_new', 'endscreenprojector_project', '__wbg_endscreenprojector_free']) {
+  'resolve_skin', 'resolve_local_skin', 'stock_accessory_id', 'stock_accessory_forward', 'desktop_backing_size', 'endscreenprojector_new', 'endscreenprojector_project', '__wbg_endscreenprojector_free',
+    'appearancepreview_new', 'appearancepreview_select', 'appearancepreview_revision', 'appearancepreview_needs_draw', 'appearancepreview_render', '__wbg_appearancepreview_free']) {
   test(`missing production gameplay ABI ${name} fails before package output`, t => {
     const f = fixture(t);
     f.write('dist/web/slither_client_bg.wasm', syntheticWasm(name));

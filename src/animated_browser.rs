@@ -457,6 +457,10 @@ mod skin_browser;
 mod views_browser;
 
 use plans_browser::*;
+pub(crate) use plans_browser::{
+    FaceLayout as PreviewFaceLayout, submit_antenna as submit_preview_antenna,
+    submit_selected_face as submit_preview_face,
+};
 use views_browser::*;
 
 /// Coupled packet/update/draw ownership with a synthetic three-palette preview.
