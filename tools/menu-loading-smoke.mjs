@@ -2,6 +2,25 @@ import assert from 'node:assert/strict';
 
 /** Authored direct real-Wasm loading projection; no DOM, scheduling or connection. */
 export function menuLoadingSmoke(wasm) {
+  const keys = ['visible', 'busy', 'text'];
+  for (const mode of ['setter', 'nonwritable']) {
+    const prior = keys.map(key => [key, Object.getOwnPropertyDescriptor(Object.prototype, key)]);
+    let writes = 0, view;
+    try {
+      for (const key of keys) Object.defineProperty(Object.prototype, key, mode === 'setter'
+        ? { configurable: true, set() { writes++; } }
+        : { configurable: true, writable: false, value: 'inherited' });
+      view = wasm.menu_loading_view('loading', false);
+    } finally {
+      for (const [key, descriptor] of prior) {
+        if (descriptor) Object.defineProperty(Object.prototype, key, descriptor); else delete Object.prototype[key];
+      }
+    }
+    assert.equal(writes, 0, 'loading copy never invokes inherited setters');
+    assert.equal(Object.getPrototypeOf(view), null);
+    for (const key of keys) assert.equal(Object.hasOwn(Object.getOwnPropertyDescriptor(view, key), 'value'), true);
+    assert.deepEqual({ ...view }, { visible: true, busy: true, text: 'Loading client…' });
+  }
   for (const code of ['loading','waiting-assets','ready-not-connected','connected','disconnected',
     'host-unavailable','csp-or-module-unavailable','client-failed','disposed']) {
     for (const mounted of [false,true]) {

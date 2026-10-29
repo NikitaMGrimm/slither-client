@@ -34,7 +34,7 @@ fn view(
     availability: PreviewAvailability,
     changed: bool,
 ) -> Result<JsValue, JsValue> {
-    let result = Object::new();
+    let result = Object::create(&JsValue::NULL.unchecked_into());
     for (key, value) in [
         ("schema", 1.into()),
         ("revision", revision.into()),
@@ -106,7 +106,7 @@ impl AppearancePreview {
             return view(revision, PreviewAvailability::Ready, false);
         }
         let descriptor = self.inner.descriptor(false).map_err(error)?;
-        let request = Object::new();
+        let request = Object::create(&JsValue::NULL.unchecked_into());
         for (key, value) in [
             ("skin", self.inner.skin().into()),
             ("customBytes", Uint8Array::from(self.inner.custom()).into()),

@@ -1,7 +1,7 @@
 import { createStockSkinAdapter } from './stock-skin-provider.mjs';
 import { createStockClient } from './stock-client.mjs';
 import { createStockEntityAssets } from './stock-food-provider.mjs';
-import { createStockHostSnapshot } from './stock-host-snapshot.mjs';
+import { createStockHostSnapshot, isPendingStockCapture } from './stock-host-snapshot.mjs';
 import { desktopBackingSize } from './desktop-layout.mjs';
 import { createStockGameplay } from './stock-gameplay.mjs';
 import { bindStockHudDom } from './stock-hud-dom.mjs';
@@ -759,6 +759,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     if (reader) listeners.push(() => reader.dispose());
     const started = native.now();
     let context;
+    const pendingCaptures = new WeakSet();
     const captureReady = () => {
       if (localHost && !localHost.isCurrentDocument()) throw new Error('Current local game document required');
       const capture = localHost ? localHost.sources : reader.capture();
@@ -769,7 +770,8 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
         const error = new Error('Renderer context sources changed; reload required'); error.status = 'unsupported'; throw error;
       }
       if (!localHost && capture.readiness.some(entry => entry.state !== 'ready')) {
-        const error = new Error('Waiting for committed host sources'); error.status = 'pending'; throw error;
+        const error = new Error('Waiting for committed host sources'); error.status = 'pending';
+        pendingCaptures.add(error); throw error;
       }
       return capture;
     };
@@ -1020,8 +1022,16 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
             withSources(callback) {
               let begun = false, failed = false, primary, result;
               try {
-                wrapped.beginOperation(); begun = true; checkHudOperation();
-                result = callback(request => {
+                let pending = false;
+                try { wrapped.beginOperation(); begun = true; }
+                catch (error) {
+                  // Only our readiness rejection can become a Rust pending view.
+                  // The failed begin has already cleared the capture; it has no matching end.
+                  if (!pendingCaptures.has(error) && !isPendingStockCapture(error)) throw error;
+                  pending = true;
+                }
+                checkHudOperation();
+                result = callback(pending ? () => freeze({ __proto__: null, status: 'pending' }) : request => {
                   checkHudOperation(); const value = adapter.resolveRecipe(request); checkHudOperation(); return value;
                 });
                 checkHudOperation();

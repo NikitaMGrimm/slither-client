@@ -40,6 +40,32 @@ export function appearancePreviewSmoke(wasm) {
   let local, stock;
   try {
     local = new wasm.AppearancePreview(true); stock = new wasm.AppearancePreview(false);
+    // Both records cross host boundaries; inherited setters must never run under the Rust borrow.
+    const requestKeys = ['skin', 'customBytes', 'own', 'cosmetic', 'x', 'y'];
+    const viewKeys = ['schema', 'revision', 'changed', 'width', 'height', 'visible', 'statusText'];
+    for (const mode of ['setter', 'nonwritable']) {
+      const keys = [...requestKeys, ...viewKeys];
+      const prior = keys.map(key => [key, Object.getOwnPropertyDescriptor(Object.prototype, key)]);
+      const ticket = local.select(1, new Uint8Array());
+      let writes = 0, request, view;
+      try {
+        for (const key of keys) Object.defineProperty(Object.prototype, key, mode === 'setter'
+          ? { configurable: true, set() { writes++; } }
+          : { configurable: true, writable: false, value: 'inherited' });
+        view = local.render(ticket, target, world, value => { request = value; return { status: 'pending' }; }, prepare);
+      } finally {
+        for (const [key, descriptor] of prior) {
+          if (descriptor) Object.defineProperty(Object.prototype, key, descriptor); else delete Object.prototype[key];
+        }
+      }
+      equal(writes, 0); equal(prepared, 0); equal(view.visible, false); equal(local.needs_draw(ticket), true);
+      for (const [record, fields] of [[request, requestKeys], [view, viewKeys]]) {
+        equal(Object.getPrototypeOf(record), null); equal(Object.isFrozen(record), true);
+        equal(Object.keys(record).sort(), [...fields].sort());
+        for (const key of fields) equal(Object.hasOwn(Object.getOwnPropertyDescriptor(record, key), 'value'), true);
+      }
+      equal(request.skin, 1); equal(request.own, false); equal(request.customBytes.length, 0);
+    }
     const bodySources = {
       palettes: Array.from({ length: 3 }, () => ({ variants: Array.from({ length: 7 }, source), boostGlow: source() })),
       effects: { outline: source(), shadow: source(), deathHighlight: source() },
