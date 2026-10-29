@@ -1,5 +1,6 @@
 import { TestGameplayPolicy } from './fixtures/gameplay-policy-double.mjs';
 import { TestStockControllerPolicy } from './fixtures/stock-controller-double.mjs';
+import { authoredSourceRecipesDouble } from './fixtures/authored-source-fixture.mjs';
 import { TestSessionPolicy } from './fixtures/session-policy-double.mjs';
 import { ProfileLiteralParserDouble } from './fixtures/profile-literals-double.mjs';
 import { stockSkinWasmDouble } from './stock-skin-policy-double.mjs';
@@ -10,6 +11,7 @@ import { createHudHistoryDouble } from './hud-history-double.mjs';
 import { createMenuPreferencesDouble } from './menu-preferences-double.mjs';
 import { createPlayAdmissionDouble } from './play-admission-double.mjs';
 import { loadWasm } from './reference-context.mjs';
+import { createAppearancePreviewDouble } from './appearance-preview-double.mjs';
 // Authored Node-only full ESM graph boundary. No browser or production Wasm proof.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -17,6 +19,7 @@ import { Worker, isMainThread, parentPort, workerData } from 'node:worker_thread
 import * as vm from 'node:vm';
 import { createGateTestDom, attachGateTestRealm, issuedMinimapViewDouble } from './game-gate-test-fixture.mjs';
 import { projectStartPageDouble } from './start-page-view-double.mjs';
+import { projectMenuLoadingDouble } from './menu-loading-view-double.mjs';
 
 const root = new URL('../', import.meta.url);
 // The flagged ABI phase replays the same inert runtime requirements with real Rust admission.
@@ -24,16 +27,22 @@ const realPlayAdmission = process.env.SLITHER_PLAY_ADMISSION_WASM === '1' ? (awa
 if (process.env.SLITHER_PLAY_ADMISSION_WASM === '1' && typeof realPlayAdmission !== 'function') {
   throw new Error('Real PlayAdmission Wasm export required; no test-double fallback in ABI phase');
 }
+const realMenuLoading = process.env.SLITHER_MENU_LOADING_WASM === '1' ? (await loadWasm()).menu_loading_view : undefined;
+if (process.env.SLITHER_MENU_LOADING_WASM === '1' && typeof realMenuLoading !== 'function') {
+  throw new Error('Real menu_loading_view Wasm export required; no ABI-phase test-double fallback');
+}
 const webNames = ['stock-skin-provider.mjs', 'stock-client.mjs', 'stock-food-provider.mjs',
   'stock-host-snapshot.mjs', 'desktop-layout.mjs', 'stock-gameplay.mjs', 'stock-hud-dom.mjs',
   'stock-hud-view.mjs', 'stock-skin-rules.mjs', 'stock-accessory-selection.mjs', 'stock-cached-accessory.mjs', 'stock-accessory-load.mjs', 'stock-prey-provider.mjs', 'stock-asset-sources.mjs',
   'skin-provider.mjs', 'client-input.mjs', 'stock-session.mjs', 'stock-hud-contract.mjs',
   'stock-hud-state.mjs', 'handshake-session.mjs', 'stock-live-profile.mjs',
   'stock-leaderboard-state.mjs', 'stock-leaderboard-view.mjs',
-  'local-game-host.mjs', 'client-asset-map.mjs', 'synthetic-body.mjs', 'synthetic-food.mjs', 'synthetic-prey.mjs', 'loopback-session.mjs'];
+  'local-game-host.mjs', 'client-asset-map.mjs', 'authored-source-recipes.mjs', 'synthetic-body.mjs', 'synthetic-food.mjs', 'synthetic-prey.mjs', 'loopback-session.mjs'];
 const entryNames = { 'bootstrap.mjs': 'game-bootstrap.mjs', 'runtime.mjs': 'game-runtime.mjs',
   'owned-hud-ui.mjs': 'game-owned-hud-ui.mjs', 'owned-play-ui.mjs': 'game-owned-play-ui.mjs',
   'owned-appearance-ui.mjs': 'game-owned-appearance-ui.mjs',
+  'appearance-preview.mjs': 'game-appearance-preview.mjs',
+  'game-owned-loading-ui.mjs': 'game-owned-loading-ui.mjs',
   'start-page-layout.mjs': 'start-page-layout.mjs',
   'owned-leaderboard-ui.mjs': 'game-owned-leaderboard-ui.mjs',
   'owned-announcement-ui.mjs': 'game-owned-announcement-ui.mjs',
@@ -61,12 +70,12 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
   // Reuse authored native/Wasm fixture definitions, never transform a product module.
   const testSource = readFileSync(new URL('tools/game-bootstrap.test.mjs', root), 'utf8');
   const definitions = testSource.slice(testSource.indexOf('function fixture('), testSource.indexOf("\ntest('an unarmed"));
-  const makeFixture = new vm.Script(`(function(gateSource,Script,createContext,runInContext,assert,createGateTestDom,attachGateTestRealm,createHudHistoryDouble,createLeaderboardHistoryDouble,TestDesktopInput,desktopBackingOracle,TestSessionPolicy,stockSkinWasmDouble,TestStockControllerPolicy,TestGameplayPolicy){
+  const makeFixture = new vm.Script(`(function(gateSource,Script,createContext,runInContext,assert,createGateTestDom,attachGateTestRealm,createHudHistoryDouble,createLeaderboardHistoryDouble,TestDesktopInput,desktopBackingOracle,TestSessionPolicy,stockSkinWasmDouble,TestStockControllerPolicy,TestGameplayPolicy,authoredSourceRecipesDouble){
     ${definitions}\nreturn {fixture,wasmDouble};})`).runInThisContext();
   const nativeSource = readFileSync(new URL('extension/game-gate.js', root), 'utf8');
   const { fixture, wasmDouble } = makeFixture(nativeSource, vm.Script, vm.createContext, vm.runInContext, assert,
     options => { const dom = createGateTestDom({ ...options, ownedHud: ownedHudNative, ownedPlay: ownedPlayNative,
-      leaderboard: leaderboardNative, minimap: minimapNative }); prepare?.(dom); return dom; }, attachGateTestRealm, createHudHistoryDouble, createLeaderboardHistoryDouble, TestDesktopInput,desktopBackingOracle,TestSessionPolicy,stockSkinWasmDouble,TestStockControllerPolicy,TestGameplayPolicy);
+      leaderboard: leaderboardNative, minimap: minimapNative }); prepare?.(dom); return dom; }, attachGateTestRealm, createHudHistoryDouble, createLeaderboardHistoryDouble, TestDesktopInput,desktopBackingOracle,TestSessionPolicy,stockSkinWasmDouble,TestStockControllerPolicy,TestGameplayPolicy,authoredSourceRecipesDouble);
   const f = fixture({ armed, hudNative });
   if (hudNative) {
     // The legacy native boundary must create HTML-branded borrowed root/status nodes too.
@@ -91,8 +100,13 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
     announcement_view() { announcements.reads++; return announcements.view; },
   });
   wasm.api.start_page_view = vm.runInContext('(' + projectStartPageDouble.toString() + ')', f.context);
+  wasm.api.menu_loading_view = realMenuLoading
+    ? vm.runInContext('(project => function(code, mounted) { const view=project(code,mounted); return Object.freeze({visible:view.visible,busy:view.busy,text:view.text}); })', f.context)(realMenuLoading)
+    : vm.runInContext('(' + projectMenuLoadingDouble.toString() + ')', f.context);
   wasm.api.MenuPreferences = vm.runInContext('(' + createMenuPreferencesDouble.toString() + ')()', f.context);
   wasm.api.PlayAdmission = realPlayAdmission ?? vm.runInContext('(' + createPlayAdmissionDouble.toString() + ')()', f.context);
+  const previewCalls = [];
+  wasm.api.AppearancePreview = vm.runInContext('(' + createAppearancePreviewDouble.toString() + ')', f.context)(previewCalls);
   const minimap = { enabled: 0, reads: [], fractions: [], view: {
     schema: 1, enabled: true, imageRevision: 0n, dimension: null,
     baseRgba: new Uint8Array(), alternateRgba: new Uint8Array(), widget: null,
@@ -142,7 +156,7 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
     if (module.status === 'linked') await module.evaluate();
     return module.namespace;
   };
-  return { f, wasm, counts, minimap, announcements, load, sources, run: source => vm.runInContext(source, f.context),
+  return { f, wasm, counts, minimap, announcements, previewCalls, load, sources, run: source => vm.runInContext(source, f.context),
     message(values) {
       // Native WebSocket delivery supplies an ArrayBuffer from the document's own realm.
       const data = vm.runInContext(`(values => {

@@ -2,10 +2,12 @@
 import init, * as wasm from '/pkg/slither_client.js';
 import { syntheticScene, syntheticStep } from '/web/synthetic-scene.mjs';
 import { createSyntheticBodyResolver } from '/web/synthetic-body.mjs';
+import { readAuthoredSourceRecipes } from '/web/authored-source-recipes.mjs';
 import { createSyntheticFoodResolver } from '/web/synthetic-food.mjs';
 import { createSyntheticPreyResolver, syntheticPreyCommands } from '/web/synthetic-prey.mjs';
 
 await init();
+const sourceRecipes = readAuthoredSourceRecipes(wasm);
 const canvas = document.querySelector('#world');
 const palettes = ['#83d5b0', '#efbb62', '#76b9ed'].map(color => {
   const source = document.createElement('canvas');
@@ -20,8 +22,8 @@ await background.decode();
 const body = createSyntheticBodyResolver(palettes, globalThis);
 let seed = 0x51eed;
 const random = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
-const food = createSyntheticFoodResolver(globalThis, random);
-const prey = createSyntheticPreyResolver(globalThis, random);
+const food = createSyntheticFoodResolver(globalThis, random, sourceRecipes.food);
+const prey = createSyntheticPreyResolver(globalThis, random, sourceRecipes.prey);
 const face = () => ({ eyes: { kind: 'standard', distance: 6, separation: 6, radius: 6,
   pupilRadius: 3.5, pupilTravel: 2.3, outlineWidth: 0, eyeColor: 0xffffff,
   pupilColor: 0, outlineColor: 0, eyeOpacity: 0.75, pupilOpacity: 1,

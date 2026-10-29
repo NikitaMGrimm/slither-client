@@ -80,12 +80,13 @@ if (process.env.SLITHER_PREY_FIXTURE_WASM === '1') {
     const scene = new wasm.AnimatedScene(0), quality = new wasm.DesktopQuality(1, 0);
     let client;
     try {
-      const assets = await createClientAssetMap({ realm });
+      const sourceRecipes = wasm.authored_source_recipes();
+      const assets = await createClientAssetMap({ realm, sourceRecipes });
       const body = createLocalBodyResolver(assets.bodySources, realm, wasm.resolve_local_skin);
       let randomCalls = 0;
       const random = () => { randomCalls++; return .25; };
-      const resolvePrey = createSyntheticPreyResolver(realm, random);
-      const food = createSyntheticFoodResolver(realm, random);
+      const resolvePrey = createSyntheticPreyResolver(realm, random, sourceRecipes.prey);
+      const food = createSyntheticFoodResolver(realm, random, sourceRecipes.food);
       const creations = [], roles = new Map();
       const target = new realm.HTMLCanvasElement();
       target.width = f.viewport.width; target.height = f.viewport.height;

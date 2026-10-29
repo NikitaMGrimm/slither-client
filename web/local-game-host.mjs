@@ -1,5 +1,6 @@
 import { loopbackEndpoint } from './loopback-session.mjs';
-import { authoredPaletteRgb, createClientAssetMap } from './client-asset-map.mjs';
+import { createClientAssetMap } from './client-asset-map.mjs';
+import { copyAuthoredSourceRecipes } from './authored-source-recipes.mjs';
 import { createLocalBodyResolver } from './synthetic-body.mjs';
 import { createSyntheticFoodResolver } from './synthetic-food.mjs';
 import { createSyntheticPreyResolver } from './synthetic-prey.mjs';
@@ -19,20 +20,31 @@ function method(prototype, name) {
   return (receiver, ...args) => apply(operation, receiver, args);
 }
 
-/** Browser plumbing and original stand-ins for the same game runtime on localhost. */
-export async function createLocalGameHost({ realm = globalThis, endpoint, sourceFactory } = {}) {
+/** Capture the existing local document fence before asynchronous default bootstrap work. */
+export function captureLocalGameDocument(realm) {
   const document = realm.document, location = realm.location, href = location?.href;
   const match = typeof href === 'string' && /^http:\/\/127\.0\.0\.1:([1-9][0-9]{0,4})(?:[/?#]|$)/.exec(href);
   if (!document || realm.top !== realm || !match || Number(match[1]) > 65535) {
     throw new Error('Literal top-level http://127.0.0.1:<port> document required');
   }
+  return freeze({ document, isCurrent() {
+    try { return realm.top === realm && realm.document === document && realm.location === location && location.href === href; }
+    catch { return false; }
+  }, assertCurrent() {
+    if (!this.isCurrent()) throw new Error('Current local game document required');
+  } });
+}
+
+/** Browser plumbing and original stand-ins for the same game runtime on localhost. */
+export async function createLocalGameHost({ realm = globalThis, endpoint, sourceFactory, sourceRecipes } = {}) {
+  const documentFence = captureLocalGameDocument(realm);
+  const document = realm.document, location = realm.location;
   endpoint = loopbackEndpoint(endpoint);
   let disposed = false, claimed = false, operation = false, inputRoute, nickname, skinPolicy, playControl;
   const cleanups = new Set();
   const isCurrentDocument = () => {
     try {
-      return !disposed && realm.top === realm && realm.document === document
-        && realm.location === location && location.href === href;
+      return !disposed && documentFence.isCurrent();
     } catch { return false; }
   };
   function current() {
@@ -54,6 +66,42 @@ export async function createLocalGameHost({ realm = globalThis, endpoint, source
     createTextNode: method(realm.Document?.prototype, 'createTextNode'),
     appendChild: method(node, 'appendChild'), removeChild: method(node, 'removeChild'),
   });
+  function captureAppearancePreviewDom() {
+    try {
+      const canvas = realm.HTMLCanvasElement.prototype, context = realm.CanvasRenderingContext2D.prototype;
+      const getContext = method(canvas, 'getContext'), contextCanvas = accessor(context, 'canvas');
+      const width = Object.getOwnPropertyDescriptor(canvas, 'width')?.set, height = Object.getOwnPropertyDescriptor(canvas, 'height')?.set;
+      const save = method(context, 'save'), restore = method(context, 'restore');
+      if (typeof width !== 'function' || typeof height !== 'function') return;
+      function owned(value) {
+        if (!isCurrentDocument()) throw new Error('Current appearance preview document required');
+        if (dom.nodeType(value) !== 1 || dom.ownerDocument(value) !== document || !dom.isConnected(value)
+          || dom.namespaceURI(value) !== 'http://www.w3.org/1999/xhtml' || dom.localName(value) !== 'canvas') {
+          throw new TypeError('Current HTML appearance preview canvas required');
+        }
+        if (!isCurrentDocument()) throw new Error('Current appearance preview document required');
+      }
+      return freeze({ schema: 1, document: document, prepare(value, x, y) {
+        if (![x, y].every(size => Number.isInteger(size) && size > 0 && size <= 1024)) {
+          throw new TypeError('Bounded appearance preview dimensions required');
+        }
+        owned(value); apply(width, value, [x]); owned(value); apply(height, value, [y]); owned(value);
+        const result = getContext(value, '2d'); owned(value);
+        if (!result || contextCanvas(result) !== value) throw new TypeError('Appearance preview 2d context required');
+        let finished = false;
+        const finish = () => {
+          if (finished) throw new Error('Appearance preview frame consumed');
+          finished = true;
+          // Restore even if document freshness was lost during submission.
+          restore(result); owned(value);
+        };
+        try { save(result); owned(value); }
+        catch (error) { try { finish(); } catch { /* Preserve the first thrown value, including undefined. */ } throw error; }
+        return freeze({ context: result, finish });
+      } });
+    } catch { return; }
+  }
+  const appearancePreviewDom = captureAppearancePreviewDom();
   function captureMinimapDom() {
     try {
       const canvas = realm.HTMLCanvasElement.prototype, context = realm.CanvasRenderingContext2D.prototype;
@@ -262,9 +310,10 @@ export async function createLocalGameHost({ realm = globalThis, endpoint, source
 
   const sourceRealm = { HTMLCanvasElement: realm.HTMLCanvasElement, HTMLImageElement: realm.HTMLImageElement,
     document: { createElement: tag => construct.createElement(document, tag) } };
+  const recipes = sourceFactory === undefined ? copyAuthoredSourceRecipes(sourceRecipes) : undefined;
   let sources = await createClientAssetMap({
     realm: sourceFactory === undefined ? { ...sourceRealm, Image: realm.Image } : realm,
-    sourceFactory, random,
+    sourceFactory, random, sourceRecipes: recipes,
   });
   current();
   if (sourceFactory === undefined) {
@@ -275,8 +324,8 @@ export async function createLocalGameHost({ realm = globalThis, endpoint, source
       inOperation();
       return rule;
     });
-    const resolveFood = createSyntheticFoodResolver(sourceRealm, random);
-    const resolvePrey = createSyntheticPreyResolver(sourceRealm, random);
+    const resolveFood = createSyntheticFoodResolver(sourceRealm, random, recipes.food);
+    const resolvePrey = createSyntheticPreyResolver(sourceRealm, random, recipes.prey);
     const revision = 'authored-local-1';
     function inOperation() {
       current();
@@ -296,7 +345,7 @@ export async function createLocalGameHost({ realm = globalThis, endpoint, source
         inOperation();
         // Rust validates the units and resolves the color once for this appearance.
         // These draws share the page random stream with food, prey and antennas.
-        const nicknameTint = freeze({ baseRgb: authoredPaletteRgb[rule.basePalette],
+        const nicknameTint = freeze({ baseRgb: recipes.paletteRgb[rule.basePalette],
           randomUnits: freeze([random(), random(), random()]) });
         return freeze({ face: freeze({ kind: 'paired', eyes: rule.eyes, decoration: freeze({ kind: 'none' }) }),
           antenna: null, nicknameTint });
@@ -344,6 +393,7 @@ export async function createLocalGameHost({ realm = globalThis, endpoint, source
   });
   const native = freeze({ ...scheduling, now, random, setInput, registerNicknameEditField, menuPreferences,
     hudDom: freeze({ schema: 1, document, dom, isCurrentDocument }),
+    ...(appearancePreviewDom ? { appearancePreviewDom } : {}),
     ...(minimapDom ? { minimapDom } : {}),
     ownedHudDom: freeze({ schema: 1, document, dom: construct }),
     ownedPlayDom: freeze({ schema: 1, document, dom: controls, createControlsLease }),

@@ -1,6 +1,9 @@
 import { createStockCachedAccessory } from './stock-cached-accessory.mjs';
 
 const freeze = Object.freeze;
+const pendingErrors = new WeakSet();
+// Recognize only authored capture failures without consulting arbitrary thrown-value properties.
+export const isPendingStockCapture = error => pendingErrors.has(error);
 const typedLength = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype), 'length').get;
 const downloaded = ['kwkbulb', 'pwdbulb', 'playbulb', 'leafbulb', 'swissbulb',
   'moldovabulb', 'vietnambulb', 'argentinabulb', 'movbulb', 'bonkbulb', 'sest', 'jmou'];
@@ -14,6 +17,7 @@ const families = [
 function fail(message, status = 'unsupported') {
   const error = new Error(message);
   error.name = 'StockHostError'; error.status = status;
+  if (status === 'pending') pendingErrors.add(error);
   throw error;
 }
 function field(record, key) {

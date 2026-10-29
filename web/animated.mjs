@@ -2,6 +2,7 @@ import init, * as wasm from './pkg/slither_client.js';
 import { syntheticScene, syntheticStep } from './synthetic-scene.mjs';
 import { connectLoopback, loopbackEndpoint, sceneHeading } from './loopback-session.mjs';
 import { createSyntheticBodyResolver } from './synthetic-body.mjs';
+import { readAuthoredSourceRecipes } from './authored-source-recipes.mjs';
 import { createSyntheticFoodResolver } from './synthetic-food.mjs';
 import { createSyntheticPreyResolver, syntheticPreyCommands } from './synthetic-prey.mjs';
 import { desktopBackingSize } from './desktop-layout.mjs';
@@ -116,15 +117,16 @@ async function start() {
     decoration: { kind: 'none' },
   };
   const resolveFace = () => ({ revision: 'synthetic-face-1', eyes: face.eyes, decoration: null });
+  const sourceRecipes = readAuthoredSourceRecipes(wasm);
   const resolveFood = createSyntheticFoodResolver(globalThis, () => {
     // A repeatable caller-owned tape supplies two independent units per creation.
     foodRandomState = (Math.imul(foodRandomState, 1664525) + 1013904223) >>> 0;
     return foodRandomState / 4294967296;
-  });
+  }, sourceRecipes.food);
   const resolvePrey = createSyntheticPreyResolver(globalThis, () => {
     preyRandomState = (Math.imul(preyRandomState, 1664525) + 1013904223) >>> 0;
     return preyRandomState / 4294967296;
-  });
+  }, sourceRecipes.prey);
   const projectDesktopSize = wasm.desktop_backing_size;
   const desiredSize = () => desktopBackingSize(window.innerWidth, window.innerHeight, projectDesktopSize);
   function recordDraws(count) {

@@ -114,3 +114,26 @@ stock artwork, loading or pixel equivalence, installed Chrome/Firefox behavior,
 remote profile acquisition or official-server acceptance. See
 [verification](verification.md#default-runtime-and-local-play-status) for the
 current evidence boundary.
+
+## Authored source initialization
+
+The default local bootstrap admits the literal top-level local document, config
+and loopback endpoint before initializing Wasm. It calls initialize once, awaits
+that promise, copies the required authored_source_recipes output, then creates
+the existing authored Canvas/Image sources. The runtime receives the same
+settled initialization promise and binds resolve_local_skin at its existing
+stage. Wasm initialization now precedes authored source allocation and decode;
+this is an intentional startup-order change, not a byte-parity claim. Rejection
+uses the existing local bootstrap status path without retry or source allocation.
+Document freshness is rechecked after asynchronous initialization and decode.
+
+Direct callers of createLocalGameHost and createClientAssetMap supply the copied
+sourceRecipes plan explicitly. Food/prey factories receive its food/prey group
+as a third argument. Explicit sourceFactory overrides still borrow their complete
+bundle without generating these stand-ins or requiring this plan. Supplied local
+hosts retain their existing runtime initialization contract. Source allocation,
+paint/decode order and random callback order after successful initialization are
+covered by authored recorder tests; real-Wasm and native browser acceptance are
+separate checks. The source adapter beginOperation/resolveRecipe/endOperation
+API and request fields remain unchanged; recipe-only previewing consumes no
+appearance randomness.

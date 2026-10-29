@@ -17,10 +17,10 @@ function record(value, fields) {
 
 /** Retain this lease before mount. No timers, source reads or session authority. */
 export function createOwnedAppearanceUi({ document, parent, nickname, dom, construct, controls,
-  capabilities, Policy, policyMethods, local, isCurrentDocument }) {
+  capabilities, Policy, policyMethods, local, isCurrentDocument, preview }) {
   let methods = record(policyMethods, ['view', 'action', 'set_nickname', 'serialize', 'free']);
   if (Object.values(methods).some(method => typeof method !== 'function')) throw new TypeError('Complete captured menu policy required');
-  let owner, mount, title, detail, nicknameParent, entries = [], lines = [], attempted = false, disposed = false, disabled = false;
+  let owner, mount, previewMount, title, detail, nicknameParent, entries = [], lines = [], attempted = false, disposed = false, disabled = false;
   const invoke = (name, ...args) => apply(methods[name], owner, args);
   const current = () => {
     if (disposed || !isCurrentDocument() || dom.ownerDocument(parent) !== document || !dom.isConnected(parent)) {
@@ -40,7 +40,8 @@ export function createOwnedAppearanceUi({ document, parent, nickname, dom, const
         if (dom.parentNode(line) !== mount || dom.ownerDocument(line) !== document || !dom.isConnected(line)
           || dom.firstChild(line) !== text || dom.parentNode(text) !== line || dom.nextSibling(text) !== null) throw new Error('Current menu labels required');
       }
-      const children = [...lines.map(entry => entry.line), ...entries.map(entry => entry.button)];
+      if (previewMount) preview.current();
+      const children = [...lines.map(entry => entry.line), ...entries.map(entry => entry.button), ...(previewMount ? [previewMount] : [])];
       if (dom.firstChild(mount) !== children[0] || children.some((node, index) => dom.nextSibling(node) !== (children[index + 1] ?? null))) throw new Error('Exact menu topology required');
     }
   };
@@ -78,6 +79,13 @@ export function createOwnedAppearanceUi({ document, parent, nickname, dom, const
     current();
     if (disabled) return;
     invoke('action', action); render(); save();
+    notifyPreview();
+  }
+  function notifyPreview() {
+    if (!preview) return;
+    current();
+    const selected = view();
+    preview.select(selected.skin, new Uint8Array(selected.customSkin)); current();
   }
   function mountMenu() {
     if (attempted || disposed) throw new Error('Menu mount already consumed');
@@ -122,6 +130,7 @@ export function createOwnedAppearanceUi({ document, parent, nickname, dom, const
     for (const [property, value] of startPageLayout.menu) dom.setStyle(dom.style(root), property, value);
     current();
     mount = root; construct.appendChild(parent, mount); current();
+    if (preview) { previewMount = preview.mount(mount); current(); notifyPreview(); }
     return freeze(actions);
   }
   function setDisabled(value) {
@@ -138,14 +147,15 @@ export function createOwnedAppearanceUi({ document, parent, nickname, dom, const
     if (disposed) return;
     disposed = true;
     let failed = false, primary;
+    try { preview?.dispose(); } catch (error) { failed = true; primary = error; }
     try {
       if (mount && isCurrentDocument() && dom.ownerDocument(mount) === document && dom.parentNode(mount) === parent) construct.removeChild(parent, mount);
-    } catch (error) { failed = true; primary = error; }
+    } catch (error) { if (!failed) { failed = true; primary = error; } }
     try { if (owner) invoke('free'); }
     catch (error) { if (!failed) { failed = true; primary = error; } }
     finally {
-      owner = mount = title = detail = nicknameParent = undefined; entries = []; lines = [];
-      document = parent = nickname = dom = construct = controls = capabilities = Policy = isCurrentDocument = methods = undefined;
+      owner = mount = previewMount = title = detail = nicknameParent = undefined; entries = []; lines = [];
+      document = parent = nickname = dom = construct = controls = capabilities = Policy = isCurrentDocument = methods = preview = undefined;
     }
     if (failed) throw primary;
   }

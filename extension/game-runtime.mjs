@@ -1,7 +1,7 @@
 import { createStockSkinAdapter } from './stock-skin-provider.mjs';
 import { createStockClient } from './stock-client.mjs';
 import { createStockEntityAssets } from './stock-food-provider.mjs';
-import { createStockHostSnapshot } from './stock-host-snapshot.mjs';
+import { createStockHostSnapshot, isPendingStockCapture } from './stock-host-snapshot.mjs';
 import { desktopBackingSize } from './desktop-layout.mjs';
 import { createStockGameplay } from './stock-gameplay.mjs';
 import { bindStockHudDom } from './stock-hud-dom.mjs';
@@ -9,6 +9,8 @@ import { projectHudView } from './stock-hud-view.mjs';
 import { createOwnedHudUi } from './owned-hud-ui.mjs';
 import { createOwnedPlayUi } from './owned-play-ui.mjs';
 import { createOwnedAppearanceUi } from './owned-appearance-ui.mjs';
+import { createAppearancePreview } from './appearance-preview.mjs';
+import { createOwnedLoadingUi } from './game-owned-loading-ui.mjs';
 import { createOwnedLeaderboardUi } from './owned-leaderboard-ui.mjs';
 import { createOwnedMinimapUi } from './owned-minimap-ui.mjs';
 import { createOwnedAnnouncementUi } from './owned-announcement-ui.mjs';
@@ -24,7 +26,7 @@ const editNotifications = new Set(['keypress', 'beforeinput', 'input', 'composit
   'dragstart', 'drag', 'dragenter', 'dragleave', 'dragover', 'drop', 'dragend']);
 
 /** Local runtime factory. Importing this module performs no page ownership work. */
-export async function startGamePage({ realm = globalThis, initialize, wasmApi, hudReadout = false, ownedHudUi = false, ownedPlayUi = false, ownedMenuUi = false, ownedLeaderboardUi = false, ownedMinimapUi = false, ownedAnnouncementUi = false, ownedEndScreenUi = false, diagnosticUi = true, localHost } = {}) {
+export async function startGamePage({ realm = globalThis, initialize, wasmApi, hudReadout = false, ownedHudUi = false, ownedPlayUi = false, ownedMenuUi = false, ownedAppearancePreview = false, ownedLoadingUi = false, ownedLeaderboardUi = false, ownedMinimapUi = false, ownedAnnouncementUi = false, ownedEndScreenUi = false, diagnosticUi = true, localHost } = {}) {
   if (typeof hudReadout !== 'boolean') throw new TypeError('Explicit hudReadout boolean required');
   if (typeof diagnosticUi !== 'boolean') throw new TypeError('Explicit diagnosticUi boolean required');
   if (typeof initialize !== 'function' || wasmApi === null || typeof wasmApi !== 'object') {
@@ -37,6 +39,8 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     throw new TypeError('Explicit ownedPlayUi boolean requires hudReadout and ownedHudUi');
   }
   if (typeof ownedMenuUi !== 'boolean' || ownedMenuUi && !ownedPlayUi) throw new TypeError('Explicit ownedMenuUi requires ownedPlayUi');
+  if (typeof ownedAppearancePreview !== 'boolean' || ownedAppearancePreview && !ownedMenuUi) throw new TypeError('Explicit ownedAppearancePreview requires ownedMenuUi');
+  if (typeof ownedLoadingUi !== 'boolean' || ownedLoadingUi && (!ownedPlayUi || diagnosticUi)) throw new TypeError('Explicit ownedLoadingUi requires consumer ownedPlayUi');
   if (typeof ownedLeaderboardUi !== 'boolean' || (ownedLeaderboardUi && (!hudReadout || !ownedHudUi || !ownedPlayUi))) {
     throw new TypeError('Explicit ownedLeaderboardUi boolean requires hudReadout, ownedHudUi and ownedPlayUi');
   }
@@ -66,6 +70,8 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
   let hud, ownedUi, constructCapabilities, hudOperation, nativeOperation, sourceOperation, hudCapabilities, cleanupActive = false;
   let playUi, controlsLease, playCapabilities, playOperation, playNodes;
   let menuUi, menuCapabilities, MenuPolicy, menuMethods, menuActions = [];
+  let PreviewPolicy, previewMethods, preparePreview;
+  let loadingUi, projectMenuLoading, loadingInitialized = false, loadingHandoff = false;
   let leaderboardUi, leaderboardProperties, projector, Projector, projectScores, freeProjector;
   let minimapUi, minimapCanvas, readMinimapView;
   let announcementUi, readAnnouncementView;
@@ -427,10 +433,14 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     if (owner !== undefined) cleanup(() => apply(release, owner, []));
     for (const action of [() => scene?.free(), () => quality?.free()]) cleanup(action);
     held = undefined;
+    if (loadingUi !== undefined) {
+      const lease = loadingUi; loadingUi = undefined;
+      cleanup(() => lease.dispose());
+    }
     cleanup(() => {
       // Local hosts have no isolated loader to publish a terminal fallback.
       if (displayStatus(true)) {
-        output.textContent = statusText(code);
+        output.textContent = ownedLoadingUi && loadingInitialized ? loadingProjection(code).text : statusText(code);
         checkHudOperation();
       }
     });
@@ -442,6 +452,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
       const host = localHost; localHost = undefined;
       cleanup(() => host.dispose());
     }
+    projectMenuLoading = undefined;
     cleanupActive = false;
     if (failed) throw primary;
   }
@@ -459,6 +470,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     (realm.document.body ?? realm.document.documentElement).appendChild(root); }
   output = realm.document.getElementById('slither-client-status');
   if (!output) { output = realm.document.createElement('p'); output.id = 'slither-client-status'; root.appendChild(output); }
+  if (ownedLoadingUi) output.className = 'slither-client-loading';
   reload = realm.document.getElementById('slither-client-reload');
   if (!reload) { reload = realm.document.createElement('button'); reload.id = 'slither-client-reload';
     reload.textContent = 'Reload ordinary page'; root.appendChild(reload); }
@@ -483,9 +495,19 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     dom.setStyle(style, 'display', visible ? '' : 'none');
     return current();
   }
+  function loadingProjection(code) {
+    const value = apply(projectMenuLoading, undefined, [code, loadingHandoff]);
+    checkHudOperation();
+    const copy = copyRecord(value, ['visible', 'busy', 'text']);
+    if (!Object.isFrozen(value) || typeof copy.visible !== 'boolean' || typeof copy.busy !== 'boolean'
+      || typeof copy.text !== 'string' || copy.text.length > 128) throw new TypeError('Copied Rust loading view required');
+    return copy;
+  }
   const report = code => {
     if (!ownedPlayUi) { output.textContent = statusText(code); native.status(code); return; }
-    output.textContent = statusText(code);
+    if (loadingUi) {
+      if (loadingInitialized) loadingUi.render(loadingProjection(code));
+    } else output.textContent = statusText(code);
     checkHudOperation();
     if (playUi && !disposed) {
       const states = { __proto__: null, 'ready-not-connected': 'ready', connected: 'connected',
@@ -580,6 +602,36 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
         for (const name of names) construct[name] = guarded(construct[name]);
         constructCapabilities = freeze(construct);
       }
+      if (ownedAppearancePreview) {
+        const raw = descriptor(native, 'appearancePreviewDom')?.value;
+        const group = copyRecord(raw, ['schema', 'document', 'prepare']);
+        if (group.schema !== 1 || group.document !== document || !Object.isFrozen(raw) || !synchronous(group.prepare)) {
+          throw new TypeError('Captured appearance preview Canvas required');
+        }
+        preparePreview = (...args) => {
+          checkHudOperation();
+          const frame = apply(group.prepare, undefined, args);
+          let finish;
+          try {
+            const copied = copyRecord(frame, ['context', 'finish']); finish = copied.finish;
+            if (!Object.isFrozen(frame) || !synchronous(finish)) throw new TypeError('Captured preview frame required');
+            checkHudOperation();
+            return freeze({ context: copied.context, finish() {
+              const result = apply(finish, undefined, []); checkHudOperation(); return result;
+            } });
+          } catch (error) {
+            try { if (typeof finish === 'function') apply(finish, undefined, []); } catch { /* Keep the first failure. */ }
+            throw error;
+          }
+        };
+        PreviewPolicy = descriptor(wasmApi, 'AppearancePreview')?.value;
+        const base = typeof PreviewPolicy === 'function' && descriptor(PreviewPolicy, 'prototype')?.value;
+        const names = ['select', 'revision', 'needs_draw', 'render', 'free'];
+        if (!synchronous(PreviewPolicy) || names.some(name => !synchronous(base && descriptor(base, name)?.value))) {
+          throw new TypeError('Captured Rust appearance preview required');
+        }
+        previewMethods = freeze(Object.fromEntries(names.map(name => [name, descriptor(base, name).value])));
+      }
       if (ownedMinimapUi) {
         const captured = descriptor(native, 'minimapDom')?.value;
         const group = copyRecord(captured, ['schema', 'document', 'canvas']);
@@ -599,6 +651,10 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
         }
       }
       if (ownedPlayUi) {
+        if (ownedLoadingUi) {
+          projectMenuLoading = descriptor(wasmApi, 'menu_loading_view')?.value;
+          if (!synchronous(projectMenuLoading)) throw new TypeError('Captured Rust loading projection required');
+        }
         const captured = descriptor(native, 'ownedPlayDom')?.value;
         if (captured === undefined) throw new TypeError('Complete native owned Play DOM group required');
         const group = copyRecord(captured, ['schema', 'document', 'dom', 'createControlsLease']);
@@ -670,9 +726,21 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
   }
   try {
     if (!ownedLeaderboardUi && !ownedMinimapUi && !ownedAnnouncementUi && !ownedEndScreenUi) captureHudCapabilities();
+    if (ownedLoadingUi) runNative(() => {
+      loadingUi = createOwnedLoadingUi({ document, parent: output, dom: hudCapabilities.dom,
+        construct: constructCapabilities, isCurrentDocument: hudCapabilities.isCurrentDocument, branded: true });
+      output.textContent = '';
+      loadingUi.mount();
+      // Static pre-Wasm fallback only; initialized projections always come from Rust.
+      loadingUi.render({ visible: true, busy: true, text: 'Loading client…' });
+    });
     report('loading');
     await initialize();
     if (disposed) return Object.freeze({ dispose });
+    if (ownedLoadingUi) runNative(() => {
+      loadingInitialized = true;
+      loadingUi.render(loadingProjection('loading'));
+    });
     if (ownedPlayUi) runNative(() => {
       playPolicy = new PlayPolicy(...playCapabilityObservation);
       playCapabilityObservation = undefined;
@@ -691,6 +759,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     if (reader) listeners.push(() => reader.dispose());
     const started = native.now();
     let context;
+    const pendingCaptures = new WeakSet();
     const captureReady = () => {
       if (localHost && !localHost.isCurrentDocument()) throw new Error('Current local game document required');
       const capture = localHost ? localHost.sources : reader.capture();
@@ -701,7 +770,8 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
         const error = new Error('Renderer context sources changed; reload required'); error.status = 'unsupported'; throw error;
       }
       if (!localHost && capture.readiness.some(entry => entry.state !== 'ready')) {
-        const error = new Error('Waiting for committed host sources'); error.status = 'pending'; throw error;
+        const error = new Error('Waiting for committed host sources'); error.status = 'pending';
+        pendingCaptures.add(error); throw error;
       }
       return capture;
     };
@@ -913,7 +983,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
         playUi = createOwnedPlayUi({ document: hudCapabilities.document, parent: root,
           dom: hudCapabilities.dom, construct: constructCapabilities,
           controls: playCapabilities.controls, isCurrentDocument: hudCapabilities.isCurrentDocument,
-          projectStartPage: wasmApi.start_page_view }, diagnosticUi, value => menuUi?.setDisabled(value));
+          projectStartPage: wasmApi.start_page_view }, diagnosticUi, value => menuUi?.setDisabled(value), ownedLoadingUi);
         checkHudOperation();
         const mounted = playUi.mount();
         checkHudOperation();
@@ -937,10 +1007,50 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
           checkHudOperation();
         }
         if (ownedMenuUi) {
+          const preview = ownedAppearancePreview ? createAppearancePreview({ document,
+            dom: hudCapabilities.dom, construct: constructCapabilities, Policy: PreviewPolicy, methods: previewMethods,
+            local: Boolean(localHost), worldTarget: target, prepare: preparePreview,
+            isCurrentDocument: hudCapabilities.isCurrentDocument,
+            isCurrentGeneration: () => !disposed && !cleanupActive && generation === playGeneration,
+            check: checkHudOperation,
+            defer(job) {
+              native.queueMicrotask(() => {
+                if (disposed || cleanupActive || generation !== playGeneration) return;
+                try { hudIdle(); runNative(job); } catch (error) { fail(error); }
+              });
+            },
+            withSources(callback) {
+              let begun = false, failed = false, primary, result;
+              try {
+                let pending = false;
+                try { wrapped.beginOperation(); begun = true; }
+                catch (error) {
+                  // Only our readiness rejection can become a Rust pending view.
+                  // The failed begin has already cleared the capture; it has no matching end.
+                  if (!pendingCaptures.has(error) && !isPendingStockCapture(error)) throw error;
+                  pending = true;
+                }
+                checkHudOperation();
+                result = callback(pending ? () => freeze({ __proto__: null, status: 'pending' }) : request => {
+                  checkHudOperation(); const value = adapter.resolveRecipe(request); checkHudOperation(); return value;
+                });
+                checkHudOperation();
+              } catch (error) { failed = true; primary = error; }
+              finally {
+                if (begun) {
+                  try { wrapped.endOperation(); checkHudOperation(); }
+                  catch (error) { if (!failed) { failed = true; primary = error; } }
+                }
+              }
+              if (failed) throw primary;
+              return result;
+            },
+          }) : undefined;
+          if (preview) listeners.push(() => preview.dispose());
           menuUi = createOwnedAppearanceUi({ document, parent: nodes.mount, nickname: nodes.nickname,
             dom: hudCapabilities.dom, construct: constructCapabilities, controls: playCapabilities.controls,
             capabilities: menuCapabilities, Policy: MenuPolicy, policyMethods: menuMethods, local: Boolean(localHost),
-            isCurrentDocument: hudCapabilities.isCurrentDocument });
+            isCurrentDocument: hudCapabilities.isCurrentDocument, preview });
           menuActions = menuUi.mount().map(action => freeze({ button: action.button, parent: action.parent,
             onPress() {
               if (disposed || cleanupActive || generation !== playGeneration) return;
@@ -1038,6 +1148,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
       finally { hudOperation = undefined; operation.primary = undefined; }
     }
     // Retire the startup fallback only after every selected owner has mounted.
+    loadingHandoff = true;
     if (ownedPlayUi) runPlay(() => { report('ready-not-connected'); displayStatus(false); });
     else report('ready-not-connected');
     frame = native.requestAnimationFrame(tick);

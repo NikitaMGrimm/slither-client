@@ -1,5 +1,6 @@
 import { TestGameplayPolicy } from './fixtures/gameplay-policy-double.mjs';
 import { TestStockControllerPolicy } from './fixtures/stock-controller-double.mjs';
+import { authoredSourceRecipesDouble } from './fixtures/authored-source-fixture.mjs';
 import { TestSessionPolicy } from './fixtures/session-policy-double.mjs';
 import { ProfileLiteralParserDouble } from './fixtures/profile-literals-double.mjs';
 import { stockSkinWasmDouble } from './stock-skin-policy-double.mjs';
@@ -35,8 +36,8 @@ const gateSource=readFileSync(new URL('../extension/game-gate.js',import.meta.ur
 const bootstrapSource=readFileSync(new URL('../extension/game-runtime.mjs',import.meta.url),'utf8');
 const testSource=readFileSync(new URL('./game-bootstrap.test.mjs',import.meta.url),'utf8');
 const hostFunctions=testSource.slice(testSource.indexOf('function fixture('),testSource.indexOf("\ntest('an unarmed"));
-const {fixture,wasmDouble}=new Script(`(function(gateSource,Script,createContext,runInContext,assert,createGateTestDom,attachGateTestRealm,createHudHistoryDouble,createLeaderboardHistoryDouble,TestDesktopInput,desktopBackingOracle,TestSessionPolicy,stockSkinWasmDouble,TestStockControllerPolicy,TestGameplayPolicy){
-  ${hostFunctions}\nreturn {fixture,wasmDouble};})`).runInThisContext()(gateSource,Script,createContext,runInContext,assert,createGateTestDom,attachGateTestRealm,createHudHistoryDouble,createLeaderboardHistoryDouble,TestDesktopInput,desktopBackingOracle,TestSessionPolicy,stockSkinWasmDouble,TestStockControllerPolicy,TestGameplayPolicy);
+const {fixture,wasmDouble}=new Script(`(function(gateSource,Script,createContext,runInContext,assert,createGateTestDom,attachGateTestRealm,createHudHistoryDouble,createLeaderboardHistoryDouble,TestDesktopInput,desktopBackingOracle,TestSessionPolicy,stockSkinWasmDouble,TestStockControllerPolicy,TestGameplayPolicy,authoredSourceRecipesDouble){
+  ${hostFunctions}\nreturn {fixture,wasmDouble};})`).runInThisContext()(gateSource,Script,createContext,runInContext,assert,createGateTestDom,attachGateTestRealm,createHudHistoryDouble,createLeaderboardHistoryDouble,TestDesktopInput,desktopBackingOracle,TestSessionPolicy,stockSkinWasmDouble,TestStockControllerPolicy,TestGameplayPolicy,authoredSourceRecipesDouble);
 // Keep the actual modules and data records in ONE JS realm. Only the synthetic
 // Window/native boundary below is adapted; no acquirer/factory override exists.
 const makeBootstrap=new Script(`(function(init,wasm,createStockHostSnapshot,createStockSkinAdapter,

@@ -8,28 +8,41 @@
 
 mod math;
 
+pub mod appearance_preview;
+
+#[cfg(target_arch = "wasm32")]
+mod appearance_preview_browser;
+
 #[cfg(target_arch = "wasm32")]
 mod accessory_browser;
 
+#[cfg(target_arch = "wasm32")]
+mod authored_sources_browser;
+
+pub mod authored_sources;
 pub mod challenge;
 pub mod desktop_input;
 pub mod desktop_layout;
 pub mod gameplay_policy;
+pub mod menu_loading;
 pub mod menu_preferences;
 pub mod play_admission;
 pub mod presentation;
 pub mod profile_literals;
 pub mod protocol;
 pub mod session_policy;
-pub mod stock_controller_policy;
 pub mod start_page;
 pub mod state;
+pub mod stock_controller_policy;
 
 #[cfg(target_arch = "wasm32")]
 mod start_page_browser;
 
 #[cfg(target_arch = "wasm32")]
 mod menu_preferences_browser;
+
+#[cfg(target_arch = "wasm32")]
+mod menu_loading_browser;
 
 #[cfg(target_arch = "wasm32")]
 mod play_admission_browser;
