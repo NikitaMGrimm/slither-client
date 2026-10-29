@@ -111,5 +111,18 @@ export function skinPolicySmoke(wasm) {
     assert.throws(resolve);
     assertions++;
   }
+  for (const [raw, count, expected] of [[null, 0, -1], ['-1', 0, -1], ['0', 32, 0], ['31', 32, 31]]) {
+    equal(wasm.stock_accessory_id(raw, count), expected, 'ready-only persisted accessory selection');
+  }
+  for (const raw of ['', '-0', '+1', '01', '32', '4294967296']) {
+    assert.throws(() => wasm.stock_accessory_id(raw, 32)); assertions++;
+  }
+  for (const [skin, expected] of [[0, 6], [41, 34], [40, 6]]) {
+    equal(wasm.stock_accessory_forward(skin, new Uint8Array()), expected, 'appearance-owned head forward');
+  }
+  assert.throws(() => wasm.stock_accessory_forward(27, new Uint8Array())); assertions++;
+  for (const skin of [27, 40, 41]) {
+    equal(wasm.stock_accessory_forward(skin, custom([2, 1])), 6, 'custom override precedes accessory face eligibility');
+  }
   return assertions;
 }

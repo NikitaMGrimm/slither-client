@@ -8,6 +8,9 @@
 
 mod math;
 
+#[cfg(target_arch = "wasm32")]
+mod accessory_browser;
+
 pub mod challenge;
 pub mod desktop_layout;
 pub mod menu_preferences;

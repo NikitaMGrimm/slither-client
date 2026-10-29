@@ -1,3 +1,5 @@
+import { createStockCachedAccessory } from './stock-cached-accessory.mjs';
+
 const freeze = Object.freeze;
 const typedLength = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype), 'length').get;
 const downloaded = ['kwkbulb', 'pwdbulb', 'playbulb', 'leafbulb', 'swissbulb',
@@ -31,13 +33,15 @@ function list(value, length, label) {
 }
 
 /** Capture live sources only. No host function, generator, pixel read or artwork load occurs. */
-export function createStockHostSnapshot({ realm, observer, readAccessory }) {
+export function createStockHostSnapshot({ realm, observer, readAccessory, resolveAccessoryId, accessorySource }) {
   if (typeof readAccessory !== 'function') throw new TypeError('Native accessory reader required');
   for (const name of ['completed', 'generated', 'painted', 'stamp']) {
     if (typeof observer?.[name] !== 'function') throw new TypeError(`Readiness observer required: ${name}`);
   }
   const Canvas = realm.HTMLCanvasElement, Image = realm.HTMLImageElement;
   const identities = new WeakMap();
+  const accessory = createStockCachedAccessory({ realm, readAccessory,
+    resolveId: resolveAccessoryId, native: accessorySource });
   let nextIdentity = 0, revision = 0, previous;
   function scalar(source, Constructor, key) {
     const descriptor = Object.getOwnPropertyDescriptor(Constructor.prototype, key);
@@ -48,6 +52,8 @@ export function createStockHostSnapshot({ realm, observer, readAccessory }) {
     return value;
   }
   return freeze({
+    dispose: () => accessory.dispose(),
+    assertAccessoryLoad: () => accessory.assertCurrent(),
     capture() {
       if (!observer.completed()) fail('Waiting for host asset construction', 'pending');
       if (field(realm, 'render_mode') !== 2 || field(realm, 'is_mobile') !== false
@@ -56,8 +62,7 @@ export function createStockHostSnapshot({ realm, observer, readAccessory }) {
       if (field(realm, 'playing') !== false || field(realm, 'connecting') !== false || field(realm, 'ws') != null) {
         fail('Original game session is not quiescent');
       }
-      const cosmetic = readAccessory();
-      if (cosmetic !== null && cosmetic !== '-1') fail('Static accessory selection unsupported');
+      const selected = accessory.capture();
       const host = { nsr: field(realm, 'nsr') };
       if (typeof host.nsr !== 'boolean') fail('Host rotation policy unavailable');
       const mask = field(realm, 'alcsc');
@@ -81,7 +86,8 @@ export function createStockHostSnapshot({ realm, observer, readAccessory }) {
         const state = ready ? 'ready' : 'pending';
         if (!identities.has(value)) identities.set(value, ++nextIdentity);
         const stamp = observer.stamp(value);
-        const sourceRevision = `src/${identities.get(value)}/${stamp}/${width}/${height}/${Number(complete)}/${state}`;
+        const sourceRevision = value === selected?.commitment.source ? selected.commitment.revision
+          : `src/${identities.get(value)}/${stamp}/${width}/${height}/${Number(complete)}/${state}`;
         signature.push([identities.get(value), width, height, complete, state, stamp]);
         if (states.has(value) && states.get(value) !== state) fail('Conflicting host source commitments');
         if (!states.has(value)) { states.set(value, state); readiness.push(freeze({ source: value, state, revision: sourceRevision })); }
@@ -119,9 +125,16 @@ export function createStockHostSnapshot({ realm, observer, readAccessory }) {
       }));
       for (const name of slots) host[name] = source(field(realm, name), downloaded.includes(name), false, mouthShapes[name]);
       const background = source(field(realm, 'bg_hex'), false, true);
+      if (selected) {
+        source(selected.commitment.source);
+        const record = selected.ownCachedAccessorySelection;
+        signature.push([record.id, record.width, record.height, selected.commitment.revision,
+          ...Object.values(record.geometry).map(value => Object.is(value, -0) ? '-0' : value)]);
+      }
       const encoded = JSON.stringify(signature);
       if (encoded !== previous) { previous = encoded; revision++; }
-      return freeze({ revision, normalGameplay: true, ownAccessory: -1, host: freeze(host),
+      return freeze({ revision, normalGameplay: true, ownAccessory: selected?.ownAccessory ?? -1,
+        ...(selected ? { appearanceMode: 'accessory', ownCachedAccessorySelection: selected.ownCachedAccessorySelection } : {}), host: freeze(host),
         readiness: freeze(readiness), background,
         palettes: freeze(host.per_color_imgs.slice(0, 3).map(entry => {
           if (!(entry.kmcs[0] instanceof Canvas)) fail('Canvas renderer context required');

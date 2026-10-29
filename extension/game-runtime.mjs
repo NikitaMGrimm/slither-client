@@ -664,7 +664,9 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     if (ownedLeaderboardUi) runNative(() => { projector = new Projector(); });
     if (ownedEndScreenUi) runNative(() => { endScreenProjector = new EndScreenProjector(); });
     const reader = localHost ? undefined : createStockHostSnapshot({ realm, observer: native,
-      readAccessory: () => native.readAccessory() });
+      readAccessory: () => native.readAccessory(), resolveAccessoryId: wasmApi.stock_accessory_id,
+      accessorySource: native.accessorySource });
+    if (reader) listeners.push(() => reader.dispose());
     const started = native.now();
     let context;
     const captureReady = () => {
@@ -692,7 +694,8 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
       }
     }
     if (disposed) return Object.freeze({ dispose });
-    const adapter = localHost ? localHost.sources.adapter : createStockSkinAdapter({ realm, random: native.random, readSnapshot() {
+    const adapter = localHost ? localHost.sources.adapter : createStockSkinAdapter({ realm, random: native.random,
+      appearanceMode: initial.appearanceMode ?? 'face', resolveAccessoryForward: wasmApi.stock_accessory_forward, readSnapshot() {
       if (held) throw new Error('Stock capture already held');
       held = captureReady();
       return held;
@@ -715,6 +718,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
       endOperation() {
         try {
           adapter.endOperation();
+          reader?.assertAccessoryLoad();
           if (sourceOperation?.failed) throw sourceOperation.primary;
         } catch (error) { throw sourceOperation?.failed ? sourceOperation.primary : error; }
         finally { held = sourceOperation = undefined; }
