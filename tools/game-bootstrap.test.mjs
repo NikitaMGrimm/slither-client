@@ -2209,3 +2209,59 @@ test('actual gate runtime rejects unsupported/active host admission before cache
     assert.deepEqual(h.counts,{construct:0,free:0,reader:0});assert.equal(h.entry.img,null);assert.equal(h.f.timers.size,0);
   }
 });
+
+for(const missing of ['table-absent','table-undefined','table-null','entry-absent','entry-undefined','entry-null']){
+  test('actual gate runtime waits without allocation for absent selected data: '+missing,async()=>{
+    const h=requestRuntimeFixture({prepare(f){
+      if(missing==='table-absent')delete f.realm.a_imgs;
+      else if(missing.startsWith('table-'))f.realm.a_imgs=missing==='table-null'?null:undefined;
+      else f.realm.a_imgs=missing==='entry-absent'?new Array(1):[missing==='entry-null'?null:undefined];
+    }});
+    const settled=h.pending.then(value=>({value}),error=>({error}));
+    try{
+      await h.settle();assert.deepEqual(h.counts,{construct:0,free:0,reader:0});
+      assert.equal(h.entry.img,null);assert.equal(h.f.log.filter(row=>row[0]==='selected-create'||row[0]==='selected-src').length,0);
+      h.wake();await h.settle();assert.deepEqual(h.counts,{construct:0,free:0,reader:0});
+      h.f.realm.a_imgs=[h.entry];h.wake();await h.settle();
+      assert.deepEqual(h.counts,{construct:1,free:0,reader:1});const source=h.entry.img;assert(source);
+      Object.assign(h.f.imageState(source),{complete:true,width:40,height:40});source.dispatchEvent(new Event('load'));
+      h.wake();await h.settle();if(h.f.timers.size)h.wake();
+      const result=await settled;assert(!Object.hasOwn(result,'error'));assert.equal(result.value.diagnostics().disposed,false);
+      result.value.dispose();assert.equal(h.counts.free,1);assert.equal(h.f.timers.size,0);
+      for(const effect of ['selected-create','selected-src'])assert.equal(h.f.log.filter(row=>row[0]===effect).length,1);
+      assert.equal(h.f.sockets,0);
+    }finally{h.f.event('pagehide');await settled;}
+  });
+}
+
+test('actual gate runtime absent selected data expires or disposes without allocating',async()=>{
+  for(const mode of ['expiry','dispose']){
+    const h=requestRuntimeFixture({prepare(f){f.realm.a_imgs=[null];}});
+    const settled=h.pending.then(value=>({value}),error=>({error}));await h.settle();
+    assert.equal(h.f.timers.size,1,'missing entry must retain the startup waiter');
+    if(mode==='expiry')h.f.timer(10000);else h.f.event('pagehide');
+    const result=await settled;if(mode==='expiry')assert.equal(result.error.status,'unsupported');
+    else assert(!Object.hasOwn(result,'error'));
+    assert.deepEqual(h.counts,{construct:0,free:0,reader:0});assert.equal(h.entry.img,null);assert.equal(h.f.timers.size,0);
+    assert.equal(h.f.log.filter(row=>row[0]==='selected-create'||row[0]==='selected-src').length,0);
+  }
+});
+
+test('actual gate runtime keeps malformed selected metadata terminal without invoking accessors',async()=>{
+  for(const mode of ['table-accessor','entry-accessor','table-object','table-count','entry-scalar','resource-accessor']){
+    let reads=0;
+    const h=requestRuntimeFixture({prepare(f,entry){
+      const get=()=>{reads++;throw new Error('metadata getter must not run');};
+      if(mode==='table-accessor')Object.defineProperty(f.realm,'a_imgs',{get});
+      else if(mode==='entry-accessor')Object.defineProperty(f.realm.a_imgs,'0',{get});
+      else if(mode==='table-object')f.realm.a_imgs={};
+      else if(mode==='table-count')f.realm.a_imgs=[];
+      else if(mode==='entry-scalar')f.realm.a_imgs=[false];
+      else Object.defineProperty(entry,'u',{get});
+    }});
+    await assert.rejects(h.pending,/Selected accessory (own data required|table unavailable)/);
+    assert.equal(reads,0);assert.deepEqual(h.counts,{construct:0,free:0,reader:0});
+    assert.equal(h.entry.img,null);assert.equal(h.f.timers.size,0);
+    assert.equal(h.f.log.filter(row=>row[0]==='selected-create'||row[0]==='selected-src').length,0);
+  }
+});

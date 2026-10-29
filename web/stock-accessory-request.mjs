@@ -18,7 +18,7 @@ export function createStockAccessoryRequest({ native, clock, Request, resolveId,
   }
   function fail(error) {
     if (!failed) { failed = true; primary = error; }
-    policy?.invalidate();
+    if (!freed) policy?.invalidate();
     try { stop(); } catch { /* Preserve the first native/event failure, including falsy values. */ }
   }
   function current() {
@@ -36,8 +36,9 @@ export function createStockAccessoryRequest({ native, clock, Request, resolveId,
     finally { busy = false; if (disposed) { try { free(); } catch (error) { fail(error); } } }
   }
   try {
-    policy = new Request(started, deadline);
     binding = native.open(resolveId);
+    if (binding === undefined) return undefined;
+    policy = new Request(started, deadline);
     const action = binding.prepare(policy, clock.now());
     const ticket = policy.ticket();
     if (action === 2) {

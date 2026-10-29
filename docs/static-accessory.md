@@ -220,6 +220,9 @@ the cache. The initial ten-second startup bound and 50 ms waiter are unchanged.
 Local authored sources never open this capability. None requires no request;
 an existing ready image follows the ready-only path above. A non-null unloaded
 image stays pending without replacement, callback takeover or a second request.
+An absent selected table or entry uses the same bounded startup wait without
+allocating a policy or image. Malformed metadata and construction failures remain
+terminal; only absence leaves the native capture unconsumed.
 
 Browser-free `SelectedAccessoryRequest` owns initial-resource shape admission,
 one consumed attempt, generation, deadline and terminal/publication/handoff

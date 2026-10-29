@@ -772,12 +772,17 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
           requestOwner = !native.selectedAccessoryRequest ? undefined : createStockAccessoryRequest({
             native: native.selectedAccessoryRequest, clock: native, Request: wasmApi.SelectedAccessoryRequest,
             resolveId: wasmApi.stock_accessory_id, started, deadline: started + 10000 });
-          if (requestOwner) listeners.push(() => requestOwner.dispose());
-          reader = createStockHostSnapshot({ realm, observer: native, requestOwner,
-            readAccessory: () => native.readAccessory(), resolveAccessoryId: wasmApi.stock_accessory_id,
-            accessorySource: native.accessorySource });
-          listeners.push(() => reader.dispose());
+          if (!native.selectedAccessoryRequest || requestOwner) {
+            if (requestOwner) listeners.push(() => requestOwner.dispose());
+            reader = createStockHostSnapshot({ realm, observer: native, requestOwner,
+              readAccessory: () => native.readAccessory(), resolveAccessoryId: wasmApi.stock_accessory_id,
+              accessorySource: native.accessorySource });
+            listeners.push(() => reader.dispose());
+          }
         } catch (error) { requestStartupFailed = true; throw error; }
+        if (!reader) {
+          const error = new Error('Waiting for selected accessory entry'); error.status = 'pending'; throw error;
+        }
       }
       const capture = localHost ? localHost.sources : reader.capture();
       if (context && (capture.background !== context.background

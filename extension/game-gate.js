@@ -892,8 +892,9 @@
         .map(name => descriptor(image, name)?.get);
       const define = Object.defineProperty, extensible = Object.isExtensible, same = Object.is;
       if ([create, src?.get, src?.set, add, remove, ...scalars].some(fn => typeof fn !== 'function')) return;
-      const data = (object, key) => {
+      const data = (object, key, absent = false) => {
         const value = descriptor(object, key);
+        if (!value && absent) return undefined;
         if (!value || !Object.hasOwn(value, 'value')) throw new TypeError('Selected accessory own data required');
         return value.value;
       };
@@ -921,9 +922,12 @@
           if (!Number.isInteger(count) || count < 1 || count > 4096) throw new TypeError('Selected accessory table count invalid');
           id = resolveId(raw, count);
           if (!Number.isInteger(id) || id < 0 || id >= count) throw new TypeError('Selected accessory ID invalid');
-          table = data(realm, 'a_imgs');
+          table = data(realm, 'a_imgs', true);
+          // Missing native data leaves capture unconsumed; malformed data still throws.
+          if (table == null) { opened = false; return; }
           if (!Array.isArray(table) || table.length !== count) throw new TypeError('Selected accessory table unavailable');
-          entry = data(table, String(id));
+          entry = data(table, String(id), true);
+          if (entry == null) { opened = false; return; }
           url = data(entry, 'u');
           geometry = ['sc', 'px', 'py'].map(key => data(entry, key));
           if (typeof url !== 'string' || geometry.some(value => typeof value !== 'number')) throw new TypeError('Selected accessory resource metadata invalid');
