@@ -23,6 +23,7 @@ const gameFiles = [['game-activation.mjs', 'activation.mjs'], ['game-gate.js', '
   ['game-owned-play-ui.mjs', 'owned-play-ui.mjs'],
   ['game-owned-appearance-ui.mjs', 'owned-appearance-ui.mjs'],
   ['game-appearance-preview.mjs', 'appearance-preview.mjs'],
+  ['game-owned-loading-ui.mjs', 'game-owned-loading-ui.mjs'],
   ['start-page-layout.mjs', 'start-page-layout.mjs'],
   ['game-owned-leaderboard-ui.mjs', 'owned-leaderboard-ui.mjs'],
   ['game-owned-announcement-ui.mjs', 'owned-announcement-ui.mjs'],
@@ -113,6 +114,7 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, g
     || !/export class SessionPolicy\b/.test(glue)
     || !/export class AppearancePreview\b/.test(glue)
     || !/export function desktop_backing_size\b/.test(glue)
+    || !/export function menu_loading_view\b/.test(glue)
     || !/export class PlayAdmission\b/.test(glue)
     || !/new URL\(['"]slither_client_bg\.wasm['"], import\.meta\.url\)/.test(glue)
     || !/export\s*\{[^}]*\b__wbg_init as default\s*\}/.test(glue)) {
@@ -140,7 +142,7 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, g
     'animatedscene_enable_announcement_tracking', 'animatedscene_announcement_view',
     'animatedscene_enable_minimap_tracking', 'animatedscene_observe_minimap_ui_fraction', 'animatedscene_minimap_view',
     'encode_login', 'solve_challenge', 'decode_frame', 'setup_protocol_version',
-    'resolve_skin', 'resolve_local_skin', 'stock_custom_palette_mask_valid', 'authored_source_recipes', 'stock_accessory_id', 'stock_accessory_forward', 'start_page_view', 'desktop_backing_size',
+    'resolve_skin', 'resolve_local_skin', 'stock_custom_palette_mask_valid', 'authored_source_recipes', 'stock_accessory_id', 'stock_accessory_forward', 'start_page_view', 'menu_loading_view', 'desktop_backing_size',
     'profileliteralparser_new',
     'profileliteralparser_write',
     'profileliteralparser_parse_version',
@@ -189,7 +191,7 @@ export function buildExtension({ projectRoot = defaultRoot, webDir, outputDir, g
     if (errors.length) throw new Error(errors.join('\n'));
     const manifest = JSON.parse(manifestBytes);
     const expected = new Set(['game/bootstrap.mjs', 'game/runtime.mjs', 'game/owned-hud-ui.mjs', 'game/owned-play-ui.mjs',
-      'game/owned-appearance-ui.mjs', 'game/appearance-preview.mjs', 'game/start-page-layout.mjs', 'assets/logo.svg',
+      'game/owned-appearance-ui.mjs', 'game/appearance-preview.mjs', 'game/game-owned-loading-ui.mjs', 'game/start-page-layout.mjs', 'assets/logo.svg',
       'game/owned-leaderboard-ui.mjs', 'game/owned-minimap-ui.mjs', 'game/owned-end-screen-ui.mjs', 'game/owned-announcement-ui.mjs', ...gameWebFiles.map(name => `game/${name}`),
       ...bindingFiles.map(name => `game/pkg/${name}`)]);
     const declarations = manifest.web_accessible_resources;

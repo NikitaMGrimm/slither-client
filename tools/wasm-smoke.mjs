@@ -32,6 +32,7 @@ import { sessionPolicyRecordSmoke } from './session-policy-record-smoke.mjs';
 import { sessionPolicyLifetimeSmoke } from './session-policy-lifetime-smoke.mjs';
 import { profileLiteralsSmoke } from './profile-literals-smoke.mjs';
 import { playAdmissionSmoke } from './play-admission-smoke.mjs';
+import { menuLoadingSmoke } from './menu-loading-smoke.mjs';
 import { desktopInputSmoke } from './desktop-input-smoke.mjs';
 import { desktopInputLifetimeSmoke } from './desktop-input-lifetime-smoke.mjs';
 
@@ -54,6 +55,12 @@ const profileLiteralResult = execFileSync(process.execPath,
   { encoding: 'utf8', env: { ...process.env, SLITHER_PROFILE_LITERALS_WASM: '1' }, maxBuffer: 4 * 1024 * 1024 });
 console.log('Synthetic real-Wasm profile/acquirer lifetime requirements passed:',
   profileLiteralResult.split(/\r?\n/).filter(line => /^# (tests|pass|fail|skipped) /.test(line)).join(', '));
+menuLoadingSmoke(wasm);
+const menuLoadingResult = execFileSync(process.execPath,
+  ['--test', '--test-reporter=tap', fileURLToPath(new URL('./game-menu-loading-runtime.test.mjs', import.meta.url))],
+  { encoding: 'utf8', env: { ...process.env, SLITHER_MENU_LOADING_WASM: '1' }, maxBuffer: 4 * 1024 * 1024 });
+console.log('Synthetic loading/runtime requirements with real Rust projection passed:',
+  menuLoadingResult.split(/\r?\n/).filter(line => /^# (tests|pass|fail|skipped) /.test(line)).join(', '));
 menuPreferencesSmoke(wasm);
 playAdmissionSmoke(wasm);
 const playAdmissionResult = execFileSync(process.execPath,

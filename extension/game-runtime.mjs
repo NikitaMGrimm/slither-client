@@ -10,6 +10,7 @@ import { createOwnedHudUi } from './owned-hud-ui.mjs';
 import { createOwnedPlayUi } from './owned-play-ui.mjs';
 import { createOwnedAppearanceUi } from './owned-appearance-ui.mjs';
 import { createAppearancePreview } from './appearance-preview.mjs';
+import { createOwnedLoadingUi } from './game-owned-loading-ui.mjs';
 import { createOwnedLeaderboardUi } from './owned-leaderboard-ui.mjs';
 import { createOwnedMinimapUi } from './owned-minimap-ui.mjs';
 import { createOwnedAnnouncementUi } from './owned-announcement-ui.mjs';
@@ -25,7 +26,7 @@ const editNotifications = new Set(['keypress', 'beforeinput', 'input', 'composit
   'dragstart', 'drag', 'dragenter', 'dragleave', 'dragover', 'drop', 'dragend']);
 
 /** Local runtime factory. Importing this module performs no page ownership work. */
-export async function startGamePage({ realm = globalThis, initialize, wasmApi, hudReadout = false, ownedHudUi = false, ownedPlayUi = false, ownedMenuUi = false, ownedAppearancePreview = false, ownedLeaderboardUi = false, ownedMinimapUi = false, ownedAnnouncementUi = false, ownedEndScreenUi = false, diagnosticUi = true, localHost } = {}) {
+export async function startGamePage({ realm = globalThis, initialize, wasmApi, hudReadout = false, ownedHudUi = false, ownedPlayUi = false, ownedMenuUi = false, ownedAppearancePreview = false, ownedLoadingUi = false, ownedLeaderboardUi = false, ownedMinimapUi = false, ownedAnnouncementUi = false, ownedEndScreenUi = false, diagnosticUi = true, localHost } = {}) {
   if (typeof hudReadout !== 'boolean') throw new TypeError('Explicit hudReadout boolean required');
   if (typeof diagnosticUi !== 'boolean') throw new TypeError('Explicit diagnosticUi boolean required');
   if (typeof initialize !== 'function' || wasmApi === null || typeof wasmApi !== 'object') {
@@ -39,6 +40,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
   }
   if (typeof ownedMenuUi !== 'boolean' || ownedMenuUi && !ownedPlayUi) throw new TypeError('Explicit ownedMenuUi requires ownedPlayUi');
   if (typeof ownedAppearancePreview !== 'boolean' || ownedAppearancePreview && !ownedMenuUi) throw new TypeError('Explicit ownedAppearancePreview requires ownedMenuUi');
+  if (typeof ownedLoadingUi !== 'boolean' || ownedLoadingUi && (!ownedPlayUi || diagnosticUi)) throw new TypeError('Explicit ownedLoadingUi requires consumer ownedPlayUi');
   if (typeof ownedLeaderboardUi !== 'boolean' || (ownedLeaderboardUi && (!hudReadout || !ownedHudUi || !ownedPlayUi))) {
     throw new TypeError('Explicit ownedLeaderboardUi boolean requires hudReadout, ownedHudUi and ownedPlayUi');
   }
@@ -69,6 +71,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
   let playUi, controlsLease, playCapabilities, playOperation, playNodes;
   let menuUi, menuCapabilities, MenuPolicy, menuMethods, menuActions = [];
   let PreviewPolicy, previewMethods, preparePreview;
+  let loadingUi, projectMenuLoading, loadingInitialized = false, loadingHandoff = false;
   let leaderboardUi, leaderboardProperties, projector, Projector, projectScores, freeProjector;
   let minimapUi, minimapCanvas, readMinimapView;
   let announcementUi, readAnnouncementView;
@@ -430,10 +433,14 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     if (owner !== undefined) cleanup(() => apply(release, owner, []));
     for (const action of [() => scene?.free(), () => quality?.free()]) cleanup(action);
     held = undefined;
+    if (loadingUi !== undefined) {
+      const lease = loadingUi; loadingUi = undefined;
+      cleanup(() => lease.dispose());
+    }
     cleanup(() => {
       // Local hosts have no isolated loader to publish a terminal fallback.
       if (displayStatus(true)) {
-        output.textContent = statusText(code);
+        output.textContent = ownedLoadingUi && loadingInitialized ? loadingProjection(code).text : statusText(code);
         checkHudOperation();
       }
     });
@@ -445,6 +452,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
       const host = localHost; localHost = undefined;
       cleanup(() => host.dispose());
     }
+    projectMenuLoading = undefined;
     cleanupActive = false;
     if (failed) throw primary;
   }
@@ -462,6 +470,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     (realm.document.body ?? realm.document.documentElement).appendChild(root); }
   output = realm.document.getElementById('slither-client-status');
   if (!output) { output = realm.document.createElement('p'); output.id = 'slither-client-status'; root.appendChild(output); }
+  if (ownedLoadingUi) output.className = 'slither-client-loading';
   reload = realm.document.getElementById('slither-client-reload');
   if (!reload) { reload = realm.document.createElement('button'); reload.id = 'slither-client-reload';
     reload.textContent = 'Reload ordinary page'; root.appendChild(reload); }
@@ -486,9 +495,19 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     dom.setStyle(style, 'display', visible ? '' : 'none');
     return current();
   }
+  function loadingProjection(code) {
+    const value = apply(projectMenuLoading, undefined, [code, loadingHandoff]);
+    checkHudOperation();
+    const copy = copyRecord(value, ['visible', 'busy', 'text']);
+    if (!Object.isFrozen(value) || typeof copy.visible !== 'boolean' || typeof copy.busy !== 'boolean'
+      || typeof copy.text !== 'string' || copy.text.length > 128) throw new TypeError('Copied Rust loading view required');
+    return copy;
+  }
   const report = code => {
     if (!ownedPlayUi) { output.textContent = statusText(code); native.status(code); return; }
-    output.textContent = statusText(code);
+    if (loadingUi) {
+      if (loadingInitialized) loadingUi.render(loadingProjection(code));
+    } else output.textContent = statusText(code);
     checkHudOperation();
     if (playUi && !disposed) {
       const states = { __proto__: null, 'ready-not-connected': 'ready', connected: 'connected',
@@ -632,6 +651,10 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
         }
       }
       if (ownedPlayUi) {
+        if (ownedLoadingUi) {
+          projectMenuLoading = descriptor(wasmApi, 'menu_loading_view')?.value;
+          if (!synchronous(projectMenuLoading)) throw new TypeError('Captured Rust loading projection required');
+        }
         const captured = descriptor(native, 'ownedPlayDom')?.value;
         if (captured === undefined) throw new TypeError('Complete native owned Play DOM group required');
         const group = copyRecord(captured, ['schema', 'document', 'dom', 'createControlsLease']);
@@ -703,9 +726,21 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
   }
   try {
     if (!ownedLeaderboardUi && !ownedMinimapUi && !ownedAnnouncementUi && !ownedEndScreenUi) captureHudCapabilities();
+    if (ownedLoadingUi) runNative(() => {
+      loadingUi = createOwnedLoadingUi({ document, parent: output, dom: hudCapabilities.dom,
+        construct: constructCapabilities, isCurrentDocument: hudCapabilities.isCurrentDocument, branded: true });
+      output.textContent = '';
+      loadingUi.mount();
+      // Static pre-Wasm fallback only; initialized projections always come from Rust.
+      loadingUi.render({ visible: true, busy: true, text: 'Loading client…' });
+    });
     report('loading');
     await initialize();
     if (disposed) return Object.freeze({ dispose });
+    if (ownedLoadingUi) runNative(() => {
+      loadingInitialized = true;
+      loadingUi.render(loadingProjection('loading'));
+    });
     if (ownedPlayUi) runNative(() => {
       playPolicy = new PlayPolicy(...playCapabilityObservation);
       playCapabilityObservation = undefined;
@@ -946,7 +981,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
         playUi = createOwnedPlayUi({ document: hudCapabilities.document, parent: root,
           dom: hudCapabilities.dom, construct: constructCapabilities,
           controls: playCapabilities.controls, isCurrentDocument: hudCapabilities.isCurrentDocument,
-          projectStartPage: wasmApi.start_page_view }, diagnosticUi, value => menuUi?.setDisabled(value));
+          projectStartPage: wasmApi.start_page_view }, diagnosticUi, value => menuUi?.setDisabled(value), ownedLoadingUi);
         checkHudOperation();
         const mounted = playUi.mount();
         checkHudOperation();
@@ -1103,6 +1138,7 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
       finally { hudOperation = undefined; operation.primary = undefined; }
     }
     // Retire the startup fallback only after every selected owner has mounted.
+    loadingHandoff = true;
     if (ownedPlayUi) runPlay(() => { report('ready-not-connected'); displayStatus(false); });
     else report('ready-not-connected');
     frame = native.requestAnimationFrame(tick);

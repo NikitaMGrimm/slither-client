@@ -572,7 +572,7 @@ test('actual isolated link loads exactly one fixed MAIN module and accepts bound
   f.realm.postMessage({ type: 'slither-client-status', schema: 1, id: 'a'.repeat(32), code: 'held' });
   assert.equal(f.document.head.children.length, 1);
   f.realm.postMessage({ type: 'slither-client-status', schema: 1, id: 'a'.repeat(32), code: 'connected', command: 'fetch' });
-  assert.equal(f.document.getElementById('slither-client-status').textContent, 'SlitherClient: held');
+  assert.equal(f.document.getElementById('slither-client-status').textContent, 'Loading client…');
   const output = f.document.getElementById('slither-client-status'), writes = [];
   // The isolated loader's plain DOM double has no native CSS class.
   output.style = { setProperty(name, value) { writes.push([name, value]); } };
@@ -581,7 +581,7 @@ test('actual isolated link loads exactly one fixed MAIN module and accepts bound
   assert.deepEqual(writes, [], 'healthy loader notifications preserve the runtime-owned hidden status');
   module.dispatchEvent(new Event('error'));
   assert.deepEqual(writes, [['display', '']], 'module failure reveals the outer fallback');
-  assert.equal(f.document.getElementById('slither-client-status').textContent, 'SlitherClient: csp-or-module-unavailable');
+  assert.equal(f.document.getElementById('slither-client-status').textContent, 'Play unavailable on this page.');
   assert.equal(f.document.getElementById('slither-client-reload').hidden, true);
   assert.equal(f.sockets, 0);
 });
@@ -598,9 +598,29 @@ test('isolated module deadline reveals an existing hidden fallback without loadi
   output.style = { setProperty(name, value) { writes.push([name, value]); } };
   const deadline = [...timers.values()].find(timer => timer.delay === 15000);
   assert(deadline); deadline.callback();
-  assert.equal(output.textContent, 'SlitherClient: csp-or-module-unavailable');
+  assert.equal(output.textContent, 'Play unavailable on this page.');
   assert.deepEqual(writes, [['display', '']]);
   assert.equal(f.document.head.children.length, 1); assert.equal(f.sockets, 0);
+});
+
+test('isolated status notifications preserve the runtime loading lease but module failure still reveals fallback', () => {
+  const f=fixture();
+  f.realm.chrome={runtime:{getURL:name=>`chrome-extension://synthetic/${name}`}};
+  const context=createContext({document:f.document,location:f.realm.location,URL,chrome:f.realm.chrome,
+    window:f.realm,globalThis:{chrome:f.realm.chrome},setTimeout:()=>1,clearTimeout(){},Set});
+  new Script(readFileSync(new URL('../extension/game-link.js',import.meta.url),'utf8')).runInContext(context);
+  const output=f.document.getElementById('slither-client-status');
+  // Cross-world presentation ownership marker; the isolated double has no HTML label brand.
+  Object.defineProperty(output,'firstChild',{value:{localName:'label'},configurable:true});
+  output.textContent='Runtime-owned loading label';
+  for(const code of ['loading','waiting-assets','ready-not-connected','connected']){
+    f.realm.postMessage({type:'slither-client-status',schema:1,id:'a'.repeat(32),code});
+    assert.equal(output.textContent,'Runtime-owned loading label');
+  }
+  output.style={setProperty(){}};
+  f.document.head.children[0].dispatchEvent(new Event('error'));
+  assert.equal(output.textContent,'Play unavailable on this page.');
+  assert.equal(f.document.head.children.length,1);assert.equal(f.sockets,0);
 });
 
 test('deadline failure for blank host sources constructs no Wasm owner and offers ordinary reload', async () => {

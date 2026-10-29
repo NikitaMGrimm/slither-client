@@ -14,12 +14,21 @@
     if (!output) {
       const root = document.createElement('section'); root.id = 'slither-client-root';
       output = document.createElement('p'); output.id = 'slither-client-status'; output.setAttribute('role', 'status');
+      output.className = 'slither-client-loading';
       root.appendChild(output);
       (document.body ?? document.documentElement)?.appendChild(root);
     }
     if (output) {
       if (reveal) output.style.setProperty('display', '');
-      output.textContent = `SlitherClient: ${code}`;
+      // A runtime-owned passive label/progress lease must survive typed status notifications.
+      if (reveal || output.firstChild?.localName !== 'label') {
+        const fallback = { 'host-unavailable': 'Play unavailable on this page.',
+          'csp-or-module-unavailable': 'Play unavailable on this page.', 'gate-unavailable': 'Play unavailable on this page.',
+          'client-failed': 'Play failed. Reload to start again.', disposed: 'Not connected.' };
+        // Static isolated fallback must work even when the MAIN Wasm module cannot load.
+        output.textContent = ['held', 'loading', 'waiting-assets'].includes(code) ? 'Loading client…'
+          : fallback[code] ?? `SlitherClient: ${code}`;
+      }
     }
     const root = document.getElementById('slither-client-root');
     if (root && !document.getElementById('slither-client-reload')) {

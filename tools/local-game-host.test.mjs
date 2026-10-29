@@ -512,6 +512,7 @@ test('default local bootstrap initializes once before sources and shares the exa
   };
   const start = startDefault(async options => {
     runtimeHost = options.localHost;
+    assert.equal(options.ownedAppearancePreview, true); assert.equal(options.ownedLoadingUi, true);
     assert.equal(options.initialize(), ready); assert.equal(options.initialize(), ready);
     await options.initialize();
     runtimeHost.bindSkinPolicy(localRuleDouble);
@@ -542,7 +543,7 @@ test('default local initialization failures preserve even undefined without retr
         wasmApi: { get authored_source_recipes() { assert.fail('recipe before initialization'); } } });
     } catch (error) { caught = true; assert.equal(error, primary); }
     assert(caught); assert.equal(calls, 1); assert.equal(f.canvases.length, 0); assert.equal(f.sockets.length, 0);
-    assert.equal(status.textContent, 'SlitherClient: ' + (primary?.message ?? 'Local startup failed'));
+    assert.equal(status.textContent, 'Client unavailable. Reload this page.');
   }
 });
 

@@ -30,13 +30,13 @@ export async function startGamePage({ realm = globalThis, initialize = init, was
     } catch (error) {
       try {
         const status = realm.document?.getElementById('slither-client-status');
-        if (status) status.textContent = `SlitherClient: ${error?.message ?? 'Local startup failed'}`;
+        if (status) status.textContent = 'Client unavailable. Reload this page.';
       } catch { /* A status write must not replace the startup failure. */ }
       throw error;
     }
   }
   return startRuntime({ realm, initialize: initializeRuntime, wasmApi, hudReadout: true, diagnosticUi: false,
-    ownedHudUi: true, ownedPlayUi: true, ownedMenuUi: true, ownedAppearancePreview: true, ownedLeaderboardUi: true, ownedMinimapUi: true, ownedAnnouncementUi: true, ownedEndScreenUi: true,
+    ownedHudUi: true, ownedPlayUi: true, ownedMenuUi: true, ownedAppearancePreview: true, ownedLoadingUi: true, ownedLeaderboardUi: true, ownedMinimapUi: true, ownedAnnouncementUi: true, ownedEndScreenUi: true,
     ...(localHost ? { localHost } : {}) });
 }
 
