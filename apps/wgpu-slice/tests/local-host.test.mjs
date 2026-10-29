@@ -4,15 +4,16 @@ import assert from 'node:assert/strict';
 import { localHost } from '../web/local-host.mjs';
 function fixture(make) {
   const log = [], sockets = [], queue = [];
-  let generation = 1, next = 9007199254740999n;
+  let generation = 1, next = 9007199254740999n, time = 123;
   const add = (kind, data) => queue.push({ kind, data, id: next++, generation });
   const owner = {
     play() { add(1, 'ws://127.0.0.1:19491/slither'); },
     effect_kind: () => queue[0]?.kind ?? 0, effect_id: () => queue[0].id,
     effect_generation: () => queue[0].generation, effect_url: () => queue[0].data,
     effect_bytes: () => queue[0].data,
+    construct(g, id, time) { assert.equal(g, queue[0].generation); assert.equal(id, queue[0].id); log.push(['begin-construct',g,id,time]); },
     acknowledge(g, id, ok) { assert.equal(g, queue[0].generation); assert.equal(id, queue[0].id); assert.equal(typeof id, 'bigint'); log.push(['ack', id, ok]); queue.shift(); if (!ok) this.fail(); },
-    opened(g) { log.push(['opened', g]); add(2, Uint8Array.of(1)); add(2, Uint8Array.of(99, 0)); },
+    opened(g, time) { log.push(['opened', g, time]); add(2, Uint8Array.of(1)); add(2, Uint8Array.of(99, 0)); },
     receive(g, b, t) { log.push(['received', g, [...b], t]); },
     closed(g) { log.push(['closed', g]); },
     fail() { log.push(['fail']); queue.length = 0; if (sockets.length) add(3); },
@@ -24,8 +25,8 @@ function fixture(make) {
     const socket = { readyState: 1, bufferedAmount: 0, send(b) { log.push(['send', [...b]]); }, close() { log.push(['close']); this.onclose?.(); } };
     sockets.push(socket); log.push(['construct', url]); make?.(socket); return socket;
   }
-  const host = localHost({ owner, socket: construct, now: () => 123, extent: () => [960, 540, 1], readout: (s) => log.push(['hud', s]) });
-  return { host, owner, log, sockets, restart: () => generation++ };
+  const host = localHost({ owner, socket: construct, now: () => time, extent: () => [960, 540, 1], readout: (s) => log.push(['hud', s]) });
+  return { host, owner, log, sockets, clock: value => { time=value; }, restart: () => generation++ };
 }
 test('no implicit socket; full-u64 effects acknowledged outside callbacks; copied binary receive', () => {
   const f = fixture(); f.host.frame(20); assert.equal(f.sockets.length, 0);
@@ -62,4 +63,15 @@ test('GPU failure stops further frame attempts and disables Play without reconne
   f.owner.frame = () => { frames++; throw new Error('device lost'); };
   f.host.frame(1); f.host.frame(2); assert.equal(frames, 1); assert.equal(f.sockets.length, 0);
   assert.match(f.host.failure().failure.message, /device lost/); f.host.dispose();
+});
+test('fresh host clocks fence actual construction, open and presentation flush', () => {
+  const f=fixture();f.clock(5000);f.host.call(()=>f.owner.play());
+  const begin=f.log.findIndex(x=>x[0]==='begin-construct');const native=f.log.findIndex(x=>x[0]==='construct');
+  assert.ok(begin>=0 && begin<native);assert.equal(f.log[begin][3],5000);
+  f.clock(5001);f.sockets[0].onopen();assert.deepEqual(f.log.find(x=>x[0]==='opened'),['opened',1,5001]);
+  assert.deepEqual(f.log.filter(x=>x[0]==='flush').at(-1),['flush',5001,960,540,1]);
+});
+test('failed fresh-construction admission creates no socket', () => {
+  const f=fixture();f.owner.construct=()=>{throw undefined;};f.host.call(()=>f.owner.play());
+  assert.equal(f.sockets.length,0);assert.deepEqual(f.host.failure(),{failed:true,failure:undefined});
 });

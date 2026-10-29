@@ -76,6 +76,13 @@ mod desktop {
                 let Some(e) = self.game.effect() else {
                     return Ok(());
                 };
+                if matches!(&e.kind, slither_wgpu_slice::game::EffectKind::Connect(_)) {
+                    self.game.construct(
+                        e.generation,
+                        e.id,
+                        self.started.elapsed().as_secs_f64() * 1000.,
+                    )?;
+                }
                 match self.transport.execute(&e) {
                     Ok(()) => self.game.acknowledge(e.generation, e.id, true)?,
                     Err(error) => self.game.fail(&error),
@@ -85,6 +92,8 @@ mod desktop {
         }
         fn pictures(&mut self) -> Result<()> {
             for _ in 0..16 {
+                self.game
+                    .observe_time(self.started.elapsed().as_secs_f64() * 1000.)?;
                 let Some(p) = self.game.take_frame() else {
                     return Ok(());
                 };
@@ -105,7 +114,11 @@ mod desktop {
                 }
                 self.effects()?;
             }
-            Err("Frame drain budget".into())
+            if self.game.has_frame() {
+                Err("Frame drain budget".into())
+            } else {
+                Ok(())
+            }
         }
         fn frame(&mut self) -> Result<()> {
             let size = self.window.inner_size();
@@ -113,16 +126,21 @@ mod desktop {
             let scale = self.window.scale_factor();
             self.host.resize(extent)?;
             self.game.viewport(extent, scale)?;
-            let now = self.started.elapsed().as_secs_f64() * 1000.;
             for event in self.transport.poll() {
                 match event {
                     Event::Opened(g) => {
-                        if let Err(e) = self.game.opened(g) {
+                        if let Err(e) = self
+                            .game
+                            .opened(g, self.started.elapsed().as_secs_f64() * 1000.)
+                        {
                             self.game.fail(&e)
                         }
                     }
                     Event::Binary(g, b) => {
-                        if let Err(e) = self.game.receive(g, &b, now) {
+                        if let Err(e) =
+                            self.game
+                                .receive(g, &b, self.started.elapsed().as_secs_f64() * 1000.)
+                        {
                             self.game.fail(&e)
                         }
                     }
@@ -138,7 +156,8 @@ mod desktop {
             }
             self.effects()?;
             self.pictures()?;
-            self.game.begin_frame(now, extent, scale)?;
+            self.game
+                .begin_frame(self.started.elapsed().as_secs_f64() * 1000., extent, scale)?;
             self.effects()?;
             self.pictures()?;
             self.window.set_title(&format!(

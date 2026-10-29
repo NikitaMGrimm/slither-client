@@ -28,6 +28,20 @@ session actions; surface timeout retains it without a second update. Failure
 commits terminal state and closes the owned socket, cancelling the candidate.
 Packet-time Setup pictures preserve the core callback order. Resize supersedes
 queued intermediate pictures while retaining the admitted packet state.
+All staged Setup pictures, HUD/resources and the aggregate pixel charge validate
+before publishing packet world/history/serial/RNG and the complete picture queue.
+Draining exactly16 admitted pictures succeeds; the limit check does not take an
+extra unacknowledged picture.
+
+Host clock contract: call `construct(generation, effect_id, fresh_now_ms)` once
+immediately before executing an issued Connect, then acknowledge the effect.
+`opened(generation, fresh_now_ms)` and `receive(..., fresh_now_ms)` fence late
+handshake callbacks. `observe_time(fresh_now_ms)` checks the absolute3333ms expiry
+without advancing the model, including during retained/zero-size waits.
+`begin_frame` also checks expiry before those waits. Work keeps its original model
+timestamp; successful presentation only issues Connect, whose fresh constructor
+boundary starts the handshake budget. Wasm `flush(now_ms,width,height,dpr)` carries
+fresh time before presentation-only work; `presented(bool)` remains unchanged.
 
 Windows uses thin winit pointer/key/window glue and a native tungstenite
 transport. The connector has a1s TCP deadline plus an absolute2s HTTP handshake

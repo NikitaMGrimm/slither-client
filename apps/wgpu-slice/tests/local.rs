@@ -127,8 +127,11 @@ fn effects(g: &mut LocalGame) -> Vec<Vec<u8>> {
     let mut packets = Vec::new();
     for _ in 0..16 {
         let Some(e) = g.effect() else { return packets };
-        if let EffectKind::Send(b) = e.kind {
-            packets.push(b);
+        if let EffectKind::Send(ref b) = e.kind {
+            packets.push(b.clone());
+        }
+        if matches!(&e.kind, EffectKind::Connect(_)) {
+            g.construct(e.generation, e.id, 1.).unwrap();
         }
         g.acknowledge(e.generation, e.id, true).unwrap();
     }
@@ -146,7 +149,7 @@ fn pictures(g: &mut LocalGame) {
         p.frame.quads(&r).unwrap();
         g.presented(true).unwrap();
     }
-    panic!("picture loop")
+    assert!(!g.has_frame(), "picture loop");
 }
 fn pump(g: &mut LocalGame, t: f64) -> Vec<Vec<u8>> {
     g.begin_frame(t, [960, 540], 1.).unwrap();
@@ -161,8 +164,9 @@ fn negotiating() -> LocalGame {
     pump(&mut g, 1.);
     let e = g.effect().unwrap();
     assert!(matches!(e.kind, EffectKind::Connect(_)));
+    g.construct(e.generation, e.id, 1.).unwrap();
     g.acknowledge(e.generation, e.id, true).unwrap();
-    g.opened(g.generation()).unwrap();
+    g.opened(g.generation(), 2.).unwrap();
     assert_eq!(g.phase(), Phase::Opening);
     assert_eq!(effects(&mut g), [vec![1], vec![99, 0]]);
     assert_eq!(g.phase(), Phase::Challenge);
@@ -302,7 +306,7 @@ fn malformed_ingress_rolls_back_and_stale_callbacks_never_reconnect() {
     assert!(g.can_play());
     g.play("ws://127.0.0.1:19491/slither", "Next", 65).unwrap();
     assert!(g.generation() > old);
-    g.opened(old).unwrap();
+    g.opened(old, 42.).unwrap();
     g.receive(old, &[0], 41.).unwrap();
     g.closed(old);
     assert_eq!(g.phase(), Phase::Opening);
@@ -437,11 +441,184 @@ fn protocol_mismatch_and_prefix_failure_do_not_advance_admission() {
     g.play("ws://127.0.0.1:19491/slither", "Player", 0).unwrap();
     pump(&mut g, 1.);
     effects(&mut g);
-    g.opened(g.generation()).unwrap();
+    g.opened(g.generation(), 2.).unwrap();
     let e = g.effect().unwrap();
     g.acknowledge(e.generation, e.id, false).unwrap();
     assert_eq!(g.phase(), Phase::Failed);
     assert_eq!(g.effect().unwrap().kind, EffectKind::Close);
     effects(&mut g);
+    assert!(g.effect().is_none());
+}
+
+#[test]
+fn regression_exact_sixteen_setup_pictures_drain_successfully() {
+    let mut g = negotiating();
+    g.receive(g.generation(), &bundle(&vec![setup(); 16]), 3.)
+        .unwrap();
+    pictures(&mut g);
+    assert!(g.take_frame().is_none());
+    assert_eq!(g.phase(), Phase::Playing);
+}
+#[test]
+fn regression_seventeenth_setup_rejects_without_publication() {
+    let mut g = negotiating();
+    let before = g.hud_text();
+    let e = g
+        .receive(g.generation(), &bundle(&vec![setup(); 17]), 3.)
+        .unwrap_err();
+    assert!(e.contains("Setup draw budget"), "{e}");
+    assert_eq!(g.phase(), Phase::Setup);
+    assert_eq!(g.hud_text(), before);
+    assert!(g.take_frame().is_none());
+}
+#[test]
+fn regression_retained_picture_does_not_defer_handshake_expiry() {
+    let mut g = negotiating();
+    g.begin_frame(20., [960, 540], 1.).unwrap();
+    let p = g.take_frame().unwrap();
+    g.retry_frame(p).unwrap();
+    let world = format!("{:?}", g.client().received());
+    g.begin_frame(3335., [960, 540], 1.).unwrap();
+    assert_eq!(g.phase(), Phase::Failed);
+    assert_eq!(format!("{:?}", g.client().received()), world);
+    assert!(g.take_frame().is_none());
+    assert_eq!(g.effect().unwrap().kind, EffectKind::Close);
+    effects(&mut g);
+    g.begin_frame(3336., [0, 0], 1.).unwrap();
+    assert!(g.effect().is_none());
+}
+#[test]
+fn regression_zero_backing_expires_and_fences_late_setup() {
+    let mut g = negotiating();
+    g.viewport([0, 0], 1.).unwrap();
+    g.begin_frame(3335., [0, 0], 1.).unwrap();
+    assert_eq!(g.phase(), Phase::Failed);
+    g.receive(g.generation(), &bundle(&[setup()]), 3336.)
+        .unwrap();
+    assert!(g.client().received().setup.is_none());
+    let e = g.effect().unwrap();
+    assert_eq!(e.kind, EffectKind::Close);
+    effects(&mut g);
+    g.receive(g.generation(), &bundle(&[setup()]), 3337.)
+        .unwrap();
+    assert!(g.effect().is_none());
+}
+#[test]
+fn regression_late_ingress_expires_without_a_frame_pump() {
+    let mut g = negotiating();
+    g.receive(g.generation(), &bundle(&[setup()]), 3335.)
+        .unwrap();
+    assert_eq!(g.phase(), Phase::Failed);
+    assert!(g.client().received().setup.is_none());
+    assert_eq!(g.effect().unwrap().kind, EffectKind::Close);
+}
+#[test]
+fn regression_delayed_initial_picture_gets_fresh_constructor_budget() {
+    let mut g = LocalGame::new(0.).unwrap();
+    g.play("ws://127.0.0.1:19491/slither", "Player", 0).unwrap();
+    g.begin_frame(1., [960, 540], 1.).unwrap();
+    let p = g.take_frame().unwrap();
+    g.retry_frame(p).unwrap();
+    g.begin_frame(5000., [960, 540], 1.).unwrap();
+    assert!(g.effect().is_none());
+    assert!(g.take_frame().is_some());
+    g.presented(true).unwrap();
+    let e = g.effect().unwrap();
+    assert!(matches!(e.kind, EffectKind::Connect(_)));
+    // The corrected host must begin construction here using its fresh5000ms clock.
+    g.construct(e.generation, e.id, 5000.).unwrap();
+    g.acknowledge(e.generation, e.id, true).unwrap();
+    g.begin_frame(5001., [960, 540], 1.).unwrap();
+    assert_eq!(g.phase(), Phase::Opening);
+    pictures(&mut g);
+    assert!(g.construct(e.generation, e.id, 5001.).is_err());
+    g.observe_time(8333.).unwrap();
+    assert_eq!(g.phase(), Phase::Opening);
+    g.begin_frame(8334., [960, 540], 1.).unwrap();
+    assert_eq!(g.phase(), Phase::Failed);
+    assert_eq!(g.effect().unwrap().kind, EffectKind::Close);
+    effects(&mut g);
+    assert!(g.effect().is_none());
+}
+fn late_budget_packet() -> Vec<u8> {
+    let mut cs = vec![setup()];
+    for i in 0..1140 {
+        let f = vec![b'F', 11, 10, 41, (i % 40) as u8, (i / 40) as u8, 20];
+        cs.push(f);
+    }
+    for id in 1000u16..1100 {
+        let mut p = prey();
+        p[1..3].copy_from_slice(&id.to_be_bytes());
+        cs.push(p);
+    }
+    cs.push(vec![b'h', 0, 7, 128, 0, 0]);
+    cs.push(setup());
+    let mut b = board();
+    b[3] = 3;
+    cs.push(b);
+    bundle(&cs)
+}
+#[test]
+fn regression_late_combined_draw_budget_is_atomic() {
+    let mut g = playing();
+    let before = format!("{:?}", g.client().received());
+    let hud = g.hud_text();
+    let error = g
+        .receive(g.generation(), &late_budget_packet(), 30.)
+        .unwrap_err();
+    assert!(
+        error.contains("frame extent/scale/budget"),
+        "Expected late combined frame validation, got {error}"
+    );
+    let same_world = format!("{:?}", g.client().received()) == before;
+    let same_hud = g.hud_text() == hud;
+    let no_partial_queue = g.take_frame().is_none();
+    assert_eq!(
+        (same_world, same_hud, no_partial_queue),
+        (true, true, true),
+        "late frame/resource rejection must publish nothing"
+    );
+    // A later valid factory request must also retain the prior RNG and frame serial.
+    let mut control = playing();
+    let packet = bundle(&[vec![b'F', 11, 10, 41, 50, 50, 20]]);
+    g.receive(g.generation(), &packet, 40.).unwrap();
+    control.receive(control.generation(), &packet, 40.).unwrap();
+    let foods = |g: &LocalGame| {
+        g.client()
+            .foods()
+            .foods()
+            .iter()
+            .map(|f| f.snapshot())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(foods(&g), foods(&control));
+    g.begin_frame(60., [960, 540], 1.).unwrap();
+    control.begin_frame(60., [960, 540], 1.).unwrap();
+    effects(&mut g);
+    effects(&mut control);
+    assert_eq!(
+        g.take_frame().unwrap().frame.identity,
+        control.take_frame().unwrap().frame.identity
+    );
+}
+
+#[test]
+fn constructor_admission_is_single_use_and_late_open_is_fenced() {
+    let mut g = LocalGame::new(0.).unwrap();
+    g.play("ws://127.0.0.1:19491/slither", "Player", 0).unwrap();
+    pump(&mut g, 1.);
+    let e = g.effect().unwrap();
+    assert!(g.acknowledge(e.generation, e.id, true).is_err());
+    assert!(g.construct(e.generation, e.id + 1, 1.).is_err());
+    g.construct(e.generation, e.id, 1.).unwrap();
+    assert!(g.construct(e.generation, e.id, 1000.).is_err());
+    g.acknowledge(e.generation, e.id, true).unwrap();
+    let before = format!("{:?}", g.client().received());
+    g.opened(g.generation(), 3335.).unwrap();
+    assert_eq!(g.phase(), Phase::Failed);
+    assert_eq!(g.effect().unwrap().kind, EffectKind::Close);
+    assert_eq!(format!("{:?}", g.client().received()), before);
+    effects(&mut g);
+    g.opened(g.generation(), 4000.).unwrap();
     assert!(g.effect().is_none());
 }

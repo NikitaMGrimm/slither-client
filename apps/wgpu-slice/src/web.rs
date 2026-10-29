@@ -43,7 +43,11 @@ impl LocalGameplay {
                 }
             }
         }
-        Err("Frame drain budget".into())
+        if self.game.has_frame() {
+            Err("Frame drain budget".into())
+        } else {
+            Ok(())
+        }
     }
 }
 #[wasm_bindgen]
@@ -131,8 +135,11 @@ impl LocalGameplay {
     pub fn acknowledge(&mut self, g: u32, id: u64, ok: bool) -> std::result::Result<(), JsValue> {
         self.checked(|s| s.acknowledge(g, id, ok))
     }
-    pub fn opened(&mut self, g: u32) -> std::result::Result<(), JsValue> {
-        self.checked(|s| s.opened(g))
+    pub fn opened(&mut self, g: u32, now: f64) -> std::result::Result<(), JsValue> {
+        self.checked(|s| s.opened(g, now))
+    }
+    pub fn construct(&mut self, g: u32, id: u64, now: f64) -> std::result::Result<(), JsValue> {
+        self.checked(|s| s.construct(g, id, now))
     }
     pub fn receive(&mut self, g: u32, b: &[u8], now: f64) -> std::result::Result<(), JsValue> {
         self.checked(|s| s.receive(g, b, now))
@@ -160,8 +167,15 @@ impl LocalGameplay {
         self.game.mouse_up();
     }
     /// Receive/Setup flush does not advance the gameplay clock.
-    pub fn flush(&mut self, width: u32, height: u32, dpr: f64) -> std::result::Result<(), JsValue> {
+    pub fn flush(
+        &mut self,
+        now: f64,
+        width: u32,
+        height: u32,
+        dpr: f64,
+    ) -> std::result::Result<(), JsValue> {
         let result = (|| {
+            self.game.observe_time(now)?;
             self.host.resize([width, height])?;
             self.game.viewport([width, height], dpr)?;
             self.pictures()
@@ -178,7 +192,7 @@ impl LocalGameplay {
         height: u32,
         dpr: f64,
     ) -> std::result::Result<(), JsValue> {
-        self.flush(width, height, dpr)?;
+        self.flush(now, width, height, dpr)?;
         self.checked(|g| g.begin_frame(now, [width, height], dpr))?;
         self.pictures().map_err(|e| {
             self.game.fail(&e);

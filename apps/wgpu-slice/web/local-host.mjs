@@ -22,12 +22,13 @@ export function localHost({ owner, socket: construct, now, extent, readout }) {
       try {
         if (kind === 1) {
           if (wire) throw new Error('Socket already owned');
+          owner.construct(generation, id, now());
           const socket = construct(owner.effect_url());
           const lease = { socket, generation };
           wire = lease;
           socket.binaryType = 'arraybuffer';
           const active = () => !disposed && wire === lease;
-          socket.onopen = () => { if (active()) call(() => owner.opened(generation)); };
+          socket.onopen = () => { if (active()) call(() => owner.opened(generation, now())); };
           socket.onmessage = event => {
             if (!active()) return;
             call(() => {
@@ -62,7 +63,7 @@ export function localHost({ owner, socket: construct, now, extent, readout }) {
   function flush() {
     if (renderStopped) { update(); return; }
     const [w, h, dpr] = extent();
-    try { owner.flush(w, h, dpr); } catch (error) { renderStopped = true; throw error; }
+    try { owner.flush(now(), w, h, dpr); } catch (error) { renderStopped = true; throw error; }
     drain();
     update();
   }

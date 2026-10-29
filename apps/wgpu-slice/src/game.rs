@@ -41,6 +41,7 @@ enum After {
 struct Pending {
     effect: Effect,
     after: After,
+    started: bool,
 }
 struct Work {
     now: f64,
@@ -221,11 +222,37 @@ impl LocalGame {
                 kind,
             },
             after,
+            started: false,
         });
         Ok(())
     }
     pub fn effect(&self) -> Option<Effect> {
         self.effects.front().map(|p| p.effect.clone())
+    }
+    /// Validate and date the one Connect immediately before the host constructor effect.
+    /// Retained frame timestamps belong to model work, never to the handshake deadline.
+    pub fn construct(&mut self, generation: u32, id: u64, now: f64) -> Result<()> {
+        let p = self.effects.front().ok_or("No Connect effect")?;
+        if p.effect.generation != generation
+            || p.effect.id != id
+            || p.started
+            || !matches!(p.effect.kind, EffectKind::Connect(_))
+        {
+            return Err("Stale/repeated Connect construction".into());
+        }
+        self.session.begin_construct(now).map_err(|e| e.0)?;
+        self.effects.front_mut().expect("validated").started = true;
+        Ok(())
+    }
+    /// Wall-clock expiry is independent of model updates, backing extent and retained pictures.
+    pub fn observe_time(&mut self, now: f64) -> Result<()> {
+        if !now.is_finite() {
+            return Err("Invalid host timestamp".into());
+        }
+        if self.session.handshake_timed_out(now) {
+            self.fail("Handshake timed out");
+        }
+        Ok(())
     }
     pub fn acknowledge(&mut self, generation: u32, id: u64, ok: bool) -> Result<()> {
         if self
@@ -234,6 +261,15 @@ impl LocalGame {
             .is_none_or(|p| p.effect.id != id || p.effect.generation != generation)
         {
             return Err("Stale effect acknowledgement".into());
+        }
+        if ok
+            && matches!(
+                self.effects.front().expect("checked").effect.kind,
+                EffectKind::Connect(_)
+            )
+            && !self.effects.front().expect("checked").started
+        {
+            return Err("Connect must begin before acknowledgement".into());
         }
         let p = self.effects.pop_front().expect("checked");
         if !ok {
@@ -260,7 +296,11 @@ impl LocalGame {
     fn active(&self, generation: u32) -> bool {
         generation == self.generation && !self.session.terminal()
     }
-    pub fn opened(&mut self, generation: u32) -> Result<()> {
+    pub fn opened(&mut self, generation: u32, now: f64) -> Result<()> {
+        if !self.active(generation) {
+            return Ok(());
+        }
+        self.observe_time(now)?;
         if !self.active(generation) {
             return Ok(());
         }
@@ -314,6 +354,10 @@ impl LocalGame {
         }
     }
     pub fn receive(&mut self, generation: u32, bytes: &[u8], now: f64) -> Result<()> {
+        if !self.active(generation) {
+            return Ok(());
+        }
+        self.observe_time(now)?;
         if !self.active(generation) {
             return Ok(());
         }
@@ -502,17 +546,18 @@ impl LocalGame {
         let rows = self
             .rows
             .stage_complete(&mut rows_plan, &scores, &self.nickname)?;
-        rows.commit()?;
-        self.client = client;
-        self.session = session;
-        self.hud = hud;
-        self.rows = rows;
-        self.identity = serial.get();
-        self.rng = rng.get();
+        let mut pictures = VecDeque::new();
         if !self.suspended {
             let mut bytes = 0;
+            let text = Self::format_hud_parts(
+                &client,
+                &hud,
+                &rows,
+                &session,
+                self.failure.as_deref(),
+                false,
+            );
             for frame in frames.into_inner() {
-                let text = self.hud_text();
                 let p = render::finish(frame, &mut self.bank, &text)?;
                 bytes += p
                     .resources
@@ -522,14 +567,24 @@ impl LocalGame {
                 if bytes > crate::bank::PIXEL_BUDGET {
                     return Err("Queued Setup pixels budget".into());
                 }
-                self.packet_frames.push_back(p);
+                pictures.push_back(p);
             }
         }
+        // All packet outputs and their aggregate charge are valid before any world/history publish.
+        rows.commit()?;
+        self.client = client;
+        self.session = session;
+        self.hud = hud;
+        self.rows = rows;
+        self.identity = serial.get();
+        self.rng = rng.get();
+        self.packet_frames.extend(pictures);
         Ok(())
     }
     /// Probe only the existing transactional clock callback; intentionally abort before entity update.
     /// The same owner commits it exactly once after all staged input send acknowledgements.
     pub fn begin_frame(&mut self, now: f64, extent: [u32; 2], scale: f64) -> Result<()> {
+        self.observe_time(now)?;
         self.viewport(extent, scale)?;
         if self.suspended {
             return Ok(());
@@ -550,9 +605,6 @@ impl LocalGame {
             if !self.packet_frames.is_empty() || !self.effects.is_empty() {
                 return Ok(());
             }
-        }
-        if self.session.handshake_timed_out(now) {
-            self.fail("Handshake timed out");
         }
         self.session.observe_lag(now);
         self.session.ui_tick(now).map_err(|e| e.0)?;
@@ -747,6 +799,13 @@ impl LocalGame {
         self.inflight = 2;
         Some(prepared)
     }
+    /// Non-consuming drain-boundary query: never issue an extra unacknowledged picture.
+    pub fn has_frame(&self) -> bool {
+        !self.suspended
+            && self.inflight == 0
+            && (!self.packet_frames.is_empty()
+                || self.work.as_ref().is_some_and(|w| w.prepared.is_some()))
+    }
     pub fn presented(&mut self, success: bool) -> Result<()> {
         let kind = std::mem::replace(&mut self.inflight, 0);
         if kind == 0 {
@@ -768,7 +827,6 @@ impl LocalGame {
             self.rows = rows;
         }
         if self.session.commit_control(self.has_socket) {
-            self.session.begin_construct(w.now).map_err(|e| e.0)?;
             self.enqueue(EffectKind::Connect(self.endpoint.clone()), After::Socket)?;
         }
         self.policy.frame_commit_done(self.session.view().connected);
@@ -847,11 +905,28 @@ impl LocalGame {
         self.format_hud(&self.client, &self.hud, false)
     }
     fn format_hud(&self, client: &AnimatedClient, hud: &HudHistory, reset_rows: bool) -> String {
-        let phase = self.phase();
+        Self::format_hud_parts(
+            client,
+            hud,
+            &self.rows,
+            &self.session,
+            self.failure.as_deref(),
+            reset_rows,
+        )
+    }
+    fn format_hud_parts(
+        client: &AnimatedClient,
+        hud: &HudHistory,
+        rows: &LeaderboardHistory,
+        session: &SessionPolicy,
+        failure: Option<&str>,
+        reset_rows: bool,
+    ) -> String {
+        let phase = session.view().phase;
         let status = if phase == Phase::Failed {
             "FAILED"
         } else {
-            match GameplayPolicy::status(phase.label(), self.session.view().connected) {
+            match GameplayPolicy::status(phase.label(), session.view().connected) {
                 1 => "READY",
                 2 => "CONNECTED",
                 4 => "CONNECTING",
@@ -868,7 +943,7 @@ impl LocalGame {
         let top = if reset_rows {
             None
         } else {
-            self.rows.visible_rows().first()
+            rows.visible_rows().first()
         }
         .map(|r| format!("{} {}", r.name_text, r.score_text))
         .unwrap_or_else(|| "--".into());
@@ -876,9 +951,7 @@ impl LocalGame {
             "{status} | ENTER PLAY / ESC STOP\nLENGTH {score}  RANK {} / {}\nFINAL {final_score}  TOP {top}\n{}",
             hud.rank,
             hud.population,
-            self.failure
-                .as_deref()
-                .unwrap_or("LOCAL AUTHORED BODY/PAIRED EYES; ARROWS/POINTER/SPACE")
+            failure.unwrap_or("LOCAL AUTHORED BODY/PAIRED EYES; ARROWS/POINTER/SPACE")
         )
     }
 }
