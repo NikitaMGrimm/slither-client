@@ -318,7 +318,7 @@ export function stockHudSmoke(wasm) {
       resolveRecipe(request) { ok(held); return composed.callbacks.recipe(request); },
       resolveAntennaRandom(request) { ok(held); return composed.callbacks.random(request); },
     };
-    const controller = createStockClient({ scene: composed.scene, quality: composed.quality, adapter,
+    const controller = createStockClient({ StockControllerPolicy: wasm.StockControllerPolicy, scene: composed.scene, quality: composed.quality, adapter,
       hostAssets: {
         resolveFood(request, lease) { ok(held); eq(lease, sourceLease); return composed.callbacks.food(request); },
         resolvePrey(request, lease) { ok(held); eq(lease, sourceLease); return composed.callbacks.prey(request); },

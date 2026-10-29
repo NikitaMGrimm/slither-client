@@ -23,6 +23,7 @@ pub mod authored_sources;
 pub mod challenge;
 pub mod desktop_input;
 pub mod desktop_layout;
+pub mod gameplay_policy;
 pub mod menu_loading;
 pub mod menu_preferences;
 pub mod play_admission;
@@ -32,6 +33,7 @@ pub mod protocol;
 pub mod session_policy;
 pub mod start_page;
 pub mod state;
+pub mod stock_controller_policy;
 
 #[cfg(target_arch = "wasm32")]
 mod start_page_browser;
@@ -59,6 +61,12 @@ mod desktop_input_browser;
 
 #[cfg(target_arch = "wasm32")]
 mod session_policy_browser;
+
+#[cfg(target_arch = "wasm32")]
+mod stock_controller_policy_browser;
+
+#[cfg(target_arch = "wasm32")]
+mod gameplay_policy_browser;
 
 #[cfg(target_arch = "wasm32")]
 mod canvas_browser;

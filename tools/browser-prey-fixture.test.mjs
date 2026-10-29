@@ -9,7 +9,7 @@ import { createClientAssetMap } from '../web/client-asset-map.mjs';
 import { createLocalBodyResolver } from '../web/synthetic-body.mjs';
 import { createSyntheticPreyResolver } from '../web/synthetic-prey.mjs';
 import { createSyntheticFoodResolver } from '../web/synthetic-food.mjs';
-import { createStockClient } from '../web/stock-client.mjs';
+import { createStockClient } from './fixtures/stock-client-fixture.mjs';
 
 test('prey coverage is a bounded authored default-consumer contract, separate from saved matrices', () => {
   const f = createBrowserPreyFixture();
@@ -100,7 +100,7 @@ if (process.env.SLITHER_PREY_FIXTURE_WASM === '1') {
         resolveAntennaRandom() { throw new Error('This authored scenario contains no antenna'); },
       };
       quality.begin_connection();
-      client = createStockClient({ scene, quality, adapter, target, palettes: assets.palettes,
+      client = createStockClient({ StockControllerPolicy: wasm.StockControllerPolicy, scene, quality, adapter, target, palettes: assets.palettes,
         background: assets.background, width: f.viewport.width, height: f.viewport.height,
         hostAssets: { resolveFood: food, resolvePrey(request) {
           const result = resolvePrey(request); creations.push({ request, result });

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import vm from 'node:vm';
 import { createStockSession } from './fixtures/session-policy-fixture.mjs';
-import { createStockClient } from '../web/stock-client.mjs';
+import { createStockClient } from './fixtures/stock-client-fixture.mjs';
 import { copyHudIngressPlan, copyHudIngressReport } from '../web/stock-hud-contract.mjs';
 
 const setup = [97, ...new Array(22).fill(0), 19, 42];

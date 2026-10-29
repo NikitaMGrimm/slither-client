@@ -1,7 +1,7 @@
 // Authored controller/native/source doubles only; no Wasm, browser or network.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createStockClient } from '../web/stock-client.mjs';
+import { createStockClient } from './fixtures/stock-client-fixture.mjs';
 
 const nativeName = 'apply_frame_and_render_standard_with_face_presentation_and_prey_and_hud';
 const guard = () => ({ playing: true, closeRequested: false, deathPending: false });

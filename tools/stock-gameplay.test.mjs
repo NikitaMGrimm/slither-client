@@ -3,8 +3,8 @@ import { TestDesktopInput } from './fixtures/client-input-fixture.mjs';
 // Original synthetic protocol, scene and native scheduling doubles; no real socket.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createStockGameplay } from '../web/stock-gameplay.mjs';
-import { createStockClient } from '../web/stock-client.mjs';
+import { createStockGameplay } from './fixtures/stock-gameplay-fixture.mjs';
+import { createStockClient } from './fixtures/stock-client-fixture.mjs';
 
 const request = () => ({ endpoint: 'ws://192.0.2.9:1234/slither',
   profile: { clientVersion: 1, password: new Uint8Array(20), protocolVersion: 19 },

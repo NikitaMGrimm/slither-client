@@ -1,3 +1,5 @@
+import { gameplayPolicySmoke, gameplayPolicyNumericSmoke, gameplayPolicyLifetimeSmoke, gameplayPolicyAdmissionSmoke } from './gameplay-policy-smoke.mjs';
+import { stockControllerSmoke, stockControllerLifetimeSmoke, stockControllerAdmissionSmoke } from './stock-controller-smoke.mjs';
 import { authoredSourcesSmoke } from './authored-source-smoke.mjs';
 import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
@@ -40,6 +42,25 @@ import { desktopInputLifetimeSmoke } from './desktop-input-lifetime-smoke.mjs';
 const wasm = await loadWasm();
 console.log('Synthetic real-Wasm authored source recipes passed:', await authoredSourcesSmoke(wasm));
 desktopLayoutSmoke(wasm);
+console.log('Synthetic real-Wasm gameplay differential passed:', await gameplayPolicySmoke(wasm));
+console.log('Synthetic real-Wasm gameplay scalar copies passed:', gameplayPolicyNumericSmoke(wasm));
+console.log('Synthetic real-Wasm gameplay lifetime passed:', await gameplayPolicyLifetimeSmoke(wasm));
+console.log('Synthetic real-Wasm gameplay capability admission passed:', gameplayPolicyAdmissionSmoke(wasm));
+const gameplayResult = execFileSync(process.execPath,
+  ['--test', '--test-reporter=tap', ...['stock-gameplay', 'stock-gameplay-hud', 'stock-gameplay-readout', 'stock-gameplay-leaderboard', 'stock-profile-gameplay']
+    .map(name => fileURLToPath(new URL('./' + name + '.test.mjs', import.meta.url)))],
+  { encoding: 'utf8', env: { ...process.env, SLITHER_GAMEPLAY_WASM: '1', SLITHER_CONTROLLER_WASM: '1' }, maxBuffer: 4 * 1024 * 1024 });
+console.log('Synthetic real-Wasm gameplay existing requirements passed:',
+  gameplayResult.split(/\r?\n/).filter(line => /^# (tests|pass|fail|skipped) /.test(line)).join(', '));
+console.log('Synthetic real-Wasm stock controller differential passed:', stockControllerSmoke(wasm));
+console.log('Synthetic real-Wasm stock controller lifetime passed:', stockControllerLifetimeSmoke(wasm));
+console.log('Synthetic real-Wasm stock controller injection passed:', stockControllerAdmissionSmoke(wasm));
+const controllerResult = execFileSync(process.execPath,
+  ['--test', '--test-reporter=tap', ...['stock-client', 'stock-client-hud', 'stock-gameplay', 'stock-gameplay-hud', 'stock-gameplay-readout', 'stock-gameplay-leaderboard']
+    .map(name => fileURLToPath(new URL('./' + name + '.test.mjs', import.meta.url)))],
+  { encoding: 'utf8', env: { ...process.env, SLITHER_CONTROLLER_WASM: '1' }, maxBuffer: 4 * 1024 * 1024 });
+console.log('Synthetic real-Wasm controller composition requirements passed:',
+  controllerResult.split(/\r?\n/).filter(line => /^# (tests|pass|fail|skipped) /.test(line)).join(', '));
 console.log('Synthetic real-Wasm session equivalence passed:', sessionPolicySmoke(wasm));
 console.log('Synthetic real-Wasm session lifetime passed:', sessionPolicyLifetimeSmoke(wasm));
 console.log('Synthetic real-Wasm session copied records passed:', sessionPolicyRecordSmoke(wasm));
