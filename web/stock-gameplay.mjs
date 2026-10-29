@@ -160,13 +160,16 @@ export function createStockGameplay(options) {
   function releasePolicy() {
     if (!releaseRequested || policyLeases !== 0 || !gameplayOwner) return;
     const owner = gameplayOwner;
+    const retainedFatal = Reflect.apply(policyMethods.fatal, owner, []);
     let failed = false, primary;
     try { retiredPolicy = Reflect.apply(policyMethods.snapshot, owner, []); }
     catch (error) { failed = true; primary = error; }
     gameplayOwner = null;
     try { Reflect.apply(policyMethods.free, owner, []); }
     catch (error) { if (!failed) { failed = true; primary = error; } }
-    if (failed) throw primary;
+    // Deferred terminal cleanup already delivered its first fatal (even undefined).
+    // A new owner's secondary retirement/free failure cannot escape that boundary.
+    if (failed && !retainedFatal) throw primary;
   }
   function lease(callback) {
     policyLeases++;

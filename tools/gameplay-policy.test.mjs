@@ -13,7 +13,7 @@ const wasm={GameplayPolicy:TestGameplayPolicy,StockControllerPolicy:TestStockCon
   ProfileLiteralParser:ProfileLiteralParserDouble,HudHistory:HudHistoryDouble,LeaderboardHistory:LeaderboardHistoryDouble};
 test('gameplay exact retained oracle differential with inert host effects',async()=>{const r=await gameplayPolicySmoke(wasm);assert(r.sequences>50);console.log('DOUBLE gameplay differential:',JSON.stringify(r));});
 test('gameplay UTF-16 and Math.ceil boundaries',()=>assert.equal(gameplayPolicyNumericSmoke(wasm).cases,12));
-test('gameplay new-owner cleanup and reentry lifetimes',async()=>assert.equal((await gameplayPolicyLifetimeSmoke(wasm)).cases,10));
+test('gameplay new-owner cleanup and reentry lifetimes',async()=>assert.equal((await gameplayPolicyLifetimeSmoke(wasm)).cases,11));
 test('gameplay capability precedence, partial cleanup and explicit injection',()=>assert.equal(gameplayPolicyAdmissionSmoke(wasm).cases,8));
 test('negative controls reject unpaired publication, lost reentry poison, reset input and profile eligibility',async()=>{
   for(const P of[

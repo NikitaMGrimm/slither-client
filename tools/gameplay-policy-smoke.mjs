@@ -184,5 +184,12 @@ export async function gameplayPolicyLifetimeSmoke(wasm){
     assert.deepEqual(values,poison?[]:[Array.from(old,letter=>letter.charCodeAt(0))]);
     h.flush();h.gameplay.dispose();h.controller.dispose();cases++;
   }
+  {
+    const secondary={authored:'free after retained undefined'};
+    const{P,count}=tracked({free(){throw secondary;}}),{h,board}=createGameplayComposition(adapter,{...wasm,GameplayPolicy:P});
+    h.start();h.faults.hud=undefined;h.sockets[0].message([97,3],board());
+    assert.doesNotThrow(()=>h.flush(),'secondary owner release cannot escape deferred first-fatal cleanup');
+    assert.deepEqual(h.errors,[undefined]);assert.equal(count.free,1);h.gameplay.dispose();h.controller.dispose();cases++;
+  }
   return{cases,scope:'Once-only explicit/deferred release; exact first errors; host doubles'};
 }
