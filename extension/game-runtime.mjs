@@ -422,9 +422,6 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
     for (const remove of listeners.splice(0)) cleanup(remove);
     cleanup(() => native.setInput(event => { if (event.type === 'click' && event.target === reload) native.ordinaryReload(); }));
     for (const action of [() => gameplay?.dispose(), () => controller?.dispose()]) cleanup(action);
-    const playOwner = playPolicy, playRelease = playPolicyMethods?.free;
-    playPolicy = PlayPolicy = playPolicyMethods = playCapabilityObservation = undefined;
-    if (playOwner !== undefined) cleanup(() => apply(playRelease, playOwner, []));
     const owner = projector, release = freeProjector;
     projector = projectScores = freeProjector = Projector = undefined;
     if (owner !== undefined) cleanup(() => apply(release, owner, []));
@@ -438,6 +435,9 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
       }
     });
     cleanup(() => native.status(code));
+    const playOwner = playPolicy, playRelease = playPolicyMethods?.free;
+    playPolicy = PlayPolicy = playPolicyMethods = playCapabilityObservation = undefined;
+    if (playOwner !== undefined) cleanup(() => apply(playRelease, playOwner, []));
     if (localHost) {
       const host = localHost; localHost = undefined;
       cleanup(() => host.dispose());

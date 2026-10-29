@@ -166,3 +166,15 @@ test('Play owner is released once after native cleanup, preserving an earlier un
     runtime.dispose(); assert.equal(frees,1); assert.equal(graph.f.raf.size,0); assert.equal(graph.f.sockets,0);
   });
 });
+
+test('terminal diagnostic publication finishes before releasing its Rust availability owner', async () => {
+  await runGameModuleTest(async ({ assert, createGraph }) => {
+    const graph=createGraph({hudNative:true,ownedHudNative:true,ownedPlayNative:true}); graph.hudWasm();
+    const {startGamePage}=await graph.load('runtime.mjs');
+    const runtime=await startGamePage({initialize(){},wasmApi:graph.wasm.api,hudReadout:true,
+      ownedHudUi:true,ownedPlayUi:true,diagnosticUi:false});
+    runtime.dispose('ready-not-connected');
+    assert.equal(graph.f.document.getElementById('slither-client-status').textContent,'SlitherClient: Unavailable');
+    assert.equal(graph.f.raf.size,0); runtime.dispose();
+  });
+});
