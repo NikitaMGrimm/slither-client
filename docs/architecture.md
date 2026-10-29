@@ -15,7 +15,6 @@ the following exceptions:
 | `web/client-input.mjs` | Retained key/pointer/boost state, turn debt, timing gates, heading quantization and packet intents. |
 | `web/handshake-session.mjs` | Challenge/login/setup state machine and frame limits; Rust already owns encoding, decoding and challenge arithmetic. |
 | `web/stock-hud-view.mjs` | Binding/readiness composition around Rust-formatted current/final HUD values. |
-| `web/stock-skin-rules.mjs` | Appearance selection and numeric recipe policy; borrowed DOM source capture remains separate. |
 | `web/desktop-layout.mjs` | Numeric viewport-to-backing-size policy. |
 | `extension/game-runtime.mjs` | Mixed entry/DOM/capability plumbing and Play admission/availability state. |
 
@@ -40,9 +39,14 @@ objects through the existing provider. Admitted custom runs use first-variant
 shading and project each palette modulo three, preserving admitted run counts
 and order without merging projection collisions. Empty or rejected custom data
 keeps the existing `skin % 3` selection. These authored families do not imply
-stock 42-color equivalence. The separate Rust stock resolver covers built-in/custom
-runs, face and antenna geometry, but complete palette artwork and special-source
-binding are still needed before that policy can replace the local stand-ins.
+stock 42-color equivalence. The production stock adapter separately binds the
+existing Rust resolve_skin for built-in/custom runs, face/antenna geometry and
+rotation policy, and validates the host custom mask through the same Rust
+palette predicate. Its JavaScript modules retain copied request admission and
+borrowed source lookup/readiness/identity, without a numeric policy fallback.
+The former authored JavaScript policy is a tools-only differential oracle.
+This cutover does not expand the local stand-ins or establish stock artwork,
+loading or installed-host acceptance.
 
 The default runtime enables Rust-owned nickname presentation before ingress.
 Each retained snake appearance owns its text and fade state, independently of

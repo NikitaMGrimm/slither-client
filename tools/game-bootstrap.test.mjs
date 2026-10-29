@@ -1,3 +1,4 @@
+import { stockSkinPolicyDouble, stockSkinWasmDouble } from './stock-skin-policy-double.mjs';
 import { createLeaderboardHistoryDouble } from './leaderboard-history-double.mjs';
 import { createHudHistoryDouble } from './hud-history-double.mjs';
 import assert from 'node:assert/strict';
@@ -249,7 +250,7 @@ function wasmDouble(f) {
     begin_connection() { calls.push('quality.connection'); }
     free() { qualityFrees++; f.faults.cleanup?.('quality.free'); }
   }
-  const api = { AnimatedScene, DesktopQuality, HudHistory: createHudHistoryDouble(), LeaderboardHistory: createLeaderboardHistoryDouble(),
+  const api = { ...stockSkinWasmDouble, AnimatedScene, DesktopQuality, HudHistory: createHudHistoryDouble(), LeaderboardHistory: createLeaderboardHistoryDouble(),
     encode_login() { return Uint8Array.of(115, 1); }, solve_challenge() { return new Uint8Array(27); },
     setup_protocol_version() { return 19; },
     decode_frame(bytes) {
@@ -1945,7 +1946,7 @@ test('ready cached accessory composes native load commitment with appearance-for
   const revision = snapshot.readiness.find(entry => entry.source === source).revision;
   assert(revision.startsWith('trusted-accessory-load/'));
   let held, rendered = 0;
-  const adapter = createStockSkinAdapter({ realm: f.realm, appearanceMode: 'accessory',
+  const adapter = createStockSkinAdapter({ ...stockSkinPolicyDouble, realm: f.realm, appearanceMode: 'accessory',
     readSnapshot() { held = reader.capture(); return held; }, random: () => .25,
     resolveAccessoryForward(skin) { return skin === 41 ? 34 : 6; } });
   const request = { skin: 41, own: true, id: 7, cosmetic: 255, customBytes: new Uint8Array() };
