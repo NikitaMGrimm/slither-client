@@ -1,0 +1,36 @@
+[package]
+name = "slither-wgpu-slice"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+publish = false
+license = "MIT"
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[[bin]]
+name = "slither-wgpu-desktop"
+path = "src/main.rs"
+
+[dependencies]
+slither-client = { path = "../.." }
+wgpu = { version = "=30.0.1", default-features = false, features = ["std", "wgsl", "dx12", "vulkan", "webgpu"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+winit = { version = "=0.30.13", default-features = false, features = ["rwh_06"] }
+pollster = "=0.4.0"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "=0.2.129"
+wasm-bindgen-futures = "=0.4.79"
+js-sys = "=0.3.106"
+web-sys = { version = "=0.3.106", features = ["HtmlCanvasElement"] }
+
+[profile.dev]
+debug = 0
+
+[profile.release]
+debug = 0
+lto = "thin"
+codegen-units = 1
