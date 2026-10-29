@@ -64,7 +64,7 @@ function syntheticWasm(omit) {
     ...section(1, [1, 0x60, 0, 0]),
     ...section(3, [2, 0, 0]),
     ...section(5, [1, 0, 1]),
-    ...section(7, [functions.length + 1, ...entry('memory', 2, 0), ...functions.flatMap(name => entry(name, 0, 0))]),
+    ...section(7, [...leb(functions.length + 1), ...entry('memory', 2, 0), ...functions.flatMap(name => entry(name, 0, 0))]),
     ...section(10, [2, 2, 0, 0x0b, 2, 0, 0x0b]),
   ]);
 }
