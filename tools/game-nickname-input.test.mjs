@@ -12,7 +12,7 @@ import { Script, createContext, runInContext } from 'node:vm';
 import { createGateTestDom, attachGateTestRealm } from './game-gate-test-fixture.mjs';
 import { createClientInput, TestDesktopInput } from './fixtures/client-input-fixture.mjs';
 import { createStockHostSnapshot } from '../web/stock-host-snapshot.mjs';
-import { createStockSkinAdapter } from '../web/stock-skin-provider.mjs';
+import { createStockSkinAdapter, isUnsupportedStockAccessoryFace } from '../web/stock-skin-provider.mjs';
 import { createStockClient } from '../web/stock-client.mjs';
 import { createStockEntityAssets } from '../web/stock-food-provider.mjs';
 import { desktopBackingSize } from '../web/desktop-layout.mjs';
@@ -469,10 +469,10 @@ test('unregister, setInput, pagehide and reload share lifetime with no synthetic
 
 test('actual bootstrap/gameplay router can call the selected lease before its filter with no added observations', async () => {
   const bootstrapSource = readFileSync(new URL('../extension/game-runtime.mjs', import.meta.url), 'utf8');
-  const makeBootstrap = new Script(`(function(init,wasm,createStockHostSnapshot,createStockSkinAdapter,
+  const makeBootstrap = new Script(`(function(init,wasm,createStockHostSnapshot,createStockSkinAdapter, isUnsupportedStockAccessoryFace,
     createStockClient,createStockEntityAssets,desktopBackingSize,createStockGameplay){
     ${bootstrapSource.replace(/^import .+;\r?$/gm, '').replace(/^export /gm, '')}\nreturn (options = {}) => startGamePage({initialize:init,wasmApi:wasm,...options});})`).runInThisContext();
-  const startGamePage = makeBootstrap(async () => {}, {}, createStockHostSnapshot, createStockSkinAdapter,
+  const startGamePage = makeBootstrap(async () => {}, {}, createStockHostSnapshot, createStockSkinAdapter, isUnsupportedStockAccessoryFace,
     createStockClient, createStockEntityAssets, desktopBackingSize, createStockGameplay);
   const f = fixtureFactory(); f.host(); f.complete(); const wasm = wasmDouble(f);
   const slot = Symbol.for('slither.client.gate.v1'); let native, lease;

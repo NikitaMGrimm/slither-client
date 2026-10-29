@@ -1,4 +1,4 @@
-import { createStockSkinAdapter } from './stock-skin-provider.mjs';
+import { createStockSkinAdapter, isUnsupportedStockAccessoryFace } from './stock-skin-provider.mjs';
 import { createStockClient } from './stock-client.mjs';
 import { createStockEntityAssets } from './stock-food-provider.mjs';
 import { createStockHostSnapshot, isPendingStockCapture } from './stock-host-snapshot.mjs';
@@ -1032,7 +1032,15 @@ export async function startGamePage({ realm = globalThis, initialize, wasmApi, h
                 }
                 checkHudOperation();
                 result = callback(pending ? () => freeze({ __proto__: null, status: 'pending' }) : request => {
-                  checkHudOperation(); const value = adapter.resolveRecipe(request); checkHudOperation(); return value;
+                  checkHudOperation();
+                  let value;
+                  try { value = adapter.resolveRecipe(request); }
+                  catch (error) {
+                    if (!isUnsupportedStockAccessoryFace(error)) throw error;
+                    value = freeze({ __proto__: null, status: 'unsupported' });
+                  }
+                  checkHudOperation();
+                  return value;
                 });
                 checkHudOperation();
               } catch (error) { failed = true; primary = error; }

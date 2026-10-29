@@ -6,7 +6,8 @@ use crate::{
         AntennaCullBounds, AntennaDrawInput, AntennaState, BodyGeometry, BodyPaintSample,
         BodyPaintView, BodyPaintVisual, CurveInput, EyeLayoutInput, FaceGeometry, MouthFaceLayout,
         PairedSideLayout, PreparedAntenna, PreparedBodyGeometry, SingleEyeLayout, SkinDescriptor,
-        StandardEyeLayout, resolve_authored_local_skin, resolve_skin, sample_curve_with_heading,
+        StandardEyeLayout, StaticHeadAccessoryGeometry, StaticHeadAccessoryLayout,
+        resolve_authored_local_skin, resolve_skin, sample_curve_with_heading,
     },
     state::{Appearance, Direction, Point, Setup},
 };
@@ -126,6 +127,44 @@ impl AppearancePreview {
     /// Borrow the owned selection bytes, without exposing a mutable alias.
     pub fn custom(&self) -> &[u8] {
         &self.custom
+    }
+
+    /// Stock menu previews represent the player's existing selection, never a wire ID.
+    pub fn own_accessory_context(&self) -> bool {
+        !self.local
+    }
+
+    /// Project an admitted draw-local accessory through the existing static layout.
+    /// The adapter supplies its exact explicit or Rust-forward-projected geometry.
+    pub fn accessory_layout(
+        &self,
+        plan: &PreviewPlan,
+        geometry: StaticHeadAccessoryGeometry,
+        source_extent: Point,
+    ) -> Result<StaticHeadAccessoryLayout, &'static str> {
+        if !self.own_accessory_context()
+            || matches!(plan.descriptor.face, FaceGeometry::SingleImage(_))
+        {
+            return Err("Static accessory unsupported for this preview");
+        }
+        geometry
+            .layout(
+                0.,
+                source_extent,
+                plan.visual.spawn,
+                EyeLayoutInput {
+                    corrected_head: PREVIEW_HEAD,
+                    camera: plan.view.camera,
+                    viewport_half: Point {
+                        x: plan.view.half_width,
+                        y: plan.view.half_height,
+                    },
+                    scale: plan.visual.scale,
+                    zoom: plan.view.zoom,
+                    death_progress: plan.visual.death,
+                },
+            )
+            .map_err(|_| "Invalid preview accessory layout")
     }
 
     /// Stale or already submitted jobs do not read sources or paint again.

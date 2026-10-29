@@ -2,6 +2,11 @@ import { createSkinProvider } from './skin-provider.mjs';
 import { ownData, readStockSkinRequest, stockInteger } from './stock-skin-rules.mjs';
 import { assertStockAccessorySource, readStockAccessorySelection, sameStockAccessorySelection, withStockAccessoryForward } from './stock-accessory-selection.mjs';
 
+const unsupportedAccessoryFaces = new WeakSet();
+
+/** Identify only this adapter's selected-accessory face rejection, without inspecting errors. */
+export const isUnsupportedStockAccessoryFace = error => unsupportedAccessoryFaces.has(error);
+
 // Original live-slot adapter. Host sources are borrowed, never loaded or painted.
 const freeze = Object.freeze;
 const arrayLength = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype), 'length').get;
@@ -128,6 +133,7 @@ function selectedAccessory(request, rule, snapshot, resolveForward) {
   if (selected && !['standard', 'mouth-face'].includes(rule.eyes.kind)) {
     const error = new TypeError('Selected stock accessory unsupported for this face family');
     error.status = 'unsupported';
+    unsupportedAccessoryFaces.add(error);
     throw error;
   }
   if (selected?.appearanceForward) {

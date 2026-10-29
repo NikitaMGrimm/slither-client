@@ -11,10 +11,12 @@ use crate::{
         PREVIEW_WIDTH, PreviewAvailability, PreviewFace,
     },
     body_browser::{BorrowedSources, field},
+    face_browser::accessory_geometry,
     presentation::{
         BodyPaintInput, BodyPaintQuality, FacePresentation, plan_standard_body,
         plan_standard_body_with_antenna,
     },
+    state::Point,
 };
 
 fn error(message: &str) -> JsValue {
@@ -110,7 +112,7 @@ impl AppearancePreview {
         for (key, value) in [
             ("skin", self.inner.skin().into()),
             ("customBytes", Uint8Array::from(self.inner.custom()).into()),
-            ("own", false.into()),
+            ("own", self.inner.own_accessory_context().into()),
             ("cosmetic", 0.into()),
             ("x", PREVIEW_HEAD.x.into()),
             ("y", PREVIEW_HEAD.y.into()),
@@ -130,23 +132,60 @@ impl AppearancePreview {
         if let Some(availability) = availability {
             return view(revision, availability, true);
         }
+        let accessory = if self.inner.own_accessory_context() {
+            let attachment = field(&field(&response, "recipe")?, "attachment")?;
+            if attachment.is_null() {
+                None
+            } else {
+                Some(accessory_geometry(&attachment, "scale")?)
+            }
+        } else {
+            None
+        };
         let cached = Closure::<dyn FnMut(JsValue) -> JsValue>::new(move |_| response.clone());
         let mut sources = BorrowedSources::default();
-        let recipe = sources.resolve_with_face(
-            cached.as_ref().unchecked_ref(),
-            &request,
-            target,
-            &FacePresentation {
-                face: descriptor.face,
-                antenna: descriptor.antenna.map(|antenna| antenna.geometry),
-            },
-        )?;
+        let presentation = FacePresentation {
+            face: descriptor.face,
+            antenna: descriptor.antenna.map(|antenna| antenna.geometry),
+        };
+        let recipe = if self.inner.own_accessory_context() {
+            sources.resolve_with_accessory(
+                cached.as_ref().unchecked_ref(),
+                &request,
+                target,
+                &presentation,
+                accessory.as_ref(),
+                false,
+            )?
+        } else {
+            sources.resolve_with_face(
+                cached.as_ref().unchecked_ref(),
+                &request,
+                target,
+                &presentation,
+            )?
+        };
         // The gameplay target is forbidden even if a provider placed it in a
         // nominally ready catalog. No pixels are read from either target.
         sources.validate(world_target)?;
         let plan = self
             .inner
             .plan(!recipe.style.rotate_segments)
+            .map_err(error)?;
+        let accessory_layout = recipe
+            .accessory
+            .as_ref()
+            .map(|source| {
+                self.inner.accessory_layout(
+                    &plan,
+                    source.geometry,
+                    Point {
+                        x: source.source_rect.width,
+                        y: source.source_rect.height,
+                    },
+                )
+            })
+            .transpose()
             .map_err(error)?;
         let palettes = recipe.palettes();
         let input = BodyPaintInput {
@@ -160,7 +199,7 @@ impl AppearancePreview {
             },
             visual: plan.visual,
             entry_alpha: 1.,
-            command_limit: 8 * MAX_PREVIEW_SAMPLES + 16,
+            command_limit: 8 * MAX_PREVIEW_SAMPLES + 16 - usize::from(recipe.accessory.is_some()),
         };
         let body = if let Some(antenna) = &plan.antenna {
             plan_standard_body_with_antenna(input, antenna.barrier_effect)
@@ -203,7 +242,14 @@ impl AppearancePreview {
             for command in &body.commands[body.antenna_barrier..] {
                 sources.submit(&context, command)?;
             }
-            submit_preview_face(&sources, &context, recipe.face.as_ref(), face, false, None)?;
+            submit_preview_face(
+                &sources,
+                &context,
+                recipe.face.as_ref(),
+                face,
+                false,
+                recipe.accessory.as_ref().zip(accessory_layout.as_ref()),
+            )?;
             sources.validate(target)?;
             sources.validate(world_target)?;
             Ok::<_, JsValue>(())

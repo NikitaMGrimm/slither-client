@@ -17,11 +17,25 @@ The local route displays its three existing authored families, plain paired
 faces and admitted custom stripes. These are authored stand-ins; they are not
 stock 42-color artwork. The stock route uses the same existing ready borrowed
 provider objects as gameplay, including represented face families and ordinary
-antennas. It requests `own: false` and cosmetic zero, so it does not preview the
-separate current-own static accessory selection. No new catalog, loader or
-source artwork is supplied. Pending and unsupported provider results hide the
+antennas. Stock preview requests `own: true` and cosmetic zero, borrowing the
+already-selected, already-ready current-own static accessory through the same
+trusted adapter. Explicit complete geometry is retained exactly; cached-entry
+forward comes from the existing Rust `stock_accessory_forward` policy. Paired
+and Mouth faces use the existing placement, crop, alpha and ordered submission.
+A selected SingleImage remains unsupported; accepted custom runs determine face
+eligibility first. Local preview keeps `own: false` and no accessory. No wire
+cosmetic, preview ID or menu action selects an accessory, and no gameplay state
+changes. No new catalog, loader or source artwork is supplied. Pending and
+unsupported provider results hide the
 old image and show a plain status. They do not start loading or automatic retry;
 a later menu selection can request another projection.
+
+Only the stock adapter's privately identified selected-accessory face rejection
+becomes an unsupported preview. Its public throw contract stays unchanged for
+other callers. Unrelated errors, forged status/message fields and falsy primaries
+retain the existing failure path. The trusted load-once commitment and its
+same-URL pre-event mutation limitation remain as documented in
+[static accessories](static-accessory.md); the preview adds no readiness policy.
 
 Selection is source-free. The captured microtask runs after the menu operation
 unwinds, checks document/generation/topology and the current Rust ticket, and
