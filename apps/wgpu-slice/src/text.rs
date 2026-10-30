@@ -226,6 +226,7 @@ impl TextCache {
                     Draw {
                         corners: None,
                         repeat_uv: None,
+                        black_effect: false,
                         asset: tile.resource.asset,
                         // Neighbor pixels outside the crop preserve linear sampling
                         // across tile seams at fractional screen positions.
