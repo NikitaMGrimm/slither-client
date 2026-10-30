@@ -339,6 +339,8 @@ mod tests {
                     other => panic!("Synthetic peer accept: {other:?}"),
                 }
             };
+            // Windows sockets accepted from a nonblocking listener stay nonblocking.
+            stream.set_nonblocking(false).unwrap();
             stream
                 .set_read_timeout(Some(Duration::from_secs(2)))
                 .unwrap();
