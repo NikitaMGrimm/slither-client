@@ -57,6 +57,7 @@ fn image(asset: BodyAsset, x: f64, y: f64, w: f64, h: f64, alpha: f64) -> Draw {
         asset,
         source: None,
         repeat_uv: None,
+        black_effect: false,
         destination: BodyRect {
             x,
             y,
@@ -90,6 +91,7 @@ fn prey(c: &PreyImageCommand) -> Draw {
         asset: c.source.asset(),
         source,
         repeat_uv: None,
+        black_effect: false,
         destination,
         translation: [0., 0.],
         rotation: 0.,

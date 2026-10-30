@@ -19,6 +19,7 @@ struct Texture {
     _texture: wgpu::Texture,
     bind: wgpu::BindGroup,
     repeat_bind: wgpu::BindGroup,
+    black: bool,
 }
 pub struct Renderer {
     pub sample_count: u32,
@@ -29,6 +30,7 @@ pub struct Renderer {
     layout: wgpu::BindGroupLayout,
     over: wgpu::RenderPipeline,
     lighter: wgpu::RenderPipeline,
+    black_over: wgpu::RenderPipeline,
     textures: BTreeMap<ResourceKey, Texture>,
     lost: Arc<AtomicBool>,
 }
@@ -108,7 +110,7 @@ impl Renderer {
             source: wgpu::ShaderSource::Wgsl(include_str!("quad.wgsl").into()),
         });
         let pipeline =
-            |blend| {
+            |blend, fragment| {
                 device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("ordered paint"),
                 layout: Some(&pipeline_layout),
@@ -127,7 +129,7 @@ impl Renderer {
                 multisample: wgpu::MultisampleState{count:sample_count,..Default::default()},
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
-                    entry_point: Some("fs"),
+                    entry_point: Some(fragment),
                     compilation_options: Default::default(),
                     targets: &[Some(wgpu::ColorTargetState {
                         format,
@@ -139,16 +141,30 @@ impl Renderer {
                 cache: None,
             })
             };
-        let over = pipeline(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING);
+        let over = pipeline(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING, "fs");
+        let black_over = pipeline(
+            wgpu::BlendState {
+                color: wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::One,
+                    dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                    operation: wgpu::BlendOperation::ReverseSubtract,
+                },
+                alpha: wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING.alpha,
+            },
+            "fs_black",
+        );
         let add = wgpu::BlendComponent {
             src_factor: wgpu::BlendFactor::One,
             dst_factor: wgpu::BlendFactor::One,
             operation: wgpu::BlendOperation::Add,
         };
-        let lighter = pipeline(wgpu::BlendState {
-            color: add,
-            alpha: add,
-        });
+        let lighter = pipeline(
+            wgpu::BlendState {
+                color: add,
+                alpha: add,
+            },
+            "fs",
+        );
         Ok(Self {
             sample_count,
             format,
@@ -158,6 +174,7 @@ impl Renderer {
             layout,
             over,
             lighter,
+            black_over,
             textures: BTreeMap::new(),
             lost,
         })
@@ -267,6 +284,13 @@ impl Renderer {
                 _texture: texture,
                 bind,
                 repeat_bind,
+                black: r
+                    .image
+                    .pixels
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .all(|p| p[..3] == [0; 3]),
             },
         );
         Ok(())
@@ -379,12 +403,16 @@ impl Renderer {
             });
             pass.set_vertex_buffer(0, buffer.slice(..));
             for (i, q) in quads.iter().enumerate() {
-                pass.set_pipeline(if q.blend == BodyBlend::Lighter {
-                    &self.lighter
-                } else {
-                    &self.over
-                });
                 let texture = &self.textures[&q.key];
+                pass.set_pipeline(
+                    if q.black_effect && texture.black && q.blend == BodyBlend::SourceOver {
+                        &self.black_over
+                    } else if q.blend == BodyBlend::Lighter {
+                        &self.lighter
+                    } else {
+                        &self.over
+                    },
+                );
                 pass.set_bind_group(
                     0,
                     if q.repeat {

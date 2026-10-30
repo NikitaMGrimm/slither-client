@@ -15,3 +15,16 @@ struct VertexOut {
 @fragment fn fs(v: VertexOut) -> @location(0) vec4<f32> {
     return textureSample(source, source_sampler, v.uv) * v.alpha;
 }
+
+@fragment fn fs_black(v: VertexOut) -> @location(0) vec4<f32> {
+    let alpha = textureSample(source, source_sampler, v.uv).a * v.alpha;
+    if alpha == 0. { return vec4<f32>(0.); }
+    // The Canvas reference truncates each black layer on the 8-bit destination.
+    // Reverse-subtract a near-half-byte bias to counter hardware nearest rounding.
+    // The 255/256 factor matches its integer attenuation on dark backgrounds;
+    // this is not a general replacement for colored-image source-over.
+    // Integer-alpha Vulkan/MSAA4 probe: exact for destination bytes 0..18;
+    // GPU blend precision leaves at most one byte of error elsewhere.
+    let bias = (0.5 - 1. / 512.) / 255.;
+    return vec4<f32>(vec3<f32>(bias), alpha * (255. / 256.));
+}

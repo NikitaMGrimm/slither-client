@@ -1,8 +1,8 @@
 //! Validation and the single f64 -> f32 submission boundary; no scene or clock policy.
 use crate::Result;
 use slither_client::presentation::{
-    BodyAsset, BodyAssetStatus, BodyBlend, BodyImageCommand, BodyRect, FoodImageCommand,
-    FoodImageDraw,
+    BodyAsset, BodyAssetStatus, BodyBlend, BodyImageCommand, BodyPaintPass, BodyRect,
+    FoodImageCommand, FoodImageDraw,
 };
 use std::collections::BTreeMap;
 
@@ -31,6 +31,8 @@ pub struct Draw {
     pub source: Option<BodyRect>,
     /// Unbounded normalized UV rectangle for a repeating image; crops remain bounded.
     pub repeat_uv: Option<BodyRect>,
+    /// Eligible for Canvas-like black-effect rounding; colored sources keep normal blending.
+    pub black_effect: bool,
     pub destination: BodyRect,
     /// Translation in logical viewport pixels, followed by local rotation.
     pub translation: [f64; 2],
@@ -90,6 +92,15 @@ impl From<&BodyImageCommand> for Draw {
             asset: c.asset,
             source: c.source_rect,
             repeat_uv: None,
+            black_effect: c.blend == BodyBlend::SourceOver
+                && matches!(
+                    c.pass,
+                    BodyPaintPass::Outline
+                        | BodyPaintPass::NearHeadShadow
+                        | BodyPaintPass::TailOutline
+                        | BodyPaintPass::TailShadow
+                        | BodyPaintPass::BodyShadow
+                ),
             destination: c.destination,
             translation: [c.center.x + c.translation.x, c.center.y + c.translation.y],
             rotation: c.rotation.unwrap_or(0.),
@@ -120,6 +131,7 @@ impl From<&FoodImageCommand> for Draw {
             asset: c.source.asset(),
             source,
             repeat_uv: None,
+            black_effect: false,
             destination,
             translation: [0.; 2],
             rotation: 0.,
@@ -153,6 +165,7 @@ pub struct Frame {
 pub struct Quad {
     pub key: ResourceKey,
     pub repeat: bool,
+    pub black_effect: bool,
     pub blend: BodyBlend,
     /// Six vertices: clip X/Y, UV X/Y, effective alpha. Order is never regrouped.
     pub vertices: [[f32; 5]; 6],
@@ -256,6 +269,7 @@ impl Frame {
                 Ok(Quad {
                     key,
                     repeat: d.repeat_uv.is_some(),
+                    black_effect: d.black_effect,
                     blend: d.blend,
                     vertices: [
                         corners[0], corners[1], corners[2], corners[0], corners[2], corners[3],
@@ -275,6 +289,7 @@ mod tests {
         let mut d = Draw {
             corners: None,
             repeat_uv: None,
+            black_effect: false,
             asset: BodyAsset {
                 handle: 1,
                 revision: 1,
