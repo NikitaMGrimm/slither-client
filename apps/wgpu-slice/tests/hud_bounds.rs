@@ -8,6 +8,7 @@ fn bounded(extent: [u32; 2], scale: f64) {
         extent,
         viewport_scale: scale,
         draws: Vec::new(),
+        snakes: Vec::new(),
     };
     let out = render::finish(
         frame,

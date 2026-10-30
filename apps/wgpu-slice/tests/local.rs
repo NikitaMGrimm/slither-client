@@ -439,6 +439,51 @@ fn largest_minimap_tiles_within_source_budget_and_marker_is_not_clamped() {
     assert!(widget.marker.top_left.x > widget.side || widget.marker.top_left.y > widget.side);
     assert!(maps.iter().any(|d| d.asset.width == 14));
 }
+
+#[test]
+fn other_snake_observations_separate_retained_culled_and_submitted_bodies() {
+    let mut g = playing();
+    let mut near = snake(9);
+    near[1..3].copy_from_slice(&0u16.to_be_bytes()); // Zero is a valid other ID.
+    near[19..22].copy_from_slice(&u24(5060));
+    near[28..31].copy_from_slice(&u24(5060));
+    let mut far = snake(9);
+    far[1..3].copy_from_slice(&42u16.to_be_bytes());
+    far[16..19].copy_from_slice(&u24(10500));
+    far[19..22].copy_from_slice(&u24(10000));
+    far[25..28].copy_from_slice(&u24(9780));
+    far[28..31].copy_from_slice(&u24(10000));
+    g.receive(g.generation(), &bundle(&[near, far]), 21.)
+        .unwrap();
+    assert_eq!(
+        g.client()
+            .snake_objects()
+            .filter(|(_, own, _, _)| !own)
+            .count(),
+        2
+    );
+    g.begin_frame(100., [960, 540], 1.).unwrap();
+    effects(&mut g);
+    let picture = g.take_frame().unwrap();
+    let own = picture.frame.snakes.iter().find(|s| s.own).unwrap();
+    assert_eq!(own.id, 7);
+    let other = picture.frame.snakes.iter().find(|s| !s.own).unwrap();
+    assert_eq!(other.id, 0);
+    assert!(other.body_commands > 0);
+    assert!(other.viewport_body_commands > 0);
+    assert!(other.viewport_body_commands <= other.body_commands);
+    assert!(!picture.frame.snakes.iter().any(|s| s.id == 42));
+    let resident = picture
+        .resources
+        .iter()
+        .map(|r| (r.asset.into(), r.asset))
+        .collect();
+    assert_eq!(
+        picture.frame.quads(&resident).unwrap().len(),
+        picture.frame.draws.len()
+    );
+    g.presented(true).unwrap();
+}
 #[test]
 fn control_ack_barrier_and_exact_keyboard_ping_boost_heading_order() {
     let mut g = playing();
@@ -688,6 +733,7 @@ fn lazy_resources_preserve_full_palette_and_reject_unknowns() {
         extent: [100, 100],
         viewport_scale: 1.,
         draws: vec![],
+        snakes: Vec::new(),
     };
     for color in 0..42 {
         frame.draws = vec![draw(bank.assets[bank.bodies[color].variants[0].asset])];

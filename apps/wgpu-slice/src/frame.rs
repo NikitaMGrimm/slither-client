@@ -36,6 +36,51 @@ pub struct Draw {
     pub effective_alpha: f64,
     pub blend: BodyBlend,
 }
+impl Draw {
+    /// Diagnostic geometry overlap only; transparent source pixels are not inspected.
+    pub(crate) fn image_intersects_viewport(&self, extent: [u32; 2], scale: f64) -> bool {
+        let r = self.destination;
+        if self.corners.is_some()
+            || self.effective_alpha <= 0.0
+            || r.width == 0.0
+            || r.height == 0.0
+        {
+            return false;
+        }
+        let (sin, cos) = self.rotation.sin_cos();
+        let points = [
+            [r.x, r.y],
+            [r.x + r.width, r.y],
+            [r.x + r.width, r.y + r.height],
+            [r.x, r.y + r.height],
+        ]
+        .map(|[x, y]| {
+            [
+                self.translation[0] + cos * x - sin * y,
+                self.translation[1] + sin * x + cos * y,
+            ]
+        });
+        let width = f64::from(extent[0]) / scale;
+        let height = f64::from(extent[1]) / scale;
+        let viewport = [[0.0, 0.0], [width, 0.0], [width, height], [0.0, height]];
+        // Separating axes for a rotated image rectangle and the viewport, with positive area.
+        [[1.0, 0.0], [0.0, 1.0], [cos, sin], [-sin, cos]]
+            .into_iter()
+            .all(|[x, y]| {
+                let span = |points: [[f64; 2]; 4]| {
+                    points
+                        .map(|p| p[0] * x + p[1] * y)
+                        .into_iter()
+                        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| {
+                            (lo.min(v), hi.max(v))
+                        })
+                };
+                let (lo, hi) = span(points);
+                let (view_lo, view_hi) = span(viewport);
+                hi > view_lo && view_hi > lo
+            })
+    }
+}
 impl From<&BodyImageCommand> for Draw {
     fn from(c: &BodyImageCommand) -> Self {
         Self {
@@ -80,6 +125,15 @@ impl From<&FoodImageCommand> for Draw {
     }
 }
 
+/// Observations from this frame's existing culling and actual normal-body commands.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SnakeDrawObservation {
+    pub id: u16,
+    pub own: bool,
+    pub body_commands: usize,
+    pub viewport_body_commands: usize,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Frame {
     pub identity: u64,
@@ -87,6 +141,8 @@ pub struct Frame {
     pub viewport_scale: f64,
     pub tick: u32,
     pub draws: Vec<Draw>,
+    /// Diagnostic only: does not participate in GPU submission or scene policy.
+    pub snakes: Vec<SnakeDrawObservation>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -189,5 +245,46 @@ impl Frame {
                 })
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn viewport_overlap_uses_rotated_geometry_positive_alpha_and_backing_scale() {
+        // ORIGINAL SYNTHETIC image rectangles; no source image or GPU.
+        let mut d = Draw {
+            corners: None,
+            asset: BodyAsset {
+                handle: 1,
+                revision: 1,
+                width: 100,
+                height: 2,
+                status: BodyAssetStatus::Ready,
+            },
+            source: None,
+            destination: BodyRect {
+                x: 0.,
+                y: 0.,
+                width: 100.,
+                height: 2.,
+            },
+            translation: [-20., 45.],
+            rotation: -std::f64::consts::FRAC_PI_4,
+            effective_alpha: 1.,
+            blend: BodyBlend::SourceOver,
+        };
+        // Its axis-aligned bounds overlap, but the diagonal misses the viewport corner.
+        assert!(!d.image_intersects_viewport([10, 10], 1.));
+        d.translation[1] = 39.;
+        assert!(d.image_intersects_viewport([10, 10], 1.));
+        assert!(d.image_intersects_viewport([20, 20], 2.));
+        d.effective_alpha = 0.;
+        assert!(!d.image_intersects_viewport([10, 10], 1.));
+        d.effective_alpha = 1.;
+        d.rotation = 0.;
+        d.translation = [10., 0.];
+        assert!(!d.image_intersects_viewport([10, 10], 1.));
     }
 }
