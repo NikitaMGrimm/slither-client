@@ -35,12 +35,14 @@ test('scene server is local, allowlisted and requires no reference or socket', a
   assert.equal(JSON.parse((await request('/scene/config.json')).text).simulatorUrl, null);
   const policy = page.headers['content-security-policy'];
   assert.match(policy, /connect-src 'self';/); assert.doesNotMatch(policy, /ws:|'unsafe-inline'|'unsafe-eval'/);
-  for (const resource of ['/anchors', '/game/bootstrap.mjs', '/game/runtime.mjs', '/game/host.css', '/assets/logo.svg', '/game/start-page-layout.mjs', '/game/appearance-preview.mjs',
-    '/game/local-game-host.mjs', '/game/client-asset-map.mjs', '/game/stock-accessory-selection.mjs', '/game/owned-minimap-ui.mjs', '/game/owned-end-screen-ui.mjs', '/game/owned-announcement-ui.mjs', '/game/stock-gameplay.mjs', '/game/stock-leaderboard-state.mjs',
-    '/animated', '/scene/animated.mjs', '/scene/desktop-layout.mjs', '/scene/synthetic-body.mjs', '/scene/synthetic-food.mjs', '/scene/synthetic-prey.mjs', '/scene/skin-provider.mjs', '/benchmark', '/scene/benchmark.mjs', '/scene/dense-scene.mjs', '/scene/scene.css', '/scene/scene.mjs', '/scene/synthetic-scene.mjs', '/scene/loopback-session.mjs']) {
+  for (const resource of ['/game/bootstrap.mjs', '/game/runtime.mjs', '/game/host.css', '/assets/logo.svg',
+    '/game/start-page-layout.mjs', '/game/appearance-preview.mjs', '/game/local-game-host.mjs',
+    '/game/client-asset-map.mjs', '/game/stock-accessory-selection.mjs', '/game/owned-minimap-ui.mjs',
+    '/game/owned-end-screen-ui.mjs', '/game/owned-announcement-ui.mjs', '/game/stock-gameplay.mjs',
+    '/game/stock-leaderboard-state.mjs']) {
     assert.equal((await request(resource)).status, 200);
   }
-  for (const resource of ['/Cargo.toml', '/web/scene.html', '/reference/', '/scene/unknown.mjs']) assert.equal((await request(resource)).status, 404);
+  for (const resource of ['/anchors', '/animated', '/benchmark', '/game/gate.js', '/Cargo.toml', '/web/game.html', '/reference/', '/scene/unknown.mjs']) assert.equal((await request(resource)).status, 404);
   for (const resource of ['/../Cargo.toml', '/%2e%2e/Cargo.toml', '//foreign', '/scene\\scene.mjs']) assert.equal((await request(resource)).status, 400);
   for (const host of ['localhost', 'example.invalid', '127.0.0.1:1']) assert.equal((await request('/', { host })).status, 403);
   assert.equal((await request('/', { method: 'POST' })).status, 405);

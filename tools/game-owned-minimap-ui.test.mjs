@@ -1,7 +1,7 @@
 // Authored DOM/Canvas and issued Rust-view doubles. No real Wasm or browser pixels.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createOwnedMinimapUi } from '../extension/game-owned-minimap-ui.mjs';
+import { createOwnedMinimapUi } from '../web/game-owned-minimap-ui.mjs';
 import { createGateTestDom, issuedMinimapViewDouble } from './game-gate-test-fixture.mjs';
 
 function fixture() {

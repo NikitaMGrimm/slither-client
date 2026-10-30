@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { Script, createContext, runInContext } from 'node:vm';
 import { createGateTestDom, attachGateTestRealm } from './game-gate-test-fixture.mjs';
 
-const source = readFileSync(new URL('../extension/game-gate.js', import.meta.url), 'utf8');
+const source = readFileSync(new URL('./fixtures/game-gate.js', import.meta.url), 'utf8');
 const slot = Symbol.for('slither.client.gate.v1'), id = 'a'.repeat(32);
 const names = ['inputValue', 'inputMaxLength', 'inputAutocompleteOff', 'buttonType', 'buttonDisabled'];
 const descriptors = [['Input', 'value', 'get'], ['Input', 'maxLength', 'set'], ['Input', 'autocomplete', 'set'],

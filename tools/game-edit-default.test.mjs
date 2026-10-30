@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { Script, createContext, runInContext } from 'node:vm';
 import { createGateTestDom, attachGateTestRealm } from './game-gate-test-fixture.mjs';
 
-const gateSource = readFileSync(new URL('../extension/game-gate.js', import.meta.url), 'utf8');
+const gateSource = readFileSync(new URL('./fixtures/game-gate.js', import.meta.url), 'utf8');
 const source = readFileSync(new URL('./game-bootstrap.test.mjs', import.meta.url), 'utf8');
 const functions = source.slice(source.indexOf('function fixture('), source.indexOf("\ntest('an unarmed"));
 const { fixture } = new Script(`(function(gateSource,Script,createContext,runInContext,assert,createGateTestDom,attachGateTestRealm){

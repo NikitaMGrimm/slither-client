@@ -1,11 +1,11 @@
 name: Bug report
-description: Report a reproducible defect in the browser prototypes.
+description: Report a reproducible defect in the desktop or browser client.
 title: "bug: "
 body:
   - type: markdown
     attributes:
       value: |
-        Report the specific prototype behavior involved.
+        Report the specific client behavior involved.
         Keep official source, assets, credentials, and raw captures out of this issue. Use textual observations and explicitly labelled synthetic reproducers.
   - type: input
     id: revision

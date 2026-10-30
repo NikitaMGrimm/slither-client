@@ -98,8 +98,8 @@ function scalar(element, Constructor, key) {
 }
 
 /**
- * Construct a synchronous trusted-host provider. See docs/skin-provider.md for
- * the typed input/output contract. This validates metadata, not callback safety.
+ * Construct a synchronous trusted-host provider with copied recipe metadata.
+ * This validates metadata, not callback safety.
  */
 export function createSkinProvider({ trusted, realm, resolveHostRecipe, normalizeHostRecipe }) {
   if (trusted !== true) throw new TypeError('Explicit trusted: true is required');

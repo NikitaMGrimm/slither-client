@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {createStockSession as createCurrent} from '../web/stock-session.mjs';
 import {createStockSession as createRetained} from './fixtures/stock-session-oracle.mjs';
 import {syntheticSetup} from '../web/synthetic-scene.mjs';
-import {syntheticChallenge} from './reference-parity.mjs';
+import {syntheticChallenge} from './synthetic-challenge.mjs';
 import {unpackCommands} from '../web/handshake-session.mjs';
 const challenge=Uint8Array.of(54,...syntheticChallenge('ABCDEFGHIJKLMNOPQRSTUVWXYZA'));
 const wire=commands=>Uint8Array.from(commands.length===1?commands[0]:commands.flatMap((c,i)=>i===0?[c.length>>8,c.length&255,...c]:[c.length+32,...c]));

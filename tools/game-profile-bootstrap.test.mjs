@@ -33,8 +33,8 @@ after(()=>{for(const [name,descriptor] of networkGlobals) {
   if(descriptor)Object.defineProperty(globalThis,name,descriptor);else delete globalThis[name];
 }});
 
-const gateSource=readFileSync(new URL('../extension/game-gate.js',import.meta.url),'utf8');
-const bootstrapSource=readFileSync(new URL('../extension/game-runtime.mjs',import.meta.url),'utf8');
+const gateSource=readFileSync(new URL('./fixtures/game-gate.js',import.meta.url),'utf8');
+const bootstrapSource=readFileSync(new URL('../web/game-runtime.mjs',import.meta.url),'utf8');
 const testSource=readFileSync(new URL('./game-bootstrap.test.mjs',import.meta.url),'utf8');
 const hostFunctions=testSource.slice(testSource.indexOf('function fixture('),testSource.indexOf("\ntest('an unarmed"));
 const {fixture,wasmDouble}=new Script(`(function(gateSource,Script,createContext,runInContext,assert,createGateTestDom,attachGateTestRealm,createHudHistoryDouble,createLeaderboardHistoryDouble,TestDesktopInput,desktopBackingOracle,TestSessionPolicy,stockSkinWasmDouble,TestStockControllerPolicy,TestGameplayPolicy,authoredSourceRecipesDouble){

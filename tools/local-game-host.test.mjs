@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { captureLocalGameDocument, createLocalGameHost } from '../web/local-game-host.mjs';
 import { createGateTestDom, issuedMinimapViewDouble } from './game-gate-test-fixture.mjs';
-import { createOwnedMinimapUi } from '../extension/game-owned-minimap-ui.mjs';
+import { createOwnedMinimapUi } from '../web/game-owned-minimap-ui.mjs';
 import { createClientInput } from './fixtures/client-input-fixture.mjs';
 
 // Explicit DOM, generated-source and browser-capability doubles; no real sockets.
@@ -495,7 +495,7 @@ test('document, top and URL changes invalidate the host, including navigation du
 
 // Actual default bootstrap and local host with the existing authored native realm.
 // The runtime sink below observes initialization/source handoff, not browser gameplay.
-const defaultBootstrap = readFileSync(new URL('../extension/game-bootstrap.mjs', import.meta.url), 'utf8')
+const defaultBootstrap = readFileSync(new URL('../web/game-bootstrap.mjs', import.meta.url), 'utf8')
   .split('// Trusted MAIN modules')[0].replace(/^import .+;\r?$/gm, '').replace(/^export /gm, '');
 const bootstrapFactory = new Script(`(function(startRuntime,createLocalGameHost,captureLocalGameDocument,loopbackEndpoint,readAuthoredSourceRecipes){
   ${defaultBootstrap}\nreturn startGamePage;})`).runInThisContext();

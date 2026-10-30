@@ -1,3 +1,4 @@
+// Test-only authored host harness for Canvas runtime regressions. Never served or packaged.
 // Isolated-world loader: fixed package URL, typed status only, no host commands.
 (() => {
   'use strict';
