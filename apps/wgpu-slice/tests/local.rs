@@ -1120,3 +1120,180 @@ fn constructor_admission_is_single_use_and_late_open_is_fenced() {
     g.opened(g.generation(), 4000.).unwrap();
     assert!(g.effect().is_none());
 }
+
+#[cfg(windows)]
+#[test]
+fn nicknames_reach_ordered_frames_with_retained_tint_and_draw_clock_fade() {
+    let mut g = negotiating();
+    let mut named = snake(44);
+    named[22] = 7;
+    named.splice(23..23, b"AV cafe".iter().copied());
+    let mut remote = named.clone();
+    remote[2] = 8;
+    // The same appearance is drawn at both ordered Setup barriers.
+    g.receive(
+        g.generation(),
+        &bundle(&[setup(), named, remote, setup(), setup()]),
+        3.,
+    )
+    .unwrap();
+    pictures(&mut g);
+    let names = g.client().nickname_draws();
+    assert_eq!(names.len(), 2);
+    assert_eq!(names[0].text, "AV cafe");
+    assert_ne!(names[0].color, NEUTRAL_NICKNAME_COLOR);
+    let color = names[0].color;
+    let before = format!("{:?}", g.client().received());
+    assert!(
+        g.receive(g.generation(), &bundle(&vec![setup(); 17]), 3.5)
+            .is_err()
+    );
+    assert_eq!(format!("{:?}", g.client().received()), before);
+    // An aborted Setup batch must not leave stale pixels at reused identities.
+    g.receive(g.generation(), &bundle(&[setup()]), 3.75)
+        .unwrap();
+    pictures(&mut g);
+    let mut own_alpha = 0.;
+    let mut remote_alpha = 0.;
+    for i in 0..205 {
+        g.begin_frame(20. + f64::from(i) * 16., [960, 540], 1.)
+            .unwrap();
+        effects(&mut g);
+        let p = g.take_frame().unwrap();
+        g.presented(true).unwrap();
+        let name = &g.client().nickname_draws()[0];
+        assert_eq!(name.color, color);
+        let text = p
+            .frame
+            .draws
+            .iter()
+            .position(|d| d.asset.handle >= 0x4000_0000_0000_0000)
+            .unwrap();
+        let body = p
+            .frame
+            .draws
+            .iter()
+            .position(|d| {
+                g.bank.bodies.iter().any(|family| {
+                    family
+                        .variants
+                        .iter()
+                        .any(|v| g.bank.assets[v.asset] == d.asset)
+                })
+            })
+            .unwrap();
+        assert!(text < body);
+        assert_eq!(
+            p.frame.draws[text].translation,
+            [name.position.x, name.position.y]
+        );
+        assert_eq!(p.frame.draws[text].effective_alpha, name.alpha);
+        own_alpha = name.alpha;
+        remote_alpha = g.client().nickname_draws()[1].alpha;
+    }
+    assert!(own_alpha < remote_alpha);
+    assert_eq!(remote_alpha, 0.5);
+    assert_eq!(g.bank.text.cached_runs(), 2); // appearance-owned tint varies
+}
+
+#[cfg(windows)]
+#[test]
+fn nickname_anchor_keeps_fixed_backing_gap_at_each_dpr_and_zoom() {
+    let mut g = negotiating();
+    let mut named = snake(0);
+    named[22] = 4;
+    named.splice(23..23, b"Name".iter().copied());
+    g.receive(g.generation(), &bundle(&[setup(), named]), 3.)
+        .unwrap();
+    pictures(&mut g);
+    let quality = g.quality();
+    for zoom in [0.6, 1.4] {
+        for dpr in [1_u32, 2, 3] {
+            let scale = f64::from(dpr);
+            let mut client = g.client().clone();
+            client.set_zoom(zoom).unwrap();
+            let p = render::prepare(
+                &mut client,
+                &mut g.bank,
+                [960 * dpr, 540 * dpr],
+                scale,
+                99,
+                quality,
+            )
+            .unwrap();
+            let head = client.snake_objects().next().unwrap().3.metrics();
+            let camera = client.camera().position();
+            let zoom = client.camera().zoom();
+            let head_x = (480. + (head.corrected_head.x - camera.x) * zoom) * scale;
+            let head_y = (270. + (head.corrected_head.y - camera.y) * zoom) * scale;
+            let label = p
+                .frame
+                .draws
+                .iter()
+                .find(|d| d.asset.handle >= 0x4000_0000_0000_0000)
+                .unwrap();
+            assert!((label.translation[0] * scale - head_x).abs() < 1e-9);
+            let gap = label.translation[1] * scale - head_y;
+            assert!(
+                (gap - (32. + 11. * head.scale * zoom * scale)).abs() < 1e-9,
+                "DPR {dpr}, zoom {zoom}: head-to-label gap {gap}"
+            );
+        }
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn long_nickname_keeps_backing_size_and_session_at_high_dpr() {
+    let mut g = negotiating();
+    let mut named = snake(0);
+    named[22] = 255;
+    named.splice(23..23, [b'W'; 255]);
+    g.receive(g.generation(), &bundle(&[setup(), named]), 3.)
+        .unwrap();
+    pictures(&mut g);
+    let mut backing_heights = Vec::new();
+    let mut backing_widths = Vec::new();
+    for scale in [1_u32, 2, 3, 9] {
+        g.begin_frame(
+            20. + f64::from(scale) * 16.,
+            [960 * scale.min(8), 540 * scale.min(8)],
+            f64::from(scale),
+        )
+        .unwrap();
+        effects(&mut g);
+        let p = g.take_frame().unwrap();
+        let labels: Vec<_> = p
+            .frame
+            .draws
+            .iter()
+            .filter(|d| d.asset.handle >= 0x4000_0000_0000_0000)
+            .collect();
+        assert!(
+            labels.len() > 1,
+            "the admitted full name must be tiled and drawn"
+        );
+        backing_heights.push(labels[0].destination.height * f64::from(scale));
+        backing_widths.push(
+            labels
+                .iter()
+                .map(|d| d.destination.width * f64::from(scale))
+                .sum::<f64>(),
+        );
+        assert!(labels.iter().all(|d| d.asset.width <= 512));
+        g.presented(true).unwrap();
+        assert_eq!(g.phase(), Phase::Playing);
+        assert!(g.failure.is_none());
+        assert!(g.effect().is_none());
+    }
+    assert!(
+        backing_heights
+            .iter()
+            .all(|height| *height == backing_heights[0])
+    );
+    assert!(
+        backing_widths
+            .iter()
+            .all(|width| *width == backing_widths[0])
+    );
+}

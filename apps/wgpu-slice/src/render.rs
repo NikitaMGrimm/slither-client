@@ -221,6 +221,32 @@ pub fn prepare(
         command_limit: 8192,
     })
     .map_err(|e| e.to_string())?;
+    let mut text_draws = Vec::new();
+    let mut text_resources = std::collections::BTreeMap::new();
+    for name in client.nickname_draws() {
+        use crate::text::{Align, Baseline, TextRun, TextStyle, Weight};
+        for (draw, resource) in bank.text.draw(
+            TextRun {
+                text: &name.text,
+                style: TextStyle {
+                    // The core's nickname font is fixed in backing pixels.
+                    size: name.font_size / scale,
+                    weight: Weight::Normal,
+                    color: name.color,
+                },
+                // The core mixes a fixed backing-pixel gap with world geometry;
+                // only the latter should grow when the logical frame is scaled.
+                position: [name.position.x, name.position.y - 32. + 32. / scale],
+                align: Align::Center,
+                baseline: Baseline::Middle,
+                alpha: name.alpha,
+            },
+            scale,
+        )? {
+            text_resources.insert(resource.asset.handle, resource);
+            text_draws.push(draw);
+        }
+    }
     let palettes: Vec<_> = bank
         .bodies
         .iter()
@@ -231,6 +257,7 @@ pub fn prepare(
         .collect();
     draws.extend(food.early.iter().map(Draw::from));
     draws.extend(prey_plan.early.iter().map(prey));
+    draws.extend(text_draws);
     let mut eyes = Vec::new();
     let mut snakes = Vec::new();
     for snake in prepared {
@@ -417,6 +444,7 @@ pub fn prepare(
             ));
         }
     }
+    bank.stage_text(identity, text_resources.into_values().collect())?;
     let mut frame = Frame {
         identity,
         extent,
@@ -432,42 +460,53 @@ pub fn prepare(
 fn finish_plan(
     mut prepared: PreparedFrame,
     bank: &mut Bank,
-    plan: &crate::hud::Plan,
+    plan: Result<crate::hud::Plan>,
 ) -> Result<PreparedFrame> {
-    // Late overlays append to the captured scene. Re-resolving world resources
-    // here could replace pixels belonging to an earlier queued Setup picture.
-    crate::hud::rasterize(plan, &mut bank.hud)?;
-    for panel in &plan.panels {
-        let mut command = image(
-            bank.hud.asset,
-            panel.destination.x,
-            panel.destination.y,
-            panel.destination.width,
-            panel.destination.height,
-            panel.opacity,
-        );
-        command.source = Some(panel.source());
-        prepared.frame.draws.push(command);
-    }
-    if !plan.panels.is_empty() {
-        prepared.resources.push(bank.hud.clone());
-    }
-    if prepared.pixel_bytes() > crate::bank::PIXEL_BUDGET {
-        return Err("Active resource pixel budget exceeded".into());
-    }
-    let resident = prepared
-        .resources
-        .iter()
-        .map(|r| (r.asset.into(), r.asset))
-        .collect();
-    prepared.frame.quads(&resident)?;
-    Ok(prepared)
+    let identity = prepared.frame.identity;
+    let result = (|| {
+        let plan = plan?;
+        // Late overlays append to the captured scene. Re-resolving world resources
+        // here could replace pixels belonging to an earlier queued Setup picture.
+        crate::hud::rasterize(&plan, &mut bank.hud)?;
+        for panel in &plan.panels {
+            let mut command = image(
+                bank.hud.asset,
+                panel.destination.x,
+                panel.destination.y,
+                panel.destination.width,
+                panel.destination.height,
+                panel.opacity,
+            );
+            command.source = Some(panel.source());
+            prepared.frame.draws.push(command);
+        }
+        if !plan.panels.is_empty() {
+            prepared.resources.push(bank.hud.clone());
+        }
+        if prepared.pixel_bytes() > crate::bank::PIXEL_BUDGET {
+            return Err("Active resource pixel budget exceeded".into());
+        }
+        let resident = prepared
+            .resources
+            .iter()
+            .map(|r| (r.asset.into(), r.asset))
+            .collect();
+        prepared.frame.quads(&resident)?;
+        Ok(prepared)
+    })();
+    bank.discard_text(identity);
+    result
 }
 /// Retained string-only entry for existing callers; no domain parsing of text.
 pub fn finish(frame: Frame, bank: &mut Bank, hud: &str) -> Result<PreparedFrame> {
-    let plan = crate::hud::plan_text(hud, frame.extent, frame.viewport_scale)?;
-    let resources = bank.resources(&frame)?;
-    finish_plan(PreparedFrame { frame, resources }, bank, &plan)
+    let identity = frame.identity;
+    let result = (|| {
+        let plan = crate::hud::plan_text(hud, frame.extent, frame.viewport_scale)?;
+        let resources = bank.resources(&frame)?;
+        finish_plan(PreparedFrame { frame, resources }, bank, Ok(plan))
+    })();
+    bank.discard_text(identity);
+    result
 }
 /// Ordinary native/web gameplay shares this complete Rust projection and composition.
 pub fn finish_hud(
@@ -475,6 +514,95 @@ pub fn finish_hud(
     bank: &mut Bank,
     hud: &crate::hud::View,
 ) -> Result<PreparedFrame> {
-    let plan = crate::hud::plan(hud, prepared.frame.extent, prepared.frame.viewport_scale)?;
-    finish_plan(prepared, bank, &plan)
+    let plan = crate::hud::plan(hud, prepared.frame.extent, prepared.frame.viewport_scale);
+    finish_plan(prepared, bank, plan)
+}
+
+#[cfg(test)]
+mod text_staging_tests {
+    //! Original synthetic pixels and failures; no fonts, GPU or server.
+    use super::*;
+    use crate::{materials::RgbaImage, scene::Resource};
+    fn stage(bank: &mut Bank, identity: u64) -> Frame {
+        let asset = BodyAsset {
+            handle: 0x4000_0000_0000_0000 + identity,
+            revision: 1,
+            width: 1,
+            height: 1,
+            status: BodyAssetStatus::Ready,
+        };
+        bank.stage_text(
+            identity,
+            vec![Resource {
+                asset,
+                image: RgbaImage {
+                    width: 1,
+                    height: 1,
+                    pixels: vec![255; 4],
+                },
+            }],
+        )
+        .unwrap();
+        Frame {
+            snakes: Vec::new(),
+            identity,
+            extent: [960, 540],
+            viewport_scale: 1.,
+            tick: 0,
+            draws: vec![image(asset, 10., 10., 1., 1., 1.)],
+        }
+    }
+    #[test]
+    fn every_failed_finish_discards_only_its_own_staged_text() {
+        let mut bank = Bank::new().unwrap();
+        let retained = stage(&mut bank, 0);
+        let view = crate::game::LocalGame::new(0.).unwrap().hud_view();
+        // Repeated increasing identities used to exhaust the 16-picture budget.
+        for identity in 1..=25 {
+            let mut frame = stage(&mut bank, identity);
+            let result = match identity % 5 {
+                0 => {
+                    frame.viewport_scale = f64::NAN;
+                    finish(frame, &mut bank, "HUD")
+                }
+                1 => {
+                    let mut plan =
+                        crate::hud::plan_text("HUD", frame.extent, frame.viewport_scale).unwrap();
+                    plan.extent = [513, 512];
+                    finish_plan(
+                        PreparedFrame {
+                            frame,
+                            resources: Vec::new(),
+                        },
+                        &mut bank,
+                        Ok(plan),
+                    )
+                }
+                2 => {
+                    frame.draws[0].effective_alpha = f64::NAN;
+                    finish(frame, &mut bank, "HUD")
+                }
+                3 => {
+                    frame.draws[0].asset.handle += 1000;
+                    bank.resources(&frame)
+                        .map(|resources| PreparedFrame { frame, resources })
+                }
+                _ => {
+                    frame.viewport_scale = f64::NAN;
+                    finish_hud(
+                        PreparedFrame {
+                            frame,
+                            resources: Vec::new(),
+                        },
+                        &mut bank,
+                        &view,
+                    )
+                }
+            };
+            assert!(result.is_err());
+        }
+        bank.resources(&retained).unwrap();
+        let frame = stage(&mut bank, 26);
+        finish(frame, &mut bank, "HUD").unwrap();
+    }
 }

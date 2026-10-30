@@ -1646,6 +1646,43 @@ impl AnimatedClient {
         Ok(journal.expect("HUD mode always constructs a journal"))
     }
 
+    /// Retain appearance-time nickname tint together with the existing ordered
+    /// Setup pictures and HUD journal. Uses the same atomic ingress transaction.
+    #[allow(clippy::too_many_arguments)]
+    pub fn apply_frame_with_tinted_presentation_and_all_factories_and_setup_and_hud<E, F, G, P, H>(
+        &mut self,
+        bytes: &[u8],
+        header: ElapsedHeader,
+        resolve: F,
+        mut resolve_food: G,
+        mut resolve_prey: P,
+        on_setup: H,
+        plan: HudIngressPlan<'_>,
+    ) -> Result<HudIngressReport, E>
+    where
+        E: From<ClientPresentationError>,
+        F: FnMut(&Appearance, AppearanceContext) -> Result<TintedPresentation, E>,
+        G: FnMut(&FoodSpawnInput, f64) -> Result<FoodFactory, E>,
+        P: FnMut(&PreySpawnInput, f64) -> Result<PreyFactory, E>,
+        H: FnMut(&mut AnimatedClient, &Setup) -> Result<(), E>,
+    {
+        let (_, journal) = self.apply_frame_accessory_transaction(
+            bytes,
+            header,
+            resolve,
+            true,
+            true,
+            true,
+            |spawn, zoom| resolve_food(spawn, zoom).map(Some),
+            true,
+            |spawn, zoom| resolve_prey(spawn, zoom).map(Some),
+            true,
+            on_setup,
+            Some(plan),
+        )?;
+        Ok(journal.expect("HUD mode always constructs a journal"))
+    }
+
     /// Resolve complete appearances plus optional explicit nickname tint inputs.
     ///
     /// Uses the [`Self::apply_frame_with_accessory_presentation`] mode. Each tint
