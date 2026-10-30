@@ -19,6 +19,9 @@ fn cosmetics(own: Option<u8>) -> Cosmetics {
     let bytes = png(8, 8);
     Cosmetics::load(|_| Ok(bytes.clone()), own).unwrap()
 }
+fn quality() -> QualitySnapshot {
+    QualityState::new(QualityMode::High, 0.).unwrap().snapshot()
+}
 fn u24(n: u32) -> [u8; 3] {
     let b = n.to_be_bytes();
     [b[1], b[2], b[3]]
@@ -107,7 +110,12 @@ fn bounded_png_jpeg_decode_premultiplies_and_rejects_bad_inputs() {
     images.add("s/a_cap.png", &png(1, 1)).unwrap();
     assert!(images.add("s/a_cap.png", &png(1, 1)).is_err());
     assert!(images.add("../s/a_cap.png", &png(1, 1)).is_err());
-    assert!(Cosmetics::from_images(images, None).is_err());
+    assert!(
+        Cosmetics::from_images(images, Some(30))
+            .unwrap()
+            .accessory(true)
+            .is_some()
+    );
 }
 
 #[test]
@@ -116,7 +124,9 @@ fn every_stock_skin_prepares_and_binds_only_its_active_resources() {
     bank.cosmetics = Some(cosmetics(None));
     for skin in 0..=65 {
         let mut c = client(&bank, skin, 255);
-        let frame = render::prepare(&mut c, &mut bank, [960, 540], 1., 1).unwrap();
+        let frame = render::prepare(&mut c, &mut bank, [960, 540], 1., 1, quality())
+            .unwrap()
+            .frame;
         let resources = bank.resources(&frame).unwrap();
         assert!(!frame.draws.is_empty(), "skin {skin}");
         assert!(resources.len() < 100, "skin {skin}");
@@ -156,12 +166,14 @@ fn every_stock_skin_prepares_and_binds_only_its_active_resources() {
 }
 
 #[test]
-fn all_accessories_use_retained_attachment_and_own_choice_overrides_wire_marker() {
+fn all_explicit_own_accessories_use_retained_attachment() {
     let mut bank = Bank::new().unwrap();
-    bank.cosmetics = Some(cosmetics(None));
     for id in 0..32 {
-        let mut c = client(&bank, 0, id);
-        let frame = render::prepare(&mut c, &mut bank, [960, 540], 1., 1).unwrap();
+        bank.cosmetics = Some(cosmetics(Some(id)));
+        let mut c = client(&bank, 0, 255);
+        let frame = render::prepare(&mut c, &mut bank, [960, 540], 1., 1, quality())
+            .unwrap()
+            .frame;
         let token = c.own_token().unwrap();
         let geometry = c.static_accessory_geometry(token).unwrap();
         let data = cosmetics::ACCESSORIES[usize::from(id)];
@@ -173,7 +185,7 @@ fn all_accessories_use_retained_attachment_and_own_choice_overrides_wire_marker(
             .cosmetics
             .as_ref()
             .unwrap()
-            .accessory(true, id)
+            .accessory(true)
             .unwrap()
             .asset;
         assert_eq!(frame.draws.iter().filter(|d| d.asset == asset).count(), 1);
@@ -195,7 +207,7 @@ fn antenna_state_advances_once_and_bulb_precedes_death_highlights() {
     bank.cosmetics = Some(cosmetics(None));
     let mut c = client(&bank, 37, 255);
     let token = c.own_token().unwrap();
-    render::prepare(&mut c, &mut bank, [960, 540], 1., 1).unwrap();
+    render::prepare(&mut c, &mut bank, [960, 540], 1., 1, quality()).unwrap();
     let first = c.antenna_snapshot(token).unwrap();
     let removal = [0, 4, b's', 0, 7, 1];
     c.apply_frame_with_accessory_presentation::<ClientPresentationError, _>(
@@ -205,13 +217,16 @@ fn antenna_state_advances_once_and_bulb_precedes_death_highlights() {
     )
     .unwrap();
     c.advance(200., false).unwrap();
-    let frame = render::prepare(&mut c, &mut bank, [960, 540], 1., 2).unwrap();
+    let frame = render::prepare(&mut c, &mut bank, [960, 540], 1., 2, quality())
+        .unwrap()
+        .frame;
     assert_ne!(first, c.antenna_snapshot(token).unwrap());
     let bulb = bank
         .cosmetics
         .as_ref()
         .unwrap()
-        .role(SkinSourceRole::KwkBulb);
+        .role(SkinSourceRole::KwkBulb)
+        .unwrap();
     let bulb = frame.draws.iter().position(|d| d.asset == bulb).unwrap();
     let death = bank.assets[bank.death.asset];
     let death = frame.draws.iter().position(|d| d.asset == death).unwrap();
@@ -225,7 +240,9 @@ fn dense_and_swell_styles_reach_body_sampling() {
     let mut bank = Bank::new().unwrap();
     bank.cosmetics = Some(cosmetics(None));
     let mut c = client(&bank, 60, 255);
-    let frame = render::prepare(&mut c, &mut bank, [960, 540], 1., 1).unwrap();
+    let frame = render::prepare(&mut c, &mut bank, [960, 540], 1., 1, quality())
+        .unwrap()
+        .frame;
     let family = |frame: &slither_wgpu_slice::frame::Frame, bank: &Bank, palette: usize| {
         frame
             .draws
@@ -248,15 +265,21 @@ fn dense_and_swell_styles_reach_body_sampling() {
     );
     let mut plain = Bank::new().unwrap();
     let mut ordinary = client(&bank, 60, 255);
-    let ordinary = render::prepare(&mut ordinary, &mut plain, [960, 540], 1., 1).unwrap();
+    let ordinary = render::prepare(&mut ordinary, &mut plain, [960, 540], 1., 1, quality())
+        .unwrap()
+        .frame;
     assert!(
         family(&frame, &bank, 36) > family(&ordinary, &plain, 36),
         "dense sampling reaches submission"
     );
     let mut swollen = client(&bank, 27, 255);
     let mut ordinary = swollen.clone();
-    let swollen = render::prepare(&mut swollen, &mut bank, [960, 540], 1., 2).unwrap();
-    let ordinary = render::prepare(&mut ordinary, &mut plain, [960, 540], 1., 2).unwrap();
+    let swollen = render::prepare(&mut swollen, &mut bank, [960, 540], 1., 2, quality())
+        .unwrap()
+        .frame;
+    let ordinary = render::prepare(&mut ordinary, &mut plain, [960, 540], 1., 2, quality())
+        .unwrap()
+        .frame;
     let width = |frame: &slither_wgpu_slice::frame::Frame, bank: &Bank| {
         frame
             .draws
@@ -274,4 +297,239 @@ fn dense_and_swell_styles_reach_body_sampling() {
         width(&swollen, &bank) > width(&ordinary, &plain),
         "swell reaches submission"
     );
+}
+
+#[test]
+fn wire_markers_never_select_an_own_or_remote_accessory() {
+    let mut bank = Bank::new().unwrap();
+    for own in [None, Some(30)] {
+        bank.cosmetics = Some(cosmetics(own));
+        for marker in [0, 30] {
+            let mut c = client(&bank, 0, marker);
+            let mut remote = spawn(0, marker);
+            remote[2] = 8;
+            let mut packet = (remote.len() as u16).to_be_bytes().to_vec();
+            packet.extend(remote);
+            c.apply_frame_with_accessory_presentation::<ClientPresentationError, _>(
+                &packet,
+                ElapsedHeader::Absent,
+                |a, context| {
+                    Ok(bank
+                        .cosmetics
+                        .as_ref()
+                        .unwrap()
+                        .appearance(a, context.own)
+                        .unwrap())
+                },
+            )
+            .unwrap();
+            for (token, _, _, _) in c.snake_objects() {
+                assert_eq!(
+                    c.static_accessory_geometry(token).is_some(),
+                    Some(token) == c.own_token() && own.is_some()
+                );
+            }
+            let frame = render::prepare(&mut c, &mut bank, [960, 540], 1., 1, quality())
+                .unwrap()
+                .frame;
+            if let Some(source) = bank.cosmetics.as_ref().unwrap().accessory(true) {
+                assert_eq!(
+                    frame
+                        .draws
+                        .iter()
+                        .filter(|d| d.asset == source.asset)
+                        .count(),
+                    1
+                );
+            }
+            assert!(bank.cosmetics.as_ref().unwrap().accessory(false).is_none());
+            bank.resources(&frame).unwrap();
+        }
+    }
+}
+
+#[test]
+fn missing_and_corrupt_native_images_preserve_play_and_other_cosmetics() {
+    use slither_wgpu_slice::game::LocalGame;
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    let directory = std::env::temp_dir().join(format!(
+        "synthetic-cosmetic-startup-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir(&directory).unwrap();
+    let bytes = png(8, 8);
+    for path in cosmetics::paths() {
+        let file = directory.join(path);
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(file, &bytes).unwrap();
+    }
+    for failed in [
+        "s/a_hardhat.png",
+        "s/jmou3.png",
+        "s/kwk6.png",
+        "s2/sest5.png",
+    ] {
+        for corrupt in [false, true] {
+            if corrupt {
+                fs::write(directory.join(failed), b"corrupt synthetic image").unwrap();
+            } else {
+                fs::remove_file(directory.join(failed)).unwrap();
+            }
+            let mut game = LocalGame::new(0.).unwrap();
+            game.configure_cosmetics(Cosmetics::directory(&directory, Some(31)).unwrap())
+                .unwrap();
+            assert!(game.can_play());
+            game.play("ws://127.0.0.1:19491/slither", "Synthetic", 0)
+                .unwrap();
+            game.begin_frame(1., [960, 540], 1.).unwrap();
+            assert!(game.take_frame().is_some());
+            let sources = game.bank.cosmetics.as_ref().unwrap();
+            assert!(sources.role(SkinSourceRole::PlayBulb).is_some());
+            if failed == "s/a_hardhat.png" {
+                assert!(sources.accessory(true).is_none());
+            }
+            if failed == "s/jmou3.png" {
+                assert!(matches!(
+                    sources.skin(40, &[]).unwrap().face,
+                    FaceGeometry::Paired(_)
+                ));
+            }
+            if failed == "s/kwk6.png" {
+                assert!(sources.skin(37, &[]).unwrap().antenna.is_none());
+            }
+            if failed == "s2/sest5.png" {
+                assert_eq!(
+                    sources.skin(41, &[]).unwrap().face_sources,
+                    SkinFaceSources::None
+                );
+            }
+            for skin in [0, 37, 40, 41, 42] {
+                let mut world = client(&game.bank, skin, 30);
+                let frame =
+                    render::prepare(&mut world, &mut game.bank, [960, 540], 1., 2, quality())
+                        .unwrap()
+                        .frame;
+                game.bank.resources(&frame).unwrap();
+            }
+            fs::write(directory.join(failed), &bytes).unwrap();
+        }
+    }
+    // This exact, newly created synthetic directory is the sole cleanup target.
+    assert!(
+        directory
+            .canonicalize()
+            .unwrap()
+            .starts_with(std::env::temp_dir().canonicalize().unwrap())
+    );
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn dying_skin_41_outline_does_not_cover_the_eye_interior() {
+    use slither_wgpu_slice::frame::Draw;
+    let mut bank = Bank::new().unwrap();
+    bank.cosmetics = Some(cosmetics(None));
+    let mut c = client(&bank, 41, 255);
+    let token = c.own_token().unwrap();
+    c.apply_frame_with_accessory_presentation::<ClientPresentationError, _>(
+        &[0, 4, b's', 0, 7, 1],
+        ElapsedHeader::Absent,
+        |_, _| unreachable!(),
+    )
+    .unwrap();
+    for tick in 1..=30 {
+        c.advance(100. + f64::from(tick) * 50., false).unwrap();
+        if c.snake_object(token).unwrap().metrics().death_progress >= 0.65 {
+            break;
+        }
+    }
+    let frame = render::prepare(&mut c, &mut bank, [960, 540], 1., 1, quality())
+        .unwrap()
+        .frame;
+    let white = bank.disk([255; 3]).unwrap();
+    let black = bank.disk([0; 3]).unwrap();
+    let ring = bank.solid([0; 3]);
+    let eye_index = frame.draws.iter().position(|d| d.asset == white).unwrap();
+    let eye = &frame.draws[eye_index];
+    let pupil = &frame.draws[eye_index + 1];
+    let center = |d: &Draw| {
+        [
+            d.destination.x + d.destination.width / 2.,
+            d.destination.y + d.destination.height / 2.,
+        ]
+    };
+    let e = center(eye);
+    let p = center(pupil);
+    let distance = (e[0] - p[0]).hypot(e[1] - p[1]);
+    let direction = if distance > 0. {
+        [(e[0] - p[0]) / distance, (e[1] - p[1]) / distance]
+    } else {
+        [1., 0.]
+    };
+    let radius = eye.destination.width / 2.;
+    let stroke = 3. * c.camera().zoom();
+    let inner = radius - stroke / 2.;
+    let sample = [
+        e[0] + direction[0] * inner * 0.9,
+        e[1] + direction[1] * inner * 0.9,
+    ];
+    let resources = bank.resources(&frame).unwrap();
+    let mut alpha = 0.;
+    // The background reuses the black solid; measure the eye scope after it.
+    let outline_start = frame
+        .draws
+        .iter()
+        .position(|d| d.asset == ring && d.corners.is_some())
+        .unwrap();
+    for draw in frame
+        .draws
+        .iter()
+        .skip(outline_start)
+        .filter(|d| [white, black, ring].contains(&d.asset))
+    {
+        let coverage = if let Some(corners) = draw.corners {
+            let crosses: Vec<_> = (0..4)
+                .map(|i| {
+                    let a = corners[i];
+                    let b = corners[(i + 1) % 4];
+                    (b[0] - a[0]) * (sample[1] - a[1]) - (b[1] - a[1]) * (sample[0] - a[0])
+                })
+                .collect();
+            f64::from(crosses.iter().all(|v| *v >= 0.) || crosses.iter().all(|v| *v <= 0.))
+        } else {
+            let d = draw.destination;
+            let u = (sample[0] - d.x) / d.width;
+            let v = (sample[1] - d.y) / d.height;
+            if !(0. ..1.).contains(&u) || !(0. ..1.).contains(&v) {
+                0.
+            } else {
+                let image = &resources
+                    .iter()
+                    .find(|r| r.asset == draw.asset)
+                    .unwrap()
+                    .image;
+                let x = (u * f64::from(image.width)) as usize;
+                let y = (v * f64::from(image.height)) as usize;
+                f64::from(image.pixels[(y * image.width as usize + x) * 4 + 3]) / 255.
+            }
+        };
+        let a = coverage * draw.effective_alpha;
+        alpha = a + alpha * (1. - a);
+    }
+    assert!((0.2..0.8).contains(&eye.effective_alpha));
+    assert!(
+        (alpha - eye.effective_alpha).abs() < 1e-12,
+        "interior alpha {alpha}, eye fill {}",
+        eye.effective_alpha
+    );
+    let first_ring = &frame.draws[outline_start];
+    let corner = first_ring.corners.unwrap()[0];
+    assert!(((corner[0] - e[0]).hypot(corner[1] - e[1]) - radius - stroke / 2.).abs() < 1e-10);
 }

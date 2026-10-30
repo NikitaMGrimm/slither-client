@@ -127,7 +127,7 @@ impl Images {
 
 pub struct Cosmetics {
     roles: BTreeMap<&'static str, Resource>,
-    accessories: Vec<Resource>,
+    accessories: BTreeMap<u8, Resource>,
     pub own_accessory: Option<u8>,
 }
 impl Cosmetics {
@@ -135,14 +135,22 @@ impl Cosmetics {
     pub fn load(mut resolve: impl FnMut(&str) -> Result<Vec<u8>>, own: Option<u8>) -> Result<Self> {
         let mut images = Images::default();
         for path in paths() {
-            images.add(&path, &resolve(&path)?)?;
+            if let Err(error) = resolve(&path).and_then(|bytes| images.add(&path, &bytes)) {
+                eprintln!("Cosmetic {path} unavailable: {error}");
+            }
         }
         Self::from_images(images, own)
     }
     #[cfg(not(target_arch = "wasm32"))]
     pub fn directory(directory: &std::path::Path, own: Option<u8>) -> Result<Self> {
         use std::io::Read;
-        let root = directory.canonicalize().map_err(|e| e.to_string())?;
+        let root = match directory.canonicalize() {
+            Ok(root) => root,
+            Err(error) => {
+                eprintln!("Cosmetics directory unavailable: {error}");
+                return Self::from_images(Images::default(), own);
+            }
+        };
         Self::load(
             |path| {
                 let file = root.join(path).canonicalize().map_err(|e| e.to_string())?;
@@ -164,13 +172,16 @@ impl Cosmetics {
         if own.is_some_and(|v| usize::from(v) >= ACCESSORIES.len()) {
             return Err("Accessory must be 0..31".into());
         }
-        if images.images.len() != paths().len() {
-            return Err("Incomplete cosmetic image set".into());
-        }
         let mut next = 0x4000_0000_0000_0000_u64;
-        let mut resource = |image: RgbaImage| {
+        let mut bytes = 0;
+        let mut resource = |image: RgbaImage, name: &str| {
+            if bytes + image.pixels.len() > COSMETIC_PIXEL_BUDGET {
+                eprintln!("Cosmetic {name} unavailable: pixel budget");
+                return None;
+            }
+            bytes += image.pixels.len();
             next += 1;
-            Resource {
+            Some(Resource {
                 asset: BodyAsset {
                     handle: next,
                     revision: 1,
@@ -179,15 +190,15 @@ impl Cosmetics {
                     status: BodyAssetStatus::Ready,
                 },
                 image,
-            }
+            })
         };
         let mut roles = BTreeMap::new();
         for (role, path, w, h, inset) in IMAGES {
-            let image = images.images.remove(path).ok_or("Missing cosmetic")?;
-            roles.insert(
-                role.as_str(),
-                resource(canvas_image(image, w, h, inset, inset != 0)),
-            );
+            if let Some(image) = images.images.remove(path)
+                && let Some(source) = resource(canvas_image(image, w, h, inset, inset != 0), path)
+            {
+                roles.insert(role.as_str(), source);
+            }
         }
         for role in [
             SkinSourceRole::SingleEyeBase,
@@ -196,17 +207,22 @@ impl Cosmetics {
             SkinSourceRole::AcBulb,
             SkinSourceRole::CdBulb,
         ] {
-            roles.insert(role.as_str(), resource(procedural(role)?));
+            match procedural(role) {
+                Ok(image) => {
+                    if let Some(source) = resource(image, role.as_str()) {
+                        roles.insert(role.as_str(), source);
+                    }
+                }
+                Err(error) => eprintln!("Cosmetic {} unavailable: {error}", role.as_str()),
+            }
         }
         let accessories = ACCESSORIES
             .iter()
-            .map(|v| {
-                resource(
-                    images
-                        .images
-                        .remove(&format!("s/a_{}.png", v.0))
-                        .expect("complete image set"),
-                )
+            .enumerate()
+            .filter_map(|(id, v)| {
+                let path = format!("s/a_{}.png", v.0);
+                let image = images.images.remove(&path)?;
+                resource(image, &path).map(|source| (id as u8, source))
             })
             .collect();
         let result = Self {
@@ -214,47 +230,63 @@ impl Cosmetics {
             accessories,
             own_accessory: own,
         };
-        if result
-            .resources()
-            .map(|r| r.image.pixels.len())
-            .sum::<usize>()
-            > COSMETIC_PIXEL_BUDGET
-        {
-            return Err("Cosmetic pixel budget".into());
-        }
         Ok(result)
     }
-    pub fn role(&self, role: SkinSourceRole) -> BodyAsset {
-        self.roles[role.as_str()].asset
+    pub fn role(&self, role: SkinSourceRole) -> Option<BodyAsset> {
+        self.roles.get(role.as_str()).map(|r| r.asset)
     }
-    pub fn accessory(&self, own: bool, cosmetic: u8) -> Option<&Resource> {
-        let id = if own {
-            self.own_accessory.or(Some(cosmetic))
-        } else {
-            Some(cosmetic)
-        }?;
-        self.accessories.get(usize::from(id))
+    fn selected_accessory(&self, own: bool) -> Option<(u8, &Resource)> {
+        let id = self.own_accessory.filter(|_| own)?;
+        self.accessories.get(&id).map(|source| (id, source))
+    }
+    pub fn accessory(&self, own: bool) -> Option<&Resource> {
+        self.selected_accessory(own).map(|(_, source)| source)
+    }
+    /// Resource readiness and retained geometry must agree before appearance publication.
+    pub fn skin(&self, skin: u8, custom: &[u8]) -> std::result::Result<SkinDescriptor, SkinError> {
+        let mut skin = resolve_skin(skin, custom, false)?;
+        let ready = |role| self.role(role).is_some();
+        let face_ready = match skin.face_sources {
+            SkinFaceSources::None => true,
+            SkinFaceSources::PairedSide(role) => ready(role),
+            SkinFaceSources::SingleImage { base, pupil } => {
+                ready(base.source) && ready(pupil.source)
+            }
+            SkinFaceSources::Mouth { eye_marks, mouth } => ready(eye_marks) && ready(mouth),
+        };
+        if !face_ready {
+            skin.face = match skin.face {
+                FaceGeometry::Paired(face) => FaceGeometry::Paired(PairedFaceGeometry {
+                    decoration: None,
+                    ..face
+                }),
+                _ => FaceGeometry::default(),
+            };
+            skin.face_sources = SkinFaceSources::None;
+        }
+        skin.antenna = skin.antenna.filter(|a| ready(a.source));
+        Ok(skin)
     }
     pub fn appearance(&self, a: &Appearance, own: bool) -> Result<AccessoryPresentation> {
-        let skin = resolve_skin(a.skin, &a.custom_skin, false).map_err(|e| e.to_string())?;
+        let skin = self
+            .skin(a.skin, &a.custom_skin)
+            .map_err(|e| e.to_string())?;
         // Single-image eyes bypass the entire accessory branch in the stock painter.
         let accessory = if matches!(skin.face, FaceGeometry::SingleImage(_)) {
             None
         } else {
-            let id = if own {
-                self.own_accessory.unwrap_or(a.cosmetic)
-            } else {
-                a.cosmetic
-            };
-            ACCESSORIES
-                .get(usize::from(id))
-                .map(|v| StaticHeadAccessoryGeometry {
-                    forward: stock_accessory_forward(a.skin, &a.custom_skin)
-                        .expect("paired or mouth"),
+            self.selected_accessory(own).map(|(id, _)| {
+                let v = ACCESSORIES[usize::from(id)];
+                StaticHeadAccessoryGeometry {
+                    forward: match skin.face {
+                        FaceGeometry::Paired(face) => face.eyes.forward,
+                        _ => StandardEyeGeometry::default().forward,
+                    },
                     image_scale: v.1,
                     pivot_x: v.2,
                     pivot_y: v.3,
-                })
+                }
+            })
         };
         Ok(AccessoryPresentation {
             presentation: FacePresentation {
@@ -265,7 +297,7 @@ impl Cosmetics {
         })
     }
     pub fn resources(&self) -> impl Iterator<Item = &Resource> {
-        self.roles.values().chain(&self.accessories)
+        self.roles.values().chain(self.accessories.values())
     }
 }
 

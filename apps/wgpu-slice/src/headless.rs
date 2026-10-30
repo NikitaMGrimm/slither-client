@@ -561,6 +561,7 @@ pub fn run(
     server: Option<&str>,
     nickname: &str,
     skin: u8,
+    cosmetics: Option<slither_wgpu_slice::cosmetics::Cosmetics>,
 ) -> Result<()> {
     let started = Instant::now();
     let mut summary = Summary {
@@ -597,6 +598,9 @@ pub fn run(
             return Err("duration reached before Play".into());
         }
         let mut game = LocalGame::new(started.elapsed().as_secs_f64() * 1000.0)?;
+        if let Some(cosmetics) = cosmetics {
+            game.configure_cosmetics(cosmetics)?;
+        }
         game.play_with_profile(&endpoint, nickname, skin, &profile)?;
         drop(profile);
         Host {

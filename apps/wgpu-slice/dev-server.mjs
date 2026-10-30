@@ -1,11 +1,24 @@
 // Local development only. External cosmetic bytes are never copied into web-dist.
 import http from 'node:http';
 import path from 'node:path';
-import { readFile, realpath } from 'node:fs/promises';
+import { open, readFile, realpath } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 const app = path.dirname(fileURLToPath(import.meta.url));
 const types = { '.html': 'text/html', '.mjs': 'text/javascript', '.js': 'text/javascript', '.wasm': 'application/wasm', '.png': 'image/png', '.jpg': 'image/jpeg' };
+export const IMAGE_LIMIT = 4 * 1024 * 1024;
+// Read from the same opened handle, including a sentinel byte for concurrent growth.
+export async function readImage(handle) {
+  const bytes = Buffer.alloc(IMAGE_LIMIT + 1);
+  let size = 0;
+  while (size < bytes.length) {
+    const { bytesRead } = await handle.read(bytes, size, bytes.length - size, null);
+    if (!bytesRead) break;
+    size += bytesRead;
+  }
+  if (size > IMAGE_LIMIT) throw new Error('Image budget');
+  return bytes.subarray(0, size);
+}
 export function createServer({ webDir = path.join(app, 'web-dist'), cosmeticsDir, accessory = -1, simulatorPort } = {}) {
   if (!Number.isInteger(accessory) || accessory < -1 || accessory > 31) throw new Error('Accessory must be -1 or 0..31');
   if (simulatorPort !== undefined && (!Number.isInteger(simulatorPort) || simulatorPort < 1 || simulatorPort > 65535)) throw new Error('Invalid simulator port');
@@ -24,14 +37,17 @@ export function createServer({ webDir = path.join(app, 'web-dist'), cosmeticsDir
     const cosmetic = resource.startsWith('/cosmetics/');
     const relative = cosmetic ? resource.slice('/cosmetics/'.length) : resource === '/' ? 'index.html' : resource.slice(1);
     if (cosmetic && (!cosmeticsDir || !/^s2?\/[a-z0-9_]+\.(png|jpg)$/.test(relative))) { send(404, 'text/plain', 'Unavailable'); return; }
-    if (!cosmetic && !/^(index\.html|diagnostic\.html|entry\.mjs|local\.mjs|local-host\.mjs|pkg\/slither_wgpu_slice(?:_bg\.wasm|\.js)|pkg\/snippets\/slither-client-[a-f0-9]{16}\/web\/stock-hud-contract\.mjs)$/.test(relative)) { send(404, 'text/plain', 'Unavailable'); return; }
+    if (!cosmetic && !/^(index\.html|diagnostic\.html|entry\.mjs|local\.mjs|local-host\.mjs|cosmetics\.mjs|pkg\/slither_wgpu_slice(?:_bg\.wasm|\.js)|pkg\/snippets\/slither-client-[a-f0-9]{16}\/web\/stock-hud-contract\.mjs)$/.test(relative)) { send(404, 'text/plain', 'Unavailable'); return; }
     try {
       const root = await realpath(cosmetic ? cosmeticsDir : webDir);
       const file = await realpath(path.join(root, relative));
       const escaped = path.relative(root, file);
       if (escaped === '..' || escaped.startsWith(`..${path.sep}`) || path.isAbsolute(escaped)) throw new Error('Escaped root');
-      const bytes = await readFile(file);
-      if (cosmetic && bytes.length > 4 * 1024 * 1024) throw new Error('Image budget');
+      let bytes;
+      if (cosmetic) {
+        const handle = await open(file, 'r');
+        try { bytes = await readImage(handle); } finally { await handle.close(); }
+      } else bytes = await readFile(file);
       send(200, types[path.extname(file)] ?? 'application/octet-stream', bytes);
     } catch { send(404, 'text/plain', 'Unavailable'); }
   });

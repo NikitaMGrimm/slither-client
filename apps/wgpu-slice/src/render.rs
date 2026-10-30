@@ -143,17 +143,34 @@ fn submit_face(
             .layout(heading, pupil, view)
             .map_err(|e| e.to_string())?;
         for pair in e.pairs {
+            if e.outline_width > 0. {
+                let outer = e.eye_radius + e.outline_width / 2.;
+                let inner = (e.eye_radius - e.outline_width / 2.).max(0.);
+                let steps = (std::f64::consts::TAU * outer).ceil().clamp(16., 128.) as usize;
+                let black = bank.solid([0; 3]);
+                // A Canvas stroke has no coverage inside its inner radius. A
+                // black disk would darken the translucent eye fill during death.
+                for i in 0..steps {
+                    let at = |ordinal: usize, radius: f64| {
+                        let angle = std::f64::consts::TAU * ordinal as f64 / steps as f64;
+                        Point {
+                            x: pair.eye.x + radius * angle.cos(),
+                            y: pair.eye.y + radius * angle.sin(),
+                        }
+                    };
+                    draws.push(polygon(
+                        black,
+                        [
+                            at(i, outer),
+                            at(i + 1, outer),
+                            at(i + 1, inner),
+                            at(i, inner),
+                        ],
+                        e.eye_alpha,
+                    ));
+                }
+            }
             for (color, point, radius, alpha) in [
-                (
-                    [0; 3],
-                    pair.eye,
-                    if e.outline_width > 0. {
-                        e.eye_radius + e.outline_width / 2.
-                    } else {
-                        0.
-                    },
-                    e.eye_alpha,
-                ),
                 (e.eye_color, pair.eye, e.eye_radius, e.eye_alpha),
                 (e.pupil_color, pair.pupil, e.pupil_radius, e.pupil_alpha),
             ] {
@@ -212,7 +229,9 @@ fn submit_face(
                 .map_err(|e| e.to_string())?;
             for (source, rect) in [base, source_pupil].into_iter().zip(layout.destinations) {
                 draws.push(placed(
-                    cosmetics.role(source.source),
+                    cosmetics
+                        .role(source.source)
+                        .ok_or("Missing prepared face source")?,
                     source.source_rect,
                     rect,
                     Point { x: 0., y: 0. },
@@ -227,7 +246,9 @@ fn submit_face(
                 .map_err(|e| e.to_string())?;
             for (source, layout) in [eye_marks, eye_marks, mouth].into_iter().zip(layout.images) {
                 draws.push(placed(
-                    cosmetics.role(source),
+                    cosmetics
+                        .role(source)
+                        .ok_or("Missing prepared face source")?,
                     None,
                     layout.destination,
                     layout.translation,
@@ -244,7 +265,9 @@ fn submit_face(
                 .map_err(|e| e.to_string())?
             {
                 draws.push(placed(
-                    cosmetics.role(source),
+                    cosmetics
+                        .role(source)
+                        .ok_or("Missing prepared face source")?,
                     None,
                     layout.destination,
                     layout.translation,
@@ -289,7 +312,8 @@ fn submit_antenna(
             .cosmetics
             .as_ref()
             .ok_or("Antenna images unavailable")?
-            .role(skin.antenna.ok_or("Missing antenna role")?.source);
+            .role(skin.antenna.ok_or("Missing antenna role")?.source)
+            .ok_or("Missing prepared antenna source")?;
         draws.push(placed(
             asset,
             None,
@@ -616,7 +640,10 @@ pub fn prepare(
             .snake_object(snake.token)
             .ok_or("prepared appearance missing")?;
         let skin = if full_stock {
-            resolve_skin(m.skin, raw.custom_skin(), false)
+            bank.cosmetics
+                .as_ref()
+                .expect("full stock")
+                .skin(m.skin, raw.custom_skin())
         } else {
             resolve_authored_local_skin(m.skin, raw.custom_skin())
         }
@@ -693,7 +720,7 @@ pub fn prepare(
         let accessory = prepared_snake.accessory.and_then(|geometry| {
             bank.cosmetics
                 .as_ref()
-                .and_then(|c| c.accessory(snake.own, raw.cosmetic()))
+                .and_then(|c| c.accessory(snake.own))
                 .map(|r| (geometry, r.asset))
         });
         submit_face(bank, &skin, &snake, input, accessory, &mut draws)?;

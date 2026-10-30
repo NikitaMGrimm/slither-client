@@ -1,5 +1,6 @@
 import init, { LocalGameplay, game_backing_size, CosmeticImages } from './pkg/slither_wgpu_slice.js';
 import { localHost } from './local-host.mjs';
+import { loadCosmetics } from './cosmetics.mjs';
 const canvas = document.getElementById('game');
 const status = document.getElementById('status');
 const play = document.getElementById('play');
@@ -31,36 +32,19 @@ try {
   if (!disposed) {
     owner = await LocalGameplay.create(canvas, performance.now());
     if (disposed) { owner.free(); owner = undefined; throw new Error('Disposed during startup'); }
-    const configResponse = await fetch('./config.json', { credentials: 'omit', signal: abort.signal });
-    if (configResponse.ok) {
-      const config = await configResponse.json();
-      if (config.cosmeticsBaseUrl) {
-        const base = new URL(config.cosmeticsBaseUrl, location.href);
-        if (base.origin !== location.origin || !['127.0.0.1', 'localhost', '[::1]'].includes(base.hostname)) throw new Error('Cosmetics require a same-origin local development URL');
-        let images = new CosmeticImages();
-        try {
-          for (const path of CosmeticImages.paths()) {
-            const response = await fetch(new URL(path, base), { credentials: 'omit', redirect: 'error', signal: abort.signal });
-            if (!response.ok) throw new Error(`Cosmetic unavailable: ${path}`);
-            const reader = response.body.getReader();
-            const chunks = []; let size = 0;
-            try {
-              for (;;) {
-                const { value, done } = await reader.read(); if (done) break;
-                size += value.byteLength;
-                if (size > 4 * 1024 * 1024) throw new Error('Cosmetic image budget');
-                chunks.push(value);
-              }
-            } finally { await reader.cancel(); reader.releaseLock(); }
-            const bytes = new Uint8Array(size); let offset = 0;
-            for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-            images.add(path, bytes);
-          }
-          const ready = images; images = undefined;
-          owner.cosmetics(ready, config.accessory ?? -1);
-        } finally { images?.free(); }
+    try {
+      const configResponse = await fetch('./config.json', { credentials: 'omit', signal: abort.signal });
+      if (configResponse.ok) {
+        const config = await configResponse.json();
+        if (config.simulatorUrl) endpoint.value = config.simulatorUrl;
+        if (config.cosmeticsBaseUrl) {
+          const base = new URL(config.cosmeticsBaseUrl, location.href);
+          if (base.origin !== location.origin || !['127.0.0.1', 'localhost', '[::1]'].includes(base.hostname)) throw new Error('Cosmetics require a same-origin local development URL');
+          await loadCosmetics({ owner, CosmeticImages, baseUrl: base, accessory: config.accessory ?? -1, signal: abort.signal });
+        }
       }
-      if (config.simulatorUrl) endpoint.value = config.simulatorUrl;
+    } catch (error) {
+      if (!disposed) console.warn(`Cosmetics unavailable: ${String(error)}`);
     }
     if (disposed) { owner?.free(); owner = undefined; }
     else {

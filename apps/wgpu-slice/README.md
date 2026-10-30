@@ -105,7 +105,8 @@ budgets still apply. HUD/leaderboard text conversion is a follow-up.
 
 Ordered body, early/late food and prey, paired eyes and arena are implemented
 using authored procedural materials. The HUD shows length and rank at bottom left
-and the top-ten leaderboard at top right, in a temporary 5x7 bitmap font. Complete menus and mobile integration remain open. Material/edge rasterization differs
+and the top-ten leaderboard at top right, in a temporary 5x7 bitmap font. Complete
+menus and mobile integration remain open. Material/edge rasterization differs
 from Canvas; tests do not establish visual parity or player feel.
 
 The minimap uses shared retained occupancy, crossfade, marker and session opacity

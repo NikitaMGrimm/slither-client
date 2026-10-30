@@ -456,6 +456,16 @@ mod desktop {
     }
     pub fn run(mut options: Options) -> Result<()> {
         if let Some(headless) = options.headless.take() {
+            let cosmetics = options
+                .cosmetics_dir
+                .as_deref()
+                .map(|directory| {
+                    slither_wgpu_slice::cosmetics::Cosmetics::directory(
+                        directory,
+                        options.accessory,
+                    )
+                })
+                .transpose()?;
             return crate::headless::run(
                 headless,
                 options.endpoint.as_deref(),
@@ -463,6 +473,7 @@ mod desktop {
                 options.server.as_deref(),
                 &options.nickname,
                 options.skin,
+                cosmetics,
             );
         }
         let event_loop = EventLoop::new().map_err(|e| e.to_string())?;
@@ -529,10 +540,20 @@ mod desktop {
                         "external-frames",
                         "--frame-every",
                         "2",
+                        "--cosmetics-dir",
+                        "synthetic-artwork",
+                        "--accessory",
+                        "30",
                     ],
                 ]
                 .concat();
-                assert!(parse(&args).unwrap().unwrap().headless.is_some());
+                let options = parse(&args).unwrap().unwrap();
+                assert!(options.headless.is_some());
+                assert_eq!(options.accessory, Some(30));
+                assert_eq!(
+                    options.cosmetics_dir.as_deref(),
+                    Some(std::path::Path::new("synthetic-artwork"))
+                );
             }
             for args in [
                 vec!["--headless"],
