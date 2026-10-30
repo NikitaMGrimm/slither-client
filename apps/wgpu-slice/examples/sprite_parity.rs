@@ -99,12 +99,29 @@ fn add<'a>(
     }
 }
 
-fn rasters<'a>(palette: &'a Value, key: &str) -> Vec<&'a str> {
-    match palette.get(key) {
-        Some(Value::Array(items)) => items.iter().filter_map(Value::as_str).collect(),
-        Some(Value::String(id)) => vec![id.as_str()],
-        _ => Vec::new(),
-    }
+/// Raster IDs in palette `p` under `key`. Entries stay positional, so a
+/// malformed one is an error rather than silently shifting later sprites.
+fn rasters<'a>(palette: &'a Value, p: usize, key: &str) -> Result<Vec<&'a str>> {
+    let items = match palette.get(key) {
+        Some(Value::Array(items)) => items.iter().collect(),
+        Some(id @ Value::String(_)) => vec![id],
+        _ => return Ok(Vec::new()),
+    };
+    items
+        .into_iter()
+        .enumerate()
+        .map(|(i, item)| {
+            item.as_str()
+                // Raster IDs are plain file stems inside the pack directory.
+                .filter(|id| {
+                    !id.is_empty()
+                        && id
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+                })
+                .ok_or_else(|| format!("catalog palette {p} {key}[{i}]: invalid raster id"))
+        })
+        .collect()
 }
 
 fn run() -> Result<()> {
@@ -127,7 +144,7 @@ fn run() -> Result<()> {
     };
     for (p, palette) in palettes.iter().enumerate() {
         let body = recipes.body_sources.palettes.get(p);
-        for (v, id) in rasters(palette, "kmcs").into_iter().enumerate() {
+        for (v, id) in rasters(palette, p, "kmcs")?.into_iter().enumerate() {
             push(
                 "body segment",
                 format!("palette {p} variant {v}"),
@@ -135,7 +152,7 @@ fn run() -> Result<()> {
                 id,
             );
         }
-        for id in rasters(palette, "kfmc") {
+        for id in rasters(palette, p, "kfmc")? {
             push(
                 "boost glow",
                 format!("palette {p}"),
@@ -149,7 +166,7 @@ fn run() -> Result<()> {
             ("food outline", "oimgs", 1),
             ("food glow", "gimgs", 2),
         ] {
-            for (s, id) in rasters(palette, key).into_iter().enumerate() {
+            for (s, id) in rasters(palette, p, key)?.into_iter().enumerate() {
                 let ours = food.and_then(|f| match pick {
                     0 => f.bodies.get(s),
                     1 => f.outlines.get(s),
@@ -158,7 +175,7 @@ fn run() -> Result<()> {
                 push(family, format!("palette {p} size {s}"), ours, id);
             }
         }
-        for (s, id) in rasters(palette, "pr_imgs").into_iter().enumerate() {
+        for (s, id) in rasters(palette, p, "pr_imgs")?.into_iter().enumerate() {
             push(
                 "prey body",
                 format!("palette {p} size {s}"),
@@ -168,6 +185,9 @@ fn run() -> Result<()> {
         }
     }
 
+    if pairs.is_empty() {
+        return Err("catalog lists no sprites to compare".into());
+    }
     let mut families: Vec<(&'static str, Family)> = Vec::new();
     for pair in &pairs {
         let index = match families.iter().position(|(name, _)| *name == pair.family) {
