@@ -166,6 +166,9 @@ impl LocalGame {
     pub fn new(now: f64) -> Result<Self> {
         let mut client = AnimatedClient::new(now).map_err(|e| e.to_string())?;
         client.enable_score_tracking().map_err(|e| e.to_string())?;
+        client
+            .enable_minimap_tracking()
+            .map_err(|e| e.to_string())?;
         let mut session = SessionPolicy::new();
         session.subscribe(2).map_err(|e| e.0)?;
         Ok(Self {
@@ -173,7 +176,7 @@ impl LocalGame {
             bank: Bank::new()?,
             session,
             input: DesktopInput::new(19.).map_err(|e| e.to_string())?,
-            policy: GameplayPolicy::new(true, true, true, false, false, false),
+            policy: GameplayPolicy::new(true, true, true, true, false, false),
             hud: HudHistory::default(),
             rows: LeaderboardHistory::default(),
             projector: LeaderboardScoreProjector::new(),
@@ -513,6 +516,7 @@ impl LocalGame {
         let rng = Cell::new(self.rng);
         let serial = Cell::new(self.identity);
         let frames = RefCell::new(Vec::new());
+        let captured_pixels = Cell::new(0_usize);
         let extent = self.extent;
         let scale = self.scale;
         let units = || {
@@ -526,7 +530,18 @@ impl LocalGame {
         let report=client.apply_frame_with_accessory_presentation_and_all_factories_and_setup_and_hud::<Ingress,_,_,_,_>(bytes,ElapsedHeader::Absent,
             |a,_|{let skin=resolve_authored_local_skin(a.skin,&a.custom_skin).map_err(|e|Ingress(e.to_string()))?;Ok(FacePresentation{face:skin.face,antenna:None}.into())},
             |s,_|Ok(bank.borrow().food(s.raw_color,units())),|s,_|Ok(bank.borrow().prey(s.raw_color,units())),
-            |c,_|{if frames.borrow().len()>=16{return Err(Ingress("Setup draw budget".into()));}serial.set(serial.get()+1);let frame=render::prepare(c,&mut bank.borrow_mut(),extent,scale,serial.get()).map_err(Ingress)?;frames.borrow_mut().push(frame);Ok(())},
+            |c,_|{
+                if frames.borrow().len()>=16{return Err(Ingress("Setup draw budget".into()));}
+                serial.set(serial.get()+1);
+                let frame=render::prepare(c,&mut bank.borrow_mut(),extent,scale,serial.get()).map_err(Ingress)?;
+                // HUD projection follows the complete ingress report. Reserve its
+                // bounded atlas before retaining each immutable scene snapshot.
+                let bytes=captured_pixels.get()+frame.pixel_bytes()+crate::hud::MAX_PIXEL_BYTES;
+                if bytes>crate::bank::PIXEL_BUDGET{return Err(Ingress("Setup capture pixels budget".into()));}
+                captured_pixels.set(bytes);
+                frames.borrow_mut().push(frame);
+                Ok(())
+            },
             HudIngressPlan{schema:2,command_count:commands.len(),guards:&guards,final_capture_indices:&plan.final_capture_indices}).map_err(|e|e.0)?;
         let mut events = Vec::new();
         let mut row_events = Vec::new();
@@ -691,7 +706,13 @@ impl LocalGame {
             }
         }
         self.session.observe_lag(now);
+        let minimap_ui = self.session.view().ui_timer_needed;
         self.session.ui_tick(now).map_err(|e| e.0)?;
+        if minimap_ui {
+            self.client
+                .observe_minimap_ui_fraction(self.session.view().return_fraction)
+                .map_err(|e| e.to_string())?;
+        }
         let lagging = self.session.view().lagging;
         let mut captured = None;
         let probe = self
@@ -758,6 +779,10 @@ impl LocalGame {
         let actions = ClientControlActions {
             reset_world: pending.reset_world,
             reset_lag: pending.reset_lag,
+            minimap_ui_fraction: self
+                .policy
+                .include_minimap(life.return_active)
+                .then_some(life.return_fraction),
             connected: if pending.disconnected {
                 Some(false)
             } else {

@@ -79,6 +79,8 @@ pub struct Plan {
     pub panels: Vec<Panel>,
 }
 const PAD: u32 = 4;
+/// Upper bound reserved while scene snapshots wait for the command-ordered HUD.
+pub const MAX_PIXEL_BYTES: usize = 512 * 512 * 4;
 pub const SCORE_CELLS: u32 = 8;
 // Logical text size stays fixed across window sizes and backing DPR.
 const UI_SCALE: f64 = 1.5;

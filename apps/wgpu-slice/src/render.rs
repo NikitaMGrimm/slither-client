@@ -11,6 +11,11 @@ pub struct PreparedFrame {
     pub frame: Frame,
     pub resources: Vec<Resource>,
 }
+impl PreparedFrame {
+    pub fn pixel_bytes(&self) -> usize {
+        self.resources.iter().map(|r| r.image.pixels.len()).sum()
+    }
+}
 pub fn dimensions(extent: [u32; 2], scale: f64) -> Result<[u32; 2]> {
     if extent.contains(&0)
         || extent.iter().any(|n| *n > MAX_EXTENT)
@@ -85,7 +90,7 @@ pub fn prepare(
     extent: [u32; 2],
     scale: f64,
     identity: u64,
-) -> Result<Frame> {
+) -> Result<PreparedFrame> {
     let logical = dimensions(extent, scale)?;
     let prepared = client
         .prepare_draw_with_style(logical[0], logical[1], 1., false)
@@ -317,19 +322,24 @@ pub fn prepare(
             ));
         }
     }
-    Ok(Frame {
+    let mut frame = Frame {
         identity,
         extent,
         viewport_scale: scale,
         tick: 0,
         draws,
-    })
+    };
+    let mut resources = bank.resources(&frame)?;
+    bank.minimap.append(client, &mut frame, &mut resources)?;
+    Ok(PreparedFrame { frame, resources })
 }
 fn finish_plan(
-    mut frame: Frame,
+    mut prepared: PreparedFrame,
     bank: &mut Bank,
     plan: &crate::hud::Plan,
 ) -> Result<PreparedFrame> {
+    // Late overlays append to the captured scene. Re-resolving world resources
+    // here could replace pixels belonging to an earlier queued Setup picture.
     crate::hud::rasterize(plan, &mut bank.hud)?;
     for panel in &plan.panels {
         let mut command = image(
@@ -341,18 +351,34 @@ fn finish_plan(
             panel.opacity,
         );
         command.source = Some(panel.source());
-        frame.draws.push(command);
+        prepared.frame.draws.push(command);
     }
-    let resources = bank.resources(&frame)?;
-    Ok(PreparedFrame { frame, resources })
+    if !plan.panels.is_empty() {
+        prepared.resources.push(bank.hud.clone());
+    }
+    if prepared.pixel_bytes() > crate::bank::PIXEL_BUDGET {
+        return Err("Active resource pixel budget exceeded".into());
+    }
+    let resident = prepared
+        .resources
+        .iter()
+        .map(|r| (r.asset.into(), r.asset))
+        .collect();
+    prepared.frame.quads(&resident)?;
+    Ok(prepared)
 }
 /// Retained string-only entry for existing callers; no domain parsing of text.
 pub fn finish(frame: Frame, bank: &mut Bank, hud: &str) -> Result<PreparedFrame> {
     let plan = crate::hud::plan_text(hud, frame.extent, frame.viewport_scale)?;
-    finish_plan(frame, bank, &plan)
+    let resources = bank.resources(&frame)?;
+    finish_plan(PreparedFrame { frame, resources }, bank, &plan)
 }
 /// Ordinary native/web gameplay shares this complete Rust projection and composition.
-pub fn finish_hud(frame: Frame, bank: &mut Bank, hud: &crate::hud::View) -> Result<PreparedFrame> {
-    let plan = crate::hud::plan(hud, frame.extent, frame.viewport_scale)?;
-    finish_plan(frame, bank, &plan)
+pub fn finish_hud(
+    prepared: PreparedFrame,
+    bank: &mut Bank,
+    hud: &crate::hud::View,
+) -> Result<PreparedFrame> {
+    let plan = crate::hud::plan(hud, prepared.frame.extent, prepared.frame.viewport_scale)?;
+    finish_plan(prepared, bank, &plan)
 }
