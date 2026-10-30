@@ -5,6 +5,8 @@ use slither_client::presentation::{BodyAsset, BodyAssetStatus, BodyRect, Leaderb
 /// Copied existing Rust projections. Row order, identity, own flag and score text are retained.
 #[derive(Clone, Debug, PartialEq)]
 pub struct View {
+    pub playing: bool,
+    pub opacity: slither_client::presentation::HudOpacity,
     pub status: String,
     pub score: String,
     pub final_score: String,
@@ -58,6 +60,7 @@ pub struct Panel {
     pub size: [u32; 2],
     pub destination: BodyRect,
     pub lines: Vec<Line>,
+    pub opacity: f64,
 }
 impl Panel {
     pub fn source(&self) -> BodyRect {
@@ -76,12 +79,14 @@ pub struct Plan {
     pub panels: Vec<Panel>,
 }
 const PAD: u32 = 4;
-pub const SCORE_CELLS: u32 = 17; // Full signed safe-integer decimal contract, including minus.
+pub const SCORE_CELLS: u32 = 8;
+// Logical text size stays fixed across window sizes and backing DPR.
+const UI_SCALE: f64 = 1.5;
 fn viewport(extent: [u32; 2], scale: f64) -> Result<[u32; 2]> {
     if extent.iter().any(|v| *v > MAX_EXTENT) || !scale.is_finite() || scale <= 0. {
         return Err("Invalid HUD viewport".into());
     }
-    let logical = extent.map(|v| (f64::from(v) / scale).floor());
+    let logical = extent.map(|v| (f64::from(v) / scale / UI_SCALE).floor());
     if logical
         .iter()
         .any(|v| !v.is_finite() || *v > f64::from(MAX_EXTENT))
@@ -92,7 +97,7 @@ fn viewport(extent: [u32; 2], scale: f64) -> Result<[u32; 2]> {
 }
 fn corner_plan(lines: Vec<Line>, extent: [u32; 2], scale: f64) -> Result<Plan> {
     let [w, h] = viewport(extent, scale)?;
-    let s = if w >= 260 && h >= 200 { 2 } else { 1 };
+    let s = 1;
     let mut p = Plan {
         extent: [0, 0],
         glyph_scale: s,
@@ -101,8 +106,8 @@ fn corner_plan(lines: Vec<Line>, extent: [u32; 2], scale: f64) -> Result<Plan> {
     if w < 48 || h < 40 {
         return Ok(p);
     }
-    let margin = if w >= 260 && h >= 200 { 8 } else { 4 };
-    let columns = ((w - 2 * margin - 2 * PAD) / (6 * s)).min(24);
+    let margin = 4;
+    let columns = ((w - 2 * margin - 2 * PAD) / (6 * s)).min(33);
     let count = ((h * 2 / 5).saturating_sub(2 * PAD) / (9 * s)).min(lines.len() as u32);
     if columns == 0 || count == 0 {
         return Ok(p);
@@ -113,43 +118,58 @@ fn corner_plan(lines: Vec<Line>, extent: [u32; 2], scale: f64) -> Result<Plan> {
         origin: [0, 0],
         size,
         destination: BodyRect {
-            x: f64::from(margin),
-            y: f64::from(h - margin - size[1]),
-            width: f64::from(size[0]),
-            height: f64::from(size[1]),
+            x: f64::from(margin) * UI_SCALE,
+            y: f64::from(h - margin - size[1]) * UI_SCALE,
+            width: f64::from(size[0]) * UI_SCALE,
+            height: f64::from(size[1]) * UI_SCALE,
         },
         lines: lines.into_iter().take(count as usize).collect(),
+        opacity: 1.,
     });
     p.extent = size;
     Ok(p)
 }
 pub fn plan(view: &View, extent: [u32; 2], scale: f64) -> Result<Plan> {
-    let mut lines = vec![
-        Line::Current(view.score.clone()),
-        Line::Status(view.status.clone()),
-        Line::Rank {
-            rank: view.rank.clone(),
-            population: view.population.clone(),
-        },
-        Line::Final(view.final_score.clone()),
-    ];
+    let mut lines = if view.playing {
+        if view.score == "--" {
+            Vec::new()
+        } else {
+            vec![
+                Line::Current(view.score.clone()),
+                Line::Rank {
+                    rank: view.rank.clone(),
+                    population: view.population.clone(),
+                },
+            ]
+        }
+    } else {
+        let mut lines = vec![Line::Status(view.status.clone())];
+        if view.final_score != "--" {
+            lines.push(Line::Final(view.final_score.clone()));
+        }
+        lines
+    };
     if let Some(message) = &view.message {
         lines.push(Line::Message(message.clone()));
     }
     let mut p = corner_plan(lines, extent, scale)?;
-    if p.panels.is_empty() || view.rows.is_empty() {
+    if let Some(panel) = p.panels.first_mut() {
+        panel.opacity = if view.playing {
+            view.opacity.readout.clamp(0., 1.)
+        } else {
+            1.
+        };
+    }
+    if view.rows.is_empty() {
         return Ok(p);
     }
     let [w, h] = viewport(extent, scale)?;
     let s = p.glyph_scale;
-    if w < 600 {
+    if w < 200 || h < 40 {
         return Ok(p);
     }
-    let columns = ((w / 2).clamp(332, 452).saturating_sub(2 * PAD) / (6 * s)).min(38);
-    let count = ((h * 9 / 20)
-        .min(h.saturating_sub(32) / 2)
-        .saturating_sub(2 * PAD)
-        / (9 * s))
+    let columns = ((w - 8 - 2 * PAD) / (6 * s)).min(33);
+    let count = (h.saturating_sub(8 + 2 * PAD) / (9 * s))
         .saturating_sub(1)
         .min(10)
         .min(view.rows.len() as u32);
@@ -171,12 +191,13 @@ pub fn plan(view: &View, extent: [u32; 2], scale: f64) -> Result<Plan> {
         origin: [0, y],
         size,
         destination: BodyRect {
-            x: f64::from(w - 8 - size[0]),
-            y: 8.,
-            width: f64::from(size[0]),
-            height: f64::from(size[1]),
+            x: f64::from(w - 4 - size[0]) * UI_SCALE,
+            y: 4. * UI_SCALE,
+            width: f64::from(size[0]) * UI_SCALE,
+            height: f64::from(size[1]) * UI_SCALE,
         },
         lines,
+        opacity: view.opacity.rows.clamp(0., 1.),
     });
     p.extent = [p.extent[0].max(size[0]), y + size[1]];
     Ok(p)
@@ -256,6 +277,8 @@ fn glyph(c: char) -> [u8; 7] {
         '|' => [4; 7],
         '.' => [0, 0, 0, 0, 0, 6, 6],
         ':' => [0, 6, 6, 0, 6, 6, 0],
+        '(' => [2, 4, 8, 8, 8, 4, 2],
+        ')' => [8, 4, 2, 2, 2, 4, 8],
         '#' => [10, 31, 10, 10, 31, 10, 0],
         '>' => [16, 8, 4, 2, 4, 8, 16],
         _ => [31, 17, 1, 2, 4, 0, 4],
@@ -323,7 +346,7 @@ pub fn rasterize(plan: &Plan, target: &mut Resource) -> Result<()> {
     if plan.panels.len() > 2
         || plan.extent.contains(&0)
         || plan.extent.iter().any(|v| *v > 512)
-        || !(1..=2).contains(&plan.glyph_scale)
+        || plan.glyph_scale != 1
     {
         return Err("HUD atlas budget".into());
     }
@@ -354,13 +377,6 @@ pub fn rasterize(plan: &Plan, target: &mut Resource) -> Result<()> {
         scale: plan.glyph_scale,
     };
     for p in &plan.panels {
-        paint.rect(
-            p.origin[0],
-            p.origin[1],
-            p.size[0],
-            p.size[1],
-            [9, 12, 17, 220],
-        );
         let cols = (p.size[0] - 2 * PAD) / (6 * plan.glyph_scale);
         for (i, line) in p.lines.iter().enumerate() {
             let at = [
@@ -372,10 +388,10 @@ pub fn rasterize(plan: &Plan, target: &mut Resource) -> Result<()> {
             match line {
                 Line::Current(value) | Line::Final(value) => {
                     let current = matches!(line, Line::Current(_));
-                    let label_cols = if cols >= 24 { 7 } else { 2 };
+                    let label_cols = if cols >= 26 { 13 } else { 2 };
                     let label = match (current, label_cols) {
-                        (true, 7) => "LENGTH ",
-                        (false, 7) => "FINAL  ",
+                        (true, 13) => "YOUR LENGTH: ",
+                        (false, 13) => "FINAL LENGTH: ",
                         (true, _) => "L ",
                         _ => "F ",
                     };
@@ -389,79 +405,69 @@ pub fn rasterize(plan: &Plan, target: &mut Resource) -> Result<()> {
                 }
                 Line::Status(s) | Line::Message(s) => paint.text(s, at, cols, false, normal),
                 Line::Rank { rank, population } => {
-                    if cols >= 15 {
-                        paint.text("RANK ", at, 5, false, normal);
-                        paint.number(rank, [at[0] + 5 * 6 * plan.glyph_scale, at[1]], 5, white);
-                        paint.text(
-                            " / ",
-                            [at[0] + 10 * 6 * plan.glyph_scale, at[1]],
-                            3,
-                            false,
-                            normal,
-                        );
-                        paint.number(
-                            population,
-                            [at[0] + 13 * 6 * plan.glyph_scale, at[1]],
-                            cols - 13,
-                            white,
-                        );
-                    } else {
+                    if cols < 10 {
                         let left = (cols - 1) / 2;
                         paint.number(rank, at, left, white);
-                        paint.text(
-                            "/",
-                            [at[0] + left * 6 * plan.glyph_scale, at[1]],
-                            1,
-                            false,
-                            normal,
-                        );
+                        paint.text("/", [at[0] + left * 6, at[1]], 1, false, normal);
                         paint.number(
                             population,
-                            [at[0] + (left + 1) * 6 * plan.glyph_scale, at[1]],
+                            [at[0] + (left + 1) * 6, at[1]],
                             cols - left - 1,
                             white,
                         );
+                        continue;
                     }
+                    let label = if cols >= 29 { "YOUR RANK: " } else { "R " };
+                    let n = label.len() as u32;
+                    paint.text(label, at, n, false, normal);
+                    let field = (cols - n - 4) / 2;
+                    paint.number(rank, [at[0] + n * 6, at[1]], field, white);
+                    paint.text(" OF ", [at[0] + (n + field) * 6, at[1]], 4, false, normal);
+                    paint.number(
+                        population,
+                        [at[0] + (n + field + 4) * 6, at[1]],
+                        cols - n - field - 4,
+                        white,
+                    );
                 }
                 Line::Heading => {
-                    paint.text("LEADERS", at, cols - 18, false, white);
                     paint.text(
-                        "LENGTH",
-                        [at[0] + (cols - SCORE_CELLS) * 6 * plan.glyph_scale, at[1]],
-                        SCORE_CELLS,
-                        true,
-                        normal,
+                        "LEADERBOARD",
+                        [at[0] + (cols - 11) / 2 * 6, at[1]],
+                        11,
+                        false,
+                        [217, 217, 217, 217],
                     );
                 }
                 Line::Row(row) => {
+                    let rgb = u32::from_str_radix(
+                        row.css_color.strip_prefix('#').ok_or("Invalid HUD color")?,
+                        16,
+                    )
+                    .map_err(|_| "Invalid HUD color")?;
+                    let alpha = row.opacity_request.clamp(0., 1.);
+                    let color = [
+                        (f64::from((rgb >> 16) & 255) * alpha).round() as u8,
+                        (f64::from((rgb >> 8) & 255) * alpha).round() as u8,
+                        (f64::from(rgb & 255) * alpha).round() as u8,
+                        (255. * alpha).round() as u8,
+                    ];
+                    paint.text(&row.number_text, at, 3, true, color);
+                    let name_at = [at[0] + 4 * 6, at[1]];
+                    let name_cells = cols - SCORE_CELLS - 5;
+                    paint.text(&row.name_text, name_at, name_cells, false, color);
                     if row.own {
-                        paint.rect(
-                            p.origin[0] + 1,
-                            at[1] - 1,
-                            p.size[0] - 2,
-                            9 * plan.glyph_scale,
-                            [28, 40, 50, 235],
+                        paint.text(
+                            &row.name_text,
+                            [name_at[0] + 1, name_at[1]],
+                            name_cells,
+                            false,
+                            color,
                         );
-                        paint.text(">", at, 1, false, white);
                     }
-                    let color = if row.own { white } else { normal };
-                    paint.text(
-                        &row.number_text,
-                        [at[0] + 6 * plan.glyph_scale, at[1]],
-                        3,
-                        true,
-                        color,
-                    );
-                    paint.text(
-                        &row.name_text,
-                        [at[0] + 5 * 6 * plan.glyph_scale, at[1]],
-                        cols - 23,
-                        false,
-                        color,
-                    );
                     paint.number(
                         &row.score_text,
-                        [at[0] + (cols - SCORE_CELLS) * 6 * plan.glyph_scale, at[1]],
+                        [at[0] + (cols - SCORE_CELLS) * 6, at[1]],
                         SCORE_CELLS,
                         color,
                     );

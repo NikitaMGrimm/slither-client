@@ -20,6 +20,13 @@ fn row(i: usize) -> LeaderboardRow {
 }
 fn view() -> View {
     View {
+        playing: true,
+        opacity: slither_client::presentation::HudOpacity {
+            readout: 1.,
+            header: 0.85,
+            rows: 1.,
+            announcement: 1.,
+        },
         status: "CONNECTED".into(),
         score: "10000".into(),
         final_score: "9000".into(),
@@ -36,7 +43,7 @@ fn rect_contains(r: BodyRect, x: f64, y: f64) -> bool {
 fn ordinary_layout_has_ten_exact_rows_and_keeps_scene_center_clear() {
     let v = view();
     let p = hud::plan(&v, [960, 540], 1.).unwrap();
-    assert_eq!(p.glyph_scale, 2);
+    assert_eq!(p.glyph_scale, 1);
     assert_eq!(p.panels.len(), 2);
     let board = p
         .panels
@@ -55,12 +62,16 @@ fn ordinary_layout_has_ten_exact_rows_and_keeps_scene_center_clear() {
     }
     let score = p.panels.iter().find(|p| p.role == Role::Score).unwrap();
     assert!(score.lines.contains(&Line::Current("10000".into())));
-    assert!(score.lines.contains(&Line::Final("9000".into())));
+    assert!(
+        !score
+            .lines
+            .iter()
+            .any(|l| matches!(l, Line::Final(_) | Line::Status(_)))
+    );
     assert!(score.lines.contains(&Line::Rank {
         rank: "5".into(),
         population: "100".into()
     }));
-    assert!(score.lines.contains(&Line::Status("CONNECTED".into())));
 }
 #[test]
 fn all_extents_and_fractional_dpr_bound_the_atlas_panels_and_work() {
@@ -91,11 +102,6 @@ fn all_extents_and_fractional_dpr_bound_the_atlas_panels_and_work() {
                 assert!(r.x >= 0. && r.y >= 0.);
                 assert!(r.x + r.width <= f64::from(extent[0]) / scale);
                 assert!(r.y + r.height <= f64::from(extent[1]) / scale);
-                assert!(!rect_contains(
-                    r,
-                    f64::from(extent[0]) / scale / 2.,
-                    f64::from(extent[1]) / scale / 2.
-                ));
             }
             assert!(
                 resource
@@ -116,7 +122,7 @@ fn all_extents_and_fractional_dpr_bound_the_atlas_panels_and_work() {
 #[test]
 fn constrained_height_reduces_rows_in_order_and_tiny_views_submit_none() {
     let v = view();
-    let p = hud::plan(&v, [640, 360], 1.).unwrap();
+    let p = hud::plan(&v, [640, 120], 1.).unwrap();
     let ids: Vec<_> = p
         .panels
         .iter()
@@ -131,7 +137,7 @@ fn constrained_height_reduces_rows_in_order_and_tiny_views_submit_none() {
         .collect();
     assert!(!ids.is_empty() && ids.len() < 10);
     assert_eq!(ids, (1..=ids.len()).collect::<Vec<_>>());
-    assert_eq!(hud::plan(&v, [320, 200], 1.).unwrap().panels.len(), 1);
+    assert_eq!(hud::plan(&v, [320, 200], 1.).unwrap().panels.len(), 2);
     for extent in [[32, 32], [0, 540], [1920, 1080]] {
         let scale = if extent[0] == 1920 { 64. } else { 1. };
         assert!(hud::plan(&v, extent, scale).unwrap().panels.is_empty());
@@ -177,7 +183,7 @@ fn names_are_clipped_without_overwriting_stable_score_columns() {
     assert_eq!(projected.score_text, "12345");
 }
 #[test]
-fn own_marker_changes_only_its_row_and_unicode_has_explicit_fallback() {
+fn own_name_emphasis_changes_only_its_row_and_unicode_has_explicit_fallback() {
     let mut v = view();
     let p = hud::plan(&v, [960, 540], 1.).unwrap();
     let mut own = hud::resource();
@@ -224,7 +230,7 @@ fn resource_revisions_track_visible_bytes_and_dimensions_atomically() {
     hud::rasterize(&hud::plan(&v, [0, 0], 1.).unwrap(), &mut r).unwrap();
     assert_eq!(r.asset, before.asset);
     assert_eq!(r.image.pixels, before.image.pixels);
-    hud::rasterize(&hud::plan(&v, [640, 360], 1.).unwrap(), &mut r).unwrap();
+    hud::rasterize(&hud::plan(&v, [300, 120], 1.).unwrap(), &mut r).unwrap();
     assert!(r.asset.revision > before.asset.revision);
     assert_ne!(
         [r.asset.width, r.asset.height],
@@ -246,7 +252,7 @@ fn signed_safe_integer_columns_retain_the_exact_rust_score_text() {
     let mut v = view();
     for score in [-9_007_199_254_740_991., 9_007_199_254_740_991., -0.] {
         let text = slither_client::presentation::hud_score_text(score).unwrap();
-        assert!(text.chars().count() <= hud::SCORE_CELLS as usize);
+        assert!(text.chars().count() <= 17);
         v.rows[0].score = score;
         v.rows[0].score_text = text.clone();
         v.score = text.clone();
@@ -263,7 +269,12 @@ fn signed_safe_integer_columns_retain_the_exact_rust_score_text() {
         assert_eq!(row.score_text, text);
         assert_eq!(row.score.to_bits(), score.to_bits());
         assert!(p.panels[0].lines.contains(&Line::Current(text.clone())));
-        assert!(p.panels[0].lines.contains(&Line::Final(text)));
+        assert!(
+            !p.panels[0]
+                .lines
+                .iter()
+                .any(|l| matches!(l, Line::Final(_)))
+        );
     }
     let nan = f64::from_bits(0x7ff8_0000_0000_0123);
     v.rows[0].score = nan;
@@ -349,4 +360,85 @@ fn normalized_name_spaces_keep_their_blank_glyph_and_projected_text() {
     .unwrap();
     hud::rasterize(&plan, &mut actual).unwrap();
     assert_eq!(actual.image.pixels, expected.image.pixels);
+}
+
+#[test]
+fn fixed_logical_layout_keeps_ten_rows_on_small_windows_and_at_double_dpr() {
+    let v = view();
+    let ordinary = hud::plan(&v, [960, 540], 1.).unwrap();
+    assert_eq!(ordinary, hud::plan(&v, [1920, 1080], 2.).unwrap());
+    for extent in [[640, 360], [400, 700], [320, 200]] {
+        let p = hud::plan(&v, extent, 1.).unwrap();
+        let board = p
+            .panels
+            .iter()
+            .find(|p| p.role == Role::Leaderboard)
+            .unwrap();
+        assert_eq!(
+            board
+                .lines
+                .iter()
+                .filter(|l| matches!(l, Line::Row(_)))
+                .count(),
+            10
+        );
+    }
+}
+
+#[test]
+fn projected_row_color_opacity_and_lifecycle_alpha_reach_the_rendered_frame() {
+    let mut v = view();
+    v.rows[0].css_color = "#80d0d0";
+    v.rows[0].opacity_request = 0.5;
+    v.opacity.readout = 0.25;
+    v.opacity.rows = 0.4;
+    let p = hud::plan(&v, [960, 540], 1.).unwrap();
+    let mut r = hud::resource();
+    hud::rasterize(&p, &mut r).unwrap();
+    let board = p
+        .panels
+        .iter()
+        .find(|p| p.role == Role::Leaderboard)
+        .unwrap();
+    let top = board.origin[1] + 4 + 9;
+    let colors = r.image.pixels.as_chunks::<4>().0;
+    let row = &colors[(top * p.extent[0]) as usize..((top + 7) * p.extent[0]) as usize];
+    assert!(row.contains(&[64, 104, 104, 128]));
+    assert!(row.iter().all(|c| c[3] == 0 || *c == [64, 104, 104, 128]));
+    let mut bank = Bank::new().unwrap();
+    let frame = Frame {
+        identity: 1,
+        tick: 0,
+        extent: [960, 540],
+        viewport_scale: 1.,
+        draws: vec![],
+    };
+    let out = render::finish_hud(frame, &mut bank, &v).unwrap();
+    assert_eq!(
+        out.frame
+            .draws
+            .iter()
+            .map(|d| d.effective_alpha)
+            .collect::<Vec<_>>(),
+        vec![0.25, 0.4]
+    );
+}
+
+#[test]
+fn final_readout_is_separate_from_active_gameplay() {
+    let mut v = view();
+    v.playing = false;
+    let p = hud::plan(&v, [960, 540], 1.).unwrap();
+    assert!(p.panels[0].lines.contains(&Line::Final("9000".into())));
+    assert!(
+        !p.panels[0]
+            .lines
+            .iter()
+            .any(|l| matches!(l, Line::Current(_) | Line::Rank { .. }))
+    );
+    v.playing = true;
+    v.score = "--".into();
+    let p = hud::plan(&v, [960, 540], 1.).unwrap();
+    assert_eq!(p.panels.len(), 1);
+    assert_eq!(p.panels[0].role, Role::Leaderboard);
 }

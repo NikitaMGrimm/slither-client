@@ -587,14 +587,8 @@ impl LocalGame {
         let mut pictures = VecDeque::new();
         if !self.suspended {
             let mut bytes = 0;
-            let view = Self::format_hud_parts(
-                &client,
-                &hud,
-                &rows,
-                &session,
-                self.failure.as_deref(),
-                false,
-            );
+            let view =
+                Self::format_hud_parts(&hud, &rows, &session, self.failure.as_deref(), false);
             for frame in frames.into_inner() {
                 let p = render::finish_hud(frame, &mut self.bank, &view)?;
                 bytes += p
@@ -822,7 +816,7 @@ impl LocalGame {
         self.policy.score_done();
         w.world = Some(world);
         let w = self.work.as_ref().expect("work");
-        let view = self.format_hud(w.world.as_ref().expect("world"), &w.hud, w.reset_rows);
+        let view = self.format_hud(&w.hud, w.reset_rows);
         let prepared = render::finish_hud(frame, &mut self.bank, &view)?;
         self.work.as_mut().expect("work").prepared = Some(prepared);
         Ok(())
@@ -890,7 +884,10 @@ impl LocalGame {
             self.extent = extent;
             self.scale = scale;
             self.packet_frames.clear();
-            let view = self.hud_view();
+            let view = self.work.as_ref().map_or_else(
+                || self.hud_view(),
+                |w| self.format_hud(&w.hud, w.reset_rows),
+            );
             if let Some(w) = &mut self.work {
                 w.extent = extent;
                 w.scale = scale;
@@ -949,16 +946,10 @@ impl LocalGame {
     }
     /// Same typed in-game view for both platform hosts; no session or model mutation.
     pub fn hud_view(&self) -> crate::hud::View {
-        self.format_hud(&self.client, &self.hud, false)
+        self.format_hud(&self.hud, false)
     }
-    fn format_hud(
-        &self,
-        client: &AnimatedClient,
-        hud: &HudHistory,
-        reset_rows: bool,
-    ) -> crate::hud::View {
+    fn format_hud(&self, hud: &HudHistory, reset_rows: bool) -> crate::hud::View {
         Self::format_hud_parts(
-            client,
             hud,
             &self.rows,
             &self.session,
@@ -967,7 +958,6 @@ impl LocalGame {
         )
     }
     fn format_hud_parts(
-        client: &AnimatedClient,
         hud: &HudHistory,
         rows: &LeaderboardHistory,
         session: &SessionPolicy,
@@ -985,14 +975,17 @@ impl LocalGame {
                 _ => "NOT CONNECTED",
             }
         };
-        let score = sample(client.score_view())
-            .and_then(|s| hud_score_text(s.score).ok())
+        let score = hud
+            .current
+            .and_then(|s| s.score_text().ok())
             .unwrap_or_else(|| "--".into());
         let final_score = hud
             .final_capture
             .and_then(|v| v.score_text().ok())
             .unwrap_or_else(|| "--".into());
         crate::hud::View {
+            playing: session.view().playing,
+            opacity: hud.requested_opacity,
             status: status.into(),
             score,
             final_score,

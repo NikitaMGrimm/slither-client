@@ -319,6 +319,7 @@ fn zero_resize_retry_retains_generation_state_and_pending_world() {
     g.begin_frame(40., [960, 540], 1.).unwrap();
     effects(&mut g);
     let p = g.take_frame().unwrap();
+    let hud_draws = p.frame.draws[p.frame.draws.len() - 2..].to_vec();
     g.retry_frame(p).unwrap();
     g.viewport([0, 0], 1.).unwrap();
     assert!(g.take_frame().is_none());
@@ -327,6 +328,7 @@ fn zero_resize_retry_retains_generation_state_and_pending_world() {
     let p = g.take_frame().unwrap();
     assert_eq!(p.frame.extent, [1920, 1080]);
     assert_eq!(p.frame.viewport_scale, 2.);
+    assert_eq!(&p.frame.draws[p.frame.draws.len() - 2..], &hud_draws);
     g.presented(true).unwrap();
     assert_eq!(g.generation(), generation);
     assert_eq!(g.phase(), Phase::Playing);

@@ -338,7 +338,7 @@ fn finish_plan(
             panel.destination.y,
             panel.destination.width,
             panel.destination.height,
-            1.,
+            panel.opacity,
         );
         command.source = Some(panel.source());
         frame.draws.push(command);
