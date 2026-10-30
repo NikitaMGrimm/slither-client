@@ -13,6 +13,32 @@ pub struct Rasterizer {
 mod tests {
     use super::*;
     #[test]
+    fn ascii_space_advances_match_canvas_without_pair_kerning() {
+        let mut rasterizer = Rasterizer::new();
+        // Authored strings, absolute advances measured in 15px Arial Canvas.
+        for (text, expected) in [("A\u{b}V", 24.1772), ("A V A V A V A V A V A V", 165.9009)] {
+            let raster = rasterizer
+                .rasterize(text, 15., Weight::Normal, [255; 3])
+                .unwrap();
+            assert!(
+                (raster.advance - expected).abs() < 0.05,
+                "{text:?}: {} px, Canvas {expected} px",
+                raster.advance
+            );
+        }
+    }
+    #[test]
+    fn nbsp_retains_pair_kerning() {
+        let raster = Rasterizer::new()
+            .rasterize("A\u{a0}V", 15., Weight::Normal, [255; 3])
+            .unwrap();
+        assert!(
+            (raster.advance - 23.3496).abs() < 0.05,
+            "{}",
+            raster.advance
+        );
+    }
+    #[test]
     fn soft_hyphen_is_invisible_and_vertical_tab_is_a_space() {
         let mut rasterizer = Rasterizer::new();
         let mut raster = |s: &str| {
@@ -191,7 +217,12 @@ impl Rasterizer {
                 previous = None;
                 continue;
             };
-            if let Some(p) = previous {
+            // Canvas breaks kerning at ASCII spaces, including normalized
+            // whitespace. NBSP keeps its ordinary glyph-pair behavior.
+            if let Some(p) = previous
+                && p != ' '
+                && c != ' '
+            {
                 pen += font.horizontal_kern(p, c, size).unwrap_or(0.);
             }
             let m = font.metrics(c, size);
