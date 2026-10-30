@@ -2,7 +2,7 @@
 use crate::{
     Result,
     bank::Bank,
-    frame::{Draw, Frame, MAX_EXTENT},
+    frame::{Draw, Frame, MAX_EXTENT, SnakeDrawObservation},
     scene::Resource,
 };
 use slither_client::{presentation::*, state::Point};
@@ -230,8 +230,15 @@ pub fn prepare(
     draws.extend(food.early.iter().map(Draw::from));
     draws.extend(prey_plan.early.iter().map(prey));
     let mut eyes = Vec::new();
+    let mut snakes = Vec::new();
     for snake in prepared {
         let m = snake.metrics;
+        let mut observation = SnakeDrawObservation {
+            id: m.id,
+            own: snake.own,
+            body_commands: 0,
+            viewport_body_commands: 0,
+        };
         let raw = client
             .snake_object(snake.token)
             .ok_or("prepared appearance missing")?;
@@ -270,8 +277,18 @@ pub fn prepare(
                 command_limit: 8192,
             })
             .map_err(|e| e.to_string())?;
-            draws.extend(body.commands.iter().map(Draw::from));
+            for command in &body.commands {
+                let draw = Draw::from(command);
+                if command.pass == BodyPaintPass::Body {
+                    observation.body_commands += 1;
+                    if draw.image_intersects_viewport(extent, scale) {
+                        observation.viewport_body_commands += 1;
+                    }
+                }
+                draws.push(draw);
+            }
         }
+        snakes.push(observation);
         let start = draws.len();
         if let Some(style) = snake.eye_geometry {
             eyes.push((
@@ -404,6 +421,7 @@ pub fn prepare(
         viewport_scale: scale,
         tick: 0,
         draws,
+        snakes,
     };
     let mut resources = bank.resources(&frame)?;
     bank.minimap.append(client, &mut frame, &mut resources)?;

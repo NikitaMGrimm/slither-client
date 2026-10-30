@@ -315,6 +315,7 @@ fn ordinary_composition_preserves_body_order_and_uses_two_cropped_panels() {
         extent: [960, 540],
         viewport_scale: 1.,
         draws: vec![draw.clone()],
+        snakes: Vec::new(),
     };
     let resources = bank.resources(&frame).unwrap();
     let result = render::finish_hud(
@@ -419,6 +420,7 @@ fn projected_row_color_opacity_and_lifecycle_alpha_reach_the_rendered_frame() {
         extent: [960, 540],
         viewport_scale: 1.,
         draws: vec![],
+        snakes: Vec::new(),
     };
     let resources = bank.resources(&frame).unwrap();
     let out =

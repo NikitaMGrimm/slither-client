@@ -436,6 +436,7 @@ mod tests {
                 viewport_scale: 1.,
                 tick: 0,
                 draws: vec![command],
+                snakes: Vec::new(),
             };
             assert_eq!(
                 frame.quads(&[(asset.into(), asset)].into()).unwrap().len(),

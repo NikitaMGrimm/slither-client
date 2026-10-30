@@ -31,10 +31,24 @@ no HTTPS-to-HTTP downgrade for the script/directory) and kept only in memory.
 There is no automatic reconnect.
 
 `--headless --duration <s> --frames <new-dir> [--frame-every <s>]` starts one
-Play without a window, steers in slow circles with a periodic boost through the
+Play without a window, wanders along broad drifting arcs with a periodic boost through the
 normal input path, saves 960x540 PNGs outside the checkout and prints a summary
 (server, profile version, handshake/login/Setup, packet and frame counts, own
 length over time, exit reason). Passwords and raw packets are never printed.
+
+The encounter summary separates received retained other appearances (maximum
+count and distinct wire IDs) from the core's culled-visible appearances, and
+from others whose positive-alpha normal-body quads overlap the viewport.
+It reports the viewport maximum with a frame/time and up to eight sample IDs,
+and whether any other normal body reached a successfully submitted draw list.
+Counts include death fades; ID reuse contributes once to each distinct-ID set.
+Viewport overlap tests transformed quad geometry, not opaque source pixels or
+occlusion. Observations travel with the actual prepared picture, including Setup
+and retained pictures. The first viewport-body encounter also saves one extra
+`first-other-*.png` immediately, before another picture can replace it.
+The deterministic autopilot keeps its existing input cadence/boost schedule;
+its slow heading drift makes the first minute travel across the map rather than
+repeat a small orbit. It does not avoid opponents or the arena edge.
 
 The browser build stays simulator-only: browser fetches need CORS permission for
 the official page, script and directory, JavaScript cannot set WebSocket Origin,
