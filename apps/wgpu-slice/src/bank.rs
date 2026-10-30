@@ -23,6 +23,8 @@ pub struct Bank {
     pub outline: BodyAssetUse,
     pub shadow: BodyAssetUse,
     pub death: BodyAssetUse,
+    pub tile: BodyAssetUse,
+    pub backdrop: BodyAssetUse,
     food: Vec<FoodFactory>,
     prey: Vec<PreyFactory>,
     cache: BTreeMap<usize, Resource>,
@@ -47,6 +49,8 @@ impl Bank {
             outline: use_at(0),
             shadow: use_at(0),
             death: use_at(0),
+            tile: use_at(0),
+            backdrop: use_at(0),
             food: Vec::new(),
             prey: Vec::new(),
             cache: BTreeMap::new(),
@@ -63,6 +67,8 @@ impl Bank {
         b.outline = b.add(r.body_sources.outline);
         b.shadow = b.add(r.body_sources.shadow);
         b.death = b.add(r.body_sources.death_highlight);
+        b.tile = b.add(r.tile);
+        b.backdrop = b.add(r.backdrop);
         for p in r.food {
             let mut family = |rs: Vec<CanvasRecipe>| -> Result<Vec<FoodSource>> {
                 rs.into_iter()

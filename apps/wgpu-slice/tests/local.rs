@@ -227,6 +227,124 @@ fn zero_population_packet_preserves_the_complete_retained_readout() {
     zero_header_preserves_readout(2, 0);
 }
 #[test]
+fn desktop_backing_uses_content_size_without_dpr_and_suspends_zero() {
+    assert_eq!(render::backing_size([960., 540.]).unwrap(), [1500, 845]);
+    assert_eq!(render::backing_size([1920., 1080.]).unwrap(), [1500, 845]);
+    assert_eq!(render::backing_size([540., 960.]).unwrap(), [845, 1500]);
+    assert_eq!(render::backing_size([0., 540.]).unwrap(), [0, 0]);
+    assert!(render::backing_size([f64::NAN, 540.]).is_err());
+}
+#[test]
+fn background_draw_order_phase_zoom_and_quality_gate_match_core_plan() {
+    let mut g = playing();
+    let mut c = g.client().clone();
+    c.set_follows(false);
+    c.set_camera_position(slither_client::state::Point { x: 100., y: 200. })
+        .unwrap();
+    c.set_zoom(0.8).unwrap();
+    let q = g.quality();
+    let first = render::prepare(&mut c, &mut g.bank, [960, 540], 1., 1, q).unwrap();
+    let tile = g.bank.assets[g.bank.tile.asset];
+    let backdrop = g.bank.assets[g.bank.backdrop.asset];
+    assert_eq!(first.frame.draws[1].asset, backdrop);
+    assert_eq!(first.frame.draws[1].effective_alpha, 0.3);
+    assert_eq!(first.frame.draws[2].asset, tile);
+    assert_eq!(first.frame.draws[0].effective_alpha, 1.);
+    assert!(first.frame.draws[2].repeat_uv.is_some());
+    let previous = c.camera().position();
+    c.set_camera_position(slither_client::state::Point {
+        x: previous.x + 17.,
+        y: previous.y - 11.,
+    })
+    .unwrap();
+    let second = render::prepare(&mut c, &mut g.bank, [1280, 720], 1., 2, q).unwrap();
+    let uv = second.frame.draws[2].repeat_uv.unwrap();
+    let phase = c.background().phase();
+    assert_eq!(
+        uv.x,
+        (-640. / c.camera().zoom() - phase.x * f64::from(tile.width)) / f64::from(tile.width)
+    );
+    assert_eq!(uv.width, 1280. / c.camera().zoom() / f64::from(tile.width));
+    let low = QualityState::new(QualityMode::Low, 0.).unwrap();
+    let mut low = low;
+    low.begin_connection();
+    let third = render::prepare(&mut c, &mut g.bank, [960, 540], 1., 3, low.snapshot()).unwrap();
+    assert_eq!(third.frame.draws[1].asset, tile);
+    assert!(!third.frame.draws.iter().any(|d| d.asset == backdrop));
+    let resources = third.resources;
+    assert!(!resources.iter().any(|r| r.asset == backdrop));
+}
+#[test]
+fn local_skin_style_and_applied_sampling_scale_match_canvas_policy() {
+    let mut g = negotiating();
+    g.receive(g.generation(), &bundle(&[setup(), snake(60)]), 3.)
+        .unwrap();
+    let mut client = g.client().clone();
+    client.advance(40., false).unwrap();
+    let mut expected = client.clone();
+    let mut quality = g.quality();
+    quality.quality_scale = 1.4;
+    let snakes = expected
+        .prepare_draw_with_style(960, 540, 1.4, false)
+        .unwrap();
+    assert!(snakes.iter().any(|s| {
+        s.body_geometry
+            .as_ref()
+            .is_some_and(|b| b.samples.iter().all(|sample| sample.flag == 2))
+    }));
+    let tile = g.bank.assets[g.bank.tile.asset];
+    let backdrop = g.bank.assets[g.bank.backdrop.asset];
+    expected
+        .prepare_background(BackgroundInput {
+            width: 960,
+            height: 540,
+            zoom: expected.camera().zoom(),
+            image_size: Some([backdrop.width, backdrop.height]),
+            pattern_available: true,
+            quality,
+            tile_width: f64::from(tile.width),
+            tile_height: f64::from(tile.height),
+        })
+        .unwrap();
+    render::prepare(&mut client, &mut g.bank, [960, 540], 1., 4, quality).unwrap();
+    assert!(
+        client == expected,
+        "local draw preparation must match the shared Canvas policy"
+    );
+}
+#[test]
+fn quality_fallback_is_staged_once_across_retry_resize_and_zero_backing() {
+    let mut g = playing();
+    let before = g.quality();
+    g.begin_frame(1002., [960, 540], 1.).unwrap();
+    effects(&mut g);
+    let p = g.take_frame().unwrap();
+    g.retry_frame(p).unwrap();
+    assert_eq!(g.quality(), before);
+    g.viewport([1280, 720], 1.).unwrap();
+    g.begin_frame(1100., [1280, 720], 1.).unwrap();
+    assert_eq!(g.quality(), before);
+    pictures(&mut g);
+    assert!(!g.quality().high_quality);
+    assert_eq!(g.quality().low_fps_counter, 1.);
+    assert_eq!(g.quality().quality_blend, 1.);
+    pump(&mut g, 1120.);
+    assert!(g.quality().quality_blend < 1.);
+    assert!(g.quality().quality_scale > 1.);
+    let before = g.quality();
+    g.begin_frame(1500., [0, 0], 1.).unwrap();
+    assert_eq!(g.quality(), before);
+    g.stop();
+    effects(&mut g);
+    pump(&mut g, 1501.);
+    g.set_requested_quality(QualityMode::Low);
+    assert_ne!(g.quality().quality_blend, 0.);
+    g.play("ws://127.0.0.1:19491/slither", "Player", 0).unwrap();
+    assert_eq!(g.quality().quality_blend, 0.);
+    assert_eq!(g.quality().quality_scale, 1.7);
+    assert_eq!(g.quality().low_fps_counter, 0.);
+}
+#[test]
 fn endpoint_and_play_are_explicit_and_atomic() {
     for bad in [
         "ws://localhost:9000/slither",
@@ -671,6 +789,7 @@ fn lazy_resources_preserve_full_palette_and_reject_unknowns() {
         corners: None,
         asset: a,
         source: None,
+        repeat_uv: None,
         destination: BodyRect {
             x: 0.,
             y: 0.,

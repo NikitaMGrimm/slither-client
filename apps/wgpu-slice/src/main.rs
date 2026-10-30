@@ -159,7 +159,7 @@ mod desktop {
                     self.game.presented(false)?;
                     return Err(e);
                 }
-                match self.host.present(&p.frame) {
+                match self.host.present_scaled(&p.frame) {
                     Ok(true) => self.game.presented(true)?,
                     Ok(false) => {
                         self.game.retry_frame(p)?;
@@ -203,10 +203,12 @@ mod desktop {
                 }
             }
             let size = self.window.inner_size();
-            let extent = [size.width, size.height];
-            let scale = self.window.scale_factor();
-            self.host.resize(extent)?;
-            self.game.viewport(extent, scale)?;
+            let physical = [size.width, size.height];
+            let dpr = self.window.scale_factor();
+            let extent =
+                slither_wgpu_slice::render::backing_size(physical.map(|n| f64::from(n) / dpr))?;
+            self.host.resize(physical)?;
+            self.game.viewport(extent, 1.)?;
             for event in self.transport.poll() {
                 match event {
                     Event::Opened(g) => {
@@ -238,7 +240,7 @@ mod desktop {
             self.effects()?;
             self.pictures()?;
             self.game
-                .begin_frame(self.started.elapsed().as_secs_f64() * 1000., extent, scale)?;
+                .begin_frame(self.started.elapsed().as_secs_f64() * 1000., extent, 1.)?;
             self.effects()?;
             self.pictures()?;
             self.window.set_title(&format!(
@@ -342,8 +344,13 @@ mod desktop {
                     WindowEvent::RedrawRequested => r.frame()?,
                     WindowEvent::Resized(s) => {
                         r.host.resize([s.width, s.height])?;
-                        r.game
-                            .viewport([s.width, s.height], r.window.scale_factor())?;
+                        r.game.viewport(
+                            slither_wgpu_slice::render::backing_size([
+                                f64::from(s.width) / r.window.scale_factor(),
+                                f64::from(s.height) / r.window.scale_factor(),
+                            ])?,
+                            1.,
+                        )?;
                     }
                     WindowEvent::CursorMoved { position, .. } => {
                         let d = r.window.scale_factor();

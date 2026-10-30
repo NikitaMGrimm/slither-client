@@ -1,4 +1,4 @@
-import init, { LocalGameplay } from './pkg/slither_wgpu_slice.js';
+import init, { LocalGameplay, game_backing_size } from './pkg/slither_wgpu_slice.js';
 import { localHost } from './local-host.mjs';
 const canvas = document.getElementById('game');
 const status = document.getElementById('status');
@@ -12,11 +12,10 @@ const abort = new AbortController();
 const listen = (node, type, fn) => node.addEventListener(type, fn, { signal: abort.signal });
 const editable = e => e.target instanceof HTMLInputElement;
 function extent() {
-  const dpr = devicePixelRatio;
-  const w = Math.round(canvas.clientWidth * dpr), h = Math.round(canvas.clientHeight * dpr);
+  const [w, h] = game_backing_size(canvas.clientWidth, canvas.clientHeight);
   if (canvas.width !== w) canvas.width = w;
   if (canvas.height !== h) canvas.height = h;
-  return [w, h, dpr];
+  return [w, h, 1];
 }
 function dispose() {
   if (disposed) return;

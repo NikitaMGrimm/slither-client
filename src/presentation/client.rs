@@ -2620,6 +2620,26 @@ impl AnimatedClient {
         Ok(prepared)
     }
 
+    /// Prepare once with a style resolved for each visible appearance, as the
+    /// Canvas adapter does. A failed resolver leaves the complete client intact.
+    pub fn prepare_draw_resolved<E, F>(
+        &mut self,
+        width: u32,
+        height: u32,
+        quality_scale: f64,
+        resolve_style: F,
+    ) -> Result<Vec<PreparedSnake>, E>
+    where
+        E: From<ClientPresentationError>,
+        F: FnMut(usize, bool, &SnakePresentation) -> Result<bool, E>,
+    {
+        let mut next = self.clone();
+        let prepared =
+            next.prepare_draw_resolved_staged(width, height, quality_scale, resolve_style)?;
+        *self = next;
+        Ok(prepared)
+    }
+
     /// Prepare one numeric draw with explicit ordered antenna randomness.
     /// This consumes the same camera, spacing and eye transition as rendering;
     /// do not prepare again for the same draw. Callback effects cannot roll back.
@@ -4605,6 +4625,14 @@ mod resolved_draw_tests {
                 .unwrap();
             assert_eq!(a, b);
             assert_eq!(uniform, resolved);
+            let mut adapter = client.clone();
+            let c = adapter
+                .prepare_draw_resolved(960, 540, 1.3, |_, _, _| {
+                    Ok::<_, ClientPresentationError>(detailed)
+                })
+                .unwrap();
+            assert_eq!(a, c);
+            assert_eq!(uniform, adapter);
         }
         let saved = client.clone();
         let mut stage = client.clone();
@@ -4621,6 +4649,18 @@ mod resolved_draw_tests {
         );
         assert_eq!(client, saved);
         assert_ne!(stage, saved);
+        assert!(
+            client
+                .prepare_draw_resolved(960, 540, 1., |ordinal, _, _| {
+                    if ordinal == 1 {
+                        Err(ClientPresentationError::Limit)
+                    } else {
+                        Ok(true)
+                    }
+                })
+                .is_err()
+        );
+        assert_eq!(client, saved);
     }
     mod static_accessory_native_tests {
         use super::*;

@@ -29,6 +29,8 @@ pub struct Draw {
     pub corners: Option<[[f64; 2]; 4]>,
     pub asset: BodyAsset,
     pub source: Option<BodyRect>,
+    /// Unbounded normalized UV rectangle for a repeating image; crops remain bounded.
+    pub repeat_uv: Option<BodyRect>,
     pub destination: BodyRect,
     /// Translation in logical viewport pixels, followed by local rotation.
     pub translation: [f64; 2],
@@ -42,6 +44,7 @@ impl From<&BodyImageCommand> for Draw {
             corners: None,
             asset: c.asset,
             source: c.source_rect,
+            repeat_uv: None,
             destination: c.destination,
             translation: [c.center.x + c.translation.x, c.center.y + c.translation.y],
             rotation: c.rotation.unwrap_or(0.),
@@ -71,6 +74,7 @@ impl From<&FoodImageCommand> for Draw {
             corners: None,
             asset: c.source.asset(),
             source,
+            repeat_uv: None,
             destination,
             translation: [0.; 2],
             rotation: 0.,
@@ -92,6 +96,7 @@ pub struct Frame {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Quad {
     pub key: ResourceKey,
+    pub repeat: bool,
     pub blend: BodyBlend,
     /// Six vertices: clip X/Y, UV X/Y, effective alpha. Order is never regrouped.
     pub vertices: [[f32; 5]; 6],
@@ -134,6 +139,9 @@ impl Frame {
                     height: f64::from(d.asset.height),
                 });
                 if !rect_finite(source)
+                    || d.repeat_uv.is_some_and(|uv| {
+                        !rect_finite(uv) || uv.width <= 0. || uv.height <= 0. || d.source.is_some()
+                    })
                     || !rect_finite(d.destination)
                     || !d.rotation.is_finite()
                     || !d.translation.into_iter().all(f64::is_finite)
@@ -165,11 +173,20 @@ impl Frame {
                     let local_x = x;
                     let x = d.translation[0] + cos * x - sin * y;
                     let y = d.translation[1] + sin * local_x + cos * y;
+                    let [uv_x, uv_y] = d.repeat_uv.map_or_else(
+                        || {
+                            [
+                                (source.x + u * source.width) / f64::from(d.asset.width),
+                                (source.y + v * source.height) / f64::from(d.asset.height),
+                            ]
+                        },
+                        |uv| [uv.x + u * uv.width, uv.y + v * uv.height],
+                    );
                     let values = [
                         2. * (x * self.viewport_scale) / f64::from(self.extent[0]) - 1.,
                         1. - 2. * (y * self.viewport_scale) / f64::from(self.extent[1]),
-                        (source.x + u * source.width) / f64::from(d.asset.width),
-                        (source.y + v * source.height) / f64::from(d.asset.height),
+                        uv_x,
+                        uv_y,
                         d.effective_alpha,
                     ];
                     if values
@@ -182,6 +199,7 @@ impl Frame {
                 }
                 Ok(Quad {
                     key,
+                    repeat: d.repeat_uv.is_some(),
                     blend: d.blend,
                     vertices: [
                         corners[0], corners[1], corners[2], corners[0], corners[2], corners[3],
