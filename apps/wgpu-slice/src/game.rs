@@ -98,6 +98,41 @@ pub fn loopback_endpoint(value: &str) -> Result<u16> {
     Ok(p)
 }
 
+/// Shared endpoint admission; the browser's local entry applies its own loopback gate.
+pub fn server_endpoint(value: &str) -> Result<url::Url> {
+    if value
+        .bytes()
+        .any(|b| b.is_ascii_control() || b.is_ascii_whitespace() || b == b'\\')
+    {
+        return Err("Invalid server URL".into());
+    }
+    let url = url::Url::parse(value).map_err(|_| "Invalid server URL")?;
+    if url.scheme() != "ws"
+        || url.host_str().is_none()
+        || url.port_or_known_default() == Some(0)
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || url.path() != "/slither"
+    {
+        return Err("Expected ws://host:port/slither without credentials or query".into());
+    }
+    Ok(url)
+}
+
+/// In-memory login data; never format or persist this value.
+#[derive(Default)]
+pub struct LoginProfile {
+    pub client_version: u16,
+    pub password: [u8; 20],
+}
+impl Drop for LoginProfile {
+    fn drop(&mut self) {
+        self.password.fill(0);
+    }
+}
+
 pub struct LocalGame {
     client: AnimatedClient,
     pub bank: Bank,
@@ -185,14 +220,29 @@ impl LocalGame {
             && self.inflight == 0
     }
     pub fn play(&mut self, endpoint: &str, nickname: &str, skin: u8) -> Result<()> {
+        self.play_with_profile(endpoint, nickname, skin, &LoginProfile::default())
+    }
+    pub fn play_with_profile(
+        &mut self,
+        endpoint: &str,
+        nickname: &str,
+        skin: u8,
+        profile: &LoginProfile,
+    ) -> Result<()> {
         if !self.can_play() {
             return Err("Explicit Play unavailable".into());
         }
-        loopback_endpoint(endpoint)?;
+        server_endpoint(endpoint)?;
         let mut menu = MenuPreferences::new(true);
         menu.select(skin, &[])?;
-        let login =
-            protocol::encode_login(0, &[0; 20], nickname, skin, None).map_err(|e| e.to_string())?;
+        let login = protocol::encode_login(
+            profile.client_version,
+            &profile.password,
+            nickname,
+            skin,
+            None,
+        )
+        .map_err(|e| e.to_string())?;
         if matches!(self.phase(), Phase::Disconnected | Phase::Failed) {
             self.session = SessionPolicy::new();
             self.session.subscribe(2).map_err(|e| e.0)?;

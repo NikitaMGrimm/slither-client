@@ -49,7 +49,8 @@ on the core. game::LocalGame owns the shared protocol/session/input/presentation
 flow. Windows uses winit and tungstenite; the browser uses WebSocket and RAF.
 Both submit ordered frames and authored materials through the same wgpu renderer.
 
-Play opens a literal loopback endpoint; there is no automatic reconnect. The
+Play opens a simulator endpoint or, natively with `--official`, an official
+server chosen from the live directory; there is no automatic reconnect. The
 renderer covers body, food, prey, paired eyes, arena and a small bitmap HUD.
 Image faces, antennas and complete menus remain incomplete. Rasterization can
 differ from Canvas; passing tests does not establish perceptual parity.

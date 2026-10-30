@@ -81,7 +81,10 @@ impl LocalGameplay {
         nickname: &str,
         skin: u8,
     ) -> std::result::Result<(), JsValue> {
-        self.checked(|g| g.play(endpoint, nickname, skin))
+        self.checked(|g| {
+            crate::game::loopback_endpoint(endpoint)?;
+            g.play(endpoint, nickname, skin)
+        })
     }
     pub fn stop(&mut self) {
         self.game.stop();

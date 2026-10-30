@@ -67,4 +67,6 @@ browser command prints the Canvas URL. Existing npm run scene accepts --port and
 Use offscreen rendering or headless browsers for automated visual work. Keep
 captures outside Git. State what ran and any limitations: synthetic correctness,
 local gameplay, browser rendering and perceptual parity are different results.
-No tests or CI may connect to official game servers.
+No tests or CI may connect to official game servers. For a deliberate live check,
+run the desktop client with `--official --headless` (see the wgpu README); keep
+such runs few and short.

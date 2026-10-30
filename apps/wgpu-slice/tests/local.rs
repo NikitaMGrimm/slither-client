@@ -255,6 +255,38 @@ fn endpoint_and_play_are_explicit_and_atomic() {
     assert!(matches!(g.effect().unwrap().kind, EffectKind::Connect(_)));
 }
 #[test]
+fn synthetic_profile_reaches_existing_challenge_login_without_local_credentials() {
+    use slither_wgpu_slice::game::LoginProfile;
+    let mut g = LocalGame::new(0.).unwrap();
+    let profile = LoginProfile {
+        client_version: 4242,
+        password: [123; 20],
+    };
+    g.play_with_profile("ws://192.0.2.1:445/slither", "Synthetic", 9, &profile)
+        .unwrap();
+    pump(&mut g, 1.);
+    let e = g.effect().unwrap();
+    assert_eq!(
+        e.kind,
+        EffectKind::Connect("ws://192.0.2.1:445/slither".into())
+    );
+    g.construct(e.generation, e.id, 1.).unwrap();
+    g.acknowledge(e.generation, e.id, true).unwrap();
+    g.opened(g.generation(), 2.).unwrap();
+    assert_eq!(effects(&mut g), [vec![1], vec![99, 0]]);
+    g.receive(g.generation(), &bundle(&[challenge()]), 3.)
+        .unwrap();
+    let packets = effects(&mut g);
+    assert_eq!(
+        packets[1],
+        slither_client::protocol::encode_login(4242, &[123; 20], "Synthetic", 9, None).unwrap()
+    );
+    assert_eq!(g.phase(), Phase::Setup);
+    g.stop();
+    effects(&mut g);
+    g.play("ws://127.0.0.1:19491/slither", "Local", 0).unwrap();
+}
+#[test]
 fn actual_ingress_food_prey_face_score_and_board_reach_plans() {
     let mut g = playing();
     assert_eq!(g.phase(), Phase::Playing);

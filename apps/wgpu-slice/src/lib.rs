@@ -10,6 +10,8 @@ pub mod materials;
 pub mod minimap;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod official;
 pub mod render;
 pub mod scene;
 

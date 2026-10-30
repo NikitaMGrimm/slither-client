@@ -15,7 +15,31 @@ If slither-sim is not on PATH, set SLITHER_SIM or run
 `npm run dev:desktop -- --simulator <path>`.
 Enter starts Play, Escape stops; pointer/arrows/Space and mouse boost feed the
 shared input policy. No connection starts until Play, and reconnect is explicit.
-The endpoint must be ws://127.0.0.1:<port>/slither.
+Use `--endpoint ws://host:port/slither` for a simulator elsewhere.
+
+## Official servers
+
+`--official` plays on the official servers (native only). Each Play fetches the
+homepage, its `/s/game<digits>.js` script and the server directory as inert data,
+parses `client_version`/`cpw` with the core's closed literal grammar (code is
+never evaluated), pings one address per cluster over `ws://address:80/ptc` and
+picks a server like the original: lowest cluster RTT, then population-weighted.
+`--server host:port` skips discovery. Game sockets use the original `ws://`
+path with `Origin: http://slither.io`. Downloads are capped after gzip decoding
+(256 KiB page/directory, 1 MiB script, 5 s, at most three same-host redirects,
+no HTTPS-to-HTTP downgrade for the script/directory) and kept only in memory.
+There is no automatic reconnect.
+
+`--headless --duration <s> --frames <new-dir> [--frame-every <s>]` starts one
+Play without a window, steers in slow circles with a periodic boost through the
+normal input path, saves 960x540 PNGs outside the checkout and prints a summary
+(server, profile version, handshake/login/Setup, packet and frame counts, own
+length over time, exit reason). Passwords and raw packets are never printed.
+
+The browser build stays simulator-only: browser fetches need CORS permission for
+the official page, script and directory, JavaScript cannot set WebSocket Origin,
+and HTTPS pages block the original `ws://` endpoints. Options are a same-origin
+page host or an HTTPS/WSS relay that supplies the upstream Origin.
 
 ## Build and test
 

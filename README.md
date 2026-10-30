@@ -38,6 +38,16 @@ npm run dev:desktop
 
 Press Enter to Play, Escape to Stop; use pointer/arrows and Space or mouse boost.
 
+Official servers (Windows desktop):
+
+```sh
+cargo run --release --manifest-path apps/wgpu-slice/Cargo.toml --locked --bin slither-wgpu-desktop -- --official --nickname Player --skin 0
+```
+
+Add `--headless --duration 60 --frames <new-dir-outside-repo>` to play once on
+autopilot without a window and save periodic PNGs; see the
+[wgpu app README](apps/wgpu-slice/README.md#official-servers).
+
 Browser (Canvas2D):
 
 ```sh
