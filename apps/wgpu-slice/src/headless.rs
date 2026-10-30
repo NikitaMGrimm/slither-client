@@ -6,12 +6,14 @@ use slither_client::{
 };
 use slither_wgpu_slice::{
     Result,
+    frame::Frame,
     game::{EffectKind, LocalGame, LoginProfile},
     gpu::{Renderer, instance},
     native::{Event, Transport},
     official::Preparation,
 };
 use std::{
+    collections::BTreeSet,
     fs::{self, OpenOptions},
     io::BufWriter,
     path::{Path, PathBuf},
@@ -21,6 +23,86 @@ use std::{
 };
 
 const EXTENT: [u32; 2] = [960, 540];
+
+fn autopilot_heading(seconds: f64) -> f64 {
+    // Broad arcs with a slow heading drift; the first minute travels across the map.
+    seconds * 0.017 + 0.55 * (seconds / 16.0).sin()
+}
+
+struct ViewportPeak {
+    seconds: f64,
+    frame: u64,
+    ids: Vec<u16>,
+    body_commands: usize,
+}
+#[derive(Default)]
+struct Encounters {
+    received_max: usize,
+    received_ids: BTreeSet<u16>,
+    visible_max: usize,
+    visible_ids: BTreeSet<u16>,
+    body_draw_list_max: usize,
+    viewport_peak: Option<ViewportPeak>,
+}
+impl Encounters {
+    fn receive(&mut self, game: &LocalGame) {
+        let mut count = 0;
+        for (_, own, drawn, snake) in game.client().snake_objects() {
+            if own {
+                continue;
+            }
+            let m = snake.metrics();
+            self.received_ids.insert(m.id);
+            count += usize::from(drawn && !m.expired);
+        }
+        self.received_max = self.received_max.max(count);
+    }
+    /// Called only after this exact picture completed GPU submission successfully.
+    fn presented(&mut self, frame: &Frame, seconds: f64) -> bool {
+        let others: Vec<_> = frame.snakes.iter().filter(|s| !s.own).collect();
+        self.visible_max = self.visible_max.max(others.len());
+        self.visible_ids.extend(others.iter().map(|s| s.id));
+        self.body_draw_list_max = self
+            .body_draw_list_max
+            .max(others.iter().filter(|s| s.body_commands > 0).count());
+        let in_view: Vec<_> = others
+            .iter()
+            .filter(|s| s.viewport_body_commands > 0)
+            .collect();
+        let previous = self.viewport_peak.as_ref().map_or(0, |p| p.ids.len());
+        if in_view.len() > previous {
+            self.viewport_peak = Some(ViewportPeak {
+                seconds,
+                frame: frame.identity,
+                ids: in_view.iter().map(|s| s.id).collect(),
+                body_commands: in_view.iter().map(|s| s.viewport_body_commands).sum(),
+            });
+        }
+        previous == 0 && !in_view.is_empty()
+    }
+    fn print(&self) {
+        println!(
+            "other_snakes: received_max={} received_distinct_ids={} visible_max={} visible_distinct_ids={} viewport_max={} body_draw_list_max={} body_in_draw_list={}",
+            self.received_max,
+            self.received_ids.len(),
+            self.visible_max,
+            self.visible_ids.len(),
+            self.viewport_peak.as_ref().map_or(0, |p| p.ids.len()),
+            self.body_draw_list_max,
+            self.body_draw_list_max > 0
+        );
+        if let Some(p) = &self.viewport_peak {
+            println!(
+                "other_snakes_viewport_peak: time={:.2}s frame={} count={} sample_ids={:?} viewport_body_commands={}",
+                p.seconds,
+                p.frame,
+                p.ids.len(),
+                p.ids.iter().take(8).collect::<Vec<_>>(),
+                p.body_commands
+            );
+        }
+    }
+}
 
 pub struct Options {
     duration: Duration,
@@ -64,9 +146,11 @@ struct Summary {
     captured: u64,
     lengths: Vec<(f64, f64, usize)>,
     reason: String,
+    encounters: Encounters,
 }
 impl Summary {
     fn observe(&mut self, game: &LocalGame) {
+        self.encounters.receive(game);
         self.negotiated |= game.phase() == Phase::Challenge;
         self.login_sent |= game.phase() == Phase::Setup;
         self.setup |= game.client().score_view().table_max.is_some();
@@ -122,6 +206,7 @@ impl Summary {
             .collect::<Vec<_>>()
             .join(", ");
         println!("own_length=[{samples}]");
+        self.encounters.print();
         println!("exit={}", self.reason);
     }
 }
@@ -281,6 +366,7 @@ struct Host<'a> {
     gpu: Offscreen,
     started: Instant,
     summary: &'a mut Summary,
+    capture_dir: &'a Path,
 }
 impl Host<'_> {
     fn seconds(&self) -> f64 {
@@ -323,6 +409,13 @@ impl Host<'_> {
             self.game.presented(true)?;
             self.summary.rendered += 1;
             self.summary.observe(&self.game);
+            let first_encounter = self
+                .summary
+                .encounters
+                .presented(&picture.frame, self.seconds());
+            if first_encounter {
+                self.capture("first-other")?;
+            }
             self.effects()?;
         }
         if self.game.has_frame() {
@@ -360,7 +453,7 @@ impl Host<'_> {
             }
         }
         if self.game.phase() == Phase::Playing {
-            let angle = active_seconds * 0.25;
+            let angle = autopilot_heading(active_seconds);
             self.game.pointer(
                 480.0 + 220.0 * angle.cos(),
                 270.0 + 220.0 * angle.sin(),
@@ -397,7 +490,7 @@ impl Host<'_> {
                     elapsed.as_secs_f64() + (options.duration.as_secs_f64() / 30.0).max(1.0);
             }
             if self.summary.rendered > 0 && elapsed >= next_capture {
-                self.capture(options)?;
+                self.capture("frame")?;
                 last_saved_render = self.summary.rendered;
                 next_capture = elapsed + options.frame_every;
             }
@@ -418,7 +511,7 @@ impl Host<'_> {
         }
         self.summary.sample(&self.game, self.seconds());
         if self.summary.rendered > last_saved_render {
-            self.capture(options)?;
+            self.capture("frame")?;
         }
         if !self.summary.setup {
             return Err(format!("{} before Setup", self.summary.reason));
@@ -432,9 +525,9 @@ impl Host<'_> {
         }
         Ok(())
     }
-    fn capture(&mut self, options: &Options) -> Result<()> {
-        let path = options.frames.join(format!(
-            "frame-{:04}-{:09}ms.png",
+    fn capture(&mut self, label: &str) -> Result<()> {
+        let path = self.capture_dir.join(format!(
+            "{label}-{:04}-{:09}ms.png",
             self.summary.captured,
             self.started.elapsed().as_millis()
         ));
@@ -512,6 +605,7 @@ pub fn run(
             gpu,
             started,
             summary: &mut summary,
+            capture_dir: &options.frames,
         }
         .play(&options)
     })();
@@ -526,6 +620,74 @@ pub fn run(
 mod tests {
     // ORIGINAL SYNTHETIC settings/output fixtures; no connection or GPU.
     use super::*;
+    #[test]
+    fn autopilot_crosses_distance_over_the_first_minute_with_gentle_turns() {
+        let mut distance = [0.0, 0.0];
+        for second in 0..60 {
+            let heading = autopilot_heading(f64::from(second));
+            distance[0] += heading.cos();
+            distance[1] += heading.sin();
+            assert!((autopilot_heading(f64::from(second + 1)) - heading).abs() < 0.052);
+        }
+        // Unit-speed travel cannot collapse back into the previous small closed orbit.
+        assert!(distance[0].hypot(distance[1]) > 45.0);
+    }
+    #[test]
+    fn encounter_peaks_use_frame_ownership_and_keep_the_maximum_sample() {
+        use slither_wgpu_slice::frame::SnakeDrawObservation as Snake;
+        let mut e = Encounters::default();
+        let mut frame = Frame {
+            identity: 7,
+            extent: EXTENT,
+            viewport_scale: 1.,
+            tick: 0,
+            draws: vec![],
+            snakes: vec![
+                Snake {
+                    id: 0,
+                    own: true,
+                    body_commands: 10,
+                    viewport_body_commands: 10,
+                },
+                Snake {
+                    id: 9,
+                    own: false,
+                    body_commands: 0,
+                    viewport_body_commands: 0,
+                },
+            ],
+        };
+        assert!(!e.presented(&frame, 1.));
+        assert_eq!(e.visible_max, 1);
+        assert_eq!(e.body_draw_list_max, 0);
+        assert!(e.viewport_peak.is_none());
+        frame.identity = 8;
+        frame.snakes = vec![
+            Snake {
+                id: 0,
+                own: false,
+                body_commands: 3,
+                viewport_body_commands: 2,
+            },
+            Snake {
+                id: 9,
+                own: false,
+                body_commands: 2,
+                viewport_body_commands: 1,
+            },
+        ];
+        assert!(e.presented(&frame, 2.));
+        frame.identity = 9;
+        frame.snakes.truncate(1);
+        assert!(!e.presented(&frame, 3.));
+        assert_eq!(e.visible_max, 2);
+        assert_eq!(e.visible_ids, BTreeSet::from([0, 9]));
+        let peak = e.viewport_peak.unwrap();
+        assert_eq!(peak.frame, 8);
+        assert_eq!(peak.seconds, 2.);
+        assert_eq!(peak.ids, vec![0, 9]);
+        assert_eq!(peak.body_commands, 3);
+    }
     #[test]
     fn finite_budget_rejects_nan_zero_overflow_and_excessive_capture_counts() {
         for (duration, interval) in [

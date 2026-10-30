@@ -315,6 +315,7 @@ impl Scene {
             viewport_scale,
             tick: self.tick,
             draws,
+            snakes: Vec::new(),
         })
     }
     pub fn tick(&self) -> u32 {

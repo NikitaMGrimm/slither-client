@@ -42,6 +42,7 @@ fn frame(draws: Vec<Draw>) -> Frame {
         viewport_scale: 1.,
         tick: 1,
         draws,
+        snakes: Vec::new(),
     }
 }
 fn resident() -> BTreeMap<ResourceKey, BodyAsset> {
