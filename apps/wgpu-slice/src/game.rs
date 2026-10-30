@@ -587,16 +587,10 @@ impl LocalGame {
         let mut pictures = VecDeque::new();
         if !self.suspended {
             let mut bytes = 0;
-            let text = Self::format_hud_parts(
-                &client,
-                &hud,
-                &rows,
-                &session,
-                self.failure.as_deref(),
-                false,
-            );
+            let view =
+                Self::format_hud_parts(&hud, &rows, &session, self.failure.as_deref(), false);
             for frame in frames.into_inner() {
-                let p = render::finish(frame, &mut self.bank, &text)?;
+                let p = render::finish_hud(frame, &mut self.bank, &view)?;
                 bytes += p
                     .resources
                     .iter()
@@ -822,8 +816,8 @@ impl LocalGame {
         self.policy.score_done();
         w.world = Some(world);
         let w = self.work.as_ref().expect("work");
-        let text = self.format_hud(w.world.as_ref().expect("world"), &w.hud, w.reset_rows);
-        let prepared = render::finish(frame, &mut self.bank, &text)?;
+        let view = self.format_hud(&w.hud, w.reset_rows);
+        let prepared = render::finish_hud(frame, &mut self.bank, &view)?;
         self.work.as_mut().expect("work").prepared = Some(prepared);
         Ok(())
     }
@@ -890,7 +884,10 @@ impl LocalGame {
             self.extent = extent;
             self.scale = scale;
             self.packet_frames.clear();
-            let text = self.hud_text();
+            let view = self.work.as_ref().map_or_else(
+                || self.hud_view(),
+                |w| self.format_hud(&w.hud, w.reset_rows),
+            );
             if let Some(w) = &mut self.work {
                 w.extent = extent;
                 w.scale = scale;
@@ -898,7 +895,7 @@ impl LocalGame {
                     self.identity += 1;
                     let frame =
                         render::prepare(world, &mut self.bank, extent, scale, self.identity)?;
-                    w.prepared = Some(render::finish(frame, &mut self.bank, &text)?);
+                    w.prepared = Some(render::finish_hud(frame, &mut self.bank, &view)?);
                 }
             }
         }
@@ -945,11 +942,14 @@ impl LocalGame {
         self.input.mouse_up();
     }
     pub fn hud_text(&self) -> String {
-        self.format_hud(&self.client, &self.hud, false)
+        self.hud_view().compact_text()
     }
-    fn format_hud(&self, client: &AnimatedClient, hud: &HudHistory, reset_rows: bool) -> String {
+    /// Same typed in-game view for both platform hosts; no session or model mutation.
+    pub fn hud_view(&self) -> crate::hud::View {
+        self.format_hud(&self.hud, false)
+    }
+    fn format_hud(&self, hud: &HudHistory, reset_rows: bool) -> crate::hud::View {
         Self::format_hud_parts(
-            client,
             hud,
             &self.rows,
             &self.session,
@@ -958,13 +958,12 @@ impl LocalGame {
         )
     }
     fn format_hud_parts(
-        client: &AnimatedClient,
         hud: &HudHistory,
         rows: &LeaderboardHistory,
         session: &SessionPolicy,
         failure: Option<&str>,
         reset_rows: bool,
-    ) -> String {
+    ) -> crate::hud::View {
         let phase = session.view().phase;
         let status = if phase == Phase::Failed {
             "FAILED"
@@ -976,25 +975,106 @@ impl LocalGame {
                 _ => "NOT CONNECTED",
             }
         };
-        let score = sample(client.score_view())
-            .and_then(|s| hud_score_text(s.score).ok())
+        let score = hud
+            .current
+            .and_then(|s| s.score_text().ok())
             .unwrap_or_else(|| "--".into());
         let final_score = hud
             .final_capture
             .and_then(|v| v.score_text().ok())
             .unwrap_or_else(|| "--".into());
-        let top = if reset_rows {
-            None
-        } else {
-            rows.visible_rows().first()
+        crate::hud::View {
+            playing: session.view().playing,
+            opacity: hud.requested_opacity,
+            status: status.into(),
+            score,
+            final_score,
+            rank: hud
+                .current
+                .map_or_else(|| "--".into(), |current| current.rank_text()),
+            population: hud
+                .current
+                .map_or_else(|| "--".into(), |current| current.population_text()),
+            rows: if reset_rows {
+                Vec::new()
+            } else {
+                rows.visible_rows().to_vec()
+            },
+            message: failure.map(str::to_owned),
         }
-        .map(|r| format!("{} {}", r.name_text, r.score_text))
-        .unwrap_or_else(|| "--".into());
-        format!(
-            "{status} | ENTER PLAY / ESC STOP\nLENGTH {score}  RANK {} / {}\nFINAL {final_score}  TOP {top}\n{}",
-            hud.rank,
-            hud.population,
-            failure.unwrap_or("LOCAL AUTHORED BODY/PAIRED EYES; ARROWS/POINTER/SPACE")
-        )
+    }
+}
+#[cfg(test)]
+mod hud_projection_tests {
+    use super::*;
+    #[test]
+    fn full_hud_copies_the_existing_top_ten_projection_without_sorting_or_rescoring() {
+        let mut g = LocalGame::new(0.).unwrap();
+        g.nickname = "Player".into();
+        let events = [
+            LeaderboardEvent {
+                command_index: 0,
+                kind: LeaderboardEventKind::Setup(430),
+            },
+            LeaderboardEvent {
+                command_index: 1,
+                kind: LeaderboardEventKind::Board {
+                    local_row: 3,
+                    rows: (0..12)
+                        .map(|i| LeaderboardRawRow {
+                            count: 12 + i,
+                            fractional_mass: 0.5,
+                            raw_color: i as u8,
+                            name: format!("Row {i}").into_bytes(),
+                        })
+                        .collect(),
+                },
+            },
+        ];
+        let mut plan = g.rows.prepare(&events).unwrap();
+        plan.begin().unwrap();
+        let input: Vec<_> = (0..12)
+            .map(|i| LeaderboardScoreInput {
+                count: 12 + i,
+                fractional_mass: 0.5,
+            })
+            .collect();
+        let scores = g
+            .projector
+            .project(430, &input)
+            .unwrap()
+            .into_iter()
+            .map(|v| match v {
+                LeaderboardRowScore::Value(n) => n,
+                LeaderboardRowScore::OutOfTable => f64::NAN,
+            })
+            .collect();
+        let rows = g
+            .rows
+            .stage_complete(&mut plan, &[scores], &g.nickname)
+            .unwrap();
+        rows.commit().unwrap();
+        g.rows = rows;
+        g.hud = g
+            .hud
+            .packet(&[HudHistoryEvent::Leaderboard {
+                rank: 3,
+                population: 50,
+                death_pending: false,
+            }])
+            .unwrap();
+        let view = g.hud_view();
+        assert_eq!(view.rows, g.rows.visible_rows());
+        assert_eq!(view.rows.len(), 10);
+        assert_eq!(view.rows[2].name_text, "Player");
+        assert!(view.rows[2].own);
+        assert_eq!(view.rank, "--");
+        assert_eq!(view.population, "--");
+        assert_eq!(
+            view.rows.iter().map(|r| r.ordinal).collect::<Vec<_>>(),
+            (1..=10).collect::<Vec<_>>()
+        );
+        assert_eq!(g.hud_text(), view.compact_text());
+        assert!(g.effect().is_none());
     }
 }
