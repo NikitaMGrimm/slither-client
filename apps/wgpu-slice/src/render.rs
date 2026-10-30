@@ -219,6 +219,29 @@ pub fn prepare(
         command_limit: 8192,
     })
     .map_err(|e| e.to_string())?;
+    let mut text_draws = Vec::new();
+    let mut text_resources = std::collections::BTreeMap::new();
+    for name in client.nickname_draws() {
+        use crate::text::{Align, Baseline, TextRun, TextStyle, Weight};
+        for (draw, resource) in bank.text.draw(
+            TextRun {
+                text: &name.text,
+                style: TextStyle {
+                    size: name.font_size,
+                    weight: Weight::Normal,
+                    color: name.color,
+                },
+                position: [name.position.x, name.position.y],
+                align: Align::Center,
+                baseline: Baseline::Middle,
+                alpha: name.alpha,
+            },
+            scale,
+        )? {
+            text_resources.insert(resource.asset.handle, resource);
+            text_draws.push(draw);
+        }
+    }
     let palettes: Vec<_> = bank
         .bodies
         .iter()
@@ -229,6 +252,7 @@ pub fn prepare(
         .collect();
     draws.extend(food.early.iter().map(Draw::from));
     draws.extend(prey_plan.early.iter().map(prey));
+    draws.extend(text_draws);
     let mut eyes = Vec::new();
     let mut snakes = Vec::new();
     for snake in prepared {
@@ -415,6 +439,7 @@ pub fn prepare(
             ));
         }
     }
+    bank.stage_text(identity, text_resources.into_values().collect())?;
     let mut frame = Frame {
         identity,
         extent,

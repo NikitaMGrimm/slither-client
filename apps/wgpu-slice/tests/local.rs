@@ -1119,3 +1119,71 @@ fn constructor_admission_is_single_use_and_late_open_is_fenced() {
     g.opened(g.generation(), 4000.).unwrap();
     assert!(g.effect().is_none());
 }
+
+#[cfg(windows)]
+#[test]
+fn nicknames_reach_ordered_frames_with_retained_tint_and_draw_clock_fade() {
+    let mut g = negotiating();
+    let mut named = snake(44);
+    named[22] = 7;
+    named.splice(23..23, b"AV cafe".iter().copied());
+    let mut remote = named.clone();
+    remote[2] = 8;
+    // The same appearance is drawn at both ordered Setup barriers.
+    g.receive(
+        g.generation(),
+        &bundle(&[setup(), named, remote, setup(), setup()]),
+        3.,
+    )
+    .unwrap();
+    pictures(&mut g);
+    let names = g.client().nickname_draws();
+    assert_eq!(names.len(), 2);
+    assert_eq!(names[0].text, "AV cafe");
+    assert_ne!(names[0].color, NEUTRAL_NICKNAME_COLOR);
+    let color = names[0].color;
+    let before = format!("{:?}", g.client().received());
+    assert!(
+        g.receive(g.generation(), &bundle(&vec![setup(); 17]), 3.5)
+            .is_err()
+    );
+    assert_eq!(format!("{:?}", g.client().received()), before);
+    // An aborted Setup batch must not leave stale pixels at reused identities.
+    g.receive(g.generation(), &bundle(&[setup()]), 3.75)
+        .unwrap();
+    pictures(&mut g);
+    let mut own_alpha = 0.;
+    let mut remote_alpha = 0.;
+    for i in 0..205 {
+        g.begin_frame(20. + f64::from(i) * 16., [960, 540], 1.)
+            .unwrap();
+        effects(&mut g);
+        let p = g.take_frame().unwrap();
+        g.presented(true).unwrap();
+        let name = &g.client().nickname_draws()[0];
+        assert_eq!(name.color, color);
+        let text = p
+            .frame
+            .draws
+            .iter()
+            .position(|d| d.asset.handle >= 0x4000_0000_0000_0000)
+            .unwrap();
+        let body = p
+            .frame
+            .draws
+            .iter()
+            .position(|d| d.asset.handle < 0x3000_0000_0000_0000 && d.asset.width > 1)
+            .unwrap();
+        assert!(text < body);
+        assert_eq!(
+            p.frame.draws[text].translation,
+            [name.position.x, name.position.y]
+        );
+        assert_eq!(p.frame.draws[text].effective_alpha, name.alpha);
+        own_alpha = name.alpha;
+        remote_alpha = g.client().nickname_draws()[1].alpha;
+    }
+    assert!(own_alpha < remote_alpha);
+    assert_eq!(remote_alpha, 0.5);
+    assert_eq!(g.bank.text.cached_runs(), 2); // appearance-owned tint varies
+}

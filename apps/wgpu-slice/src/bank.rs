@@ -32,6 +32,9 @@ pub struct Bank {
     solids: BTreeMap<[u8; 3], BodyAsset>,
     pub hud: Resource,
     pub minimap: crate::minimap::Minimap,
+    pub text: crate::text::TextCache,
+    text_frames: BTreeMap<u64, Vec<Resource>>,
+    pub palette_rgb: Vec<[u8; 3]>,
 }
 fn use_at(i: usize) -> BodyAssetUse {
     BodyAssetUse {
@@ -58,6 +61,9 @@ impl Bank {
             solids: BTreeMap::new(),
             hud: crate::hud::resource(),
             minimap: crate::minimap::Minimap::default(),
+            text: crate::text::TextCache::default(),
+            text_frames: BTreeMap::new(),
+            palette_rgb: r.palette_rgb,
         };
         for p in r.body_sources.palettes {
             let variants = p.variants.into_iter().map(|r| b.add(r)).collect();
@@ -174,6 +180,10 @@ impl Bank {
             .iter()
             .filter_map(|k| self.assets.iter().position(|a| ResourceKey::from(*a) == *k))
             .collect();
+        let text = self
+            .text_frames
+            .get(&frame.identity)
+            .map_or(&[][..], Vec::as_slice);
         let bytes = indices
             .iter()
             .map(|i| self.assets[*i].width as usize * self.assets[*i].height as usize * 4)
@@ -182,7 +192,8 @@ impl Bank {
                 self.hud.image.pixels.len()
             } else {
                 0
-            };
+            }
+            + text.iter().map(|r| r.image.pixels.len()).sum::<usize>();
         if bytes > PIXEL_BUDGET {
             return Err("Active resource pixel budget exceeded".into());
         }
@@ -200,6 +211,7 @@ impl Bank {
             }
         }
         let mut resources: Vec<_> = self.cache.values().cloned().collect();
+        resources.extend_from_slice(text);
         if keys.contains(&self.hud.asset.into()) {
             resources.push(self.hud.clone());
         }
@@ -219,7 +231,29 @@ impl Bank {
             .map(|r| (r.asset.into(), r.asset))
             .collect();
         frame.quads(&resident)?;
+        self.text_frames.remove(&frame.identity);
         Ok(resources)
+    }
+    /// Own the pixels of queued Setup pictures independently of LRU eviction.
+    pub fn stage_text(&mut self, identity: u64, resources: Vec<Resource>) -> Result<()> {
+        // Preparation is ordered. Reused identities replace only unpublished
+        // pixels left by an aborted candidate; admitted pictures own their copies.
+        self.text_frames.retain(|key, _| *key < identity);
+        if resources.is_empty() {
+            return Ok(());
+        }
+        let bytes = self
+            .text_frames
+            .values()
+            .flatten()
+            .chain(&resources)
+            .map(|r| r.image.pixels.len())
+            .sum::<usize>();
+        if self.text_frames.len() >= 16 || bytes > PIXEL_BUDGET {
+            return Err("queued text resource budget".into());
+        }
+        self.text_frames.insert(identity, resources);
+        Ok(())
     }
     pub fn cached_sources(&self) -> usize {
         self.cache.len()

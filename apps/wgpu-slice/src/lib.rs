@@ -14,6 +14,7 @@ pub mod native;
 pub mod official;
 pub mod render;
 pub mod scene;
+pub mod text;
 
 #[cfg(target_arch = "wasm32")]
 mod web;

@@ -85,6 +85,24 @@ Background uses the shared phase/zoom plan and Canvas-authored tile/backdrop.
 policy, without DPR multiplication. Native scales the backing to the window;
 browser controls overlay the full-window canvas. Retries do not advance quality.
 
+## Text
+
+Nicknames use the existing appearance-owned core commands, tint, culling,
+placement and spawn/death/own-name fading. They draw before snake bodies, as in
+Canvas. Browser text is rasterized by OffscreenCanvas; Windows loads installed
+Arial (`arial.ttf` / `arialbd.ttf`) at runtime through fontdue, with kerning and
+4x coverage sampling. Native coverage is not pixel-identical to browser hinting.
+No fonts or reference artwork are bundled.
+
+`text::TextCache::draw(TextRun, backing_scale)` returns ordinary ordered
+draw/resource pairs. The API supports Arial regular/bold, size, RGB, opacity,
+left/center/right alignment and alphabetic/middle baselines. Shadows are not
+implemented. The LRU retains at most 256 runs / 4 MiB; movement and fading reuse
+textures. Queued pictures retain their own pixels after eviction. Runs admit up
+to 1024 UTF-8 bytes, 1..=128 backing font pixels and an 8192x512 raster, tiled
+with sampling gutters into the existing 512px texture limit. Active/queued
+resources retain the existing aggregate budgets. HUD integration is separate.
+
 ## Scope
 
 Ordered body, early/late food and prey, paired eyes and arena are implemented

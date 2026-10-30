@@ -30,12 +30,14 @@ ureq = { version = "=3.5.0", default-features = false, features = ["rustls", "gz
 scraper = { version = "=0.29.0", default-features = false }
 rand = "=0.10.3"
 png = "=0.18.1"
+fontdue = { version = "=0.9.5", default-features = false, features = ["std"] }
+ttf-parser = { version = "=0.25.1", default-features = false, features = ["std"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "=0.2.129"
 wasm-bindgen-futures = "=0.4.79"
 js-sys = "=0.3.106"
-web-sys = { version = "=0.3.106", features = ["HtmlCanvasElement"] }
+web-sys = { version = "=0.3.106", features = ["HtmlCanvasElement", "OffscreenCanvas", "OffscreenCanvasRenderingContext2d", "TextMetrics", "ImageData"] }
 
 [profile.dev]
 debug = 0
