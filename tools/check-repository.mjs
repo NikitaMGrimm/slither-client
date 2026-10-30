@@ -37,11 +37,13 @@ export function checkRepository(directory, history = false, outgoingTips = []) {
   if (history || outgoingTips.length) {
     // A push can name an old, now-unreferenced commit directly. Include Git's
     // actual outgoing tips, not just the local branches currently retaining it.
+    // Tool-private namespaces (for example refs/t3 checkpoints) are never pushed,
+    // so history covers only branches, remote-tracking branches and tags.
     for (const tip of outgoingTips) {
       if (!/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(tip)) throw new Error('Invalid outgoing object ID');
       git(directory, ['rev-parse', '--verify', `${tip}^{commit}`]);
     }
-    const commits = git(directory, ['rev-list', '--all', ...outgoingTips]).toString('utf8').trim().split('\n').filter(Boolean);
+    const commits = git(directory, ['rev-list', '--branches', '--remotes', '--tags', ...outgoingTips]).toString('utf8').trim().split('\n').filter(Boolean);
     for (const commit of commits) {
       const entries = git(directory, ['ls-tree', '-r', '-z', '--full-tree', commit]).toString('utf8').split('\0').filter(Boolean);
       for (const entry of entries) {
