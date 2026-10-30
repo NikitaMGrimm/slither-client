@@ -1172,7 +1172,14 @@ fn nicknames_reach_ordered_frames_with_retained_tint_and_draw_clock_fade() {
             .frame
             .draws
             .iter()
-            .position(|d| d.asset.handle < 0x3000_0000_0000_0000 && d.asset.width > 1)
+            .position(|d| {
+                g.bank.bodies.iter().any(|family| {
+                    family
+                        .variants
+                        .iter()
+                        .any(|v| g.bank.assets[v.asset] == d.asset)
+                })
+            })
             .unwrap();
         assert!(text < body);
         assert_eq!(
@@ -1186,6 +1193,52 @@ fn nicknames_reach_ordered_frames_with_retained_tint_and_draw_clock_fade() {
     assert!(own_alpha < remote_alpha);
     assert_eq!(remote_alpha, 0.5);
     assert_eq!(g.bank.text.cached_runs(), 2); // appearance-owned tint varies
+}
+
+#[cfg(windows)]
+#[test]
+fn nickname_anchor_keeps_fixed_backing_gap_at_each_dpr_and_zoom() {
+    let mut g = negotiating();
+    let mut named = snake(0);
+    named[22] = 4;
+    named.splice(23..23, b"Name".iter().copied());
+    g.receive(g.generation(), &bundle(&[setup(), named]), 3.)
+        .unwrap();
+    pictures(&mut g);
+    let quality = g.quality();
+    for zoom in [0.6, 1.4] {
+        for dpr in [1_u32, 2, 3] {
+            let scale = f64::from(dpr);
+            let mut client = g.client().clone();
+            client.set_zoom(zoom).unwrap();
+            let p = render::prepare(
+                &mut client,
+                &mut g.bank,
+                [960 * dpr, 540 * dpr],
+                scale,
+                99,
+                quality,
+            )
+            .unwrap();
+            let head = client.snake_objects().next().unwrap().3.metrics();
+            let camera = client.camera().position();
+            let zoom = client.camera().zoom();
+            let head_x = (480. + (head.corrected_head.x - camera.x) * zoom) * scale;
+            let head_y = (270. + (head.corrected_head.y - camera.y) * zoom) * scale;
+            let label = p
+                .frame
+                .draws
+                .iter()
+                .find(|d| d.asset.handle >= 0x4000_0000_0000_0000)
+                .unwrap();
+            assert!((label.translation[0] * scale - head_x).abs() < 1e-9);
+            let gap = label.translation[1] * scale - head_y;
+            assert!(
+                (gap - (32. + 11. * head.scale * zoom * scale)).abs() < 1e-9,
+                "DPR {dpr}, zoom {zoom}: head-to-label gap {gap}"
+            );
+        }
+    }
 }
 
 #[cfg(windows)]

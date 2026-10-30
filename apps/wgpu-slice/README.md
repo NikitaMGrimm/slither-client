@@ -88,11 +88,12 @@ browser controls overlay the full-window canvas. Retries do not advance quality.
 ## Text
 
 Nicknames reuse core tint, culling, placement and fading before body drawing,
-at 15 backing pixels at every DPR. Browser text uses OffscreenCanvas; Windows
-loads system Arial through fontdue (kerning, 4x coverage). No fonts are bundled;
-native coverage differs from browser hinting. Native whitespace and invisible
-Latin-1 controls follow Canvas. Raster/style failures omit labels; failed frame
-completion releases their staged pixels.
+at 15 backing pixels with a fixed 32 backing-pixel gap at every DPR. Browser text
+uses OffscreenCanvas; Windows loads system Arial through fontdue (kerning, 4x
+coverage). No fonts are bundled; native coverage differs from browser hinting.
+Native C0/C1 controls use Canvas's
+whitespace/missing-glyph choices; DEL keeps its blank fallback advance.
+Raster/style failures omit labels; failed frame completion releases staged pixels.
 
 `text::TextCache::draw(TextRun, scale)` returns ordered draw/resource pairs for
 Arial regular/bold, RGB, size, opacity, alignment and baseline; no shadows.

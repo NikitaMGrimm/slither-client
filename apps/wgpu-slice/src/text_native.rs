@@ -33,18 +33,75 @@ mod tests {
         assert!(soft.image.pixels.iter().all(|p| *p == 0));
     }
     #[test]
-    fn canvas_control_normalization_preserves_other_c0_and_c1_characters() {
-        for code in (0..=31).chain(127..=159) {
-            let c = char::from_u32(code).unwrap();
-            let expected = match code {
-                9..=13 => Some(' '),
-                29 => None,
-                _ => Some(c),
-            };
-            assert_eq!(canvas_character(c), expected, "U+{code:04X}");
+    fn c0_and_c1_rasters_use_canvas_missing_glyph_or_whitespace() {
+        let mut rasterizer = Rasterizer::new();
+        for weight in [Weight::Normal, Weight::Bold] {
+            for px in [15., 30.] {
+                for code in (0..=31).chain(128..=159) {
+                    let c = char::from_u32(code).unwrap().to_string();
+                    // Authored oracle: Chromium uses Arial's missing glyph for
+                    // these controls, except ASCII whitespace and U+001D.
+                    let equivalent = match code {
+                        9..=13 => " ",
+                        29 => "",
+                        _ => "\u{ffff}",
+                    };
+                    for (actual, expected) in [
+                        (c.clone(), equivalent.to_owned()),
+                        (format!("A{c}V"), format!("A{equivalent}V")),
+                    ] {
+                        // U+001D is a shaping boundary, covered above separately.
+                        if code == 29 && actual.len() > 1 {
+                            continue;
+                        }
+                        let actual = rasterizer.rasterize(&actual, px, weight, [255; 3]).unwrap();
+                        let expected = rasterizer
+                            .rasterize(&expected, px, weight, [255; 3])
+                            .unwrap();
+                        assert_eq!(
+                            actual.advance, expected.advance,
+                            "U+{code:04X}, {px}, {weight:?}"
+                        );
+                        assert_eq!(actual.offset, expected.offset);
+                        assert_eq!(actual.image.width, expected.image.width);
+                        assert_eq!(actual.image.height, expected.image.height);
+                        assert_eq!(
+                            actual.image.pixels, expected.image.pixels,
+                            "U+{code:04X}, {px}, {weight:?}"
+                        );
+                        if equivalent == "\u{ffff}" {
+                            assert!(actual.image.pixels.iter().any(|p| *p != 0));
+                        }
+                    }
+                }
+            }
         }
-        assert_eq!(canvas_character('\u{ad}'), None);
-        assert_eq!(canvas_character('\u{a0}'), Some('\u{a0}'));
+    }
+    #[test]
+    fn del_raster_is_blank_with_canvas_fallback_advance() {
+        let mut rasterizer = Rasterizer::new();
+        for (px, regular, bold) in [
+            (8., 4., 4.),
+            (12., 6., 7.),
+            (12.5, 7., 8.),
+            (15., 8., 9.),
+            (17.9, 9., 10.),
+            (18., 9., 9.),
+            (30., 15., 15.),
+        ] {
+            for (weight, advance) in [(Weight::Normal, regular), (Weight::Bold, bold)] {
+                let del = rasterizer
+                    .rasterize("\u{7f}", px, weight, [255; 3])
+                    .unwrap();
+                assert_eq!(del.advance, advance);
+                assert!(del.image.pixels.iter().all(|p| *p == 0));
+                let av = rasterizer.rasterize("AV", px, weight, [255; 3]).unwrap();
+                let padded = rasterizer
+                    .rasterize("\u{7f}AV\u{7f}", px, weight, [255; 3])
+                    .unwrap();
+                assert!((padded.advance - av.advance - 2. * advance).abs() < 0.00001);
+            }
+        }
     }
 }
 struct Arial {
@@ -55,7 +112,19 @@ fn canvas_character(c: char) -> Option<char> {
     match c {
         '\u{9}'..='\u{d}' => Some(' '),
         '\u{1d}' | '\u{ad}' => None,
+        // fontdue merges legacy cmaps, where these codes can name unrelated
+        // accented glyphs or the null glyph. Canvas uses Arial's .notdef box.
+        '\u{0}'..='\u{1f}' | '\u{80}'..='\u{9f}' => Some('\u{ffff}'),
         _ => Some(c),
+    }
+}
+fn del_advance(px: f64, weight: Weight) -> f32 {
+    // Windows Chromium's blank SimSun fallback has half-em advances. At these
+    // small sizes its hinted widths snap to pixels, plus one for synthetic bold.
+    if (12. ..18.).contains(&px) {
+        ((px.round() / 2.).round() + f64::from(weight == Weight::Bold)) as f32
+    } else {
+        (px / 2.) as f32
     }
 }
 impl Rasterizer {
@@ -111,6 +180,11 @@ impl Rasterizer {
         let mut previous = None;
         let mut bounds = [0_i32; 4];
         for c in text.chars() {
+            if c == '\u{7f}' {
+                pen += del_advance(px, weight) * SAMPLE as f32;
+                previous = None;
+                continue;
+            }
             let Some(c) = canvas_character(c) else {
                 // Canvas suppresses these glyphs but keeps a shaping boundary:
                 // adjacent letters do not acquire kerning across the control.

@@ -232,7 +232,9 @@ pub fn prepare(
                     weight: Weight::Normal,
                     color: name.color,
                 },
-                position: [name.position.x, name.position.y],
+                // The core mixes a fixed backing-pixel gap with world geometry;
+                // only the latter should grow when the logical frame is scaled.
+                position: [name.position.x, name.position.y - 32. + 32. / scale],
                 align: Align::Center,
                 baseline: Baseline::Middle,
                 alpha: name.alpha,
@@ -540,6 +542,7 @@ mod text_staging_tests {
         )
         .unwrap();
         Frame {
+            snakes: Vec::new(),
             identity,
             extent: [960, 540],
             viewport_scale: 1.,
