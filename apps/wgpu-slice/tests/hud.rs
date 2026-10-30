@@ -367,7 +367,7 @@ fn fixed_logical_layout_keeps_ten_rows_on_small_windows_and_at_double_dpr() {
     let v = view();
     let ordinary = hud::plan(&v, [960, 540], 1.).unwrap();
     assert_eq!(ordinary, hud::plan(&v, [1920, 1080], 2.).unwrap());
-    for extent in [[640, 360], [400, 700], [320, 200]] {
+    for extent in [[640, 360], [400, 700]] {
         let p = hud::plan(&v, extent, 1.).unwrap();
         let board = p
             .panels
@@ -441,4 +441,62 @@ fn final_readout_is_separate_from_active_gameplay() {
     let p = hud::plan(&v, [960, 540], 1.).unwrap();
     assert_eq!(p.panels.len(), 1);
     assert_eq!(p.panels[0].role, Role::Leaderboard);
+}
+
+#[test]
+fn readout_fields_have_their_own_premultiplied_opacity_before_lifecycle_fading() {
+    let mut v = view();
+    v.rows.clear();
+    v.opacity.readout = 0.5;
+    let p = hud::plan(&v, [960, 540], 1.).unwrap();
+    let mut r = hud::resource();
+    hud::rasterize(&p, &mut r).unwrap();
+    let pixels = r.image.pixels.as_chunks::<4>().0;
+    let check = |x: u32, y: u32, width: u32, expected: [u8; 4]| {
+        let visible: Vec<_> = (y..y + 7)
+            .flat_map(|y| (x..x + width).map(move |x| pixels[(y * p.extent[0] + x) as usize]))
+            .filter(|pixel| pixel[3] != 0)
+            .collect();
+        assert!(!visible.is_empty());
+        assert!(
+            visible.iter().all(|pixel| *pixel == expected),
+            "{visible:?}"
+        );
+    };
+    check(4, 4, 13 * 6, [102; 4]); // Length label: 0.4.
+    check(4 + 13 * 6, 4, 20 * 6, [204; 4]); // Length value: 0.8.
+    check(4, 13, 11 * 6, [77; 4]); // Rank label: 0.3.
+    check(4 + 11 * 6, 13, 9 * 6, [89; 4]); // Rank value: 0.35.
+    check(4 + 20 * 6, 13, 4 * 6, [77; 4]); // Separator: 0.3.
+    check(4 + 24 * 6, 13, 9 * 6, [89; 4]); // Population: 0.35.
+    assert_eq!(p.panels[0].opacity, 0.5);
+}
+
+#[test]
+fn narrow_short_board_reserves_the_readout_height_only_when_columns_overlap() {
+    let v = view();
+    for (extent, dpr) in [
+        ([320, 180], 1.),
+        ([640, 360], 2.),
+        ([320, 200], 1.),
+        ([320, 120], 1.),
+    ] {
+        let p = hud::plan(&v, extent, dpr).unwrap();
+        let score = p.panels.iter().find(|p| p.role == Role::Score).unwrap();
+        let board = p
+            .panels
+            .iter()
+            .find(|p| p.role == Role::Leaderboard)
+            .unwrap();
+        assert!(board.destination.x < score.destination.x + score.destination.width);
+        assert!(board.destination.y + board.destination.height <= score.destination.y);
+        let count = board
+            .lines
+            .iter()
+            .filter(|l| matches!(l, Line::Row(_)))
+            .count();
+        assert!(count > 0 && count < 10);
+    }
+    let wide = hud::plan(&v, [960, 180], 1.).unwrap();
+    assert_eq!(wide.panels[1].lines.len(), 11);
 }

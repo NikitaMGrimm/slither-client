@@ -169,14 +169,26 @@ pub fn plan(view: &View, extent: [u32; 2], scale: f64) -> Result<Plan> {
         return Ok(p);
     }
     let columns = ((w - 8 - 2 * PAD) / (6 * s)).min(33);
-    let count = (h.saturating_sub(8 + 2 * PAD) / (9 * s))
+    let width = columns * 6 * s + 2 * PAD;
+    let x = f64::from(w - 4 - width) * UI_SCALE;
+    let right = x + f64::from(width) * UI_SCALE;
+    let bottom = p
+        .panels
+        .iter()
+        .filter(|panel| {
+            x < panel.destination.x + panel.destination.width && right > panel.destination.x
+        })
+        .map(|panel| (panel.destination.y / UI_SCALE) as u32)
+        .min()
+        .unwrap_or(h - 4);
+    let count = (bottom.saturating_sub(4 + 2 * PAD) / (9 * s))
         .saturating_sub(1)
         .min(10)
         .min(view.rows.len() as u32);
     if columns < 27 || count == 0 {
         return Ok(p);
     }
-    let size = [columns * 6 * s + 2 * PAD, (count + 1) * 9 * s + 2 * PAD];
+    let size = [width, (count + 1) * 9 * s + 2 * PAD];
     let y = p.extent[1] + 2;
     let mut lines = vec![Line::Heading];
     lines.extend(
@@ -191,7 +203,7 @@ pub fn plan(view: &View, extent: [u32; 2], scale: f64) -> Result<Plan> {
         origin: [0, y],
         size,
         destination: BodyRect {
-            x: f64::from(w - 4 - size[0]) * UI_SCALE,
+            x,
             y: 4. * UI_SCALE,
             width: f64::from(size[0]) * UI_SCALE,
             height: f64::from(size[1]) * UI_SCALE,
@@ -395,39 +407,52 @@ pub fn rasterize(plan: &Plan, target: &mut Resource) -> Result<()> {
                         (true, _) => "L ",
                         _ => "F ",
                     };
-                    paint.text(label, at, label_cols, false, normal);
+                    let (label_color, value_color) = if current {
+                        ([102; 4], [204; 4]) // White at 0.4 / 0.8, before panel lifecycle opacity.
+                    } else {
+                        (normal, white)
+                    };
+                    paint.text(label, at, label_cols, false, label_color);
                     paint.number(
                         value,
                         [at[0] + label_cols * 6 * plan.glyph_scale, at[1]],
                         cols.saturating_sub(label_cols),
-                        white,
+                        value_color,
                     );
                 }
                 Line::Status(s) | Line::Message(s) => paint.text(s, at, cols, false, normal),
                 Line::Rank { rank, population } => {
+                    let label_color = [77; 4]; // White at 0.3, premultiplied.
+                    let value_color = [89; 4]; // White at 0.35, premultiplied.
                     if cols < 10 {
                         let left = (cols - 1) / 2;
-                        paint.number(rank, at, left, white);
-                        paint.text("/", [at[0] + left * 6, at[1]], 1, false, normal);
+                        paint.number(rank, at, left, value_color);
+                        paint.text("/", [at[0] + left * 6, at[1]], 1, false, label_color);
                         paint.number(
                             population,
                             [at[0] + (left + 1) * 6, at[1]],
                             cols - left - 1,
-                            white,
+                            value_color,
                         );
                         continue;
                     }
                     let label = if cols >= 29 { "YOUR RANK: " } else { "R " };
                     let n = label.len() as u32;
-                    paint.text(label, at, n, false, normal);
+                    paint.text(label, at, n, false, label_color);
                     let field = (cols - n - 4) / 2;
-                    paint.number(rank, [at[0] + n * 6, at[1]], field, white);
-                    paint.text(" OF ", [at[0] + (n + field) * 6, at[1]], 4, false, normal);
+                    paint.number(rank, [at[0] + n * 6, at[1]], field, value_color);
+                    paint.text(
+                        " OF ",
+                        [at[0] + (n + field) * 6, at[1]],
+                        4,
+                        false,
+                        label_color,
+                    );
                     paint.number(
                         population,
                         [at[0] + (n + field + 4) * 6, at[1]],
                         cols - n - field - 4,
-                        white,
+                        value_color,
                     );
                 }
                 Line::Heading => {

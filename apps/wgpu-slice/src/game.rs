@@ -989,8 +989,12 @@ impl LocalGame {
             status: status.into(),
             score,
             final_score,
-            rank: hud.rank.to_string(),
-            population: hud.population.to_string(),
+            rank: hud
+                .current
+                .map_or_else(|| "--".into(), |current| current.rank_text()),
+            population: hud
+                .current
+                .map_or_else(|| "--".into(), |current| current.population_text()),
             rows: if reset_rows {
                 Vec::new()
             } else {
@@ -1064,8 +1068,8 @@ mod hud_projection_tests {
         assert_eq!(view.rows.len(), 10);
         assert_eq!(view.rows[2].name_text, "Player");
         assert!(view.rows[2].own);
-        assert_eq!(view.rank, "3");
-        assert_eq!(view.population, "50");
+        assert_eq!(view.rank, "--");
+        assert_eq!(view.population, "--");
         assert_eq!(
             view.rows.iter().map(|r| r.ordinal).collect::<Vec<_>>(),
             (1..=10).collect::<Vec<_>>()

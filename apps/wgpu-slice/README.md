@@ -76,7 +76,8 @@ outside active play; compact host diagnostics remain available separately.
 
 The original 5x7 bitmap glyphs have fixed logical size (10.5 pixels high, 13.5
 pixel line spacing), independent of viewport size and backing DPR. All ten rows
-fit at 640x360 and 320x200. Shorter windows reduce rows in order; widths below
+fit at 640x360. Short, narrow windows reserve the retained readout space before
+choosing row count; shorter windows reduce rows in order. Widths below
 300 logical pixels omit the board. Tiny views omit HUD submission. ASCII letters
 use uppercase glyphs; unsupported Unicode scalars visibly become question marks.
 This temporary bitmap renderer does not establish typography or pixel parity.
