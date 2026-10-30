@@ -78,6 +78,19 @@ requires a separate exact one-request/no-session/no-socket authorization. Game
 connections retain the manual single-attempt ledger requirements; this exception
 does not renew or bypass a consumed ledger.
 
+## Native wgpu Play acquisition
+
+The native wgpu host has a separate explicit-Play acquisition path for the
+current official homepage, its linked game script and directory. This dynamic
+path does not use the parked browser adapter's pin or document capabilities.
+Downloads remain bounded inert data; only the existing closed profile literals
+and directory records are interpreted. No source, credential, asset or capture
+is persisted or added to Git. Owned source/profile buffers clear on release;
+library/OS copies are outside that guarantee. See the
+[slice README](../apps/wgpu-slice/README.md#official-windows-mode) for request,
+redirect, cancellation and selection bounds. Offline tests use authored synthetic
+inputs only. Agent-run official connections remain outside implementation checks.
+
 ## Branding and license
 
 `assets/logo.svg` uses an original C-shaped snake with an eye cutout and the

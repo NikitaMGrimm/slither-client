@@ -50,6 +50,15 @@ The Windows CI job now includes its format, offline tests, Clippy and executable
 build; the WebAssembly job checks and builds the shared library and generates
 matching web bindings. These checks do not open a window or initialize a GPU.
 
+The native official-Play adapter adds synthetic coverage for dynamic script/profile
+selection, directory decoding, weighted cluster selection, explicit endpoints,
+cancellation and profile forwarding through the existing challenge/login path.
+A loopback WebSocket double checks native DNS and upgrade headers. The native
+adapter has also completed a headless local-simulator session with CPU picture
+acknowledgments, own-snake state and turn/boost inputs. This does not establish
+GPU/window behavior, actual HTTP acquisition or official-server acceptance.
+The standalone browser remains local-only; see its README for CORS/Origin limits.
+
 On 2026-10-29, the earlier rendering-slice executable rendered its synthetic
 body/food scene in a Windows Vulkan window on an NVIDIA GeForce RTX 5070 Ti,
 resized and exited normally. A separate, nonexclusive background-browser check

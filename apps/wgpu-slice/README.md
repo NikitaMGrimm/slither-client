@@ -1,20 +1,19 @@
-# Shared local gameplay with wgpu
+# Shared gameplay with wgpu
 
 This isolated app consumes the existing pure Rust core by path dependency. It
 does not change root Cargo files, the Canvas entry/payload, simulator, extension
 or previously accepted local bundles. Windows and browser use `game::LocalGame`,
 the same actual protocol ingress, session/input/HUD policies and ordered plans.
-No socket exists at startup. Only explicit Play to an entered
-`ws://127.0.0.1:<port>/slither` endpoint can construct one, after the initial
-reset frame is successfully presented. There is no automatic reconnect, remote
-profile, official-server adapter or client-authoritative movement.
+No socket exists at startup. Enter starts explicit Play; the game socket opens
+after the initial reset frame is successfully presented. Native mode supports
+official discovery or a supplied simulator endpoint. There is no automatic reconnect.
 
 ## Gameplay and adapters
 
 `LocalGame` uses `SessionPolicy` for phases, budgets, death/return, ping/lag and
 launch/reset commits. It sends the existing negotiation prefixes, solves the
-received challenge in Rust, then sends the existing login with authored local
-zero credentials. Both hosts use the negotiated header-free framing and admit
+received challenge in Rust, then sends the existing login with the selected
+profile (authored zero credentials for simulator mode). Both hosts use the negotiated header-free framing and admit
 protocol 19. The core atomically ingests actual Setup/spawn/update/food/prey/HUD
 packets. No fixture is injected into the playable owner.
 
@@ -44,8 +43,9 @@ boundary starts the handshake budget. Wasm `flush(now_ms,width,height,dpr)` carr
 fresh time before presentation-only work; `presented(bool)` remains unchanged.
 
 Windows uses thin winit pointer/key/window glue and a native tungstenite
-transport. The connector has a 1 s TCP deadline plus an absolute 2 s HTTP handshake
-deadline (including slow-drip peers); cancellation/join is bounded by them.
+transport. The connector has a 3 s total deadline: at most 1 s DNS wait, 1 s TCP,
+and 2 s HTTP upgrade, within that total (including slow-drip peers). A timed-out
+OS DNS worker can finish later but owns no socket.
 After handshake, all I/O is nonblocking. A WouldBlock write remains owned by
 tungstenite and is never duplicated. Binary frames, receive bursts and pending
 writes are bounded. Remote close drops socket ownership; later Play is explicit.
@@ -56,6 +56,54 @@ listeners detach before close/free. The first thrown JS value is retained
 separately, including `undefined`. GPU failure stops render attempts and disables
 Play; there is no Canvas/software fallback presented as GPU success. The input
 policy's existing focus-loss semantics are preserved (blur invents no release).
+
+## Official Windows mode
+
+From the repository root:
+
+```powershell
+cargo run --manifest-path apps/wgpu-slice/Cargo.toml --locked --bin slither-wgpu-desktop -- --official --nickname Player --skin 0
+```
+
+Press Enter once for Play. Add `--server host:port` to skip directory fetching
+and latency probes while still acquiring the current profile. IPv4, DNS names,
+and bracketed IPv6 are supported. Escape cancels preparation or stops the game;
+another Enter is a new explicit attempt. Nothing is fetched before Play.
+
+Each Play reads the canonical homepage, selects its `/s/game<digits>.js` script
+element, and parses the unique `client_version` and `cpw` declarations with the
+core's closed literal grammar. Downloaded code is never evaluated. Automatic
+selection reads the script's `https://slither.io/i<digits>.txt` directory URL,
+decodes rotating nibbles into IPv4/IPv6 records, and sends three byte-112 echoes
+to one random address per cluster at `ws://address:80/ptc`. The minimum rounded
+RTT chooses the cluster; active servers are weighted by population plus five.
+The original port/population fallback applies when no active weighted choice
+is available. Each Play starts fresh, without historical server exclusions.
+
+Acquisition admits at most 256 KiB homepage/directory and 1 MiB script, with a
+5 s deadline and at most three canonical-host redirects per resource. HTTP is
+allowed because the recorded canonical homepage redirects HTTPS to HTTP. Probes
+use at most 32 workers, a 7 s window shortened to 2667 ms after the first reply,
+and at most 4096 decoded endpoints. In larger directories some clusters may not
+be sampled before the deadline. Escape cancels publication immediately; an active
+HTTP read may take up to its remaining deadline to release. Source/profile bytes
+stay in memory, with owned buffers cleared on release; no disk cache is used.
+Library/OS copies and compiler temporaries are not guaranteed erased.
+
+Game and probe upgrades use the original `ws://` paths, `Origin: http://slither.io`,
+a desktop User-Agent, and tungstenite's generated Host, Upgrade, Connection,
+WebSocket version and random key headers. Compression extensions are not advertised.
+The existing negotiation/challenge/login and gameplay owner remain shared.
+Official network acceptance is manual and is not established by offline tests.
+
+The standalone browser build remains simulator-only. Browser fetch needs CORS
+permission for the homepage, script and directory; JavaScript cannot override
+WebSocket Origin. HTTPS pages also block the original insecure `ws://` endpoints.
+Possible follow-up approaches are a same-origin HTTP game-page host (subject to
+WebGPU secure-context availability), or a controlled HTTPS/WSS relay that fetches
+metadata and supplies the upstream Origin. A separately permissioned extension
+transport could address fetch CORS but still needs a compatible Origin/socket
+route. No relay, extension integration, or browser official mode is included.
 
 ## Represented visuals and limits
 
@@ -104,7 +152,8 @@ Lost surface/device stops the host, without a new connection or gameplay reset/r
 
 Rust 1.99.0, wgpu 30.0.1, winit 0.30.13, tungstenite 0.30.0 (handshake/no TLS),
 wasm-bindgen 0.2.129, futures 0.4.79 and web-sys/js-sys 0.3.106 are pinned in this
-crate/lock. Native DX12/Vulkan and browser WebGPU share frame/resource/render code.
+crate/lock. Native acquisition uses ureq 3.5.0 with Rustls/gzip, scraper 0.29.0
+and rand 0.10.3; URL admission uses url 2.5.8. Native DX12/Vulkan and browser WebGPU share frame/resource/render code.
 Use one isolated Cargo lane; never overwrite the root Canvas target/generated
 files. From this app directory:
 

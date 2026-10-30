@@ -6,10 +6,18 @@
 on the existing browser-free Rust client. Its Windows host and standalone WebGPU
 host consume one `LocalGame` around the existing `AnimatedClient`, session,
 gameplay, desktop-input and HUD policies. Platform adapters execute copied socket,
-input and lifecycle effects outside Rust borrows. Only explicit Play to an admitted
-loopback endpoint opens a socket, after successful reset presentation; Stop closes
+input and lifecycle effects outside Rust borrows. Only explicit Play opens a game
+socket, after successful reset presentation; Stop closes
 it, and restart requires another Play. The Canvas application and root Cargo
 dependencies remain separate. A labelled synthetic diagnostic entry is retained.
+
+The native adapter additionally prepares official Play by fetching the current
+canonical page/script and directory as inert data, parsing the existing closed
+profile literals, probing clusters and selecting a server. Preparation runs
+outside the event loop and before the session deadline. The shared owner accepts
+that profile for its existing challenge/login path. Native endpoints support DNS,
+IPv4 and IPv6; the standalone browser entry retains its local-only gate. See the
+slice README for bounds and browser CORS/Origin constraints.
 
 The small `Frame`/`Draw` boundary retains backing extent, viewport scale, frame
 and tick identities, full `u64` asset handles/revisions, readiness, dimensions,

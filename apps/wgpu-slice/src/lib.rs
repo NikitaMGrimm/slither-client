@@ -9,6 +9,8 @@ pub mod hud;
 pub mod materials;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod official;
 pub mod render;
 pub mod scene;
 

@@ -34,7 +34,9 @@ See [architecture](docs/architecture.md) for supported inputs and limits.
 An additive [shared wgpu client](apps/wgpu-slice/README.md) uses the same Rust
 protocol, session, input, HUD and presentation policies on Windows and browser
 WebGPU. Explicit local Play/Stop, pointer/arrows/boost and body/food/prey/paired-eye
-rendering are implemented. Actual local checks cover native transport with
+rendering are implemented. Native explicit Play also supports current official
+profile acquisition and server discovery; official acceptance remains manual.
+Actual local checks cover native transport with
 offscreen Vulkan rendering and the ordinary background-browser page, including
 restart, resize and cleanup. Native-window input and full visual/player-feel
 acceptance remain open. Canvas remains the reference backend.

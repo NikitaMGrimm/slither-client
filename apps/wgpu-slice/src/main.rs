@@ -8,6 +8,7 @@ mod desktop {
         game::LocalGame,
         gpu::{SurfaceHost, instance},
         native::{Event, Transport},
+        official::{self, Preparation},
     };
     use std::{
         sync::Arc,
@@ -25,25 +26,35 @@ mod desktop {
         endpoint: Option<String>,
         nickname: String,
         skin: u8,
+        official: bool,
+        server: Option<String>,
     }
     pub fn options() -> Result<Option<Options>> {
+        parse_options(std::env::args().skip(1))
+    }
+    fn parse_options(mut args: impl Iterator<Item = String>) -> Result<Option<Options>> {
         let mut o = Options {
             nickname: "Player".into(),
             ..Default::default()
         };
-        let mut args = std::env::args().skip(1);
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "--help" | "-h" => {
                     println!(
-                        "Offline by default. Native window requires manual launch.\nslither-wgpu-desktop [--endpoint ws://127.0.0.1:<port>/slither] [--nickname NAME] [--skin 0..65]\nEnter: explicit Play. Escape: Stop. Pointer/arrows/Space: existing Rust input.\nNo automatic connection/reconnect; no official profiles. Diagnostic: slither-wgpu-diagnostic."
+                        "Offline by default.\nslither-wgpu-desktop [--official [--server host:port] | --endpoint ws://host:port/slither] [--nickname NAME] [--skin 0..65]\nEnter: Play (official mode first fetches profile/directory and probes clusters). Escape: Stop/cancel. Pointer/arrows/Space: existing Rust input.\nNo automatic connection/reconnect. --endpoint uses authored zero credentials for simulators. Diagnostic: slither-wgpu-diagnostic."
                     );
                     return Ok(None);
                 }
                 "--endpoint" => {
                     let e = args.next().ok_or("Endpoint value required")?;
-                    slither_wgpu_slice::game::loopback_endpoint(&e)?;
+                    slither_wgpu_slice::game::server_endpoint(&e)?;
                     o.endpoint = Some(e);
+                }
+                "--official" => o.official = true,
+                "--server" => {
+                    let server = args.next().ok_or("Server value required")?;
+                    official::explicit_endpoint(&server)?;
+                    o.server = Some(server);
                 }
                 "--nickname" => o.nickname = args.next().ok_or("Nickname required")?,
                 "--skin" => {
@@ -55,6 +66,12 @@ mod desktop {
                 }
                 _ => return Err(format!("Unknown option {arg}")),
             }
+        }
+        if o.official && o.endpoint.is_some() {
+            return Err("Use --official or --endpoint".into());
+        }
+        if o.server.is_some() && !o.official {
+            return Err("--server requires --official".into());
         }
         let mut menu = slither_client::menu_preferences::MenuPreferences::new(true);
         menu.select(o.skin, &[])?;
@@ -69,6 +86,9 @@ mod desktop {
         transport: Transport,
         started: Instant,
         cursor: [f64; 2],
+        preparation: Option<Preparation>,
+        nickname: String,
+        skin: u8,
     }
     impl Running {
         fn effects(&mut self) -> Result<()> {
@@ -121,6 +141,29 @@ mod desktop {
             }
         }
         fn frame(&mut self) -> Result<()> {
+            if let Some(preparation) = &mut self.preparation
+                && let Some(result) = preparation.poll()
+            {
+                let cancelled = preparation.cancelled();
+                self.preparation.take();
+                if !cancelled {
+                    match result {
+                        Ok(prepared) => {
+                            println!("Selected {}; starting explicit Play", prepared.endpoint);
+                            self.game.play_with_profile(
+                                &prepared.endpoint,
+                                &self.nickname,
+                                self.skin,
+                                &prepared.profile,
+                            )?;
+                        }
+                        Err(e) => {
+                            eprintln!("Official discovery failed: {e}");
+                            self.game.fail(&e);
+                        }
+                    }
+                }
+            }
             let size = self.window.inner_size();
             let extent = [size.width, size.height];
             let scale = self.window.scale_factor();
@@ -161,7 +204,12 @@ mod desktop {
             self.effects()?;
             self.pictures()?;
             self.window.set_title(&format!(
-                "SlitherClient local | {} | MSAA{}",
+                "SlitherClient | {}{} | MSAA{}",
+                if self.preparation.is_some() {
+                    "Acquiring official profile/server | "
+                } else {
+                    ""
+                },
                 self.game.hud_text().replace('\n', " | "),
                 self.host.renderer.sample_count
             ));
@@ -189,7 +237,7 @@ mod desktop {
     }
     impl App {
         fn fail(&mut self, l: &ActiveEventLoop, e: String) {
-            eprintln!("Local GPU host stopped: {e}");
+            eprintln!("GPU host stopped: {e}");
             self.failure = Some(e);
             if let Some(r) = &mut self.running {
                 r.game.stop();
@@ -201,7 +249,7 @@ mod desktop {
             let window = Arc::new(
                 l.create_window(
                     Window::default_attributes()
-                        .with_title("SlitherClient local — Enter Play / Escape Stop")
+                        .with_title("SlitherClient — Enter Play / Escape Stop")
                         .with_inner_size(winit::dpi::LogicalSize::new(960., 540.)),
                 )
                 .map_err(|e| e.to_string())?,
@@ -223,6 +271,9 @@ mod desktop {
                 transport: Transport::default(),
                 started: Instant::now(),
                 cursor: [480., 270.],
+                preparation: None,
+                nickname: String::new(),
+                skin: 0,
             })
         }
     }
@@ -243,6 +294,9 @@ mod desktop {
             let result = (|| -> Result<()> {
                 match event {
                     WindowEvent::CloseRequested => {
+                        if let Some(p) = &r.preparation {
+                            p.cancel();
+                        }
                         r.game.stop();
                         r.transport.close();
                         l.exit();
@@ -274,21 +328,30 @@ mod desktop {
                         let down = event.state == ElementState::Pressed;
                         match event.physical_key {
                             PhysicalKey::Code(KeyCode::Enter) if down && !event.repeat => {
-                                if r.game.can_play() {
-                                    if let Some(endpoint) = &self.options.endpoint {
+                                if r.game.can_play() && r.preparation.is_none() {
+                                    if self.options.official {
+                                        r.nickname.clone_from(&self.options.nickname);
+                                        r.skin = self.options.skin;
+                                        println!(
+                                            "Acquiring official profile and server; Escape cancels"
+                                        );
+                                        r.preparation =
+                                            Some(Preparation::start(self.options.server.clone())?);
+                                    } else if let Some(endpoint) = &self.options.endpoint {
                                         r.game.play(
                                             endpoint,
                                             &self.options.nickname,
                                             self.options.skin,
                                         )?;
                                     } else {
-                                        eprintln!(
-                                            "Explicit --endpoint is required; no socket opened"
-                                        );
+                                        eprintln!("Use --official or --endpoint before Play");
                                     }
                                 }
                             }
                             PhysicalKey::Code(KeyCode::Escape) if down => {
+                                if let Some(p) = &r.preparation {
+                                    p.cancel();
+                                }
                                 r.game.stop();
                                 r.effects()?;
                             }
@@ -332,6 +395,45 @@ mod desktop {
         event_loop.run_app(&mut app).map_err(|e| e.to_string())?;
         app.running.take();
         app.failure.map_or(Ok(()), Err)
+    }
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        fn parse(args: &[&str]) -> Result<Option<Options>> {
+            parse_options(args.iter().map(|s| s.to_string()))
+        }
+        #[test]
+        fn cli_modes_are_explicit_and_validate_before_window_or_network() {
+            let official = parse(&[
+                "--official",
+                "--server",
+                "game.example:445",
+                "--nickname",
+                "Player",
+                "--skin",
+                "65",
+            ])
+            .unwrap()
+            .unwrap();
+            assert!(official.official);
+            assert_eq!(official.server.as_deref(), Some("game.example:445"));
+            assert_eq!(official.skin, 65);
+            assert!(parse(&["--endpoint", "ws://localhost:19491/slither"]).is_ok());
+            assert!(parse(&["--help"]).unwrap().is_none());
+            for args in [
+                vec!["--official", "--endpoint", "ws://127.0.0.1:19491/slither"],
+                vec!["--server", "x:445"],
+                vec!["--official", "--skin", "66"],
+                vec!["--official", "--server"],
+                vec![
+                    "--official",
+                    "--nickname",
+                    "this nickname is too long to encode",
+                ],
+            ] {
+                assert!(parse(&args).is_err());
+            }
+        }
     }
 }
 #[cfg(not(target_arch = "wasm32"))]
