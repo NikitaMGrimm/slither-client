@@ -44,8 +44,9 @@ compares authored sprites against an external private pack.
 
 ## Scope
 
-Ordered body, early/late food and prey, paired eyes, arena and a small bitmap HUD
-are implemented using authored procedural materials. Complete menus, image faces,
+Ordered body, early/late food and prey, paired eyes and arena are implemented
+using authored procedural materials. The HUD shows length and rank at bottom left
+and the top-ten leaderboard at top right, in a temporary 5x7 bitmap font. Complete menus, image faces,
 antennas and mobile integration remain open. Material/edge rasterization differs
 from Canvas; tests do not establish visual parity or player feel.
 

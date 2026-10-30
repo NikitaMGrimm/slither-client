@@ -192,6 +192,40 @@ fn playing() -> LocalGame {
     pump(&mut g, 20.);
     g
 }
+
+fn zero_header_preserves_readout(rank: u16, population: u16) {
+    let mut g = playing();
+    let before = g.hud_view();
+    assert_eq!(before.score, "165");
+    assert_eq!((&*before.rank, &*before.population), ("2", "9"));
+    let mut packet = board();
+    packet[2..4].copy_from_slice(&rank.to_be_bytes());
+    packet[4..6].copy_from_slice(&population.to_be_bytes());
+    g.receive(g.generation(), &bundle(&[packet]), 30.).unwrap();
+    pump(&mut g, 40.);
+    let after = g.hud_view();
+    assert_eq!(
+        (&after.score, &after.rank, &after.population),
+        (&before.score, &before.rank, &before.population)
+    );
+    let mut valid = board();
+    valid[2..4].copy_from_slice(&3u16.to_be_bytes());
+    valid[4..6].copy_from_slice(&12u16.to_be_bytes());
+    g.receive(g.generation(), &bundle(&[valid]), 50.).unwrap();
+    pump(&mut g, 60.);
+    let restored = g.hud_view();
+    assert_eq!((&*restored.rank, &*restored.population), ("3", "12"));
+}
+
+#[test]
+fn zero_rank_packet_preserves_the_complete_retained_readout() {
+    zero_header_preserves_readout(0, 9);
+}
+
+#[test]
+fn zero_population_packet_preserves_the_complete_retained_readout() {
+    zero_header_preserves_readout(2, 0);
+}
 #[test]
 fn endpoint_and_play_are_explicit_and_atomic() {
     for bad in [
@@ -319,6 +353,7 @@ fn zero_resize_retry_retains_generation_state_and_pending_world() {
     g.begin_frame(40., [960, 540], 1.).unwrap();
     effects(&mut g);
     let p = g.take_frame().unwrap();
+    let hud_draws = p.frame.draws[p.frame.draws.len() - 2..].to_vec();
     g.retry_frame(p).unwrap();
     g.viewport([0, 0], 1.).unwrap();
     assert!(g.take_frame().is_none());
@@ -327,6 +362,7 @@ fn zero_resize_retry_retains_generation_state_and_pending_world() {
     let p = g.take_frame().unwrap();
     assert_eq!(p.frame.extent, [1920, 1080]);
     assert_eq!(p.frame.viewport_scale, 2.);
+    assert_eq!(&p.frame.draws[p.frame.draws.len() - 2..], &hud_draws);
     g.presented(true).unwrap();
     assert_eq!(g.generation(), generation);
     assert_eq!(g.phase(), Phase::Playing);
