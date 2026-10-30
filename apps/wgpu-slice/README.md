@@ -129,6 +129,11 @@ The ordinary desktop entry's `--help` exits before creating an event loop/window
 The retained `slither-wgpu-diagnostic` and `diagnostic.html` use the original
 finite synthetic Scene and are labelled diagnostics, not playable server modes.
 
+`cargo run --release --example sprite_parity -- <private-pack-dir>` scores the
+authored body, food and prey sprites against a local capture of the original
+client's rasters (`catalog.json` plus `r*.png`). The pack stays outside the
+repository; the example only reads it and prints per-family error counts.
+
 After separate root review/resource gates, a manual native vector is:
 
 ```text
