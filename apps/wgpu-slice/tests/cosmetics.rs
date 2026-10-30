@@ -3,7 +3,8 @@ use slither_client::{presentation::*, protocol::ElapsedHeader};
 use slither_wgpu_slice::{
     bank::Bank,
     cosmetics::{self, Cosmetics, Images},
-    render,
+    frame::MAX_DRAWS,
+    hud, render,
 };
 use std::io::Cursor;
 
@@ -429,6 +430,115 @@ fn missing_and_corrupt_native_images_preserve_play_and_other_cosmetics() {
             .starts_with(std::env::temp_dir().canonicalize().unwrap())
     );
     fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn hundred_alive_outlined_snakes_with_hud_and_minimap_fit_the_draw_budget() {
+    let mut bank = Bank::new().unwrap();
+    bank.cosmetics = Some(cosmetics(None));
+    let packets: Vec<_> = std::iter::once(setup())
+        .chain((1u16..=100).map(|id| {
+            let mut packet = spawn(41, 255);
+            packet[1..3].copy_from_slice(&id.to_be_bytes());
+            // Short contiguous bodies keep this focused on eye draw cost.
+            packet[16..19].copy_from_slice(&u24(4880));
+            packet.truncate(31);
+            packet.extend([0, 0]);
+            packet
+        }))
+        .chain(std::iter::once(vec![b'M', 0, 8, 64]))
+        .flat_map(|packet| {
+            let mut out = (packet.len() as u16).to_be_bytes().to_vec();
+            out.extend(packet);
+            out
+        })
+        .collect();
+    let mut c = AnimatedClient::new(0.).unwrap();
+    c.enable_minimap_tracking().unwrap();
+    c.apply_frame_with_accessory_presentation::<ClientPresentationError, _>(
+        &packets,
+        ElapsedHeader::Absent,
+        |appearance, context| {
+            Ok(bank
+                .cosmetics
+                .as_ref()
+                .unwrap()
+                .appearance(appearance, context.own)
+                .unwrap())
+        },
+    )
+    .unwrap();
+    c.advance(100., false).unwrap();
+    c.observe_minimap_ui_fraction(1.).unwrap();
+    let prepared = render::prepare(&mut c, &mut bank, [960, 540], 1., 1, quality()).unwrap();
+    assert_eq!(prepared.frame.snakes.len(), 100);
+    assert!(
+        prepared
+            .frame
+            .snakes
+            .iter()
+            .all(|s| s.viewport_body_commands > 0)
+    );
+    let white = bank.disk([255; 3]).unwrap();
+    let eyes: Vec<_> = prepared
+        .frame
+        .draws
+        .iter()
+        .filter(|d| d.asset == white)
+        .collect();
+    assert_eq!(eyes.len(), 200);
+    assert!(eyes.iter().all(|d| d.effective_alpha == 1.));
+    let view = hud::View {
+        playing: true,
+        opacity: HudOpacity {
+            readout: 1.,
+            header: 1.,
+            rows: 1.,
+            announcement: 1.,
+        },
+        status: "CONNECTED".into(),
+        score: "10000".into(),
+        final_score: String::new(),
+        rank: "1".into(),
+        population: "100".into(),
+        rows: (1..=10)
+            .map(|ordinal| LeaderboardRow {
+                ordinal,
+                number_text: format!("#{ordinal}"),
+                score: 10000.,
+                score_text: "10000".into(),
+                name_text: format!("Player{ordinal}"),
+                css_color: "#ffffff",
+                own: ordinal == 1,
+                opacity_request: 1.,
+            })
+            .collect(),
+        message: None,
+    };
+    let prepared = render::finish_hud(prepared, &mut bank, &view).unwrap();
+    assert!(
+        prepared
+            .frame
+            .draws
+            .iter()
+            .any(|d| d.asset.handle >> 60 == 5)
+    );
+    assert_eq!(
+        prepared
+            .frame
+            .draws
+            .iter()
+            .filter(|d| d.asset == bank.hud.asset)
+            .count(),
+        2
+    );
+    assert!(prepared.frame.draws.len() <= MAX_DRAWS);
+    let resident = prepared
+        .resources
+        .iter()
+        .map(|r| (r.asset.into(), r.asset))
+        .collect();
+    assert!(prepared.frame.quads(&resident).is_ok());
 }
 
 #[test]

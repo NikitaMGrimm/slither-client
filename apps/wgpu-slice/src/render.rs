@@ -145,29 +145,40 @@ fn submit_face(
         for pair in e.pairs {
             if e.outline_width > 0. {
                 let outer = e.eye_radius + e.outline_width / 2.;
-                let inner = (e.eye_radius - e.outline_width / 2.).max(0.);
-                let steps = (std::f64::consts::TAU * outer).ceil().clamp(16., 128.) as usize;
-                let black = bank.solid([0; 3]);
-                // A Canvas stroke has no coverage inside its inner radius. A
-                // black disk would darken the translucent eye fill during death.
-                for i in 0..steps {
-                    let at = |ordinal: usize, radius: f64| {
-                        let angle = std::f64::consts::TAU * ordinal as f64 / steps as f64;
-                        Point {
-                            x: pair.eye.x + radius * angle.cos(),
-                            y: pair.eye.y + radius * angle.sin(),
-                        }
-                    };
-                    draws.push(polygon(
-                        black,
-                        [
-                            at(i, outer),
-                            at(i + 1, outer),
-                            at(i + 1, inner),
-                            at(i, inner),
-                        ],
+                if e.eye_alpha >= 1. {
+                    // The opaque fill covers the disk's interior, saving draws.
+                    draws.push(image(
+                        bank.disk([0; 3])?,
+                        pair.eye.x - outer,
+                        pair.eye.y - outer,
+                        outer * 2.,
+                        outer * 2.,
                         e.eye_alpha,
                     ));
+                } else {
+                    let inner = (e.eye_radius - e.outline_width / 2.).max(0.);
+                    let steps = (std::f64::consts::TAU * outer).ceil().clamp(16., 48.) as usize;
+                    let black = bank.solid([0; 3]);
+                    // Canvas strokes leave the interior clear during death fades.
+                    for i in 0..steps {
+                        let at = |ordinal: usize, radius: f64| {
+                            let angle = std::f64::consts::TAU * ordinal as f64 / steps as f64;
+                            Point {
+                                x: pair.eye.x + radius * angle.cos(),
+                                y: pair.eye.y + radius * angle.sin(),
+                            }
+                        };
+                        draws.push(polygon(
+                            black,
+                            [
+                                at(i, outer),
+                                at(i + 1, outer),
+                                at(i + 1, inner),
+                                at(i, inner),
+                            ],
+                            e.eye_alpha,
+                        ));
+                    }
                 }
             }
             for (color, point, radius, alpha) in [
