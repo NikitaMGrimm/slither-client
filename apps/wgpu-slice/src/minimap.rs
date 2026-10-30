@@ -147,6 +147,7 @@ fn draw(asset: BodyAsset, destination: BodyRect, source: Option<BodyRect>, alpha
         asset,
         destination,
         source,
+        repeat_uv: None,
         translation: [0.; 2],
         rotation: 0.,
         effective_alpha: alpha,

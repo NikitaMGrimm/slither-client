@@ -15,6 +15,13 @@ pub struct LocalGameplay {
 fn js_error(e: String) -> JsValue {
     JsValue::from_str(&e)
 }
+/// Shared desktop policy; JS supplies CSS content size without DPR multiplication.
+#[wasm_bindgen]
+pub fn game_backing_size(width: f64, height: f64) -> std::result::Result<Vec<u32>, JsValue> {
+    crate::render::backing_size([width, height])
+        .map(|v| v.to_vec())
+        .map_err(js_error)
+}
 impl LocalGameplay {
     fn checked<T>(
         &mut self,

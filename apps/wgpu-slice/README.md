@@ -80,6 +80,11 @@ A WebGPU-capable browser is required. There is no Canvas fallback.
 On Windows, from this app directory, `cargo run --release --example sprite_parity -- <private-pack-dir>`
 compares authored sprites against an external private pack.
 
+Background uses the shared phase/zoom plan and Canvas-authored tile/backdrop.
+`LocalGame` shares Canvas's adaptive quality owner and capped desktop backing
+policy, without DPR multiplication. Native scales the backing to the window;
+browser controls overlay the full-window canvas. Retries do not advance quality.
+
 ## Scope
 
 Ordered body, early/late food and prey, paired eyes and arena are implemented

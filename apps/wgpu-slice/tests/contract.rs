@@ -23,6 +23,7 @@ fn draw() -> Draw {
         corners: None,
         asset: asset(),
         source: None,
+        repeat_uv: None,
         destination: BodyRect {
             x: 0.,
             y: 0.,
@@ -47,6 +48,25 @@ fn frame(draws: Vec<Draw>) -> Frame {
 }
 fn resident() -> BTreeMap<ResourceKey, BodyAsset> {
     BTreeMap::from([(asset().into(), asset())])
+}
+#[test]
+fn repeat_uvs_cross_tile_seams_without_relaxing_image_crops() {
+    let mut d = draw();
+    d.repeat_uv = Some(BodyRect {
+        x: -0.25,
+        y: 0.5,
+        width: 4.,
+        height: 3.,
+    });
+    let q = frame(vec![d.clone()]).quads(&resident()).unwrap();
+    assert!(q[0].repeat);
+    assert_eq!(&q[0].vertices[0][2..4], &[-0.25, 0.5]);
+    assert_eq!(&q[0].vertices[2][2..4], &[3.75, 3.5]);
+    d.source = d.repeat_uv;
+    assert!(frame(vec![d.clone()]).quads(&resident()).is_err());
+    d.source = None;
+    d.repeat_uv.as_mut().unwrap().x = f64::NAN;
+    assert!(frame(vec![d]).quads(&resident()).is_err());
 }
 #[test]
 fn full_u64_revision_identity_and_readiness() {

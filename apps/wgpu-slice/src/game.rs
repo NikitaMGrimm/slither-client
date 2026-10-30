@@ -55,6 +55,8 @@ struct Work {
     reset_rows: bool,
     world: Option<AnimatedClient>,
     prepared: Option<PreparedFrame>,
+    quality: QualityState,
+    statistics_consumed: bool,
 }
 enum Probe {
     Captured,
@@ -161,6 +163,8 @@ pub struct LocalGame {
     rng: u64,
     pub failure: Option<String>,
     suspended: bool,
+    quality: QualityState,
+    draws_since_statistics: u32,
 }
 impl LocalGame {
     pub fn new(now: f64) -> Result<Self> {
@@ -199,6 +203,8 @@ impl LocalGame {
             rng: 17,
             failure: None,
             suspended: false,
+            quality: QualityState::new(QualityMode::High, now).map_err(|e| e.to_string())?,
+            draws_since_statistics: 0,
         })
     }
     pub fn generation(&self) -> u32 {
@@ -206,6 +212,16 @@ impl LocalGame {
     }
     pub fn client(&self) -> &AnimatedClient {
         &self.client
+    }
+    pub fn quality(&self) -> QualitySnapshot {
+        self.quality.snapshot()
+    }
+    /// Store the preference; the next explicit Play applies it, matching Canvas.
+    pub fn set_requested_quality(&mut self, mode: QualityMode) {
+        self.quality.set_requested_mode(mode);
+        if let Some(w) = &mut self.work {
+            w.quality.set_requested_mode(mode);
+        }
     }
     pub fn phase(&self) -> Phase {
         self.session.view().phase
@@ -256,6 +272,7 @@ impl LocalGame {
         self.nickname = nickname.into();
         self.endpoint = endpoint.into();
         self.session.begin_play();
+        self.quality.begin_connection();
         self.failure = None;
         Ok(())
     }
@@ -519,6 +536,7 @@ impl LocalGame {
         let captured_pixels = Cell::new(0_usize);
         let extent = self.extent;
         let scale = self.scale;
+        let quality = self.quality.snapshot();
         let units = || {
             let unit = || {
                 let state = rng.get().wrapping_mul(1664525).wrapping_add(1013904223) & 0xffff_ffff;
@@ -533,7 +551,7 @@ impl LocalGame {
             |c,_|{
                 if frames.borrow().len()>=16{return Err(Ingress("Setup draw budget".into()));}
                 serial.set(serial.get()+1);
-                let frame=render::prepare(c,&mut bank.borrow_mut(),extent,scale,serial.get()).map_err(Ingress)?;
+                let frame=render::prepare(c,&mut bank.borrow_mut(),extent,scale,serial.get(),quality).map_err(Ingress)?;
                 // HUD projection follows the complete ingress report. Reserve its
                 // bounded atlas before retaining each immutable scene snapshot.
                 let bytes=captured_pixels.get()+frame.pixel_bytes()+crate::hud::MAX_PIXEL_BYTES;
@@ -809,6 +827,8 @@ impl LocalGame {
             reset_rows: pending.reset_world,
             world: None,
             prepared: None,
+            quality: self.quality.clone(),
+            statistics_consumed: false,
         });
         self.control()
     }
@@ -880,7 +900,22 @@ impl LocalGame {
                 Probe::Captured => "Unexpected probe".into(),
             })?;
         self.identity += 1;
-        let frame = render::prepare(&mut world, &mut self.bank, w.extent, w.scale, self.identity)?;
+        let playing = self.session.view().playing;
+        w.quality
+            .advance(w.step, playing)
+            .map_err(|e| e.to_string())?;
+        w.statistics_consumed = w
+            .quality
+            .update_statistics(w.now, self.draws_since_statistics, playing)
+            .map_err(|e| e.to_string())?;
+        let frame = render::prepare(
+            &mut world,
+            &mut self.bank,
+            w.extent,
+            w.scale,
+            self.identity,
+            w.quality.snapshot(),
+        )?;
         self.policy.controller_done();
         let score = if w.hud.readout_required(self.session.view().playing) {
             sample(world.score_view())
@@ -924,15 +959,23 @@ impl LocalGame {
             self.fail("GPU presentation failed");
             return Ok(());
         }
-        if kind == 1 {
-            return Ok(());
+        if kind != 1 {
+            self.commit_work()?;
         }
-        self.commit_work()
+        self.draws_since_statistics = self
+            .draws_since_statistics
+            .checked_add(1)
+            .ok_or("Quality draw counter exhausted")?;
+        Ok(())
     }
     fn commit_work(&mut self) -> Result<()> {
         let w = self.work.take().ok_or("Missing frame work")?;
         self.client = w.world.ok_or("Missing world candidate")?;
         self.hud = w.hud;
+        self.quality = w.quality;
+        if w.statistics_consumed {
+            self.draws_since_statistics = 0;
+        }
         if w.reset_rows {
             let rows = self.rows.stage_reset()?;
             rows.commit()?;
@@ -968,8 +1011,14 @@ impl LocalGame {
                 w.scale = scale;
                 if let Some(world) = &mut w.world {
                     self.identity += 1;
-                    let frame =
-                        render::prepare(world, &mut self.bank, extent, scale, self.identity)?;
+                    let frame = render::prepare(
+                        world,
+                        &mut self.bank,
+                        extent,
+                        scale,
+                        self.identity,
+                        w.quality.snapshot(),
+                    )?;
                     w.prepared = Some(render::finish_hud(frame, &mut self.bank, &view)?);
                 }
             }

@@ -18,6 +18,7 @@ struct Texture {
     asset: BodyAsset,
     _texture: wgpu::Texture,
     bind: wgpu::BindGroup,
+    repeat_bind: wgpu::BindGroup,
 }
 pub struct Renderer {
     pub sample_count: u32,
@@ -231,26 +232,32 @@ impl Renderer {
             },
         );
         let view = texture.create_view(&Default::default());
-        let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("Canvas-like linear clamp"),
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            ..Default::default()
-        });
-        let bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("source"),
-            layout: &self.layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
-                },
-            ],
-        });
+        let binding = |address_mode| {
+            let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("Canvas-like linear clamp"),
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                address_mode_u: address_mode,
+                address_mode_v: address_mode,
+                ..Default::default()
+            });
+            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("source"),
+                layout: &self.layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&sampler),
+                    },
+                ],
+            })
+        };
+        let bind = binding(wgpu::AddressMode::ClampToEdge);
+        let repeat_bind = binding(wgpu::AddressMode::Repeat);
         // A new revision retires all prior versions of this handle atomically after validation/upload.
         self.textures.retain(|k, _| k.handle != key.handle);
         self.textures.insert(
@@ -259,6 +266,7 @@ impl Renderer {
                 asset: a,
                 _texture: texture,
                 bind,
+                repeat_bind,
             },
         );
         Ok(())
@@ -376,7 +384,16 @@ impl Renderer {
                 } else {
                     &self.over
                 });
-                pass.set_bind_group(0, &self.textures[&q.key].bind, &[]);
+                let texture = &self.textures[&q.key];
+                pass.set_bind_group(
+                    0,
+                    if q.repeat {
+                        &texture.repeat_bind
+                    } else {
+                        &texture.bind
+                    },
+                    &[],
+                );
                 pass.draw(i as u32 * 6..i as u32 * 6 + 6, 0..1);
             }
         }
@@ -402,6 +419,8 @@ pub struct SurfaceHost {
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
     extent: [u32; 2],
+    backing: Option<wgpu::Texture>,
+    blitter: wgpu::util::TextureBlitter,
 }
 impl SurfaceHost {
     pub async fn new(
@@ -447,11 +466,16 @@ impl SurfaceHost {
             alpha_mode: wgpu::CompositeAlphaMode::Opaque,
             view_formats: vec![],
         };
+        let blitter = wgpu::util::TextureBlitterBuilder::new(&renderer.device, format)
+            .sample_type(wgpu::FilterMode::Linear)
+            .build();
         let mut host = Self {
             renderer,
             surface,
             config,
             extent: [0, 0],
+            backing: None,
+            blitter,
         };
         host.resize(extent)?;
         Ok(host)
@@ -472,11 +496,47 @@ impl SurfaceHost {
         Ok(())
     }
     pub fn present(&mut self, frame: &Frame) -> Result<bool> {
-        if frame.extent != self.extent {
+        self.present_inner(frame, false)
+    }
+    /// Render at the desktop policy size, then scale the complete image like a CSS canvas.
+    pub fn present_scaled(&mut self, frame: &Frame) -> Result<bool> {
+        self.present_inner(frame, true)
+    }
+    fn present_inner(&mut self, frame: &Frame, scale: bool) -> Result<bool> {
+        let scaled = frame.extent != self.extent;
+        if scaled && !scale {
             return Err("frame/surface extent mismatch".into());
         }
-        if self.extent.contains(&0) {
+        if self.extent.contains(&0) || frame.extent.contains(&0) {
             return Ok(false);
+        }
+        if scaled {
+            if frame.extent.iter().any(|n| *n > 1500) {
+                return Err("Desktop backing limit".into());
+            }
+            if self
+                .backing
+                .as_ref()
+                .is_none_or(|t| [t.width(), t.height()] != frame.extent)
+            {
+                self.backing = Some(self.renderer.device.create_texture(
+                    &wgpu::TextureDescriptor {
+                        label: Some("desktop policy backing"),
+                        size: wgpu::Extent3d {
+                            width: frame.extent[0],
+                            height: frame.extent[1],
+                            depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: self.config.format,
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                            | wgpu::TextureUsages::TEXTURE_BINDING,
+                        view_formats: &[],
+                    },
+                ));
+            }
         }
         let texture = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t)
@@ -495,7 +555,23 @@ impl SurfaceHost {
             e => return Err(format!("surface stopped: {e:?}")),
         };
         let view = texture.texture.create_view(&Default::default());
-        self.renderer.render(frame, &view)?;
+        if scaled {
+            let backing = self
+                .backing
+                .as_ref()
+                .expect("backing")
+                .create_view(&Default::default());
+            self.renderer.render(frame, &backing)?;
+            let mut encoder = self
+                .renderer
+                .device
+                .create_command_encoder(&Default::default());
+            self.blitter
+                .copy(&self.renderer.device, &mut encoder, &backing, &view);
+            self.renderer.queue.submit([encoder.finish()]);
+        } else {
+            self.renderer.render(frame, &view)?;
+        }
         self.renderer.queue.present(texture);
         Ok(true)
     }

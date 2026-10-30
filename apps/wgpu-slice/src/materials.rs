@@ -89,7 +89,9 @@ fn over(target: &mut [f64; 4], c: [f64; 4], coverage: f64, alpha: f64, destinati
 /// with native Canvas is deliberately not claimed.
 pub fn materialize(recipe: &CanvasRecipe) -> Result<RgbaImage> {
     let (w, h) = (recipe.width as usize, recipe.height as usize);
-    if w == 0 || h == 0 || w > 512 || h > 512 || recipe.commands.len() > 128 {
+    // The authored hexagonal background has 600 operations; source dimensions
+    // and the per-frame pixel budget remain bounded independently.
+    if w == 0 || h == 0 || w > 512 || h > 512 || recipe.commands.len() > 1024 {
         return Err("recipe extent/budget".into());
     }
     let mut pixels = vec![[0.; 4]; w * h];
@@ -198,9 +200,29 @@ pub fn materialize(recipe: &CanvasRecipe) -> Result<RgbaImage> {
                 {
                     return Err("unsupported rectangle".into());
                 }
+                let bounds = polygon.iter().fold(
+                    [
+                        f64::INFINITY,
+                        f64::INFINITY,
+                        f64::NEG_INFINITY,
+                        f64::NEG_INFINITY,
+                    ],
+                    |[left, top, right, bottom], [x, y]| {
+                        [left.min(*x), top.min(*y), right.max(*x), bottom.max(*y)]
+                    },
+                );
                 let coverage = |x: f64, y: f64| -> f64 {
                     if rect.is_some() {
                         return 1.;
+                    }
+                    // Avoid supersampling every pixel of every hexagon in the tile.
+                    if circle.is_none()
+                        && (x + 1. < bounds[0]
+                            || y + 1. < bounds[1]
+                            || x > bounds[2]
+                            || y > bounds[3])
+                    {
+                        return 0.;
                     }
                     let mut n = 0.;
                     for sy in 0..4 {

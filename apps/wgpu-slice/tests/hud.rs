@@ -295,6 +295,7 @@ fn ordinary_composition_preserves_body_order_and_uses_two_cropped_panels() {
     let asset = bank.solid([255, 0, 0]);
     let draw = Draw {
         corners: None,
+        repeat_uv: None,
         asset,
         source: None,
         destination: BodyRect {

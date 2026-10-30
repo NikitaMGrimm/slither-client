@@ -7,6 +7,13 @@ use crate::{
 };
 use slither_client::{presentation::*, state::Point};
 
+struct PreparationError(String);
+impl From<ClientPresentationError> for PreparationError {
+    fn from(e: ClientPresentationError) -> Self {
+        Self(e.to_string())
+    }
+}
+
 pub struct PreparedFrame {
     pub frame: Frame,
     pub resources: Vec<Resource>,
@@ -15,6 +22,17 @@ impl PreparedFrame {
     pub fn pixel_bytes(&self) -> usize {
         self.resources.iter().map(|r| r.image.pixels.len()).sum()
     }
+}
+/// Desktop content size in CSS/logical pixels. DPR affects presentation only.
+pub fn backing_size(area: [f64; 2]) -> Result<[u32; 2]> {
+    if area.into_iter().any(|n| !n.is_finite() || n < 0.) {
+        return Err("Invalid desktop content size".into());
+    }
+    if area.contains(&0.) {
+        return Ok([0, 0]);
+    }
+    let size = slither_client::desktop_layout::desktop_backing_size(area[0], area[1])?;
+    Ok([size.width, size.height])
 }
 pub fn dimensions(extent: [u32; 2], scale: f64) -> Result<[u32; 2]> {
     if extent.contains(&0)
@@ -38,6 +56,7 @@ fn image(asset: BodyAsset, x: f64, y: f64, w: f64, h: f64, alpha: f64) -> Draw {
         corners: None,
         asset,
         source: None,
+        repeat_uv: None,
         destination: BodyRect {
             x,
             y,
@@ -70,6 +89,7 @@ fn prey(c: &PreyImageCommand) -> Draw {
         corners: None,
         asset: c.source.asset(),
         source,
+        repeat_uv: None,
         destination,
         translation: [0., 0.],
         rotation: 0.,
@@ -90,11 +110,21 @@ pub fn prepare(
     extent: [u32; 2],
     scale: f64,
     identity: u64,
+    applied: QualitySnapshot,
 ) -> Result<PreparedFrame> {
     let logical = dimensions(extent, scale)?;
     let prepared = client
-        .prepare_draw_with_style(logical[0], logical[1], 1., false)
-        .map_err(|e| e.to_string())?;
+        .prepare_draw_resolved(
+            logical[0],
+            logical[1],
+            applied.quality_scale,
+            |_, _, snake| {
+                resolve_authored_local_skin(snake.metrics().skin, snake.custom_skin())
+                    .map(|skin| skin.body_style.detailed_segments)
+                    .map_err(|e| PreparationError(e.to_string()))
+            },
+        )
+        .map_err(|e| e.0)?;
     let view = BodyPaintView {
         camera: client.camera().position(),
         zoom: client.camera().zoom(),
@@ -102,9 +132,55 @@ pub fn prepare(
         half_height: f64::from(extent[1]) / scale / 2.,
     };
     let quality = BodyPaintQuality {
-        high_quality: true,
-        blend: 1.,
+        high_quality: applied.high_quality,
+        blend: applied.quality_blend,
     };
+    let tile = bank.assets[bank.tile.asset];
+    let backdrop = bank.assets[bank.backdrop.asset];
+    let background = client
+        .prepare_background(BackgroundInput {
+            width: logical[0],
+            height: logical[1],
+            zoom: view.zoom,
+            image_size: Some([backdrop.width, backdrop.height]),
+            pattern_available: true,
+            quality: applied,
+            tile_width: f64::from(tile.width),
+            tile_height: f64::from(tile.height),
+        })
+        .map_err(|e| e.to_string())?;
+    let [x, y, w, h] = background.clear.rect;
+    let mut draws = vec![image(
+        bank.solid(background.clear.color),
+        x,
+        y,
+        w,
+        h,
+        background.clear.alpha,
+    )];
+    if let Some(layer) = background.image {
+        let [x, y, w, h] = layer.destination;
+        draws.push(image(backdrop, x, y, w, h, layer.alpha));
+    }
+    if let Some(layer) = background.pattern {
+        // Clip the oversized Canvas fill to the viewport; keep its pattern-space
+        // coordinates so translation, zoom and fractional phase remain identical.
+        let mut draw = image(
+            tile,
+            0.,
+            0.,
+            f64::from(logical[0]),
+            f64::from(logical[1]),
+            layer.alpha,
+        );
+        draw.repeat_uv = Some(BodyRect {
+            x: (-layer.center.x / layer.zoom - layer.translation.x) / f64::from(tile.width),
+            y: (-layer.center.y / layer.zoom - layer.translation.y) / f64::from(tile.height),
+            width: f64::from(logical[0]) / layer.zoom / f64::from(tile.width),
+            height: f64::from(logical[1]) / layer.zoom / f64::from(tile.height),
+        });
+        draws.push(draw);
+    }
     let food = plan_food(FoodPaintInput {
         foods: client.foods().foods(),
         view,
@@ -151,7 +227,7 @@ pub fn prepare(
             boost_glow: Some(p.glow),
         })
         .collect();
-    let mut draws: Vec<Draw> = food.early.iter().map(Draw::from).collect();
+    draws.extend(food.early.iter().map(Draw::from));
     draws.extend(prey_plan.early.iter().map(prey));
     let mut eyes = Vec::new();
     let mut snakes = Vec::new();
