@@ -180,10 +180,8 @@ impl Bank {
             .iter()
             .filter_map(|k| self.assets.iter().position(|a| ResourceKey::from(*a) == *k))
             .collect();
-        let text = self
-            .text_frames
-            .get(&frame.identity)
-            .map_or(&[][..], Vec::as_slice);
+        // Consume this candidate's staging even if later validation fails.
+        let text = self.text_frames.remove(&frame.identity).unwrap_or_default();
         let bytes = indices
             .iter()
             .map(|i| self.assets[*i].width as usize * self.assets[*i].height as usize * 4)
@@ -211,7 +209,7 @@ impl Bank {
             }
         }
         let mut resources: Vec<_> = self.cache.values().cloned().collect();
-        resources.extend_from_slice(text);
+        resources.extend_from_slice(&text);
         if keys.contains(&self.hud.asset.into()) {
             resources.push(self.hud.clone());
         }
@@ -231,8 +229,10 @@ impl Bank {
             .map(|r| (r.asset.into(), r.asset))
             .collect();
         frame.quads(&resident)?;
-        self.text_frames.remove(&frame.identity);
         Ok(resources)
+    }
+    pub(crate) fn discard_text(&mut self, identity: u64) {
+        self.text_frames.remove(&identity);
     }
     /// Own the pixels of queued Setup pictures independently of LRU eviction.
     pub fn stage_text(&mut self, identity: u64, resources: Vec<Resource>) -> Result<()> {

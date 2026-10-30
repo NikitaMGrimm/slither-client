@@ -87,25 +87,18 @@ browser controls overlay the full-window canvas. Retries do not advance quality.
 
 ## Text
 
-Nicknames use the existing appearance-owned core commands, tint, culling,
-placement and spawn/death/own-name fading. They draw before snake bodies, as in
-Canvas. Browser text is rasterized by OffscreenCanvas; Windows loads installed
-Arial (`arial.ttf` / `arialbd.ttf`) at runtime through fontdue, with kerning and
-4x coverage sampling. Native coverage is not pixel-identical to browser hinting.
-No fonts or reference artwork are bundled.
+Nicknames reuse core tint, culling, placement and fading before body drawing,
+at 15 backing pixels at every DPR. Browser text uses OffscreenCanvas; Windows
+loads system Arial through fontdue (kerning, 4x coverage). No fonts are bundled;
+native coverage differs from browser hinting. Native whitespace and invisible
+Latin-1 controls follow Canvas. Raster/style failures omit labels; failed frame
+completion releases their staged pixels.
 
-`text::TextCache::draw(TextRun, backing_scale)` returns ordinary ordered
-draw/resource pairs. The API supports Arial regular/bold, size, RGB, opacity,
-left/center/right alignment and alphabetic/middle baselines. Shadows are not
-implemented. The LRU retains at most 256 runs / 4 MiB; movement and fading reuse
-textures. Queued pictures retain their own pixels after eviction. Runs admit up
-to 1024 UTF-8 bytes, 1..=128 backing font pixels and an 8192x512 raster, tiled
-with sampling gutters into the existing 512px texture limit. Active/queued
-resources retain the existing aggregate budgets. HUD integration is separate.
-Nickname fonts stay 15 backing pixels at every DPR; the adapter converts that
-size to logical units before rasterization. Raster/style failures omit the label
-without ending gameplay. Native text normalizes Canvas whitespace and suppresses
-soft hyphens and U+001D while preserving their kerning boundary.
+`text::TextCache::draw(TextRun, scale)` returns ordered draw/resource pairs for
+Arial regular/bold, RGB, size, opacity, alignment and baseline; no shadows.
+The LRU holds 256 runs / 4 MiB. Runs admit 1024 UTF-8 bytes, 1..=128 backing font
+pixels and an 8192x512 raster, tiled into 512px textures. Existing active/queued
+budgets still apply. HUD/leaderboard text conversion is a follow-up.
 
 ## Scope
 
