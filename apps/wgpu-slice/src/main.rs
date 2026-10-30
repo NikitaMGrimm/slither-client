@@ -31,6 +31,8 @@ mod desktop {
         official: bool,
         server: Option<String>,
         headless: Option<crate::headless::Options>,
+        cosmetics_dir: Option<std::path::PathBuf>,
+        accessory: Option<u8>,
     }
     pub fn options() -> Result<Option<Options>> {
         parse_options(std::env::args().skip(1))
@@ -49,7 +51,7 @@ mod desktop {
             match arg.as_str() {
                 "--help" | "-h" => {
                     println!(
-                        "Offline by default.\nslither-wgpu-desktop [--official [--server host:port] | --endpoint ws://host:port/slither] [--nickname NAME] [--skin 0..65]\n[--headless --duration SECONDS --frames NEW_EXTERNAL_DIRECTORY --frame-every SECONDS]\nHeadless: automatic Play, deterministic circles/boost, offscreen PNGs and exit summary. Defaults: duration 30s, frame interval 5s.\nWindow: Enter Play, Escape Stop/cancel. Pointer/arrows/Space: existing Rust input.\nNo automatic reconnect. --endpoint uses authored zero credentials for simulators. Diagnostic: slither-wgpu-diagnostic."
+                        "Offline by default.\nslither-wgpu-desktop [--official [--server host:port] | --endpoint ws://host:port/slither] [--nickname NAME] [--skin 0..65] [--cosmetics-dir DIR] [--accessory 0..31]\n[--headless --duration SECONDS --frames NEW_EXTERNAL_DIRECTORY --frame-every SECONDS]\nHeadless: automatic Play, deterministic circles/boost, offscreen PNGs and exit summary. Defaults: duration 30s, frame interval 5s.\nWindow: Enter Play, Escape Stop/cancel. Pointer/arrows/Space: existing Rust input.\nNo automatic reconnect. --endpoint uses authored zero credentials for simulators. Diagnostic: slither-wgpu-diagnostic."
                     );
                     return Ok(None);
                 }
@@ -83,6 +85,21 @@ mod desktop {
                     o.server = Some(server);
                 }
                 "--nickname" => o.nickname = args.next().ok_or("Nickname required")?,
+                "--cosmetics-dir" => {
+                    o.cosmetics_dir =
+                        Some(args.next().ok_or("Cosmetics directory required")?.into())
+                }
+                "--accessory" => {
+                    let id = args
+                        .next()
+                        .ok_or("Accessory required")?
+                        .parse::<u8>()
+                        .map_err(|_| "Invalid accessory")?;
+                    if id >= 32 {
+                        return Err("Accessory must be 0..31".into());
+                    }
+                    o.accessory = Some(id);
+                }
                 "--skin" => {
                     o.skin = args
                         .next()
@@ -285,7 +302,14 @@ mod desktop {
             }
             l.exit();
         }
-        fn open(l: &ActiveEventLoop) -> Result<Running> {
+        fn open(l: &ActiveEventLoop, options: &Options) -> Result<Running> {
+            let mut game = LocalGame::new(0.)?;
+            if let Some(directory) = &options.cosmetics_dir {
+                game.configure_cosmetics(slither_wgpu_slice::cosmetics::Cosmetics::directory(
+                    directory,
+                    options.accessory,
+                )?)?;
+            }
             let window = Arc::new(
                 l.create_window(
                     Window::default_attributes()
@@ -307,7 +331,7 @@ mod desktop {
             Ok(Running {
                 window,
                 host,
-                game: LocalGame::new(0.)?,
+                game,
                 transport: Transport::default(),
                 started: Instant::now(),
                 cursor: [480., 270.],
@@ -320,7 +344,7 @@ mod desktop {
     impl ApplicationHandler for App {
         fn resumed(&mut self, l: &ActiveEventLoop) {
             if self.running.is_none() {
-                match Self::open(l) {
+                match Self::open(l, &self.options) {
                     Ok(r) => self.running = Some(r),
                     Err(e) => self.fail(l, e),
                 }

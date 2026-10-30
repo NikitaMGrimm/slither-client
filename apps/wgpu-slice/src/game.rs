@@ -224,6 +224,13 @@ impl LocalGame {
             w.quality.set_requested_mode(mode);
         }
     }
+    pub fn configure_cosmetics(&mut self, cosmetics: crate::cosmetics::Cosmetics) -> Result<()> {
+        if !self.can_play() || self.client.snake_objects().next().is_some() {
+            return Err("Configure cosmetics before the first Play".into());
+        }
+        self.bank.cosmetics = Some(cosmetics);
+        Ok(())
+    }
     pub fn phase(&self) -> Phase {
         self.session.view().phase
     }
@@ -544,7 +551,7 @@ impl LocalGame {
             state as f64 / 4294967296.
         };
         let report=client.apply_frame_with_tinted_presentation_and_all_factories_and_setup_and_hud::<Ingress,_,_,_,_>(bytes,ElapsedHeader::Absent,
-            |a,_|{let skin=resolve_authored_local_skin(a.skin,&a.custom_skin).map_err(|e|Ingress(e.to_string()))?;Ok(TintedPresentation{presentation:FacePresentation{face:skin.face,antenna:None}.into(),nickname_tint:Some(NicknameTint{base_rgb:bank.borrow().palette_rgb[skin.base_palette],random_units:[unit(),unit(),unit()]})})},
+            |a,context|{let skin=resolve_authored_local_skin(a.skin,&a.custom_skin).map_err(|e|Ingress(e.to_string()))?;let presentation=if let Some(c)=&bank.borrow().cosmetics{c.appearance(a,context.own).map_err(Ingress)?}else{FacePresentation{face:skin.face,antenna:None}.into()};Ok(TintedPresentation{presentation,nickname_tint:Some(NicknameTint{base_rgb:bank.borrow().palette_rgb[skin.base_palette],random_units:[unit(),unit(),unit()]})})},
             |s,_|Ok(bank.borrow().food(s.raw_color,[unit(),unit()])),|s,_|Ok(bank.borrow().prey(s.raw_color,[unit(),unit()])),
             |c,_|{
                 if frames.borrow().len()>=16{return Err(Ingress("Setup draw budget".into()));}

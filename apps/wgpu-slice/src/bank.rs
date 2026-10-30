@@ -17,6 +17,7 @@ pub struct Family {
     pub glow: BodyAssetUse,
 }
 pub struct Bank {
+    pub cosmetics: Option<crate::cosmetics::Cosmetics>,
     pub assets: Vec<BodyAsset>,
     recipes: Vec<CanvasRecipe>,
     pub bodies: Vec<Family>,
@@ -46,6 +47,7 @@ impl Bank {
     pub fn new() -> Result<Self> {
         let r = authored_source_recipes();
         let mut b = Self {
+            cosmetics: None,
             assets: Vec::new(),
             recipes: Vec::new(),
             bodies: Vec::new(),
@@ -186,6 +188,13 @@ impl Bank {
             .iter()
             .map(|i| self.assets[*i].width as usize * self.assets[*i].height as usize * 4)
             .sum::<usize>()
+            + self
+                .cosmetics
+                .iter()
+                .flat_map(|c| c.resources())
+                .filter(|r| keys.contains(&r.asset.into()))
+                .map(|r| r.image.pixels.len())
+                .sum::<usize>()
             + if keys.contains(&self.hud.asset.into()) {
                 self.hud.image.pixels.len()
             } else {
@@ -210,6 +219,13 @@ impl Bank {
         }
         let mut resources: Vec<_> = self.cache.values().cloned().collect();
         resources.extend_from_slice(&text);
+        resources.extend(
+            self.cosmetics
+                .iter()
+                .flat_map(|c| c.resources())
+                .filter(|r| keys.contains(&r.asset.into()))
+                .cloned(),
+        );
         if keys.contains(&self.hud.asset.into()) {
             resources.push(self.hud.clone());
         }

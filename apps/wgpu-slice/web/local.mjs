@@ -1,4 +1,4 @@
-import init, { LocalGameplay, game_backing_size } from './pkg/slither_wgpu_slice.js';
+import init, { LocalGameplay, game_backing_size, CosmeticImages } from './pkg/slither_wgpu_slice.js';
 import { localHost } from './local-host.mjs';
 const canvas = document.getElementById('game');
 const status = document.getElementById('status');
@@ -11,6 +11,7 @@ let host, owner, raf, disposed = false;
 const abort = new AbortController();
 const listen = (node, type, fn) => node.addEventListener(type, fn, { signal: abort.signal });
 const editable = e => e.target instanceof HTMLInputElement;
+listen(document.querySelector('form'), 'submit', e => e.preventDefault());
 function extent() {
   const [w, h] = game_backing_size(canvas.clientWidth, canvas.clientHeight);
   if (canvas.width !== w) canvas.width = w;
@@ -20,7 +21,8 @@ function extent() {
 function dispose() {
   if (disposed) return;
   disposed = true; cancelAnimationFrame(raf); abort.abort();
-  host?.dispose(); host = undefined;
+  if (host) host.dispose(); else owner?.free();
+  host = undefined; owner = undefined;
 }
 addEventListener('pagehide', dispose, { once: true });
 try {
@@ -28,7 +30,39 @@ try {
   await init();
   if (!disposed) {
     owner = await LocalGameplay.create(canvas, performance.now());
-    if (disposed) owner.free();
+    if (disposed) { owner.free(); owner = undefined; throw new Error('Disposed during startup'); }
+    const configResponse = await fetch('./config.json', { credentials: 'omit', signal: abort.signal });
+    if (configResponse.ok) {
+      const config = await configResponse.json();
+      if (config.cosmeticsBaseUrl) {
+        const base = new URL(config.cosmeticsBaseUrl, location.href);
+        if (base.origin !== location.origin || !['127.0.0.1', 'localhost', '[::1]'].includes(base.hostname)) throw new Error('Cosmetics require a same-origin local development URL');
+        let images = new CosmeticImages();
+        try {
+          for (const path of CosmeticImages.paths()) {
+            const response = await fetch(new URL(path, base), { credentials: 'omit', redirect: 'error', signal: abort.signal });
+            if (!response.ok) throw new Error(`Cosmetic unavailable: ${path}`);
+            const reader = response.body.getReader();
+            const chunks = []; let size = 0;
+            try {
+              for (;;) {
+                const { value, done } = await reader.read(); if (done) break;
+                size += value.byteLength;
+                if (size > 4 * 1024 * 1024) throw new Error('Cosmetic image budget');
+                chunks.push(value);
+              }
+            } finally { await reader.cancel(); reader.releaseLock(); }
+            const bytes = new Uint8Array(size); let offset = 0;
+            for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+            images.add(path, bytes);
+          }
+          const ready = images; images = undefined;
+          owner.cosmetics(ready, config.accessory ?? -1);
+        } finally { images?.free(); }
+      }
+      if (config.simulatorUrl) endpoint.value = config.simulatorUrl;
+    }
+    if (disposed) { owner?.free(); owner = undefined; }
     else {
       const adapter = owner.adapter();
       host = localHost({ owner, socket: url => new WebSocket(url), now: () => performance.now(), extent,

@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 pub mod bank;
+pub mod cosmetics;
 pub mod frame;
 pub mod game;
 pub mod gpu;

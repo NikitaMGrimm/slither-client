@@ -18,6 +18,7 @@ name = "slither-wgpu-diagnostic"
 path = "src/diagnostic_main.rs"
 
 [dependencies]
+image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg"] }
 slither-client = { path = "../.." }
 url = "=2.5.8"
 wgpu = { version = "=30.0.1", default-features = false, features = ["std", "wgsl", "dx12", "vulkan", "webgpu"] }

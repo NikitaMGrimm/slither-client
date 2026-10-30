@@ -34,7 +34,7 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: node --test tools/*.test.mjs
       - name: Test shared gameplay socket adapter offline
-        run: node --test --test-concurrency=1 apps/wgpu-slice/tests/local-host.test.mjs
+        run: node --test --test-concurrency=1 apps/wgpu-slice/tests/*.test.mjs
 
   native:
     name: Rust (${{ matrix.os }})
