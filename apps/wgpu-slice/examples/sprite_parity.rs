@@ -105,7 +105,8 @@ fn rasters<'a>(palette: &'a Value, p: usize, key: &str) -> Result<Vec<&'a str>> 
     let items = match palette.get(key) {
         Some(Value::Array(items)) => items.iter().collect(),
         Some(id @ Value::String(_)) => vec![id],
-        _ => return Ok(Vec::new()),
+        None => return Ok(Vec::new()),
+        Some(_) => return Err(format!("catalog palette {p} {key}: invalid raster field")),
     };
     items
         .into_iter()
