@@ -1,3 +1,4 @@
+// Test-only authored host harness for Canvas runtime regressions. Never served or packaged.
 // Runs before host startup only on an explicitly armed document. No host callback is invoked.
 (() => {
   'use strict';

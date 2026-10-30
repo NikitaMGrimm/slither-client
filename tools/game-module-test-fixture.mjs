@@ -10,7 +10,7 @@ import { createLeaderboardHistoryDouble } from './leaderboard-history-double.mjs
 import { createHudHistoryDouble } from './hud-history-double.mjs';
 import { createMenuPreferencesDouble } from './menu-preferences-double.mjs';
 import { createPlayAdmissionDouble } from './play-admission-double.mjs';
-import { loadWasm } from './reference-context.mjs';
+import { loadWasm } from './wasm-test-context.mjs';
 import { createAppearancePreviewDouble } from './appearance-preview-double.mjs';
 // Authored Node-only full ESM graph boundary. No browser or production Wasm proof.
 import assert from 'node:assert/strict';
@@ -72,7 +72,7 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
   const definitions = testSource.slice(testSource.indexOf('function fixture('), testSource.indexOf("\ntest('an unarmed"));
   const makeFixture = new vm.Script(`(function(gateSource,Script,createContext,runInContext,assert,createGateTestDom,attachGateTestRealm,createHudHistoryDouble,createLeaderboardHistoryDouble,TestDesktopInput,desktopBackingOracle,TestSessionPolicy,stockSkinWasmDouble,TestStockControllerPolicy,TestGameplayPolicy,authoredSourceRecipesDouble){
     ${definitions}\nreturn {fixture,wasmDouble};})`).runInThisContext();
-  const nativeSource = readFileSync(new URL('extension/game-gate.js', root), 'utf8');
+  const nativeSource = readFileSync(new URL('tools/fixtures/game-gate.js', root), 'utf8');
   const { fixture, wasmDouble } = makeFixture(nativeSource, vm.Script, vm.createContext, vm.runInContext, assert,
     options => { const dom = createGateTestDom({ ...options, ownedHud: ownedHudNative, ownedPlay: ownedPlayNative,
       leaderboard: leaderboardNative, minimap: minimapNative }); prepare?.(dom); return dom; }, attachGateTestRealm, createHudHistoryDouble, createLeaderboardHistoryDouble, TestDesktopInput,desktopBackingOracle,TestSessionPolicy,stockSkinWasmDouble,TestStockControllerPolicy,TestGameplayPolicy,authoredSourceRecipesDouble);
@@ -129,7 +129,7 @@ function createGraph({ armed = true, hudNative = false, ownedHudNative = false, 
   const sources = new Map();
   for (const name of webNames) sources.set(origin + name, readFileSync(new URL('web/' + name, root), 'utf8'));
   for (const [name, file] of Object.entries(entryNames)) {
-    const url = new URL('extension/' + file, root);
+    const url = new URL('web/' + file, root);
     sources.set(origin + name, readFileSync(url, 'utf8'));
   }
   const modules = new Map();

@@ -3,10 +3,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
-import { createOwnedPlayUi } from '../extension/game-owned-play-ui.mjs';
+import { createOwnedPlayUi } from '../web/game-owned-play-ui.mjs';
 import { createGateTestDom } from './game-gate-test-fixture.mjs';
 import { projectStartPageDouble } from './start-page-view-double.mjs';
-import { startPageLayout } from '../extension/start-page-layout.mjs';
+import { startPageLayout } from '../web/start-page-layout.mjs';
 
 const primaries = [undefined, null, false, 0, '', Symbol('synthetic primary'), new Error('synthetic primary')];
 const domNames = ['nodeType', 'ownerDocument', 'parentNode', 'firstChild',
@@ -122,12 +122,12 @@ function fixture() {
 }
 
 test('actual import and exact factory are inert; disposed lease is permanently quiet', async () => {
-  const source = await readFile(new URL('../extension/game-owned-play-ui.mjs', import.meta.url), 'utf8');
+  const source = await readFile(new URL('../web/game-owned-play-ui.mjs', import.meta.url), 'utf8');
   assert.match(source, /import \{ startPageLayout \} from '.\/start-page-layout.mjs'/);
   const prior = Object.getOwnPropertyDescriptor(globalThis, 'document');
   Object.defineProperty(globalThis, 'document', { configurable: true, get() { throw new Error('global Document read'); } });
   try {
-    const imported = await import('../extension/game-owned-play-ui.mjs?synthetic-inert-import');
+    const imported = await import('../web/game-owned-play-ui.mjs?synthetic-inert-import');
     assert.deepEqual(Object.keys(imported), ['createOwnedPlayUi']);
     const f = fixture(), lease = imported.createOwnedPlayUi(f.input);
     assert.deepEqual(Object.keys(lease), ['mount', 'setStatus', 'setPlaying', 'lock', 'unlock', 'dispose']);

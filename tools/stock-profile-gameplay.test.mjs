@@ -1,6 +1,6 @@
 import { TestSessionPolicy } from './fixtures/session-policy-double.mjs';
 import { ProfileLiteralParserDouble } from './fixtures/profile-literals-double.mjs';
-import { loadWasm } from './reference-context.mjs';
+import { loadWasm } from './wasm-test-context.mjs';
 const ProfileLiteralParser = process.env.SLITHER_PROFILE_LITERALS_WASM === '1'
   ? (await loadWasm()).ProfileLiteralParser : ProfileLiteralParserDouble;
 import { TestDesktopInput } from './fixtures/client-input-fixture.mjs';

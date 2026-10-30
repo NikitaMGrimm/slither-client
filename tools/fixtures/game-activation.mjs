@@ -1,3 +1,4 @@
+// Test-only authored host harness for Canvas runtime regressions. Never served or packaged.
 export const gameOrigins = Object.freeze(['http://slither.io', 'https://slither.io',
   'http://www.slither.io', 'https://www.slither.io', 'http://slither.com']);
 export const armKey = '__slitherClientArmV1';

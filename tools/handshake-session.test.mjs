@@ -1,10 +1,7 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { test } from 'node:test';
 import { HandshakeSession, unpackCommands } from '../web/handshake-session.mjs';
-import { probeNickname, reserveOfficialAttempt, validatedEndpoint } from './connection-budget.mjs';
+const probeNickname = 'Synthetic';
 
 const packed = commands => Uint8Array.from(commands.flatMap(command => [0, 0, 0, command.length, ...command]));
 const fakeWasm = () => ({ encode_login: () => Uint8Array.of(115, 0), solve_challenge: () => new Uint8Array(27), decode_frame: bytes => bytes, setup_protocol_version: command => command[1] });
@@ -34,70 +31,5 @@ test('unexpected protocol and repeated challenges fail closed', () => {
     session.receive(packed([[54, 1]]));
     assert.throws(() => session.receive(packed([next])));
     assert.equal(session.state, 'failed');
-  }
-});
-
-test('only one literal-IP endpoint without redirection inputs is accepted', () => {
-  assert.equal(validatedEndpoint('ws://127.0.0.1:1234/slither'), 'ws://127.0.0.1:1234/slither');
-  for (const url of ['ws://example.com/slither', 'ws://127.0.0.1/slither?next=elsewhere', 'ws://user@127.0.0.1/slither', 'https://127.0.0.1/slither', 'ws://127.0.0.1/other']) assert.throws(() => validatedEndpoint(url));
-});
-
-test('a durable outside-repo attempt reservation cannot be rearmed after failure', () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'slither-client-attempt-'));
-  try {
-    const first = reserveOfficialAttempt(directory, 'ws://127.0.0.1:1234/slither');
-    assert.equal(JSON.parse(fs.readFileSync(first.ledger)).attempts, 1);
-    assert.throws(() => reserveOfficialAttempt(directory, 'ws://127.0.0.1:1234/slither'), /EEXIST/);
-    first.persist({ success: false }, []);
-  } finally {
-    assert.equal(path.dirname(path.resolve(directory)), path.resolve(os.tmpdir()));
-    assert(path.basename(directory).startsWith('slither-client-attempt-'));
-    fs.rmSync(directory, { recursive: true, force: true });
-  }
-});
-
-test('evidence destinations are reserved before dialing and summary failure preserves wire records', () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'slither-client-attempt-'));
-  try {
-    fs.writeFileSync(path.join(directory, 'official-result.json'), 'existing evidence');
-    assert.throws(() => reserveOfficialAttempt(directory, 'ws://127.0.0.1:1234/slither'), /EEXIST/);
-    assert.equal(fs.readFileSync(path.join(directory, 'official-result.json'), 'utf8'), 'existing evidence');
-    assert(fs.existsSync(path.join(directory, 'official-attempt.json')));
-    const second = fs.mkdtempSync(path.join(directory, 'synthetic-'));
-    const reservation = reserveOfficialAttempt(second, 'ws://127.0.0.1:1234/slither');
-    const circular = {}; circular.self = circular;
-    assert.throws(() => reservation.persist(circular, [{ direction: 'in', bytes: 'synthetic' }]), /persist all/);
-    assert.equal(JSON.parse(fs.readFileSync(path.join(second, 'official-wire.jsonl'), 'utf8')).bytes, 'synthetic');
-    assert.throws(() => reservation.persist({}, []), /already finalized/);
-  } finally {
-    assert.equal(path.dirname(path.resolve(directory)), path.resolve(os.tmpdir()));
-    assert(path.basename(directory).startsWith('slither-client-attempt-'));
-    fs.rmSync(directory, { recursive: true, force: true });
-  }
-});
-
-test('synthetic flush and close failures retain both errors and still persist the other file', () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'slither-client-attempt-'));
-  const originalClose = fs.closeSync;
-  const originalFlush = fs.fsyncSync;
-  try {
-    const reservation = reserveOfficialAttempt(directory, 'ws://127.0.0.1:1234/slither');
-    let closes = 0;
-    let flushes = 0;
-    fs.fsyncSync = handle => { if (++flushes === 1) throw new Error('synthetic flush failure'); originalFlush(handle); };
-    fs.closeSync = handle => { originalClose(handle); if (++closes === 1) throw new Error('synthetic close failure'); };
-    assert.throws(() => reservation.persist({ success: false }, []), error => {
-      assert(error instanceof AggregateError);
-      assert.deepEqual(error.errors.map(item => item.message), ['synthetic flush failure', 'synthetic close failure']);
-      return true;
-    });
-    assert.equal(closes, 2);
-    assert.equal(JSON.parse(fs.readFileSync(path.join(directory, 'official-result.json'), 'utf8')).success, false);
-  } finally {
-    fs.closeSync = originalClose;
-    fs.fsyncSync = originalFlush;
-    assert.equal(path.dirname(path.resolve(directory)), path.resolve(os.tmpdir()));
-    assert(path.basename(directory).startsWith('slither-client-attempt-'));
-    fs.rmSync(directory, { recursive: true, force: true });
   }
 });

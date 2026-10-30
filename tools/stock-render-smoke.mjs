@@ -11,7 +11,7 @@ import { createStockGameplay } from '../web/stock-gameplay.mjs';
 import { createStockSession } from '../web/stock-session.mjs';
 import { projectHudView } from '../web/stock-hud-view.mjs';
 import { bindStockHudDom } from '../web/stock-hud-dom.mjs';
-import { syntheticChallenge } from './reference-parity.mjs';
+import { syntheticChallenge } from './synthetic-challenge.mjs';
 
 // Original authored synthetic packets, live-source doubles and Canvas command
 // recorder. This exercises real Wasm, without raster pixels or a host runtime.

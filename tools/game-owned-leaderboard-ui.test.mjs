@@ -24,7 +24,7 @@ if (typeof vm.SourceTextModule !== 'function') {
   });
 } else {
   const context = vm.createContext({});
-  const source = await readFile(new URL('../extension/game-owned-leaderboard-ui.mjs', import.meta.url), 'utf8');
+  const source = await readFile(new URL('../web/game-owned-leaderboard-ui.mjs', import.meta.url), 'utf8');
   const viewDouble = new vm.SourceTextModule(`
     // LABELLED DOUBLE: membership and copied frozen grammar, no real state/HUD admission.
     const issued = new WeakSet();

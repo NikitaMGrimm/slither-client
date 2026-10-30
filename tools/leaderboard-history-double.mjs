@@ -89,5 +89,5 @@ export function createLeaderboardHistoryDouble() {
 }
 
 export const LeaderboardHistoryDouble = process.env.SLITHER_LEADERBOARD_HISTORY_WASM === '1'
-  ? (await (await import('./reference-context.mjs')).loadWasm()).LeaderboardHistory
+  ? (await (await import('./wasm-test-context.mjs')).loadWasm()).LeaderboardHistory
   : createLeaderboardHistoryDouble();

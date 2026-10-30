@@ -712,6 +712,6 @@ export function bodyRenderSmoke(wasm) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const { loadWasm } = await import('./reference-context.mjs');
+  const { loadWasm } = await import('./wasm-test-context.mjs');
   console.log(JSON.stringify(bodyRenderSmoke(await loadWasm())));
 }

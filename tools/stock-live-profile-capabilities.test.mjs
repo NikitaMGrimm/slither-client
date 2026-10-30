@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { Script, createContext, runInContext } from 'node:vm';
 
-const gateSource = readFileSync(new URL('../extension/game-gate.js', import.meta.url), 'utf8');
+const gateSource = readFileSync(new URL('./fixtures/game-gate.js', import.meta.url), 'utf8');
 const route = 'https://slither.io/s/game1107249518.js';
 function fixture({ href = 'https://slither.io/', secure = true, missing, countBytes = false } = {}) {
   const context = createContext({ Event, EventTarget, URL });

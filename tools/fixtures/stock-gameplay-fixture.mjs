@@ -3,7 +3,7 @@ import {after} from 'node:test';
 import {createStockGameplay as adapter} from '../../web/stock-gameplay.mjs';
 import {TestGameplayPolicy} from './gameplay-policy-double.mjs';
 const Policy=process.env.SLITHER_GAMEPLAY_WASM==='1'
-  ?(await(await import('../reference-context.mjs')).loadWasm()).GameplayPolicy:TestGameplayPolicy;
+  ?(await(await import('../wasm-test-context.mjs')).loadWasm()).GameplayPolicy:TestGameplayPolicy;
 const owners=[];
 export function createStockGameplay(options){const owner=adapter({...options,GameplayPolicy:options.GameplayPolicy??Policy});owners.push(owner);return owner;}
 after(() => {

@@ -85,5 +85,5 @@ export function createHudHistoryDouble() {
 
 // The complete ABI smoke reuses these existing requirements with the real class.
 export const HudHistoryDouble = process.env.SLITHER_HUD_HISTORY_WASM === '1'
-  ? (await (await import('./reference-context.mjs')).loadWasm()).HudHistory
+  ? (await (await import('./wasm-test-context.mjs')).loadWasm()).HudHistory
   : createHudHistoryDouble();

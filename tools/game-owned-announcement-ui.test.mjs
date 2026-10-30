@@ -1,7 +1,7 @@
 // Authored DOM-operation doubles; no native browser or Wasm acceptance.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createOwnedAnnouncementUi } from '../extension/game-owned-announcement-ui.mjs';
+import { createOwnedAnnouncementUi } from '../web/game-owned-announcement-ui.mjs';
 import { createGateTestDom } from './game-gate-test-fixture.mjs';
 
 function fixture() {

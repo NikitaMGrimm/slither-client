@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
-import { createOwnedHudUi } from '../extension/game-owned-hud-ui.mjs';
+import { createOwnedHudUi } from '../web/game-owned-hud-ui.mjs';
 import { createGateTestDom } from './game-gate-test-fixture.mjs';
 import { bindStockHudDom } from '../web/stock-hud-dom.mjs';
 import { projectHudView } from '../web/stock-hud-view.mjs';
@@ -137,12 +137,12 @@ function displayed(state, score, rank = 1, population = 65535, token = 7n) {
 }
 
 test('actual import and constructor are inert; lease consumes mount once', async () => {
-  const source = await readFile(new URL('../extension/game-owned-hud-ui.mjs', import.meta.url), 'utf8');
+  const source = await readFile(new URL('../web/game-owned-hud-ui.mjs', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /\bimport\s*(?:[({*'"`]|[\w]+\s+from)/);
   const prior = Object.getOwnPropertyDescriptor(globalThis, 'document');
   Object.defineProperty(globalThis, 'document', { configurable: true, get() { throw new Error('global document'); } });
   try {
-    const imported = await import('../extension/game-owned-hud-ui.mjs?synthetic-inert-import');
+    const imported = await import('../web/game-owned-hud-ui.mjs?synthetic-inert-import');
     assert.deepEqual(Object.keys(imported), ['createOwnedHudUi']);
     const f = fixture();
     const lease = imported.createOwnedHudUi(f.input);
@@ -222,7 +222,7 @@ test('fresh 21-node tree, exact frozen wrappers and authored lower-left layout a
 
 test('default stylesheet hides unpopulated current readout until existing history writes its values', async () => {
   // Authored selector/tree/text contract, not execution of a browser CSS engine.
-  const css = await readFile(new URL('../extension/game-host.css', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../web/game-host.css', import.meta.url), 'utf8');
   assert.match(css, /#slither-client-root > div > div:has\(> div > span \+ b\):has\(> div > :empty\)\s*\{\s*display:\s*none\s*!important;\s*\}/);
   const f = fixture(), lease = f.lease(), nodes = lease.mount(), b = bind(f, nodes);
   const values = [nodes.readout.lengthValue, nodes.readout.rankValue, nodes.readout.populationValue];
@@ -263,7 +263,7 @@ test('default stylesheet hides unpopulated current readout until existing histor
 
 test('default stylesheet omits the empty owned final row until genuine final text exists', async () => {
   // Selector/tree/text contract only; this fixture does not execute a CSS engine.
-  const css = await readFile(new URL('../extension/game-host.css', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../web/game-host.css', import.meta.url), 'utf8');
   assert.match(css, /#slither-client-root > div > div \+ div:has\(> span \+ b:empty\)\s*\{\s*display:\s*none\s*!important;\s*\}/);
   const f = fixture(), lease = f.lease(), nodes = lease.mount(), b = bind(f, nodes);
   assert.deepEqual(nodes.mount.children, [nodes.readout.root, nodes.final.root]);

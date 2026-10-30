@@ -6,8 +6,8 @@ import { selectedAccessoryRequestSmoke } from './selected-accessory-request-smok
 import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
-import { loadWasm } from './reference-context.mjs';
-import { syntheticChallenge } from './reference-parity.mjs';
+import { loadWasm } from './wasm-test-context.mjs';
+import { syntheticChallenge } from './synthetic-challenge.mjs';
 import { HandshakeSession } from '../web/handshake-session.mjs';
 import { bundle, syntheticScene, syntheticSetup, syntheticStep } from '../web/synthetic-scene.mjs';
 import { denseScene, DENSE_SCENE_PROFILES } from '../web/dense-scene.mjs';

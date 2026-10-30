@@ -6,14 +6,9 @@ import { fileURLToPath } from 'node:url';
 const projectRoot = fileURLToPath(new URL('..', import.meta.url));
 const routes = new Map([
   ['/', ['web/game.html', 'text/html; charset=utf-8']],
-  ['/anchors', ['web/scene.html', 'text/html; charset=utf-8']],
-  ['/animated', ['web/animated.html', 'text/html; charset=utf-8']],
-  ['/benchmark', ['web/benchmark.html', 'text/html; charset=utf-8']],
-  ['/scene/scene.css', ['web/scene.css', 'text/css; charset=utf-8']],
-  ...['scene', 'authored-source-recipes', 'animated', 'desktop-layout', 'synthetic-scene', 'synthetic-body', 'synthetic-food', 'synthetic-prey', 'skin-provider', 'loopback-session', 'dense-scene', 'benchmark'].map(name => [`/scene/${name}.mjs`, [`web/${name}.mjs`, 'text/javascript; charset=utf-8']]),
   ['/scene/pkg/slither_client.js', ['dist/web/slither_client.js', 'text/javascript; charset=utf-8']],
   ['/scene/pkg/slither_client_bg.wasm', ['dist/web/slither_client_bg.wasm', 'application/wasm']],
-  ['/game/host.css', ['extension/game-host.css', 'text/css; charset=utf-8']],
+  ['/game/host.css', ['web/game-host.css', 'text/css; charset=utf-8']],
   ['/assets/logo.svg', ['assets/logo.svg', 'image/svg+xml']],
   ...[['bootstrap', 'game-bootstrap'], ['runtime', 'game-runtime'],
     ['owned-hud-ui', 'game-owned-hud-ui'], ['owned-play-ui', 'game-owned-play-ui'],
@@ -23,7 +18,7 @@ const routes = new Map([
     ['start-page-layout', 'start-page-layout'], ['game-owned-loading-ui', 'game-owned-loading-ui'],
     ['owned-leaderboard-ui', 'game-owned-leaderboard-ui'], ['owned-minimap-ui', 'game-owned-minimap-ui'],
     ['owned-end-screen-ui', 'game-owned-end-screen-ui']]
-    .map(([route, name]) => [`/game/${route}.mjs`, [`extension/${name}.mjs`, 'text/javascript; charset=utf-8']]),
+    .map(([route, name]) => [`/game/${route}.mjs`, [`web/${name}.mjs`, 'text/javascript; charset=utf-8']]),
   ...['stock-client', 'stock-skin-provider', 'stock-skin-rules', 'stock-accessory-selection', 'stock-cached-accessory', 'stock-accessory-load', 'stock-accessory-request', 'stock-host-snapshot',
     'stock-food-provider', 'stock-prey-provider', 'stock-asset-sources', 'skin-provider',
     'desktop-layout', 'client-input', 'stock-gameplay', 'stock-session', 'stock-hud-contract',
