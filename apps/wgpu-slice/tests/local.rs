@@ -835,6 +835,7 @@ fn lazy_resources_preserve_full_palette_and_reject_unknowns() {
         asset: a,
         source: None,
         repeat_uv: None,
+        black_effect: false,
         destination: BodyRect {
             x: 0.,
             y: 0.,

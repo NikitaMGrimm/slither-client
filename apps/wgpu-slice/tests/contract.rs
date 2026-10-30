@@ -24,6 +24,7 @@ fn draw() -> Draw {
         asset: asset(),
         source: None,
         repeat_uv: None,
+        black_effect: false,
         destination: BodyRect {
             x: 0.,
             y: 0.,
@@ -48,6 +49,53 @@ fn frame(draws: Vec<Draw>) -> Frame {
 }
 fn resident() -> BTreeMap<ResourceKey, BodyAsset> {
     BTreeMap::from([(asset().into(), asset())])
+}
+#[test]
+fn only_source_over_body_shadows_and_outlines_request_black_blending() {
+    let mut c = BodyImageCommand {
+        sequence: 0,
+        pass: BodyPaintPass::BodyShadow,
+        ordinal: 0,
+        asset_index: 0,
+        asset: asset(),
+        source_rect: None,
+        center: slither_client::state::Point::default(),
+        translation: slither_client::state::Point::default(),
+        rotation: None,
+        destination: draw().destination,
+        alpha: BodyAlpha {
+            requested: 0.5,
+            effective: 0.5,
+            accepted: true,
+        },
+        blend: BodyBlend::SourceOver,
+    };
+    for pass in [
+        BodyPaintPass::Outline,
+        BodyPaintPass::NearHeadShadow,
+        BodyPaintPass::TailOutline,
+        BodyPaintPass::TailShadow,
+        BodyPaintPass::BodyShadow,
+    ] {
+        c.pass = pass;
+        let d = Draw::from(&c);
+        assert!(d.black_effect);
+        assert!(frame(vec![d]).quads(&resident()).unwrap()[0].black_effect);
+    }
+    for pass in [
+        BodyPaintPass::Body,
+        BodyPaintPass::HeadFade,
+        BodyPaintPass::TailFade,
+        BodyPaintPass::OuterBoost,
+        BodyPaintPass::InnerBoost,
+        BodyPaintPass::Death,
+    ] {
+        c.pass = pass;
+        assert!(!Draw::from(&c).black_effect);
+    }
+    c.pass = BodyPaintPass::BodyShadow;
+    c.blend = BodyBlend::Lighter;
+    assert!(!Draw::from(&c).black_effect);
 }
 #[test]
 fn repeat_uvs_cross_tile_seams_without_relaxing_image_crops() {

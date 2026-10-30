@@ -296,6 +296,7 @@ fn ordinary_composition_preserves_body_order_and_uses_two_cropped_panels() {
     let draw = Draw {
         corners: None,
         repeat_uv: None,
+        black_effect: false,
         asset,
         source: None,
         destination: BodyRect {
