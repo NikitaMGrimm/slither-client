@@ -23,6 +23,8 @@ struct VertexOut {
     // Reverse-subtract a near-half-byte bias to counter hardware nearest rounding.
     // The 255/256 factor matches its integer attenuation on dark backgrounds;
     // this is not a general replacement for colored-image source-over.
+    // Integer-alpha Vulkan/MSAA4 probe: exact for destination bytes 0..18;
+    // GPU blend precision leaves at most one byte of error elsewhere.
     let bias = (0.5 - 1. / 512.) / 255.;
     return vec4<f32>(vec3<f32>(bias), alpha * (255. / 256.));
 }

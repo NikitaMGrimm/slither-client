@@ -67,7 +67,7 @@ async fn pixels() -> Result<Vec<u8>> {
     let weak = upload(&mut r, 4, [1, 1], vec![0, 0, 0, 8])?;
     let colored = upload(&mut r, 5, [1, 1], vec![32, 0, 0, 64])?;
     let mut draws = vec![
-        draw(bg, [0., 0., 256., 1280.], false, 1.),
+        draw(bg, [0., 0., 256., 1536.], false, 1.),
         draw(shadow, [0., 0., 256., 256.], false, 1.),
         draw(shadow, [0., 256., 256., 256.], true, 1.),
         draw(shadow, [0., 512., 256., 256.], true, 0.),
@@ -77,9 +77,10 @@ async fn pixels() -> Result<Vec<u8>> {
     draws.extend((0..14).map(|_| draw(weak, [0., 768., 256., 256.], true, 1.)));
     draws.push(draw(colored, [0., 1024., 128., 256.], false, 0.5));
     draws.push(draw(colored, [128., 1024., 128., 256.], true, 0.5));
+    draws.extend((0..14).map(|_| draw(weak, [0., 1280., 256., 256.], true, 1.)));
     let frame = Frame {
         identity: 1,
-        extent: [256, 1280],
+        extent: [256, 1536],
         viewport_scale: 1.,
         tick: 1,
         draws,
@@ -89,7 +90,7 @@ async fn pixels() -> Result<Vec<u8>> {
         label: Some("synthetic black-effect grid"),
         size: wgpu::Extent3d {
             width: 256,
-            height: 1280,
+            height: 1536,
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
@@ -102,7 +103,7 @@ async fn pixels() -> Result<Vec<u8>> {
     r.render(&frame, &texture.create_view(&Default::default()))?;
     let buffer = r.device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("synthetic blend readback"),
-        size: 256 * 1280 * 4,
+        size: 256 * 1536 * 4,
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
@@ -119,12 +120,12 @@ async fn pixels() -> Result<Vec<u8>> {
             layout: wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(1024),
-                rows_per_image: Some(1280),
+                rows_per_image: Some(1536),
             },
         },
         wgpu::Extent3d {
             width: 256,
-            height: 1280,
+            height: 1536,
             depth_or_array_layers: 1,
         },
     );
@@ -155,18 +156,69 @@ async fn pixels() -> Result<Vec<u8>> {
 
 #[test]
 #[ignore = "requires a hardware GPU; run explicitly with --ignored"]
-fn dark_shadow_truncation_zero_alpha_and_colored_controls() {
+fn shadow_truncation_precision_bounds_and_controls() {
+    // Largest exact prefixes measured on Vulkan/MSAA4. Brighter destinations
+    // retain a one-byte precision bound, including the fourteen-layer recurrence.
+    const SINGLE_EXACT_MAX: usize = 18;
+    const STACKED_EXACT_MAX: usize = 159;
     let data = pollster::block_on(pixels()).unwrap();
     let pixel = |x: usize, y: usize| &data[(y * 256 + x) * 4..(y * 256 + x) * 4 + 4];
-    for a in 0..=255_usize {
-        for c in 0..=15_usize {
+    let mut single_first_mismatch = 256;
+    let mut single_max_error = 0;
+    let mut single_mismatches = 0;
+    for a in 1..=255_usize {
+        for c in 0..=255_usize {
             let expected = (c * (256 - a) / 256) as u8;
-            assert_eq!(
-                pixel(c, 256 + a),
-                [expected, expected, expected, 255],
-                "background={c}, alpha={a}"
+            let actual = pixel(c, 256 + a);
+            let error = actual[..3]
+                .iter()
+                .map(|v| v.abs_diff(expected))
+                .max()
+                .unwrap();
+            single_max_error = single_max_error.max(error);
+            if error != 0 {
+                single_first_mismatch = single_first_mismatch.min(c);
+                single_mismatches += 1;
+            }
+            if c <= SINGLE_EXACT_MAX {
+                assert_eq!(error, 0, "exact range: background={c}, alpha={a}");
+            }
+            assert!(
+                error <= 1,
+                "background={c}, alpha={a}, actual={actual:?}, expected={expected}"
             );
+            assert_eq!(actual[3], 255);
         }
+    }
+    let mut stacked_first_mismatch = 256;
+    let mut stacked_max_error = 0;
+    let mut stacked_mismatches = 0;
+    for c in 0..=255_usize {
+        let expected = (0..14).fold(c, |value, _| value * (256 - 8) / 256) as u8;
+        let actual = pixel(c, 1408);
+        let error = actual[..3]
+            .iter()
+            .map(|v| v.abs_diff(expected))
+            .max()
+            .unwrap();
+        stacked_max_error = stacked_max_error.max(error);
+        if error != 0 {
+            stacked_first_mismatch = stacked_first_mismatch.min(c);
+            stacked_mismatches += 1;
+        }
+        if c <= STACKED_EXACT_MAX {
+            assert_eq!(error, 0, "exact stacked range: starting value={c}");
+        }
+        assert!(
+            error <= 1,
+            "stacked starting value={c}, actual={actual:?}, expected={expected}"
+        );
+        assert_eq!(actual[3], 255);
+    }
+    println!(
+        "single: first mismatch destination={single_first_mismatch}, max error={single_max_error}, mismatch pairs={single_mismatches}; stacked: first mismatch destination={stacked_first_mismatch}, max error={stacked_max_error}, mismatch starts={stacked_mismatches}"
+    );
+    for a in 0..=255_usize {
         for c in 0..=255_usize {
             assert_eq!(pixel(c, 512 + a), [c as u8, c as u8, c as u8, 255]);
         }
