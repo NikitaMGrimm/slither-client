@@ -152,11 +152,26 @@ There is no JS numeric fallback. Admitted local face behavior remains the core's
 ordinary paired eyes (including 25/44/63/64); image faces 27/40/41 remain plain.
 No antenna art, official images or complete cosmetic chooser is added.
 
-The small original bitmap HUD shows Rust current/final length, rank/population,
-the first projected leaderboard row and session status. Native title and browser
-DOM also expose the full Rust text. The bitmap font covers ASCII, substitutes a
-visible question glyph for other characters, and clips to 80 columns/four lines.
-This is a functional slice, not a complete scoreboard/menu/text system.
+The shared in-game HUD places current length and rank/population at bottom left,
+with the existing top ten leaderboard rows at top right. Rust owns score text,
+row order, own identity, palette colors and row/lifecycle opacity. The own name
+is emphasized; names clip inside a fixed column. Numeric overflow shows dots
+rather than a misleading decimal suffix. Session status and final length appear
+outside active play; compact host diagnostics remain available separately.
+
+The original 5x7 bitmap glyphs have fixed logical size (10.5 pixels high, 13.5
+pixel line spacing), independent of viewport size and backing DPR. All ten rows
+fit at 640x360. Short, narrow windows reserve the retained readout space before
+choosing row count; shorter windows reduce rows in order. Widths below
+300 logical pixels omit the board. Tiny views omit HUD submission. ASCII letters
+use uppercase glyphs; unsupported Unicode scalars visibly become question marks.
+This temporary bitmap renderer does not establish typography or pixel parity.
+
+Both hosts consume the same typed HUD through ordinary frame/Setup/resize
+composition. Text drawing remains inside the bitmap painter for later replacement.
+One lazy atlas stays within 512x512, submitted as at most two transparent corner
+quads. Its handle stays fixed and one revision publishes changed dimensions/pixels.
+Normal tests use original synthetic data; local GPU checks are separate.
 
 `Frame` keeps full-u64 handle/revision, backing extent, viewport scale, ordered
 crops/transforms/effective alpha and SourceOver/Lighter. No draw regrouping occurs.
