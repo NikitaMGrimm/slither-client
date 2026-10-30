@@ -90,6 +90,9 @@ library/OS copies are outside that guarantee. See the
 [slice README](../apps/wgpu-slice/README.md#official-windows-mode) for request,
 redirect, cancellation and selection bounds. Offline tests use authored synthetic
 inputs only. Agent-run official connections remain outside implementation checks.
+Headless PNG captures require a new directory outside the checkout. Decoded
+HTTP bodies retain the size/deadline/cancellation bounds even when compressed;
+HTTPS script/directory redirects cannot downgrade to HTTP.
 
 ## Branding and license
 

@@ -8,6 +8,7 @@ use scraper::{Html, Selector};
 use slither_client::profile_literals;
 use std::{
     collections::BTreeMap,
+    io::Read,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::{
         Arc, Mutex,
@@ -105,13 +106,55 @@ fn site_url(url: &Url) -> Result<()> {
     Ok(())
 }
 
-/// The site currently redirects HTTPS to HTTP. Keep redirects on the canonical host.
+fn admit_fetch_url(original: &Url, target: &Url) -> Result<()> {
+    site_url(target)?;
+    // Only the recorded homepage redirect or an originally HTTP resource can use HTTP.
+    if target.scheme() == "http" && original.scheme() == "https" && original.as_str() != PAGE {
+        return Err("Official resource redirect downgraded HTTPS".into());
+    }
+    Ok(())
+}
+
+fn read_decoded(
+    reader: impl Read,
+    limit: usize,
+    deadline: Instant,
+    cancel: &AtomicBool,
+) -> Result<Inert> {
+    // ureq's BodyWithConfig limit is an encoded-body limit. Apply this cap after decoding.
+    let mut reader = reader.take(limit as u64 + 1);
+    let mut bytes = Inert(Vec::new());
+    let mut chunk = Inert(vec![0; 8192]);
+    loop {
+        check_cancel(cancel)?;
+        if Instant::now() >= deadline {
+            return Err("Site request deadline".into());
+        }
+        let count = reader
+            .read(&mut chunk.0)
+            .map_err(|_| "Official site body read failed")?;
+        check_cancel(cancel)?;
+        if Instant::now() >= deadline {
+            return Err("Site request deadline".into());
+        }
+        if bytes.0.len() + count > limit {
+            return Err("Official site decoded body exceeds size limit".into());
+        }
+        if count == 0 {
+            return Ok(bytes);
+        }
+        bytes.0.extend_from_slice(&chunk.0[..count]);
+    }
+}
+
+/// The recorded homepage can redirect to HTTP; HTTPS script/directory URLs cannot.
 fn fetch(url: &Url, limit: usize, cancel: &AtomicBool) -> Result<(Url, Inert)> {
     let deadline = Instant::now() + Duration::from_secs(5);
+    let original = url.clone();
     let mut url = url.clone();
     for _ in 0..=3 {
         check_cancel(cancel)?;
-        site_url(&url)?;
+        admit_fetch_url(&original, &url)?;
         let left = deadline
             .checked_duration_since(Instant::now())
             .ok_or("Site request deadline")?;
@@ -141,14 +184,12 @@ fn fetch(url: &Url, limit: usize, cancel: &AtomicBool) -> Result<(Url, Inert)> {
         if response.status() != 200 {
             return Err("Official site returned a non-200 response".into());
         }
-        let bytes = response
-            .body_mut()
-            .with_config()
-            .limit(limit as u64)
-            .read_to_vec()
-            .map_err(|_| "Official site body exceeds deadline/size or is incomplete")?;
-        let bytes = Inert(bytes);
-        check_cancel(cancel)?;
+        let bytes = read_decoded(
+            response.body_mut().with_config().reader(),
+            limit,
+            deadline,
+            cancel,
+        )?;
         return Ok((url, bytes));
     }
     Err("Too many official site redirects".into())
@@ -546,6 +587,7 @@ fn prepare_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{io::Write, net::TcpListener};
     // ORIGINAL SYNTHETIC page/script; no retained reference or acquisition authority.
     const SCRIPT: &[u8] =
         b"var client_version=4242; var cpw=[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19];";
@@ -664,5 +706,100 @@ mod tests {
         ] {
             assert!(site_url(&Url::parse(bad).unwrap()).is_err());
         }
+    }
+    #[test]
+    fn https_script_and_directory_cannot_downgrade_but_original_http_can() {
+        for path in ["/s/game999.js", "/i999.txt"] {
+            let https = Url::parse(&format!("https://slither.io{path}")).unwrap();
+            let http = Url::parse(&format!("http://slither.io{path}")).unwrap();
+            assert!(admit_fetch_url(&https, &http).is_err());
+            assert!(admit_fetch_url(&https, &https).is_ok());
+            assert!(admit_fetch_url(&http, &http).is_ok());
+            assert!(admit_fetch_url(&http, &https).is_ok());
+        }
+        assert!(
+            admit_fetch_url(
+                &Url::parse(PAGE).unwrap(),
+                &Url::parse("http://slither.io/?a").unwrap()
+            )
+            .is_ok()
+        );
+    }
+    #[test]
+    fn synthetic_gzip_expansion_is_bounded_after_ureq_decoding() {
+        let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        gzip.write_all(&vec![b'x'; 8 * 1024 * 1024]).unwrap();
+        let compressed = gzip.finish().unwrap();
+        assert!(compressed.len() < PAGE_LIMIT);
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let peer = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut stream = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(e)
+                        if e.kind() == std::io::ErrorKind::WouldBlock
+                            && Instant::now() < deadline =>
+                    {
+                        thread::sleep(Duration::from_millis(5))
+                    }
+                    other => panic!("Synthetic gzip peer: {other:?}"),
+                }
+            };
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut request = Vec::new();
+            while !request.ends_with(b"\r\n\r\n") {
+                let mut byte = [0];
+                stream.read_exact(&mut byte).unwrap();
+                request.extend(byte);
+                assert!(request.len() < 8192);
+            }
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", compressed.len()).unwrap();
+            stream.write_all(&compressed).unwrap();
+        });
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .timeout_global(Some(Duration::from_secs(5)))
+            .build()
+            .into();
+        let mut response = agent
+            .get(format!("http://{address}/synthetic"))
+            .call()
+            .unwrap();
+        // The old .limit(PAGE_LIMIT).read_to_vec() admitted the compressed size then expanded 8 MiB.
+        let result = read_decoded(
+            response.body_mut().with_config().reader(),
+            PAGE_LIMIT,
+            Instant::now() + Duration::from_secs(2),
+            &AtomicBool::new(false),
+        );
+        assert!(matches!(result, Err(ref error) if error.contains("decoded body exceeds")));
+        peer.join().unwrap();
+    }
+    #[test]
+    fn decoded_reads_accept_the_exact_cap_and_check_cancel_and_deadline() {
+        let cancel = AtomicBool::new(false);
+        let deadline = Instant::now() + Duration::from_secs(1);
+        assert_eq!(
+            read_decoded(&b"abc"[..], 3, deadline, &cancel).unwrap().0,
+            b"abc"
+        );
+        assert!(read_decoded(&b"abcd"[..], 3, deadline, &cancel).is_err());
+        assert!(read_decoded(&b"abc"[..], 3, Instant::now(), &cancel).is_err());
+        struct Cancelling<'a>(&'a AtomicBool);
+        impl Read for Cancelling<'_> {
+            fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+                output[0] = b'x';
+                self.0.store(true, Ordering::SeqCst);
+                Ok(1)
+            }
+        }
+        assert!(read_decoded(Cancelling(&cancel), 3, deadline, &cancel).is_err());
     }
 }

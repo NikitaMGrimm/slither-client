@@ -2,6 +2,8 @@
 #[cfg(target_arch = "wasm32")]
 fn main() {}
 #[cfg(not(target_arch = "wasm32"))]
+mod headless;
+#[cfg(not(target_arch = "wasm32"))]
 mod desktop {
     use slither_wgpu_slice::{
         Result,
@@ -28,6 +30,7 @@ mod desktop {
         skin: u8,
         official: bool,
         server: Option<String>,
+        headless: Option<crate::headless::Options>,
     }
     pub fn options() -> Result<Option<Options>> {
         parse_options(std::env::args().skip(1))
@@ -37,11 +40,16 @@ mod desktop {
             nickname: "Player".into(),
             ..Default::default()
         };
+        let mut headless = false;
+        let mut duration = 30.0;
+        let mut frame_every = 5.0;
+        let mut frames = None;
+        let mut headless_arguments = false;
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "--help" | "-h" => {
                     println!(
-                        "Offline by default.\nslither-wgpu-desktop [--official [--server host:port] | --endpoint ws://host:port/slither] [--nickname NAME] [--skin 0..65]\nEnter: Play (official mode first fetches profile/directory and probes clusters). Escape: Stop/cancel. Pointer/arrows/Space: existing Rust input.\nNo automatic connection/reconnect. --endpoint uses authored zero credentials for simulators. Diagnostic: slither-wgpu-diagnostic."
+                        "Offline by default.\nslither-wgpu-desktop [--official [--server host:port] | --endpoint ws://host:port/slither] [--nickname NAME] [--skin 0..65]\n[--headless --duration SECONDS --frames NEW_EXTERNAL_DIRECTORY --frame-every SECONDS]\nHeadless: automatic Play, deterministic circles/boost, offscreen PNGs and exit summary. Defaults: duration 30s, frame interval 5s.\nWindow: Enter Play, Escape Stop/cancel. Pointer/arrows/Space: existing Rust input.\nNo automatic reconnect. --endpoint uses authored zero credentials for simulators. Diagnostic: slither-wgpu-diagnostic."
                     );
                     return Ok(None);
                 }
@@ -51,6 +59,24 @@ mod desktop {
                     o.endpoint = Some(e);
                 }
                 "--official" => o.official = true,
+                "--headless" => headless = true,
+                "--duration" | "--frame-every" => {
+                    let value = args
+                        .next()
+                        .ok_or("Time value required")?
+                        .parse::<f64>()
+                        .map_err(|_| "Invalid time value")?;
+                    if arg == "--duration" {
+                        duration = value;
+                    } else {
+                        frame_every = value;
+                    }
+                    headless_arguments = true;
+                }
+                "--frames" => {
+                    frames = Some(args.next().ok_or("Frame directory required")?.into());
+                    headless_arguments = true;
+                }
                 "--server" => {
                     let server = args.next().ok_or("Server value required")?;
                     official::explicit_endpoint(&server)?;
@@ -72,6 +98,18 @@ mod desktop {
         }
         if o.server.is_some() && !o.official {
             return Err("--server requires --official".into());
+        }
+        if headless {
+            if !o.official && o.endpoint.is_none() {
+                return Err("Headless requires --official or --endpoint".into());
+            }
+            o.headless = Some(crate::headless::Options::new(
+                duration,
+                frame_every,
+                frames.ok_or("Headless requires --frames NEW_EXTERNAL_DIRECTORY")?,
+            )?);
+        } else if headless_arguments {
+            return Err("--duration, --frames and --frame-every require --headless".into());
         }
         let mut menu = slither_client::menu_preferences::MenuPreferences::new(true);
         menu.select(o.skin, &[])?;
@@ -385,7 +423,17 @@ mod desktop {
             ));
         }
     }
-    pub fn run(options: Options) -> Result<()> {
+    pub fn run(mut options: Options) -> Result<()> {
+        if let Some(headless) = options.headless.take() {
+            return crate::headless::run(
+                headless,
+                options.endpoint.as_deref(),
+                options.official,
+                options.server.as_deref(),
+                &options.nickname,
+                options.skin,
+            );
+        }
         let event_loop = EventLoop::new().map_err(|e| e.to_string())?;
         let mut app = App {
             options,
@@ -429,6 +477,51 @@ mod desktop {
                     "--official",
                     "--nickname",
                     "this nickname is too long to encode",
+                ],
+            ] {
+                assert!(parse(&args).is_err());
+            }
+        }
+        #[test]
+        fn headless_admits_both_modes_and_requires_bounded_explicit_output() {
+            for mode in [
+                vec!["--official"],
+                vec!["--endpoint", "ws://127.0.0.1:19491/slither"],
+            ] {
+                let args = [
+                    mode,
+                    vec![
+                        "--headless",
+                        "--duration",
+                        "10",
+                        "--frames",
+                        "external-frames",
+                        "--frame-every",
+                        "2",
+                    ],
+                ]
+                .concat();
+                assert!(parse(&args).unwrap().unwrap().headless.is_some());
+            }
+            for args in [
+                vec!["--headless"],
+                vec!["--official", "--headless"],
+                vec!["--official", "--frames", "unused"],
+                vec![
+                    "--official",
+                    "--headless",
+                    "--frames",
+                    "unused",
+                    "--duration",
+                    "NaN",
+                ],
+                vec![
+                    "--official",
+                    "--headless",
+                    "--frames",
+                    "unused",
+                    "--frame-every",
+                    "inf",
                 ],
             ] {
                 assert!(parse(&args).is_err());

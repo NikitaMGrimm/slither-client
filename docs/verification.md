@@ -59,6 +59,16 @@ acknowledgments, own-snake state and turn/boost inputs. This does not establish
 GPU/window behavior, actual HTTP acquisition or official-server acceptance.
 The standalone browser remains local-only; see its README for CORS/Origin limits.
 
+The headless native entry has also run against a separately owned simulator on
+Vulkan/MSAA4 without a window. A 14-second run admitted Setup and own-snake
+state, sent 108 heading and two boost packets, completed 322 offscreen renders,
+and saved six complete opaque 960x540 PNGs with changing content. A small-arena
+death stopped a 20-second budget after 3.47 seconds; forcibly closing the owned
+simulator stopped another run after about four seconds with the transport error.
+These are local functional observations, not official-server or fidelity acceptance.
+Synthetic HTTP tests reject an 8 MiB gzip expansion at the decoded cap, verify
+exact-cap/cancellation/deadline behavior, and fence HTTPS resource downgrades.
+
 On 2026-10-29, the earlier rendering-slice executable rendered its synthetic
 body/food scene in a Windows Vulkan window on an NVIDIA GeForce RTX 5070 Ti,
 resized and exited normally. A separate, nonexclusive background-browser check

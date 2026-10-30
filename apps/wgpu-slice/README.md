@@ -4,7 +4,7 @@ This isolated app consumes the existing pure Rust core by path dependency. It
 does not change root Cargo files, the Canvas entry/payload, simulator, extension
 or previously accepted local bundles. Windows and browser use `game::LocalGame`,
 the same actual protocol ingress, session/input/HUD policies and ordered plans.
-No socket exists at startup. Enter starts explicit Play; the game socket opens
+Windowed mode has no socket at startup. Enter starts explicit Play; the game socket opens
 after the initial reset frame is successfully presented. Native mode supports
 official discovery or a supplied simulator endpoint. There is no automatic reconnect.
 
@@ -65,10 +65,11 @@ From the repository root:
 cargo run --manifest-path apps/wgpu-slice/Cargo.toml --locked --bin slither-wgpu-desktop -- --official --nickname Player --skin 0
 ```
 
-Press Enter once for Play. Add `--server host:port` to skip directory fetching
+In windowed mode, press Enter once for Play. Add `--server host:port` to skip directory fetching
 and latency probes while still acquiring the current profile. IPv4, DNS names,
 and bracketed IPv6 are supported. Escape cancels preparation or stops the game;
-another Enter is a new explicit attempt. Nothing is fetched before Play.
+another Enter is a new explicit attempt. Nothing is fetched before Play; headless
+mode starts that one Play automatically.
 
 Each Play reads the canonical homepage, selects its `/s/game<digits>.js` script
 element, and parses the unique `client_version` and `cpw` declarations with the
@@ -81,8 +82,10 @@ The original port/population fallback applies when no active weighted choice
 is available. Each Play starts fresh, without historical server exclusions.
 
 Acquisition admits at most 256 KiB homepage/directory and 1 MiB script, with a
-5 s deadline and at most three canonical-host redirects per resource. HTTP is
-allowed because the recorded canonical homepage redirects HTTPS to HTTP. Probes
+5 s deadline and at most three canonical-host redirects per resource. The cap
+applies after gzip decoding, with cancellation/deadline checks between bounded
+reads. The recorded homepage may redirect HTTPS to HTTP. Script/directory fetches
+cannot downgrade an originally HTTPS URL; an originally HTTP script may use HTTP. Probes
 use at most 32 workers, a 7 s window shortened to 2667 ms after the first reply,
 and at most 4096 decoded endpoints. In larger directories some clusters may not
 be sampled before the deadline. Escape cancels publication immediately; an active
@@ -104,6 +107,40 @@ WebGPU secure-context availability), or a controlled HTTPS/WSS relay that fetche
 metadata and supplies the upstream Origin. A separately permissioned extension
 transport could address fetch CORS but still needs a compatible Origin/socket
 route. No relay, extension integration, or browser official mode is included.
+
+## Headless native acceptance
+
+No window, event loop or desktop input is created with `--headless`. This command
+starts one automatic official Play and writes PNGs to a new external directory:
+
+```powershell
+$frames = Join-Path $env:TEMP ('slither-official-headless-' + [guid]::NewGuid().ToString('N'))
+cargo run --manifest-path apps/wgpu-slice/Cargo.toml --locked --bin slither-wgpu-desktop -- --official --headless --duration 60 --frames $frames --frame-every 5 --nickname Player --skin 0
+```
+
+For the simulator, replace `--official` with
+`--endpoint ws://127.0.0.1:<separately-owned-port>/slither`. The same native
+preparation/transport and shared game owner are used. A deterministic circular
+pointer target rotates at 0.25 radians/s; Space boosts for one second in every
+twelve seconds of active play. Both use the existing DesktopInput path.
+
+The existing offscreen renderer draws 960x540 RGBA8 pictures, waits for GPU
+completion/validation before acknowledging them, and saves a first picture,
+one latest picture per interval and a final changed picture. PNGs contain the
+original authored materials. Existing directories/files are never overwritten;
+the parent must already exist and captures must stay outside this checkout.
+Duration includes GPU setup and acquisition, is at most 3600 s, and is checked
+between operations. In-flight GPU/readback/acquisition cleanup can extend exit
+slightly. Capture intervals are 0.1..3600 s with at most 600 scheduled captures.
+Death, victory, disconnect and failure stop immediately without another Play.
+
+The terminal summary reports the selected server, profile version (zero for
+simulator mode), WebSocket/negotiation/challenge/login/Setup observations, received
+WebSocket frames and decoded commands, sent packets, rendered/captured frames,
+up to 32 timed own-length/segment samples, and the exit reason. Passwords and raw
+packets are never printed. A closed peer is reported as a WebSocket close; the
+existing transport does not expose the peer's close code/text. Failure before
+Setup or a failed session returns a nonzero exit status.
 
 ## Represented visuals and limits
 
@@ -153,7 +190,8 @@ Lost surface/device stops the host, without a new connection or gameplay reset/r
 Rust 1.99.0, wgpu 30.0.1, winit 0.30.13, tungstenite 0.30.0 (handshake/no TLS),
 wasm-bindgen 0.2.129, futures 0.4.79 and web-sys/js-sys 0.3.106 are pinned in this
 crate/lock. Native acquisition uses ureq 3.5.0 with Rustls/gzip, scraper 0.29.0
-and rand 0.10.3; URL admission uses url 2.5.8. Native DX12/Vulkan and browser WebGPU share frame/resource/render code.
+and rand 0.10.3; PNG capture uses png 0.18.1. URL admission uses url 2.5.8.
+Native DX12/Vulkan and browser WebGPU share frame/resource/render code.
 Use one isolated Cargo lane; never overwrite the root Canvas target/generated
 files. From this app directory:
 
