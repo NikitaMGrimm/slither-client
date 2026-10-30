@@ -8,9 +8,55 @@ pub struct Rasterizer {
     regular: Option<Arial>,
     bold: Option<Arial>,
 }
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+    #[test]
+    fn soft_hyphen_is_invisible_and_vertical_tab_is_a_space() {
+        let mut rasterizer = Rasterizer::new();
+        let mut raster = |s: &str| {
+            rasterizer
+                .rasterize(s, 15., Weight::Normal, [255; 3])
+                .unwrap()
+        };
+        let soft = raster("A\u{ad}V");
+        let invisible = raster("A\u{1d}V");
+        assert_eq!(soft.advance, invisible.advance);
+        assert_eq!(soft.image.pixels, invisible.image.pixels);
+        let tab = raster("A\u{b}V");
+        let space = raster("A V");
+        assert_eq!(tab.advance, space.advance);
+        assert_eq!(tab.image.pixels, space.image.pixels);
+        let soft = raster("\u{ad}");
+        assert_eq!(soft.advance, 0.);
+        assert!(soft.image.pixels.iter().all(|p| *p == 0));
+    }
+    #[test]
+    fn canvas_control_normalization_preserves_other_c0_and_c1_characters() {
+        for code in (0..=31).chain(127..=159) {
+            let c = char::from_u32(code).unwrap();
+            let expected = match code {
+                9..=13 => Some(' '),
+                29 => None,
+                _ => Some(c),
+            };
+            assert_eq!(canvas_character(c), expected, "U+{code:04X}");
+        }
+        assert_eq!(canvas_character('\u{ad}'), None);
+        assert_eq!(canvas_character('\u{a0}'), Some('\u{a0}'));
+    }
+}
 struct Arial {
     font: Font,
     em_ascent: f64,
+}
+fn canvas_character(c: char) -> Option<char> {
+    match c {
+        '\u{9}'..='\u{d}' => Some(' '),
+        '\u{1d}' | '\u{ad}' => None,
+        _ => Some(c),
+    }
 }
 impl Rasterizer {
     pub fn new() -> Self {
@@ -64,13 +110,13 @@ impl Rasterizer {
         let mut pen = 0_f32;
         let mut previous = None;
         let mut bounds = [0_i32; 4];
-        for c in text.chars().map(|c| {
-            if matches!(c, '\t' | '\n' | '\r' | '\u{000c}') {
-                ' '
-            } else {
-                c
-            }
-        }) {
+        for c in text.chars() {
+            let Some(c) = canvas_character(c) else {
+                // Canvas suppresses these glyphs but keeps a shaping boundary:
+                // adjacent letters do not acquire kerning across the control.
+                previous = None;
+                continue;
+            };
             if let Some(p) = previous {
                 pen += font.horizontal_kern(p, c, size).unwrap_or(0.);
             }

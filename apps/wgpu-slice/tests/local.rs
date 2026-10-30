@@ -1187,3 +1187,59 @@ fn nicknames_reach_ordered_frames_with_retained_tint_and_draw_clock_fade() {
     assert_eq!(remote_alpha, 0.5);
     assert_eq!(g.bank.text.cached_runs(), 2); // appearance-owned tint varies
 }
+
+#[cfg(windows)]
+#[test]
+fn long_nickname_keeps_backing_size_and_session_at_high_dpr() {
+    let mut g = negotiating();
+    let mut named = snake(0);
+    named[22] = 255;
+    named.splice(23..23, [b'W'; 255]);
+    g.receive(g.generation(), &bundle(&[setup(), named]), 3.)
+        .unwrap();
+    pictures(&mut g);
+    let mut backing_heights = Vec::new();
+    let mut backing_widths = Vec::new();
+    for scale in [1_u32, 2, 3, 9] {
+        g.begin_frame(
+            20. + f64::from(scale) * 16.,
+            [960 * scale.min(8), 540 * scale.min(8)],
+            f64::from(scale),
+        )
+        .unwrap();
+        effects(&mut g);
+        let p = g.take_frame().unwrap();
+        let labels: Vec<_> = p
+            .frame
+            .draws
+            .iter()
+            .filter(|d| d.asset.handle >= 0x4000_0000_0000_0000)
+            .collect();
+        assert!(
+            labels.len() > 1,
+            "the admitted full name must be tiled and drawn"
+        );
+        backing_heights.push(labels[0].destination.height * f64::from(scale));
+        backing_widths.push(
+            labels
+                .iter()
+                .map(|d| d.destination.width * f64::from(scale))
+                .sum::<f64>(),
+        );
+        assert!(labels.iter().all(|d| d.asset.width <= 512));
+        g.presented(true).unwrap();
+        assert_eq!(g.phase(), Phase::Playing);
+        assert!(g.failure.is_none());
+        assert!(g.effect().is_none());
+    }
+    assert!(
+        backing_heights
+            .iter()
+            .all(|height| *height == backing_heights[0])
+    );
+    assert!(
+        backing_widths
+            .iter()
+            .all(|width| *width == backing_widths[0])
+    );
+}

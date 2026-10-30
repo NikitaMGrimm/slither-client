@@ -23,6 +23,7 @@ pub enum Weight {
 }
 #[derive(Clone, Copy, Debug)]
 pub struct TextStyle {
+    /// Logical viewport pixels. Divide a fixed backing-pixel size by the scale.
     pub size: f64,
     pub weight: Weight,
     pub color: [u8; 3],
@@ -99,7 +100,12 @@ impl TextCache {
     /// Rasterize at backing resolution. Position and opacity are deliberately
     /// outside the cache key, so movement/fading never uploads a new texture.
     /// The returned owned resource remains valid after cache eviction.
+    /// Invalid or unrasterizable cosmetic labels produce no draws, so missing
+    /// fonts, platform errors and raster budgets cannot terminate gameplay.
     pub fn draw(&mut self, run: TextRun<'_>, backing_scale: f64) -> Result<Vec<(Draw, Resource)>> {
+        Ok(self.try_draw(run, backing_scale).unwrap_or_default())
+    }
+    fn try_draw(&mut self, run: TextRun<'_>, backing_scale: f64) -> Result<Vec<(Draw, Resource)>> {
         let px = run.style.size * backing_scale;
         if !run.position.into_iter().all(f64::is_finite)
             || !(0. ..=1.).contains(&run.alpha)

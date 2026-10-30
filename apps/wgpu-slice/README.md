@@ -102,6 +102,10 @@ textures. Queued pictures retain their own pixels after eviction. Runs admit up
 to 1024 UTF-8 bytes, 1..=128 backing font pixels and an 8192x512 raster, tiled
 with sampling gutters into the existing 512px texture limit. Active/queued
 resources retain the existing aggregate budgets. HUD integration is separate.
+Nickname fonts stay 15 backing pixels at every DPR; the adapter converts that
+size to logical units before rasterization. Raster/style failures omit the label
+without ending gameplay. Native text normalizes Canvas whitespace and suppresses
+soft hyphens and U+001D while preserving their kerning boundary.
 
 ## Scope
 

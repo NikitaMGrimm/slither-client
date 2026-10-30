@@ -227,7 +227,8 @@ pub fn prepare(
             TextRun {
                 text: &name.text,
                 style: TextStyle {
-                    size: name.font_size,
+                    // The core's nickname font is fixed in backing pixels.
+                    size: name.font_size / scale,
                     weight: Weight::Normal,
                     color: name.color,
                 },

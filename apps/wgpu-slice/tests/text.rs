@@ -20,12 +20,12 @@ fn rejects_invalid_runs_before_platform_work() {
     let mut cache = TextCache::default();
     assert!(cache.draw(run(""), 1.).unwrap().is_empty());
     for scale in [0., -1., f64::NAN, f64::INFINITY, 100.] {
-        assert!(cache.draw(run("Name"), scale).is_err());
+        assert!(cache.draw(run("Name"), scale).unwrap().is_empty());
     }
     let mut bad = run("Name");
     bad.alpha = f64::NAN;
-    assert!(cache.draw(bad, 1.).is_err());
-    assert!(cache.draw(run(&"x".repeat(1025)), 1.).is_err());
+    assert!(cache.draw(bad, 1.).unwrap().is_empty());
+    assert!(cache.draw(run(&"x".repeat(1025)), 1.).unwrap().is_empty());
     assert_eq!(cache.cached_runs(), 0);
 }
 
@@ -107,7 +107,8 @@ fn native_arial_preserves_style_alpha_scale_and_evicted_frame_pixels() {
                 },
                 1.
             )
-            .is_err()
+            .unwrap()
+            .is_empty()
     );
     let long_name = "ÿ".repeat(255);
     let tiles = cache.draw(run(&long_name), 2.).unwrap();
