@@ -279,6 +279,134 @@ fn actual_ingress_food_prey_face_score_and_board_reach_plans() {
     assert!(g.bank.cached_sources() < 200);
     g.presented(true).unwrap();
 }
+
+fn minimap_draws(p: &render::PreparedFrame) -> Vec<&Draw> {
+    p.frame
+        .draws
+        .iter()
+        .filter(|d| d.asset.handle >> 60 == 5)
+        .collect()
+}
+
+#[test]
+fn minimap_packets_fade_resize_and_keep_issued_pixels() {
+    let mut g = playing();
+    assert!(g.client().minimap_tracking_enabled());
+    g.begin_frame(30., [960, 540], 1.).unwrap();
+    effects(&mut g);
+    let hidden = g.take_frame().unwrap();
+    assert!(minimap_draws(&hidden).is_empty());
+    g.presented(true).unwrap();
+    g.receive(g.generation(), &bundle(&[vec![b'M', 0, 8, 64]]), 31.)
+        .unwrap();
+    assert_eq!(g.client().minimap_view().alternate_rgba[63 * 4..], [255; 4]);
+    g.begin_frame(40., [960, 540], 1.).unwrap();
+    effects(&mut g);
+    let first = g.take_frame().unwrap();
+    let map = minimap_draws(&first);
+    assert_eq!(map[0].translation, [912., 492.]);
+    assert_eq!(map[0].effective_alpha, 0.025);
+    let retained = first
+        .resources
+        .iter()
+        .find(|r| r.asset == map[0].asset)
+        .unwrap()
+        .clone();
+    g.retry_frame(first).unwrap();
+    let retry = g.take_frame().unwrap();
+    assert_eq!(minimap_draws(&retry)[0].asset, retained.asset);
+    assert_eq!(
+        retry
+            .resources
+            .iter()
+            .find(|r| r.asset == retained.asset)
+            .unwrap()
+            .image
+            .pixels,
+        retained.image.pixels
+    );
+    g.presented(true).unwrap();
+    let old = g.client().minimap_view().image_revision;
+    assert!(
+        g.receive(g.generation(), &bundle(&[vec![b'V', 255]]), 41.)
+            .is_err()
+    );
+    assert_eq!(g.client().minimap_view().image_revision, old);
+    g.receive(g.generation(), &bundle(&[vec![b'V', 64]]), 42.)
+        .unwrap();
+    assert_eq!(g.client().minimap_view().alternate_rgba[63 * 4..], [0; 4]);
+    g.begin_frame(200., [1920, 1080], 2.).unwrap();
+    effects(&mut g);
+    let resized = g.take_frame().unwrap();
+    assert_eq!(minimap_draws(&resized)[0].translation, [912., 492.]);
+    assert_eq!(retained.image.pixels.len(), 32 * 32 * 4);
+    g.presented(true).unwrap();
+    assert_eq!(g.client().minimap_view().last_marker_ms, 200.);
+}
+
+#[test]
+fn minimap_uses_session_return_opacity_and_stays_hidden_on_restart_setup() {
+    let mut g = playing();
+    g.receive(g.generation(), &bundle(&[vec![b'M', 0, 8, 64]]), 30.)
+        .unwrap();
+    for t in (40..=1040).step_by(16) {
+        pump(&mut g, f64::from(t));
+        g.receive(g.generation(), &bundle(&[vec![b'p']]), f64::from(t))
+            .unwrap();
+    }
+    assert_eq!(g.client().minimap_view().holder_opacity, 1.);
+    g.receive(g.generation(), &bundle(&[vec![b'v', 0]]), 1050.)
+        .unwrap();
+    for t in (1060..=5000).step_by(16) {
+        pump(&mut g, f64::from(t));
+        g.receive(g.generation(), &bundle(&[vec![b'p']]), f64::from(t))
+            .unwrap();
+    }
+    assert_eq!(g.client().minimap_view().holder_opacity, 0.);
+    g.begin_frame(5020., [960, 540], 1.).unwrap();
+    effects(&mut g);
+    assert!(minimap_draws(&g.take_frame().unwrap()).is_empty());
+    g.presented(true).unwrap();
+    g.stop();
+    effects(&mut g);
+    pump(&mut g, 5040.);
+    assert!(g.client().minimap_tracking_enabled());
+    assert!(!g.client().minimap_view().has_setup);
+}
+
+#[test]
+fn largest_minimap_tiles_within_source_budget_and_marker_is_not_clamped() {
+    let mut g = negotiating();
+    let mut far = snake(44);
+    far[16..19].copy_from_slice(&u24(500_000));
+    far[19..22].copy_from_slice(&u24(500_000));
+    g.receive(g.generation(), &bundle(&[setup(), far]), 3.)
+        .unwrap();
+    pictures(&mut g);
+    g.receive(g.generation(), &bundle(&[vec![b'M', 2, 0, 64]]), 30.)
+        .unwrap();
+    g.begin_frame(200., [960, 540], 1.).unwrap();
+    effects(&mut g);
+    let p = g.take_frame().unwrap();
+    let maps = minimap_draws(&p);
+    assert!(maps.len() >= 4);
+    assert!(
+        maps.iter()
+            .all(|d| d.asset.width <= 512 && d.asset.height <= 512)
+    );
+    let plan = g.client().minimap_view();
+    // A prepared candidate has not committed its marker or fade yet.
+    assert_eq!(plan.fade, 0.);
+    g.presented(true).unwrap();
+    let widget = g
+        .client()
+        .minimap_render_plan(MinimapLayout::default())
+        .unwrap()
+        .widget
+        .unwrap();
+    assert!(widget.marker.top_left.x > widget.side || widget.marker.top_left.y > widget.side);
+    assert!(maps.iter().any(|d| d.asset.width == 14));
+}
 #[test]
 fn control_ack_barrier_and_exact_keyboard_ping_boost_heading_order() {
     let mut g = playing();
@@ -706,6 +834,30 @@ fn late_budget_packet() -> Vec<u8> {
     cs.push(b);
     bundle(&cs)
 }
+#[test]
+fn repeated_setup_rejects_resource_heavy_snapshots_during_capture() {
+    let mut g = playing();
+    let foods: Vec<_> = (0..42)
+        .flat_map(|color| (1..=21).map(move |size| vec![b'F', 11, 10, color, size, color, size]))
+        .collect();
+    assert_eq!(foods.len(), 882);
+    g.receive(g.generation(), &bundle(&foods), 25.).unwrap();
+    let world = format!("{:?}", g.client().received());
+    let hud = g.hud_text();
+    let frames = g.client().received().frames_applied;
+    let setups = bundle(&vec![setup(); 16]);
+    let error = g.receive(g.generation(), &setups, 30.).unwrap_err();
+    assert_eq!(error, "Setup capture pixels budget");
+    assert_eq!(format!("{:?}", g.client().received()), world);
+    assert_eq!(g.hud_text(), hud);
+    assert_eq!(g.client().received().frames_applied, frames);
+    assert!(g.take_frame().is_none());
+    // One picture still fits after the rejected aggregate; no queue or draw
+    // preparation state from the rejected packet may have been published.
+    g.receive(g.generation(), &bundle(&[setup()]), 40.).unwrap();
+    pictures(&mut g);
+}
+
 #[test]
 fn regression_late_combined_draw_budget_is_atomic() {
     let mut g = playing();

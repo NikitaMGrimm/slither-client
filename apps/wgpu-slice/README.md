@@ -50,6 +50,11 @@ and the top-ten leaderboard at top right, in a temporary 5x7 bitmap font. Comple
 antennas and mobile integration remain open. Material/edge rasterization differs
 from Canvas; tests do not establish visual parity or player feel.
 
+The minimap uses shared retained occupancy, crossfade, marker and session opacity
+plans, with Canvas CSS sizing and bottom/right insets across DPR changes. Its
+layers compose before holder alpha, and the marker keeps visible overflow.
+Server-label text awaits `minimap::Minimap::append_server_label` and the text adapter.
+
 The synthetic slither-wgpu-diagnostic executable, web/diagnostic.html and examples
 are renderer development aids. Offline tests use authored synthetic packets and
 socket doubles; they open no GPU or game connection. See root docs/architecture.md

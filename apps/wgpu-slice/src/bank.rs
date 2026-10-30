@@ -29,6 +29,7 @@ pub struct Bank {
     disks: BTreeMap<[u8; 3], BodyAsset>,
     solids: BTreeMap<[u8; 3], BodyAsset>,
     pub hud: Resource,
+    pub minimap: crate::minimap::Minimap,
 }
 fn use_at(i: usize) -> BodyAssetUse {
     BodyAssetUse {
@@ -52,6 +53,7 @@ impl Bank {
             disks: BTreeMap::new(),
             solids: BTreeMap::new(),
             hud: crate::hud::resource(),
+            minimap: crate::minimap::Minimap::default(),
         };
         for p in r.body_sources.palettes {
             let variants = p.variants.into_iter().map(|r| b.add(r)).collect();

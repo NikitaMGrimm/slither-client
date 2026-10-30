@@ -315,7 +315,13 @@ fn ordinary_composition_preserves_body_order_and_uses_two_cropped_panels() {
         viewport_scale: 1.,
         draws: vec![draw.clone()],
     };
-    let result = render::finish_hud(frame, &mut bank, &view()).unwrap();
+    let resources = bank.resources(&frame).unwrap();
+    let result = render::finish_hud(
+        render::PreparedFrame { frame, resources },
+        &mut bank,
+        &view(),
+    )
+    .unwrap();
     assert_eq!(result.frame.identity, 53);
     assert_eq!(result.frame.draws[0], draw);
     assert_eq!(result.frame.draws.len(), 3);
@@ -413,7 +419,9 @@ fn projected_row_color_opacity_and_lifecycle_alpha_reach_the_rendered_frame() {
         viewport_scale: 1.,
         draws: vec![],
     };
-    let out = render::finish_hud(frame, &mut bank, &v).unwrap();
+    let resources = bank.resources(&frame).unwrap();
+    let out =
+        render::finish_hud(render::PreparedFrame { frame, resources }, &mut bank, &v).unwrap();
     assert_eq!(
         out.frame
             .draws
