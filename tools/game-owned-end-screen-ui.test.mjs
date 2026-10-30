@@ -1,7 +1,7 @@
 // Authored native DOM doubles. These tests make no browser/pixel claim.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createOwnedEndScreenUi } from '../extension/game-owned-end-screen-ui.mjs';
+import { createOwnedEndScreenUi } from '../web/game-owned-end-screen-ui.mjs';
 import { createGateTestDom } from './game-gate-test-fixture.mjs';
 
 function fixture(withMenu = false) {

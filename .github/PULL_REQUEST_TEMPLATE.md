@@ -1,16 +1,12 @@
 ## Change
 
-Describe the concrete problem and resulting behavior, including supported inputs
-and relevant limits.
+Describe the problem and resulting behavior. For cleanup, group removals and give
+tracked line counts before and after.
 
 ## Verification
 
-List checks and results, plus unrun checks. Distinguish synthetic tests, real
-Wasm execution, browser observations, external comparisons, and live acceptance.
-State the scope of each result.
+List checks passed and checks not run.
 
 ## Source boundary
 
-Confirm the index and history guards pass. Record origin and attribution for
-added code or assets, and label synthetic fixtures. Keep official source,
-assets, credentials, and raw captures outside this PR and Git history.
+Confirm index/history guards and the origin of added code or synthetic fixtures.

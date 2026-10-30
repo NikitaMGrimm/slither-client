@@ -12,7 +12,7 @@ import { copyHudIngressReport } from '../web/stock-hud-contract.mjs';
 import { unpackCommands } from '../web/handshake-session.mjs';
 import { createStockClient } from '../web/stock-client.mjs';
 import { createStockSession } from '../web/stock-session.mjs';
-import { syntheticChallenge } from './reference-parity.mjs';
+import { syntheticChallenge } from './synthetic-challenge.mjs';
 
 const word = n => [n >>> 8 & 255, n & 255];
 const triple = n => [n >>> 16 & 255, n >>> 8 & 255, n & 255];

@@ -6,7 +6,7 @@ import { setImmediate as nextTurn } from 'node:timers/promises';
 import { createStockLiveProfileAcquirer, parseClosedProfileDeclarations as parseWithPolicy,
   verifyAndConsumeProfileBytes as verifyWithPolicy } from '../web/stock-live-profile.mjs';
 import { ProfileLiteralParserDouble } from './fixtures/profile-literals-double.mjs';
-import { loadWasm } from './reference-context.mjs';
+import { loadWasm } from './wasm-test-context.mjs';
 // Normal Node runs are build-independent; only the full ABI runner explicitly selects real Wasm.
 const ProfileLiteralParser = process.env.SLITHER_PROFILE_LITERALS_WASM === '1'
   ? (await loadWasm()).ProfileLiteralParser : ProfileLiteralParserDouble;

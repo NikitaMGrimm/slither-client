@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs';
 import { test, after } from 'node:test';
 import { createGateTestDom, attachGateTestRealm } from './game-gate-test-fixture.mjs';
 import { Script, createContext, runInContext } from 'node:vm';
-import { activateGamePage, armDocument, gamePage } from '../extension/game-activation.mjs';
+import { activateGamePage, armDocument, gamePage } from './fixtures/game-activation.mjs';
 import { createStockHostSnapshot, assertStockHostCapture } from '../web/stock-host-snapshot.mjs';
 import { createStockSkinAdapter, isUnsupportedStockAccessoryFace } from '../web/stock-skin-provider.mjs';
 import { createStockClient } from './fixtures/stock-client-fixture.mjs';
@@ -23,7 +23,7 @@ import { bindStockHudDom } from '../web/stock-hud-dom.mjs';
 import { projectHudView } from '../web/stock-hud-view.mjs';
 import { createStockAccessoryRequest, hasFailedStockAccessoryRequest } from '../web/stock-accessory-request.mjs';
 import { TestSelectedAccessoryRequest } from './fixtures/accessory-request-double.mjs';
-import { loadWasm } from './reference-context.mjs';
+import { loadWasm } from './wasm-test-context.mjs';
 
 const selectedRequestPolicy = process.env.SLITHER_ACCESSORY_REQUEST_WASM === '1'
   ? (await loadWasm()).SelectedAccessoryRequest : TestSelectedAccessoryRequest;
@@ -41,8 +41,8 @@ after(() => {
 });
 
 // Original synthetic DOM/native API and Wasm doubles; no original code/artwork/socket.
-const gateSource = readFileSync(new URL('../extension/game-gate.js', import.meta.url), 'utf8');
-const bootstrapSource = readFileSync(new URL('../extension/game-runtime.mjs', import.meta.url), 'utf8');
+const gateSource = readFileSync(new URL('./fixtures/game-gate.js', import.meta.url), 'utf8');
+const bootstrapSource = readFileSync(new URL('../web/game-runtime.mjs', import.meta.url), 'utf8');
 const bootstrap = new Script('(() => {\n' + bootstrapSource.replace(/^import .+;\r?$/gm, '').replace(/^export /gm, '') + '\nreturn (options = {}) => startGamePage({ initialize: init, wasmApi: wasm, ...options });\n})();');
 const startGamePage = bootstrap.runInNewContext({ createStockHostSnapshot, assertStockHostCapture, createStockSkinAdapter, isUnsupportedStockAccessoryFace,
   createStockAccessoryRequest, hasFailedStockAccessoryRequest, createStockClient, createStockEntityAssets, desktopBackingSize, createStockGameplay, bindStockHudDom, projectHudView,
@@ -317,7 +317,7 @@ test('com entry: actual gate holds once and isolated link loads only the fixed b
   const context = createContext({ document: f.document, location: f.realm.location, URL,
     chrome: f.realm.chrome, window: f.realm, globalThis: { chrome: f.realm.chrome },
     setTimeout: () => 1, clearTimeout() {}, Set });
-  new Script(readFileSync(new URL('../extension/game-link.js', import.meta.url), 'utf8')).runInContext(context);
+  new Script(readFileSync(new URL('./fixtures/game-link.js', import.meta.url), 'utf8')).runInContext(context);
   assert.equal(f.document.head.children.length, 1);
   assert.equal(f.document.head.children[0].src, 'chrome-extension://synthetic/game/bootstrap.mjs');
   f.realm.postMessage({ type: 'slither-client-status', schema: 1, id: 'a'.repeat(32), code: 'held' });
@@ -334,7 +334,7 @@ test('com entry: actual gate and link refuse unpaired routes before holding or l
     assert.equal(f.realm.requestAnimationFrame, f.nativeRaf);
     const context = createContext({ document: f.document, location: f.realm.location, URL,
       window: f.realm, globalThis: {}, setTimeout() { assert.fail('Rejected route scheduled'); } });
-    new Script(readFileSync(new URL('../extension/game-link.js', import.meta.url), 'utf8')).runInContext(context);
+    new Script(readFileSync(new URL('./fixtures/game-link.js', import.meta.url), 'utf8')).runInContext(context);
     assert.equal(f.document.head.children.length, 0); assert.equal(f.messages.length, 0); assert.equal(f.sockets, 0);
   }
 });
@@ -362,7 +362,7 @@ test('com entry: MAIN gate and isolated link remain inert in a nested document',
   assert.equal(f.realm.sessionStorage.getItem('__slitherClientArmV1'), record);
   const context = createContext({ window: f.realm, location: f.realm.location, URL,
     document: f.document, setTimeout() { assert.fail('Nested link scheduled'); } });
-  new Script(readFileSync(new URL('../extension/game-link.js', import.meta.url), 'utf8')).runInContext(context);
+  new Script(readFileSync(new URL('./fixtures/game-link.js', import.meta.url), 'utf8')).runInContext(context);
   assert.equal(f.document.head.children.length, 0); assert.equal(f.messages.length, 0); assert.equal(f.sockets, 0);
 });
 
@@ -656,7 +656,7 @@ test('actual isolated link loads exactly one fixed MAIN module and accepts bound
   const context = createContext({ document: f.document, location: f.realm.location, URL,
     chrome: f.realm.chrome, window: f.realm, globalThis: { chrome: f.realm.chrome },
     setTimeout: () => 1, clearTimeout() {}, Set });
-  new Script(readFileSync(new URL('../extension/game-link.js', import.meta.url), 'utf8')).runInContext(context);
+  new Script(readFileSync(new URL('./fixtures/game-link.js', import.meta.url), 'utf8')).runInContext(context);
   assert.equal(f.document.head.children.length, 1);
   const module = f.document.head.children[0];
   assert.equal(f.document.getElementById('slither-client-reload').hidden, true);
@@ -686,7 +686,7 @@ test('isolated module deadline reveals an existing hidden fallback without loadi
     chrome: f.realm.chrome, window: f.realm, globalThis: { chrome: f.realm.chrome },
     setTimeout(callback, delay) { timers.set(++serial, { callback, delay }); return serial; },
     clearTimeout(id) { timers.delete(id); }, Set });
-  new Script(readFileSync(new URL('../extension/game-link.js', import.meta.url), 'utf8')).runInContext(context);
+  new Script(readFileSync(new URL('./fixtures/game-link.js', import.meta.url), 'utf8')).runInContext(context);
   const output = f.document.getElementById('slither-client-status'), writes = [];
   output.style = { setProperty(name, value) { writes.push([name, value]); } };
   const deadline = [...timers.values()].find(timer => timer.delay === 15000);
@@ -701,7 +701,7 @@ test('isolated status notifications preserve the runtime loading lease but modul
   f.realm.chrome={runtime:{getURL:name=>`chrome-extension://synthetic/${name}`}};
   const context=createContext({document:f.document,location:f.realm.location,URL,chrome:f.realm.chrome,
     window:f.realm,globalThis:{chrome:f.realm.chrome},setTimeout:()=>1,clearTimeout(){},Set});
-  new Script(readFileSync(new URL('../extension/game-link.js',import.meta.url),'utf8')).runInContext(context);
+  new Script(readFileSync(new URL('./fixtures/game-link.js',import.meta.url),'utf8')).runInContext(context);
   const output=f.document.getElementById('slither-client-status');
   // Cross-world presentation ownership marker; the isolated double has no HTML label brand.
   Object.defineProperty(output,'firstChild',{value:{localName:'label'},configurable:true});

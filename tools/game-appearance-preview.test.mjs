@@ -5,9 +5,9 @@ import { test } from 'node:test';
 import { createContext, runInContext } from 'node:vm';
 import { createGateTestDom, attachGateTestRealm } from './game-gate-test-fixture.mjs';
 import { createAppearancePreviewDouble } from './appearance-preview-double.mjs';
-import { createAppearancePreview } from '../extension/game-appearance-preview.mjs';
+import { createAppearancePreview } from '../web/game-appearance-preview.mjs';
 
-const source = readFileSync(new URL('../extension/game-gate.js', import.meta.url), 'utf8');
+const source = readFileSync(new URL('./fixtures/game-gate.js', import.meta.url), 'utf8');
 function fixture(before) {
   const dom = createGateTestDom({ hud: true, ownedHud: true, ownedPlay: true, minimap: true });
   const document = new dom.Document(); document.readyState = 'loading';

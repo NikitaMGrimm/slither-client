@@ -5,9 +5,9 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { createContext, runInContext } from 'node:vm';
 import { createGateTestDom, attachGateTestRealm, issuedMinimapViewDouble } from './game-gate-test-fixture.mjs';
-import { createOwnedMinimapUi } from '../extension/game-owned-minimap-ui.mjs';
+import { createOwnedMinimapUi } from '../web/game-owned-minimap-ui.mjs';
 
-const source = readFileSync(new URL('../extension/game-gate.js', import.meta.url), 'utf8');
+const source = readFileSync(new URL('./fixtures/game-gate.js', import.meta.url), 'utf8');
 function fixture(prepare) {
   const dom = createGateTestDom({ hud: true, ownedHud: true, minimap: true });
   const document = new dom.Document(); document.readyState = 'loading';

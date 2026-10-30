@@ -557,7 +557,7 @@ impl AnimatedScene {
 
     /// Opt-in standard-body renderer using synchronous trusted normalized
     /// skin-provider snapshots and read-only applied quality. See
-    /// `docs/standard-body-renderer.md` for the supported recipe and lifetime.
+    /// `docs/architecture.md` for the renderer and adapter boundaries.
     /// No quality/update clock advances here. All recipes and commands validate
     /// before Canvas reset; Canvas failures preserve the complete model.
     #[allow(clippy::too_many_arguments)]

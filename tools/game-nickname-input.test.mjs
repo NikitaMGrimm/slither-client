@@ -32,7 +32,7 @@ after(() => {
   assert.equal(networkCalls, 0);
 });
 
-const gateSource = readFileSync(new URL('../extension/game-gate.js', import.meta.url), 'utf8');
+const gateSource = readFileSync(new URL('./fixtures/game-gate.js', import.meta.url), 'utf8');
 const source = readFileSync(new URL('./game-bootstrap.test.mjs', import.meta.url), 'utf8');
 const functions = source.slice(source.indexOf('function fixture('), source.indexOf("\ntest('an unarmed"));
 const makeFixture = new Script(`(function(gateSource,Script,createContext,runInContext,assert,createGateTestDom,attachGateTestRealm,createHudHistoryDouble,createLeaderboardHistoryDouble,TestDesktopInput,desktopBackingOracle,TestSessionPolicy,stockSkinWasmDouble,TestStockControllerPolicy,TestGameplayPolicy,authoredSourceRecipesDouble){
@@ -471,7 +471,7 @@ test('unregister, setInput, pagehide and reload share lifetime with no synthetic
 });
 
 test('actual bootstrap/gameplay router can call the selected lease before its filter with no added observations', async () => {
-  const bootstrapSource = readFileSync(new URL('../extension/game-runtime.mjs', import.meta.url), 'utf8');
+  const bootstrapSource = readFileSync(new URL('../web/game-runtime.mjs', import.meta.url), 'utf8');
   const makeBootstrap = new Script(`(function(init,wasm,createStockHostSnapshot,createStockSkinAdapter, isUnsupportedStockAccessoryFace,
     createStockClient,createStockEntityAssets,desktopBackingSize,createStockGameplay,assertStockHostCapture,createStockAccessoryRequest,hasFailedStockAccessoryRequest){
     ${bootstrapSource.replace(/^import .+;\r?$/gm, '').replace(/^export /gm, '')}\nreturn (options = {}) => startGamePage({initialize:init,wasmApi:wasm,...options});})`).runInThisContext();

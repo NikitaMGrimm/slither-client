@@ -37,7 +37,7 @@ export class TestDesktopInput {
   snapshot() { const s=this.input.snapshot();if(s.own)delete s.own.token;return s; }
 }
 const SelectedPolicy = process.env.SLITHER_INPUT_WASM === '1'
-  ? (await (await import('../reference-context.mjs')).loadWasm()).DesktopInput : TestDesktopInput;
+  ? (await (await import('../wasm-test-context.mjs')).loadWasm()).DesktopInput : TestDesktopInput;
 const owners=[];
 export const createClientInput = options => {const owner=createAdapter({...options,InputPolicy:SelectedPolicy});owners.push(owner);return owner;};
 export function releaseTestInputs(){for(const owner of owners.splice(0))owner.dispose();}
