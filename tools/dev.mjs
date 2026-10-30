@@ -62,8 +62,8 @@ export async function develop({ mode, simulator }) {
     server?.close();
     for (const child of children) child.kill();
   };
-  const launch = (command, args) => {
-    const child = spawn(command, args, { stdio: 'inherit', windowsHide: true });
+  const launch = (command, args, windowsHide = false) => {
+    const child = spawn(command, args, { stdio: 'inherit', windowsHide });
     children.add(child);
     child.once('error', error => { console.error(error.message); process.exitCode = 1; stop(); });
     child.once('exit', code => {
@@ -75,7 +75,7 @@ export async function develop({ mode, simulator }) {
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
   try {
-    const host = launch(simulator, ['host', '--bind', `127.0.0.1:${port}`]);
+    const host = launch(simulator, ['host', '--bind', `127.0.0.1:${port}`], true);
     await ready(port, host);
     if (stopping) return;
     console.log(`Local simulator: ws://127.0.0.1:${port}/slither`);

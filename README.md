@@ -20,14 +20,17 @@ npm ci --ignore-scripts --no-audit --no-fund
 git config core.hooksPath tools/hooks
 ```
 
-Install a current challenge-capable slither-sim binary separately. Put it on PATH,
-set SLITHER_SIM to its executable path, or pass `--simulator <path>` to either
-development command below. These commands build first, start their own loopback
-simulator on a free port, and stop it when the client exits or you press Ctrl+C.
+Install a current challenge-capable slither-sim binary separately. Put it on PATH
+or set SLITHER_SIM to its executable path. To supply a path directly, use
+`npm run dev:desktop -- --simulator <path>` or
+`npm run dev:web -- --simulator <path>`.
+Both commands build first and start their own loopback simulator on a free port.
+Press Ctrl+C to stop either command and its simulator. Closing the desktop
+window also stops its simulator; closing the browser tab leaves dev:web running.
 
 ## Run
 
-Desktop (wgpu):
+Windows desktop (wgpu):
 
 ```sh
 npm run dev:desktop
@@ -62,10 +65,11 @@ Canvas workflows; diagnostic and extension routes have been removed.
 npm run check
 ```
 
-Runs repository guards, JavaScript tests, Rust format/tests/Clippy, native and
-Wasm builds for both clients, and the real Canvas Wasm ABI tests. It opens no
-window and connects to no game server. [Testing](docs/verification.md) lists
-focused checks and prerequisites.
+Runs repository guards, JavaScript tests, core Rust format/tests/Clippy, both
+Wasm builds and the real Canvas Wasm ABI tests. Native wgpu tests, Clippy and the
+desktop build run on Windows; Linux skips those native wgpu steps. The command
+opens no window and connects to no game server. [Testing](docs/verification.md)
+lists focused checks and prerequisites.
 
 Read [architecture](docs/architecture.md) and [contributing](CONTRIBUTING.md) for
 code ownership and development rules. Keep official source, assets, credentials

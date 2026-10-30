@@ -5,25 +5,33 @@ protocol/session/input/HUD/presentation policies and a small ordered wgpu render
 The crate has its own lockfile and a path dependency on the core. Canvas remains
 the visual reference.
 
-From the repository root, run the desktop client and a local simulator together:
+On Windows, from the repository root, run the desktop client and a local simulator:
 
 ```sh
 npm run dev:desktop
 ```
 
-Set SLITHER_SIM or append --simulator <executable> if slither-sim is not on PATH.
+If slither-sim is not on PATH, set SLITHER_SIM or run
+`npm run dev:desktop -- --simulator <path>`.
 Enter starts Play, Escape stops; pointer/arrows/Space and mouse boost feed the
 shared input policy. No connection starts until Play, and reconnect is explicit.
 The endpoint must be ws://127.0.0.1:<port>/slither.
 
 ## Build and test
 
-Use Rust 1.99.0 and wasm-bindgen CLI 0.2.129. From the repository root:
+Use Rust 1.99.0 and wasm-bindgen CLI 0.2.129. From the repository root, on Windows
+or Linux:
+
+```sh
+npm run check
+```
+
+The native wgpu tests, Clippy and desktop build run only on Windows; Linux skips
+those steps. For focused native checks on Windows:
 
 ```sh
 cargo build --manifest-path apps/wgpu-slice/Cargo.toml --locked --bin slither-wgpu-desktop
 cargo test --manifest-path apps/wgpu-slice/Cargo.toml --locked --lib --tests
-npm run check
 ```
 
 The full check command also generates bindings in dist/wgpu-slice/pkg. To try the
@@ -31,7 +39,7 @@ WebGPU host, copy web/index.html and web/*.mjs from this app alongside that pkg
 folder, serve the output over loopback HTTP, and enter a local simulator endpoint.
 A WebGPU-capable browser is required. There is no Canvas fallback.
 
-From this app directory, `cargo run --release --example sprite_parity -- <private-pack-dir>`
+On Windows, from this app directory, `cargo run --release --example sprite_parity -- <private-pack-dir>`
 compares authored sprites against an external private pack.
 
 ## Scope
