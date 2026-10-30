@@ -60,7 +60,15 @@ fn spawn(skin: u8, cosmetic: u8) -> Vec<u8> {
     p
 }
 fn client(bank: &Bank, skin: u8, accessory: u8) -> AnimatedClient {
-    let packets: Vec<_> = [setup(), spawn(skin, accessory)]
+    client_named(bank, skin, accessory, "")
+}
+fn named(mut packet: Vec<u8>, name: &str) -> Vec<u8> {
+    packet[22] = name.len() as u8;
+    packet.splice(23..23, name.bytes());
+    packet
+}
+fn client_named(bank: &Bank, skin: u8, accessory: u8, name: &str) -> AnimatedClient {
+    let packets: Vec<_> = [setup(), named(spawn(skin, accessory), name)]
         .into_iter()
         .flat_map(|p| {
             let mut out = (p.len() as u16).to_be_bytes().to_vec();
@@ -69,6 +77,7 @@ fn client(bank: &Bank, skin: u8, accessory: u8) -> AnimatedClient {
         })
         .collect();
     let mut c = AnimatedClient::new(0.).unwrap();
+    c.enable_nicknames().unwrap();
     c.apply_frame_with_accessory_presentation::<ClientPresentationError, _>(
         &packets,
         ElapsedHeader::Absent,
@@ -433,18 +442,67 @@ fn missing_and_corrupt_native_images_preserve_play_and_other_cosmetics() {
 }
 
 #[test]
-fn hundred_alive_outlined_snakes_with_hud_and_minimap_fit_the_draw_budget() {
-    let mut bank = Bank::new().unwrap();
-    bank.cosmetics = Some(cosmetics(None));
+#[cfg(windows)]
+fn named_plain_and_image_faces_resolve_text_and_cosmetics_together() {
+    use slither_wgpu_slice::bank::{HANDLE_NAMESPACE_SIZE, TEXT_HANDLE_BASE};
+    for skin in [0, 40] {
+        let mut bank = Bank::new().unwrap();
+        bank.cosmetics = Some(cosmetics(Some(30)));
+        let mut c = client_named(&bank, skin, 255, "Named snake");
+        let prepared = render::prepare(&mut c, &mut bank, [960, 540], 1., 1, quality()).unwrap();
+        let text = prepared
+            .frame
+            .draws
+            .iter()
+            .find(|d| {
+                (TEXT_HANDLE_BASE..TEXT_HANDLE_BASE + HANDLE_NAMESPACE_SIZE)
+                    .contains(&d.asset.handle)
+            })
+            .expect("nickname texture");
+        let cosmetics = bank.cosmetics.as_ref().unwrap();
+        let image = if skin == 40 {
+            cosmetics.role(SkinSourceRole::Mouth).unwrap()
+        } else {
+            cosmetics.accessory(true).unwrap().asset
+        };
+        let cosmetic = prepared
+            .frame
+            .draws
+            .iter()
+            .find(|d| d.asset == image)
+            .unwrap();
+        assert!(!cosmetic.black_effect);
+        assert!(!text.black_effect);
+        assert_ne!(text.asset.handle, image.handle);
+        for asset in [text.asset, image] {
+            assert_eq!(
+                prepared
+                    .resources
+                    .iter()
+                    .filter(|r| r.asset == asset)
+                    .count(),
+                1
+            );
+        }
+        let resident = prepared
+            .resources
+            .iter()
+            .map(|r| (r.asset.into(), r.asset))
+            .collect();
+        assert!(prepared.frame.quads(&resident).is_ok());
+    }
+}
+
+fn crowd_client(bank: &Bank, skin: u8) -> AnimatedClient {
     let packets: Vec<_> = std::iter::once(setup())
         .chain((1u16..=100).map(|id| {
-            let mut packet = spawn(41, 255);
+            let mut packet = spawn(skin, 255);
             packet[1..3].copy_from_slice(&id.to_be_bytes());
             // Short contiguous bodies keep this focused on eye draw cost.
             packet[16..19].copy_from_slice(&u24(4880));
             packet.truncate(31);
             packet.extend([0, 0]);
-            packet
+            named(packet, &format!("Player{id}"))
         }))
         .chain(std::iter::once(vec![b'M', 0, 8, 64]))
         .flat_map(|packet| {
@@ -455,6 +513,7 @@ fn hundred_alive_outlined_snakes_with_hud_and_minimap_fit_the_draw_budget() {
         .collect();
     let mut c = AnimatedClient::new(0.).unwrap();
     c.enable_minimap_tracking().unwrap();
+    c.enable_nicknames().unwrap();
     c.apply_frame_with_accessory_presentation::<ClientPresentationError, _>(
         &packets,
         ElapsedHeader::Absent,
@@ -470,7 +529,26 @@ fn hundred_alive_outlined_snakes_with_hud_and_minimap_fit_the_draw_budget() {
     .unwrap();
     c.advance(100., false).unwrap();
     c.observe_minimap_ui_fraction(1.).unwrap();
+    c
+}
+
+#[test]
+fn hundred_alive_outlined_snakes_with_hud_and_minimap_fit_the_draw_budget() {
+    let mut bank = Bank::new().unwrap();
+    bank.cosmetics = Some(cosmetics(None));
+    let mut c = crowd_client(&bank, 41);
     let prepared = render::prepare(&mut c, &mut bank, [960, 540], 1., 1, quality()).unwrap();
+    assert_eq!(c.nickname_draws().len(), 100);
+    #[cfg(windows)]
+    assert_eq!(
+        prepared
+            .frame
+            .draws
+            .iter()
+            .filter(|d| d.asset.handle >> 60 == 4)
+            .count(),
+        100
+    );
     assert_eq!(prepared.frame.snakes.len(), 100);
     assert!(
         prepared
@@ -488,6 +566,40 @@ fn hundred_alive_outlined_snakes_with_hud_and_minimap_fit_the_draw_budget() {
         .collect();
     assert_eq!(eyes.len(), 200);
     assert!(eyes.iter().all(|d| d.effective_alpha == 1.));
+    finish_crowd(prepared, &mut bank);
+}
+
+#[test]
+fn antenna_crowd_skips_whole_antennas_and_preserves_hud_and_minimap() {
+    let mut bank = Bank::new().unwrap();
+    bank.cosmetics = Some(cosmetics(None));
+    let mut c = crowd_client(&bank, 37);
+    let prepared = render::prepare(&mut c, &mut bank, [960, 540], 1., 1, quality()).unwrap();
+    assert_eq!(prepared.frame.snakes.len(), 100);
+    assert!(
+        prepared
+            .frame
+            .snakes
+            .iter()
+            .all(|s| s.viewport_body_commands > 0)
+    );
+    let bulb = bank
+        .cosmetics
+        .as_ref()
+        .unwrap()
+        .role(SkinSourceRole::KwkBulb)
+        .unwrap();
+    let admitted = prepared
+        .frame
+        .draws
+        .iter()
+        .filter(|d| d.asset == bulb)
+        .count();
+    assert!((1..100).contains(&admitted), "admitted {admitted} antennas");
+    finish_crowd(prepared, &mut bank);
+}
+
+fn finish_crowd(prepared: render::PreparedFrame, bank: &mut Bank) {
     let view = hud::View {
         playing: true,
         opacity: HudOpacity {
@@ -515,7 +627,7 @@ fn hundred_alive_outlined_snakes_with_hud_and_minimap_fit_the_draw_budget() {
             .collect(),
         message: None,
     };
-    let prepared = render::finish_hud(prepared, &mut bank, &view).unwrap();
+    let prepared = render::finish_hud(prepared, bank, &view).unwrap();
     assert!(
         prepared
             .frame

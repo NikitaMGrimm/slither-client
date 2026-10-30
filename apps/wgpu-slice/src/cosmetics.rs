@@ -172,7 +172,7 @@ impl Cosmetics {
         if own.is_some_and(|v| usize::from(v) >= ACCESSORIES.len()) {
             return Err("Accessory must be 0..31".into());
         }
-        let mut next = 0x4000_0000_0000_0000_u64;
+        let mut next = crate::bank::COSMETIC_HANDLE_BASE;
         let mut bytes = 0;
         let mut resource = |image: RgbaImage, name: &str| {
             if bytes + image.pixels.len() > COSMETIC_PIXEL_BUDGET {

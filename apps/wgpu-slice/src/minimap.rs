@@ -7,7 +7,13 @@ use crate::{
 };
 use slither_client::{presentation::*, state::Point};
 
-const HANDLE: u64 = 0x5000_0000_0000_0000;
+use crate::bank::MINIMAP_HANDLE_BASE as HANDLE;
+/// The largest holder (map plus 12px insets), tiled at 510px, and four marker strips.
+pub const MAX_DRAWS: usize = (slither_client::protocol::minimap::MAX_MINIMAP_DIMENSION as usize
+    + 24)
+    .div_ceil(510)
+    .pow(2)
+    + 4;
 
 #[derive(Default)]
 pub struct Minimap {

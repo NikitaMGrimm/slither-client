@@ -2,7 +2,7 @@
 use crate::{
     Result,
     bank::Bank,
-    frame::{Draw, Frame, MAX_EXTENT, SnakeDrawObservation},
+    frame::{Draw, Frame, MAX_DRAWS, MAX_EXTENT, SnakeDrawObservation},
     scene::Resource,
 };
 use slither_client::{presentation::*, state::Point};
@@ -18,6 +18,9 @@ pub struct PreparedFrame {
     pub frame: Frame,
     pub resources: Vec<Resource>,
 }
+// Nicknames are already in the scene before antenna admission. Only these
+// bounded overlay producers append draws after it; body/face draws are counted too.
+const ANTENNA_LATE_DRAW_RESERVE: usize = crate::hud::MAX_DRAWS + crate::minimap::MAX_DRAWS;
 impl PreparedFrame {
     pub fn pixel_bytes(&self) -> usize {
         self.resources.iter().map(|r| r.image.pixels.len()).sum()
@@ -296,27 +299,34 @@ fn submit_antenna(
     bank: &mut Bank,
     skin: &SkinDescriptor,
     antenna: &PreparedAntenna,
+    remaining: usize,
     draws: &mut Vec<Draw>,
 ) -> Result<()> {
+    let mut paths = Vec::new();
+    let mut count = usize::from(antenna.bulb.is_some());
     for stroke in &antenna.strokes {
         let path = match stroke.path {
             AntennaPath::Outer => &antenna.outer_path,
             AntennaPath::Inner => &antenna.inner_path,
         };
+        let Some(path) = stroke_path(path, stroke.width) else {
+            return Ok(());
+        };
+        count += path.segments.len() + path.fans.iter().map(|fan| fan.4).sum::<usize>();
+        paths.push(path);
+    }
+    // Admit the complete antenna, including every cap/join fan and its bulb.
+    if count > remaining {
+        return Ok(());
+    }
+    for (stroke, path) in antenna.strokes.iter().zip(paths) {
         let color = [
             (stroke.color >> 16) as u8,
             (stroke.color >> 8) as u8,
             stroke.color as u8,
         ];
         let solid = bank.solid(color);
-        stroke_path(
-            solid,
-            path,
-            antenna.center,
-            stroke.width,
-            stroke.alpha,
-            draws,
-        )?;
+        path.submit(solid, antenna.center, stroke.alpha, draws);
     }
     if let Some(bulb) = antenna.bulb {
         let asset = bank
@@ -340,16 +350,49 @@ fn submit_antenna(
     Ok(())
 }
 
-/// Tessellate one round-cap/join stroke without alpha-overlapping segment disks.
-/// Interior corners meet at their offset-line intersection; the exterior is a fan.
-fn stroke_path(
-    asset: BodyAsset,
-    path: &[Point],
-    center: Point,
-    width: f64,
-    alpha: f64,
-    draws: &mut Vec<Draw>,
-) -> Result<()> {
+struct StrokePath {
+    segments: Vec<[Point; 4]>,
+    fans: Vec<(Point, Point, f64, f64, usize)>,
+    radius: f64,
+}
+impl StrokePath {
+    fn submit(self, asset: BodyAsset, center: Point, alpha: f64, draws: &mut Vec<Draw>) {
+        let add = |a: Point, b: Point| Point {
+            x: a.x + b.x,
+            y: a.y + b.y,
+        };
+        for points in self.segments {
+            draws.push(polygon(asset, points.map(|p| add(p, center)), alpha));
+        }
+        for (origin, point, start, sweep, steps) in self.fans {
+            for i in 0..steps {
+                let arc = |t: f64| {
+                    add(
+                        point,
+                        Point {
+                            x: (start + t * sweep).cos() * self.radius,
+                            y: (start + t * sweep).sin() * self.radius,
+                        },
+                    )
+                };
+                draws.push(polygon(
+                    asset,
+                    [
+                        origin,
+                        arc(i as f64 / steps as f64),
+                        arc((i + 1) as f64 / steps as f64),
+                        origin,
+                    ]
+                    .map(|p| add(p, center)),
+                    alpha,
+                ));
+            }
+        }
+    }
+}
+
+/// Plan round caps/joins and their exact draw counts before emitting polygons.
+fn stroke_path(path: &[Point], width: f64) -> Option<StrokePath> {
     use std::f64::consts::PI;
     let mut points: Vec<Point> = Vec::new();
     for p in path {
@@ -361,7 +404,11 @@ fn stroke_path(
         }
     }
     if points.len() < 2 {
-        return Ok(());
+        return Some(StrokePath {
+            segments: Vec::new(),
+            fans: Vec::new(),
+            radius: width / 2.,
+        });
     }
     let radius = width / 2.;
     let normals: Vec<_> = points
@@ -413,13 +460,11 @@ fn stroke_path(
         let outer = if inner == 0 { neg(a) } else { a };
         fans.push((intersection, points[i], outer.y.atan2(outer.x), turn));
     }
-    for (start, end) in starts.into_iter().zip(ends) {
-        draws.push(polygon(
-            asset,
-            [start[0], end[0], end[1], start[1]].map(|p| add(p, center)),
-            alpha,
-        ));
-    }
+    let segments = starts
+        .into_iter()
+        .zip(ends)
+        .map(|(start, end)| [start[0], end[0], end[1], start[1]])
+        .collect();
     for (point, normal, turn) in [
         (points[0], normals[0], PI),
         (
@@ -430,37 +475,83 @@ fn stroke_path(
     ] {
         fans.push((point, point, normal.y.atan2(normal.x), turn));
     }
-    for (origin, point, start, sweep) in fans {
-        let steps = (sweep.abs() * radius.max(1.) * 2.).ceil().max(1.);
-        if !steps.is_finite() || steps > crate::frame::MAX_DRAWS.saturating_sub(draws.len()) as f64
-        {
-            return Err("Antenna stroke draw budget".into());
-        }
-        let steps = steps as usize;
-        for i in 0..steps {
-            let arc = |t: f64| {
-                add(
-                    point,
-                    Point {
-                        x: (start + t * sweep).cos() * radius,
-                        y: (start + t * sweep).sin() * radius,
-                    },
-                )
-            };
-            draws.push(polygon(
-                asset,
-                [
-                    origin,
-                    arc(i as f64 / steps as f64),
-                    arc((i + 1) as f64 / steps as f64),
-                    origin,
-                ]
-                .map(|p| add(p, center)),
-                alpha,
-            ));
-        }
+    let fans = fans
+        .into_iter()
+        .map(|(origin, point, start, sweep)| {
+            let steps = (sweep.abs() * radius.max(1.) * 2.).ceil().max(1.);
+            (steps.is_finite() && steps <= MAX_DRAWS as f64).then_some((
+                origin,
+                point,
+                start,
+                sweep,
+                steps as usize,
+            ))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(StrokePath {
+        segments,
+        fans,
+        radius,
+    })
+}
+
+#[cfg(test)]
+mod antenna_budget_tests {
+    use super::*;
+
+    #[test]
+    fn antenna_admission_counts_segments_fans_and_bulb_before_emission() {
+        let mut bank = Bank::new().unwrap();
+        bank.cosmetics =
+            Some(crate::cosmetics::Cosmetics::from_images(Default::default(), None).unwrap());
+        let skin = resolve_skin(24, &[], false).unwrap();
+        let path = vec![
+            Point { x: 0., y: 0. },
+            Point { x: 10., y: 0. },
+            Point { x: 10., y: 10. },
+        ];
+        let antenna = PreparedAntenna {
+            center: Point { x: 100., y: 100. },
+            outer_path: path.clone(),
+            inner_path: path,
+            strokes: vec![
+                AntennaStroke {
+                    path: AntennaPath::Outer,
+                    color: 0x123456,
+                    width: 5.,
+                    alpha: 0.5,
+                },
+                AntennaStroke {
+                    path: AntennaPath::Inner,
+                    color: 0xabcdef,
+                    width: 2.,
+                    alpha: 0.75,
+                },
+            ],
+            bulb: Some(AntennaBulbCommand {
+                center: Point { x: 100., y: 100. },
+                translation: Point::default(),
+                rotation: None,
+                destination: BodyRect {
+                    x: -10.,
+                    y: -10.,
+                    width: 20.,
+                    height: 20.,
+                },
+                alpha: 1.,
+            }),
+            barrier_effect: AntennaBarrierEffect::Disabled,
+        };
+        let mut full = Vec::new();
+        submit_antenna(&mut bank, &skin, &antenna, MAX_DRAWS, &mut full).unwrap();
+        assert!(full.len() > 5); // Four segments, plus cap/join fans and the bulb.
+        let mut draws = vec![image(bank.solid([255; 3]), 0., 0., 1., 1., 1.)];
+        let before = draws.clone();
+        submit_antenna(&mut bank, &skin, &antenna, full.len() - 1, &mut draws).unwrap();
+        assert_eq!(draws, before);
+        submit_antenna(&mut bank, &skin, &antenna, full.len(), &mut draws).unwrap();
+        assert_eq!(&draws[before.len()..], full);
     }
-    Ok(())
 }
 
 /// Numeric camera/body/face preparation is called exactly once per actual draw, including Setup/resize.
@@ -638,6 +729,7 @@ pub fn prepare(
     draws.extend(prey_plan.early.iter().map(prey));
     draws.extend(text_draws);
     let mut snakes = Vec::new();
+    let mut antennas = Vec::new();
     for prepared_snake in prepared {
         let snake = prepared_snake.snake;
         let m = snake.metrics;
@@ -659,10 +751,7 @@ pub fn prepare(
             resolve_authored_local_skin(m.skin, raw.custom_skin())
         }
         .map_err(|e| e.to_string())?;
-        let mut antenna_draws = Vec::new();
-        if let Some(antenna) = &snake.antenna {
-            submit_antenna(bank, &skin, antenna, &mut antenna_draws)?;
-        }
+        let mut antenna_index = draws.len();
         if let Some(geometry) = &snake.body_geometry {
             let body = plan_standard_body_with_antenna(
                 BodyPaintInput {
@@ -711,10 +800,8 @@ pub fn prepare(
                 }
             }
             draws.extend(body.commands[..body.antenna_barrier].iter().map(Draw::from));
-            draws.append(&mut antenna_draws);
+            antenna_index = draws.len();
             draws.extend(body.commands[body.antenna_barrier..].iter().map(Draw::from));
-        } else {
-            draws.append(&mut antenna_draws);
         }
         snakes.push(observation);
         let input = EyeLayoutInput {
@@ -735,6 +822,9 @@ pub fn prepare(
                 .map(|r| (geometry, r.asset))
         });
         submit_face(bank, &skin, &snake, input, accessory, &mut draws)?;
+        if let Some(antenna) = snake.antenna {
+            antennas.push((antenna_index, skin, antenna));
+        }
     }
     draws.extend(food.late.iter().map(Draw::from));
     draws.extend(prey_plan.late.iter().map(prey));
@@ -800,6 +890,18 @@ pub fn prepare(
                 0.8,
             ));
         }
+    }
+    // Admit antennas against the complete non-antenna scene, then restore each
+    // original barrier position (including its relation to death passes).
+    let mut remaining = MAX_DRAWS.saturating_sub(draws.len() + ANTENNA_LATE_DRAW_RESERVE);
+    let mut inserted = 0;
+    for (index, skin, antenna) in antennas {
+        let mut commands = Vec::new();
+        submit_antenna(bank, &skin, &antenna, remaining, &mut commands)?;
+        remaining -= commands.len();
+        let count = commands.len();
+        draws.splice(index + inserted..index + inserted, commands);
+        inserted += count;
     }
     bank.stage_text(identity, text_resources.into_values().collect())?;
     let mut frame = Frame {
@@ -882,7 +984,7 @@ mod text_staging_tests {
     use crate::{materials::RgbaImage, scene::Resource};
     fn stage(bank: &mut Bank, identity: u64) -> Frame {
         let asset = BodyAsset {
-            handle: 0x4000_0000_0000_0000 + identity,
+            handle: crate::bank::TEXT_HANDLE_BASE + identity,
             revision: 1,
             width: 1,
             height: 1,
