@@ -274,6 +274,7 @@ mod tests {
         // ORIGINAL SYNTHETIC image rectangles; no source image or GPU.
         let mut d = Draw {
             corners: None,
+            repeat_uv: None,
             asset: BodyAsset {
                 handle: 1,
                 revision: 1,
