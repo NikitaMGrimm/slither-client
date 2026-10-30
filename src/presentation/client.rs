@@ -2750,6 +2750,30 @@ impl AnimatedClient {
         E: From<ClientPresentationError>,
         R: FnMut(AntennaRandomRequest) -> Result<Vec<[f64; 2]>, E>,
     {
+        self.prepare_draw_with_accessory_styles(
+            width,
+            height,
+            quality_scale,
+            |_, _, _| Ok(detailed_style),
+            resolve_random,
+        )
+    }
+
+    /// Prepare once with appearance-specific body sampling, faces and antennas.
+    /// Style selection must use the same retained appearance as the body recipe.
+    pub fn prepare_draw_with_accessory_styles<E, F, R>(
+        &mut self,
+        width: u32,
+        height: u32,
+        quality_scale: f64,
+        resolve_style: F,
+        resolve_random: R,
+    ) -> Result<Vec<PreparedAccessorySnake>, E>
+    where
+        E: From<ClientPresentationError>,
+        F: FnMut(usize, bool, &SnakePresentation) -> Result<bool, E>,
+        R: FnMut(AntennaRandomRequest) -> Result<Vec<[f64; 2]>, E>,
+    {
         let mut next = self.clone();
         let prepared = next.prepare_draw_resolved_with_accessory_presentation_limited_staged(
             width,
@@ -2757,7 +2781,7 @@ impl AnimatedClient {
             quality_scale,
             MAX_DRAW_SAMPLES,
             &mut AntennaDrawBudget::default(),
-            |_, _, _| Ok(detailed_style),
+            resolve_style,
             resolve_random,
         )?;
         *self = next;

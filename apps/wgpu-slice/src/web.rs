@@ -22,6 +22,27 @@ pub fn game_backing_size(width: f64, height: f64) -> std::result::Result<Vec<u32
         .map(|v| v.to_vec())
         .map_err(js_error)
 }
+/// Startup-only local image batch. The game cannot see a partially decoded set.
+#[wasm_bindgen]
+pub struct CosmeticImages(crate::cosmetics::Images);
+#[wasm_bindgen]
+impl CosmeticImages {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self(crate::cosmetics::Images::default())
+    }
+    pub fn paths() -> Vec<String> {
+        crate::cosmetics::paths()
+    }
+    pub fn add(&mut self, path: &str, bytes: &[u8]) -> std::result::Result<(), JsValue> {
+        self.0.add(path, bytes).map_err(js_error)
+    }
+}
+impl Default for CosmeticImages {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 impl LocalGameplay {
     fn checked<T>(
         &mut self,
@@ -81,6 +102,23 @@ impl LocalGameplay {
             "{:?}; MSAA{}",
             self.host.renderer.adapter_info, self.host.renderer.sample_count
         )
+    }
+    pub fn cosmetics(
+        &mut self,
+        images: CosmeticImages,
+        accessory: i32,
+    ) -> std::result::Result<(), JsValue> {
+        let own = if accessory == -1 {
+            None
+        } else {
+            Some(
+                u8::try_from(accessory)
+                    .map_err(|_| js_error("Accessory must be -1 or 0..31".into()))?,
+            )
+        };
+        let cosmetics =
+            crate::cosmetics::Cosmetics::from_images(images.0, own).map_err(js_error)?;
+        self.game.configure_cosmetics(cosmetics).map_err(js_error)
     }
     pub fn play(
         &mut self,

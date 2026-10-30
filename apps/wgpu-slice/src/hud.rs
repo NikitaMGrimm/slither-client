@@ -81,6 +81,8 @@ pub struct Plan {
 const PAD: u32 = 4;
 /// Upper bound reserved while scene snapshots wait for the command-ordered HUD.
 pub const MAX_PIXEL_BYTES: usize = 512 * 512 * 4;
+/// One score/status panel and one leaderboard panel.
+pub const MAX_DRAWS: usize = 2;
 pub const SCORE_CELLS: u32 = 8;
 // Logical text size stays fixed across window sizes and backing DPR.
 const UI_SCALE: f64 = 1.5;
@@ -233,7 +235,7 @@ pub fn plan_text(text: &str, extent: [u32; 2], scale: f64) -> Result<Plan> {
 pub fn resource() -> Resource {
     Resource {
         asset: BodyAsset {
-            handle: 0x3000_0000_0000_0000,
+            handle: crate::bank::HUD_HANDLE_BASE,
             revision: 0,
             width: 1,
             height: 1,

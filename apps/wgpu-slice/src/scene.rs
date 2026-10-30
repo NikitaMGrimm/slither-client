@@ -85,7 +85,7 @@ pub struct Scene {
 fn add(resources: &mut Vec<Resource>, r: &CanvasRecipe) -> Result<BodyAsset> {
     let image = materialize(r)?;
     let asset = BodyAsset {
-        handle: 0x1000_0000_0000_0001 + resources.len() as u64,
+        handle: crate::bank::BODY_HANDLE_BASE + 1 + resources.len() as u64,
         revision: 1,
         width: image.width,
         height: image.height,

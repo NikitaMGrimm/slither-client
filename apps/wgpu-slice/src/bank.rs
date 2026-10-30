@@ -11,12 +11,20 @@ use slither_client::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 pub const PIXEL_BUDGET: usize = 64 * 1024 * 1024;
+// Each producer owns one high-nibble namespace; low bits identify its textures.
+pub const HANDLE_NAMESPACE_SIZE: u64 = 1 << 60;
+pub const BODY_HANDLE_BASE: u64 = 0x1000_0000_0000_0000;
+pub const HUD_HANDLE_BASE: u64 = 0x3000_0000_0000_0000;
+pub const TEXT_HANDLE_BASE: u64 = 0x4000_0000_0000_0000;
+pub const MINIMAP_HANDLE_BASE: u64 = 0x5000_0000_0000_0000;
+pub const COSMETIC_HANDLE_BASE: u64 = 0x6000_0000_0000_0000;
 #[derive(Clone)]
 pub struct Family {
     pub variants: Vec<BodyAssetUse>,
     pub glow: BodyAssetUse,
 }
 pub struct Bank {
+    pub cosmetics: Option<crate::cosmetics::Cosmetics>,
     pub assets: Vec<BodyAsset>,
     recipes: Vec<CanvasRecipe>,
     pub bodies: Vec<Family>,
@@ -46,6 +54,7 @@ impl Bank {
     pub fn new() -> Result<Self> {
         let r = authored_source_recipes();
         let mut b = Self {
+            cosmetics: None,
             assets: Vec::new(),
             recipes: Vec::new(),
             bodies: Vec::new(),
@@ -131,7 +140,7 @@ impl Bank {
     fn add(&mut self, r: CanvasRecipe) -> BodyAssetUse {
         let index = self.recipes.len();
         self.assets.push(BodyAsset {
-            handle: 0x1000_0000_0000_0001 + index as u64,
+            handle: BODY_HANDLE_BASE + 1 + index as u64,
             revision: 1,
             width: r.width,
             height: r.height,
@@ -186,6 +195,13 @@ impl Bank {
             .iter()
             .map(|i| self.assets[*i].width as usize * self.assets[*i].height as usize * 4)
             .sum::<usize>()
+            + self
+                .cosmetics
+                .iter()
+                .flat_map(|c| c.resources())
+                .filter(|r| keys.contains(&r.asset.into()))
+                .map(|r| r.image.pixels.len())
+                .sum::<usize>()
             + if keys.contains(&self.hud.asset.into()) {
                 self.hud.image.pixels.len()
             } else {
@@ -210,6 +226,13 @@ impl Bank {
         }
         let mut resources: Vec<_> = self.cache.values().cloned().collect();
         resources.extend_from_slice(&text);
+        resources.extend(
+            self.cosmetics
+                .iter()
+                .flat_map(|c| c.resources())
+                .filter(|r| keys.contains(&r.asset.into()))
+                .cloned(),
+        );
         if keys.contains(&self.hud.asset.into()) {
             resources.push(self.hud.clone());
         }
@@ -277,5 +300,30 @@ impl Bank {
         let a = self.assets[u.asset];
         self.solids.insert(color, a);
         a
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn texture_handle_namespaces_are_disjoint() {
+        let bases = [
+            BODY_HANDLE_BASE,
+            HUD_HANDLE_BASE,
+            TEXT_HANDLE_BASE,
+            MINIMAP_HANDLE_BASE,
+            COSMETIC_HANDLE_BASE,
+        ];
+        for (i, base) in bases.iter().enumerate() {
+            assert_eq!(base % HANDLE_NAMESPACE_SIZE, 0);
+            for other in &bases[i + 1..] {
+                assert!(
+                    base + HANDLE_NAMESPACE_SIZE <= *other
+                        || other + HANDLE_NAMESPACE_SIZE <= *base
+                );
+            }
+        }
     }
 }

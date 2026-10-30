@@ -105,8 +105,8 @@ budgets still apply. HUD/leaderboard text conversion is a follow-up.
 
 Ordered body, early/late food and prey, paired eyes and arena are implemented
 using authored procedural materials. The HUD shows length and rank at bottom left
-and the top-ten leaderboard at top right, in a temporary 5x7 bitmap font. Complete menus, image faces,
-antennas and mobile integration remain open. Material/edge rasterization differs
+and the top-ten leaderboard at top right, in a temporary 5x7 bitmap font. Complete
+menus and mobile integration remain open. Material/edge rasterization differs
 from Canvas; tests do not establish visual parity or player feel.
 
 The minimap uses shared retained occupancy, crossfade, marker and session opacity
@@ -118,3 +118,18 @@ The synthetic slither-wgpu-diagnostic executable, web/diagnostic.html and exampl
 are renderer development aids. Offline tests use authored synthetic packets and
 socket doubles; they open no GPU or game connection. See root docs/architecture.md
 and docs/verification.md for ownership and checks.
+
+## Optional cosmetics
+
+Set `--cosmetics-dir <artwork-dir>` on the desktop executable to use a local
+directory containing the original `s/` and `s2/` image paths. `--accessory 0..31`
+selects an accessory for the own snake only. Image faces, antennas and dense/swell
+styles reuse the shared core; unavailable images fall back locally with one warning.
+Without a directory, rendering stays plain. Artwork and captures remain outside Git.
+
+For WebGPU, copy this app's web files beside the generated pkg directory, then run
+`node apps/wgpu-slice/dev-server.mjs --web-dir dist/wgpu-slice --port 19087 --simulator-port 19086 --cosmetics-dir <artwork-dir> --accessory 30`.
+Use a separately started simulator on the chosen free port. PNG/JPEG reads are
+capped at 4 MiB per file, the decoded cosmetic bank at 16 MiB, and active resources
+at the existing 64 MiB budget. Rasterization and independent random streams still
+limit pixel parity; normal tests use synthetic images only.

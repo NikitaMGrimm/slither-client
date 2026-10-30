@@ -92,7 +92,7 @@ impl Default for TextCache {
             entries: BTreeMap::new(),
             bytes: 0,
             clock: 0,
-            next_handle: 0x4000_0000_0000_0000,
+            next_handle: crate::bank::TEXT_HANDLE_BASE,
         }
     }
 }
@@ -161,6 +161,9 @@ impl TextCache {
                 self.next_handle = self
                     .next_handle
                     .checked_add(1)
+                    .filter(|handle| {
+                        *handle < crate::bank::TEXT_HANDLE_BASE + crate::bank::HANDLE_NAMESPACE_SIZE
+                    })
                     .ok_or("text handle overflow")?;
                 tiles.push(Tile {
                     resource: Resource {

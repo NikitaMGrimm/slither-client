@@ -2,7 +2,7 @@
 use crate::{
     Result,
     bank::Bank,
-    frame::{Draw, Frame, MAX_EXTENT, SnakeDrawObservation},
+    frame::{Draw, Frame, MAX_DRAWS, MAX_EXTENT, SnakeDrawObservation},
     scene::Resource,
 };
 use slither_client::{presentation::*, state::Point};
@@ -18,6 +18,9 @@ pub struct PreparedFrame {
     pub frame: Frame,
     pub resources: Vec<Resource>,
 }
+// Nicknames are already in the scene before antenna admission. Only these
+// bounded overlay producers append draws after it; body/face draws are counted too.
+const ANTENNA_LATE_DRAW_RESERVE: usize = crate::hud::MAX_DRAWS + crate::minimap::MAX_DRAWS;
 impl PreparedFrame {
     pub fn pixel_bytes(&self) -> usize {
         self.resources.iter().map(|r| r.image.pixels.len()).sum()
@@ -105,6 +108,452 @@ fn polygon(asset: BodyAsset, points: [Point; 4], alpha: f64) -> Draw {
     d
 }
 
+fn placed(
+    asset: BodyAsset,
+    source: Option<BodyRect>,
+    destination: BodyRect,
+    translation: Point,
+    rotation: f64,
+    alpha: f64,
+) -> Draw {
+    let mut draw = image(
+        asset,
+        destination.x,
+        destination.y,
+        destination.width,
+        destination.height,
+        alpha,
+    );
+    draw.source = source;
+    draw.translation = [translation.x, translation.y];
+    draw.rotation = rotation;
+    draw
+}
+
+fn submit_face(
+    bank: &mut Bank,
+    skin: &SkinDescriptor,
+    snake: &PreparedSnake,
+    view: EyeLayoutInput,
+    accessory: Option<(StaticHeadAccessoryGeometry, BodyAsset)>,
+    draws: &mut Vec<Draw>,
+) -> Result<()> {
+    let heading = snake.face_heading;
+    let pupil = snake.pupil;
+    if let FaceGeometry::Paired(face) = snake.face_geometry {
+        let e = face
+            .eyes
+            .layout(heading, pupil, view)
+            .map_err(|e| e.to_string())?;
+        for pair in e.pairs {
+            if e.outline_width > 0. {
+                let outer = e.eye_radius + e.outline_width / 2.;
+                if e.eye_alpha >= 1. {
+                    // The opaque fill covers the disk's interior, saving draws.
+                    draws.push(image(
+                        bank.disk([0; 3])?,
+                        pair.eye.x - outer,
+                        pair.eye.y - outer,
+                        outer * 2.,
+                        outer * 2.,
+                        e.eye_alpha,
+                    ));
+                } else {
+                    let inner = (e.eye_radius - e.outline_width / 2.).max(0.);
+                    let steps = (std::f64::consts::TAU * outer).ceil().clamp(16., 48.) as usize;
+                    let black = bank.solid([0; 3]);
+                    // Canvas strokes leave the interior clear during death fades.
+                    for i in 0..steps {
+                        let at = |ordinal: usize, radius: f64| {
+                            let angle = std::f64::consts::TAU * ordinal as f64 / steps as f64;
+                            Point {
+                                x: pair.eye.x + radius * angle.cos(),
+                                y: pair.eye.y + radius * angle.sin(),
+                            }
+                        };
+                        draws.push(polygon(
+                            black,
+                            [
+                                at(i, outer),
+                                at(i + 1, outer),
+                                at(i + 1, inner),
+                                at(i, inner),
+                            ],
+                            e.eye_alpha,
+                        ));
+                    }
+                }
+            }
+            for (color, point, radius, alpha) in [
+                (e.eye_color, pair.eye, e.eye_radius, e.eye_alpha),
+                (e.pupil_color, pair.pupil, e.pupil_radius, e.pupil_alpha),
+            ] {
+                if radius > 0. {
+                    draws.push(image(
+                        bank.disk(color)?,
+                        point.x - radius,
+                        point.y - radius,
+                        radius * 2.,
+                        radius * 2.,
+                        alpha,
+                    ));
+                }
+            }
+        }
+    }
+    if let Some((geometry, asset)) = accessory {
+        let layout = geometry
+            .layout(
+                heading,
+                Point {
+                    x: f64::from(asset.width),
+                    y: f64::from(asset.height),
+                },
+                snake.metrics.spawn_progress,
+                view,
+            )
+            .map_err(|e| e.to_string())?;
+        draws.push(placed(
+            asset,
+            Some(BodyRect {
+                x: 0.,
+                y: 0.,
+                width: f64::from(asset.width),
+                height: f64::from(asset.height),
+            }),
+            layout.destination,
+            layout.translation,
+            layout.rotation,
+            layout.alpha,
+        ));
+    }
+    let Some(cosmetics) = &bank.cosmetics else {
+        return Ok(());
+    };
+    match (snake.face_geometry, skin.face_sources) {
+        (
+            FaceGeometry::SingleImage(geometry),
+            SkinFaceSources::SingleImage {
+                base,
+                pupil: source_pupil,
+            },
+        ) => {
+            let layout = geometry
+                .layout(heading, pupil, view)
+                .map_err(|e| e.to_string())?;
+            for (source, rect) in [base, source_pupil].into_iter().zip(layout.destinations) {
+                draws.push(placed(
+                    cosmetics
+                        .role(source.source)
+                        .ok_or("Missing prepared face source")?,
+                    source.source_rect,
+                    rect,
+                    Point { x: 0., y: 0. },
+                    0.,
+                    layout.alpha,
+                ));
+            }
+        }
+        (FaceGeometry::Mouth(geometry), SkinFaceSources::Mouth { eye_marks, mouth }) => {
+            let layout = geometry
+                .layout(heading, pupil, view)
+                .map_err(|e| e.to_string())?;
+            for (source, layout) in [eye_marks, eye_marks, mouth].into_iter().zip(layout.images) {
+                draws.push(placed(
+                    cosmetics
+                        .role(source)
+                        .ok_or("Missing prepared face source")?,
+                    None,
+                    layout.destination,
+                    layout.translation,
+                    layout.rotation,
+                    1.,
+                ));
+            }
+        }
+        (FaceGeometry::Paired(face), SkinFaceSources::PairedSide(source)) => {
+            for layout in face
+                .decoration
+                .ok_or("Missing paired decoration")?
+                .layout(heading, view)
+                .map_err(|e| e.to_string())?
+            {
+                draws.push(placed(
+                    cosmetics
+                        .role(source)
+                        .ok_or("Missing prepared face source")?,
+                    None,
+                    layout.destination,
+                    layout.translation,
+                    layout.rotation,
+                    1.,
+                ));
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn submit_antenna(
+    bank: &mut Bank,
+    skin: &SkinDescriptor,
+    antenna: &PreparedAntenna,
+    remaining: usize,
+    draws: &mut Vec<Draw>,
+) -> Result<()> {
+    let mut paths = Vec::new();
+    let mut count = usize::from(antenna.bulb.is_some());
+    for stroke in &antenna.strokes {
+        let path = match stroke.path {
+            AntennaPath::Outer => &antenna.outer_path,
+            AntennaPath::Inner => &antenna.inner_path,
+        };
+        let Some(path) = stroke_path(path, stroke.width) else {
+            return Ok(());
+        };
+        count += path.segments.len() + path.fans.iter().map(|fan| fan.4).sum::<usize>();
+        paths.push(path);
+    }
+    // Admit the complete antenna, including every cap/join fan and its bulb.
+    if count > remaining {
+        return Ok(());
+    }
+    for (stroke, path) in antenna.strokes.iter().zip(paths) {
+        let color = [
+            (stroke.color >> 16) as u8,
+            (stroke.color >> 8) as u8,
+            stroke.color as u8,
+        ];
+        let solid = bank.solid(color);
+        path.submit(solid, antenna.center, stroke.alpha, draws);
+    }
+    if let Some(bulb) = antenna.bulb {
+        let asset = bank
+            .cosmetics
+            .as_ref()
+            .ok_or("Antenna images unavailable")?
+            .role(skin.antenna.ok_or("Missing antenna role")?.source)
+            .ok_or("Missing prepared antenna source")?;
+        draws.push(placed(
+            asset,
+            None,
+            bulb.destination,
+            Point {
+                x: bulb.center.x + bulb.translation.x,
+                y: bulb.center.y + bulb.translation.y,
+            },
+            bulb.rotation.unwrap_or(0.),
+            bulb.alpha,
+        ));
+    }
+    Ok(())
+}
+
+struct StrokePath {
+    segments: Vec<[Point; 4]>,
+    fans: Vec<(Point, Point, f64, f64, usize)>,
+    radius: f64,
+}
+impl StrokePath {
+    fn submit(self, asset: BodyAsset, center: Point, alpha: f64, draws: &mut Vec<Draw>) {
+        let add = |a: Point, b: Point| Point {
+            x: a.x + b.x,
+            y: a.y + b.y,
+        };
+        for points in self.segments {
+            draws.push(polygon(asset, points.map(|p| add(p, center)), alpha));
+        }
+        for (origin, point, start, sweep, steps) in self.fans {
+            for i in 0..steps {
+                let arc = |t: f64| {
+                    add(
+                        point,
+                        Point {
+                            x: (start + t * sweep).cos() * self.radius,
+                            y: (start + t * sweep).sin() * self.radius,
+                        },
+                    )
+                };
+                draws.push(polygon(
+                    asset,
+                    [
+                        origin,
+                        arc(i as f64 / steps as f64),
+                        arc((i + 1) as f64 / steps as f64),
+                        origin,
+                    ]
+                    .map(|p| add(p, center)),
+                    alpha,
+                ));
+            }
+        }
+    }
+}
+
+/// Plan round caps/joins and their exact draw counts before emitting polygons.
+fn stroke_path(path: &[Point], width: f64) -> Option<StrokePath> {
+    use std::f64::consts::PI;
+    let mut points: Vec<Point> = Vec::new();
+    for p in path {
+        if points
+            .last()
+            .is_none_or(|q| (p.x - q.x).hypot(p.y - q.y) > 1e-9)
+        {
+            points.push(*p);
+        }
+    }
+    if points.len() < 2 {
+        return Some(StrokePath {
+            segments: Vec::new(),
+            fans: Vec::new(),
+            radius: width / 2.,
+        });
+    }
+    let radius = width / 2.;
+    let normals: Vec<_> = points
+        .windows(2)
+        .map(|p| {
+            let dx = p[1].x - p[0].x;
+            let dy = p[1].y - p[0].y;
+            let length = dx.hypot(dy);
+            Point {
+                x: -dy / length * radius,
+                y: dx / length * radius,
+            }
+        })
+        .collect();
+    let add = |a: Point, b: Point| Point {
+        x: a.x + b.x,
+        y: a.y + b.y,
+    };
+    let neg = |a: Point| Point { x: -a.x, y: -a.y };
+    let mut starts: Vec<_> = points
+        .windows(2)
+        .zip(&normals)
+        .map(|(p, n)| [add(p[0], *n), add(p[0], neg(*n))])
+        .collect();
+    let mut ends: Vec<_> = points
+        .windows(2)
+        .zip(&normals)
+        .map(|(p, n)| [add(p[1], *n), add(p[1], neg(*n))])
+        .collect();
+    let mut fans = Vec::new();
+    for i in 1..points.len() - 1 {
+        let a = normals[i - 1];
+        let b = normals[i];
+        let turn = (a.x * b.y - a.y * b.x).atan2(a.x * b.x + a.y * b.y);
+        if turn.abs() < 1e-9 {
+            continue;
+        }
+        let denominator = 1. + (a.x * b.x + a.y * b.y) / (radius * radius);
+        // Near reversal has no stable inside intersection. Bound the join locally.
+        let factor = 1. / denominator.max(0.25);
+        let m = Point {
+            x: (a.x + b.x) * factor,
+            y: (a.y + b.y) * factor,
+        };
+        let inner = usize::from(turn < 0.);
+        let intersection = add(points[i], if inner == 0 { m } else { neg(m) });
+        ends[i - 1][inner] = intersection;
+        starts[i][inner] = intersection;
+        let outer = if inner == 0 { neg(a) } else { a };
+        fans.push((intersection, points[i], outer.y.atan2(outer.x), turn));
+    }
+    let segments = starts
+        .into_iter()
+        .zip(ends)
+        .map(|(start, end)| [start[0], end[0], end[1], start[1]])
+        .collect();
+    for (point, normal, turn) in [
+        (points[0], normals[0], PI),
+        (
+            *points.last().expect("path"),
+            neg(*normals.last().expect("path")),
+            PI,
+        ),
+    ] {
+        fans.push((point, point, normal.y.atan2(normal.x), turn));
+    }
+    let fans = fans
+        .into_iter()
+        .map(|(origin, point, start, sweep)| {
+            let steps = (sweep.abs() * radius.max(1.) * 2.).ceil().max(1.);
+            (steps.is_finite() && steps <= MAX_DRAWS as f64).then_some((
+                origin,
+                point,
+                start,
+                sweep,
+                steps as usize,
+            ))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(StrokePath {
+        segments,
+        fans,
+        radius,
+    })
+}
+
+#[cfg(test)]
+mod antenna_budget_tests {
+    use super::*;
+
+    #[test]
+    fn antenna_admission_counts_segments_fans_and_bulb_before_emission() {
+        let mut bank = Bank::new().unwrap();
+        bank.cosmetics =
+            Some(crate::cosmetics::Cosmetics::from_images(Default::default(), None).unwrap());
+        let skin = resolve_skin(24, &[], false).unwrap();
+        let path = vec![
+            Point { x: 0., y: 0. },
+            Point { x: 10., y: 0. },
+            Point { x: 10., y: 10. },
+        ];
+        let antenna = PreparedAntenna {
+            center: Point { x: 100., y: 100. },
+            outer_path: path.clone(),
+            inner_path: path,
+            strokes: vec![
+                AntennaStroke {
+                    path: AntennaPath::Outer,
+                    color: 0x123456,
+                    width: 5.,
+                    alpha: 0.5,
+                },
+                AntennaStroke {
+                    path: AntennaPath::Inner,
+                    color: 0xabcdef,
+                    width: 2.,
+                    alpha: 0.75,
+                },
+            ],
+            bulb: Some(AntennaBulbCommand {
+                center: Point { x: 100., y: 100. },
+                translation: Point::default(),
+                rotation: None,
+                destination: BodyRect {
+                    x: -10.,
+                    y: -10.,
+                    width: 20.,
+                    height: 20.,
+                },
+                alpha: 1.,
+            }),
+            barrier_effect: AntennaBarrierEffect::Disabled,
+        };
+        let mut full = Vec::new();
+        submit_antenna(&mut bank, &skin, &antenna, MAX_DRAWS, &mut full).unwrap();
+        assert!(full.len() > 5); // Four segments, plus cap/join fans and the bulb.
+        let mut draws = vec![image(bank.solid([255; 3]), 0., 0., 1., 1., 1.)];
+        let before = draws.clone();
+        submit_antenna(&mut bank, &skin, &antenna, full.len() - 1, &mut draws).unwrap();
+        assert_eq!(draws, before);
+        submit_antenna(&mut bank, &skin, &antenna, full.len(), &mut draws).unwrap();
+        assert_eq!(&draws[before.len()..], full);
+    }
+}
+
 /// Numeric camera/body/face preparation is called exactly once per actual draw, including Setup/resize.
 pub fn prepare(
     client: &mut AnimatedClient,
@@ -115,15 +564,36 @@ pub fn prepare(
     applied: QualitySnapshot,
 ) -> Result<PreparedFrame> {
     let logical = dimensions(extent, scale)?;
+    let full_stock = bank.cosmetics.is_some();
+    // Mix the draw identity before the local stream so successive draws do not
+    // give the first antenna node nearly identical perturbations. Retried frames
+    // reuse their already prepared plan and consume no additional randomness.
+    let mut entropy = identity.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    entropy = (entropy ^ (entropy >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    entropy = (entropy ^ (entropy >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    entropy ^= entropy >> 31;
     let prepared = client
-        .prepare_draw_resolved(
+        .prepare_draw_with_accessory_styles::<PreparationError, _, _>(
             logical[0],
             logical[1],
             applied.quality_scale,
             |_, _, snake| {
-                resolve_authored_local_skin(snake.metrics().skin, snake.custom_skin())
-                    .map(|skin| skin.body_style.detailed_segments)
-                    .map_err(|e| PreparationError(e.to_string()))
+                Ok(full_stock
+                    && resolve_skin(snake.metrics().skin, snake.custom_skin(), false)
+                        .expect("admitted custom bytes")
+                        .body_style
+                        .detailed_segments)
+            },
+            |request| {
+                Ok((0..request.random_pair_count)
+                    .map(|_| {
+                        std::array::from_fn(|_| {
+                            entropy = entropy.wrapping_mul(1664525).wrapping_add(1013904223)
+                                & 0xffff_ffff;
+                            entropy as f64 / 4294967296.
+                        })
+                    })
+                    .collect())
             },
         )
         .map_err(|e| e.0)?;
@@ -247,8 +717,8 @@ pub fn prepare(
             text_draws.push(draw);
         }
     }
-    let palettes: Vec<_> = bank
-        .bodies
+    let families = bank.bodies.clone();
+    let palettes: Vec<_> = families
         .iter()
         .map(|p| BodyPalette {
             variants: &p.variants,
@@ -258,9 +728,10 @@ pub fn prepare(
     draws.extend(food.early.iter().map(Draw::from));
     draws.extend(prey_plan.early.iter().map(prey));
     draws.extend(text_draws);
-    let mut eyes = Vec::new();
     let mut snakes = Vec::new();
-    for snake in prepared {
+    let mut antennas = Vec::new();
+    for prepared_snake in prepared {
+        let snake = prepared_snake.snake;
         let m = snake.metrics;
         let mut observation = SnakeDrawObservation {
             id: m.id,
@@ -271,113 +742,89 @@ pub fn prepare(
         let raw = client
             .snake_object(snake.token)
             .ok_or("prepared appearance missing")?;
-        let skin =
-            resolve_authored_local_skin(m.skin, raw.custom_skin()).map_err(|e| e.to_string())?;
+        let skin = if full_stock {
+            bank.cosmetics
+                .as_ref()
+                .expect("full stock")
+                .skin(m.skin, raw.custom_skin())
+        } else {
+            resolve_authored_local_skin(m.skin, raw.custom_skin())
+        }
+        .map_err(|e| e.to_string())?;
+        let mut antenna_index = draws.len();
         if let Some(geometry) = &snake.body_geometry {
-            let body = plan_standard_body(BodyPaintInput {
-                geometry: geometry.as_paint_geometry(),
-                recipe: BodyPaintRecipe {
-                    base_palette: skin.base_palette,
-                    palettes: &palettes,
-                    runs: &skin.runs,
-                    variant_mode: skin.variant_mode,
-                    variant_period: skin.variant_period,
-                    custom: skin.custom,
-                    style: Some(skin.body_style),
-                    outline: Some(bank.outline),
-                    shadow: Some(bank.shadow),
-                    death: Some(bank.death),
+            let body = plan_standard_body_with_antenna(
+                BodyPaintInput {
+                    geometry: geometry.as_paint_geometry(),
+                    recipe: BodyPaintRecipe {
+                        base_palette: skin.base_palette,
+                        palettes: &palettes,
+                        runs: &skin.runs,
+                        variant_mode: skin.variant_mode,
+                        variant_period: skin.variant_period,
+                        custom: skin.custom,
+                        style: Some(skin.body_style),
+                        outline: Some(bank.outline),
+                        shadow: Some(bank.shadow),
+                        death: Some(bank.death),
+                    },
+                    assets: &bank.assets,
+                    view,
+                    quality,
+                    visual: BodyPaintVisual {
+                        scale: m.scale,
+                        spawn: m.spawn_progress,
+                        death: m.death_progress,
+                        dead: !m.alive,
+                        smoothed_speed: m.visual_speed,
+                        boost_threshold: m.boost_threshold_speed,
+                        cruise_speed: m.cruise_speed,
+                        maximum_speed: m.maximum_speed,
+                        boost_phase: m.boost_phase,
+                    },
+                    entry_alpha: 1.,
+                    command_limit: 8192,
                 },
-                assets: &bank.assets,
-                view,
-                quality,
-                visual: BodyPaintVisual {
-                    scale: m.scale,
-                    spawn: m.spawn_progress,
-                    death: m.death_progress,
-                    dead: !m.alive,
-                    smoothed_speed: m.visual_speed,
-                    boost_threshold: m.boost_threshold_speed,
-                    cruise_speed: m.cruise_speed,
-                    maximum_speed: m.maximum_speed,
-                    boost_phase: m.boost_phase,
-                },
-                entry_alpha: 1.,
-                command_limit: 8192,
-            })
+                snake
+                    .antenna
+                    .as_ref()
+                    .map_or(AntennaBarrierEffect::Disabled, |a| a.barrier_effect),
+            )
             .map_err(|e| e.to_string())?;
             for command in &body.commands {
-                let draw = Draw::from(command);
                 if command.pass == BodyPaintPass::Body {
                     observation.body_commands += 1;
-                    if draw.image_intersects_viewport(extent, scale) {
+                    if Draw::from(command).image_intersects_viewport(extent, scale) {
                         observation.viewport_body_commands += 1;
                     }
                 }
-                draws.push(draw);
             }
+            draws.extend(body.commands[..body.antenna_barrier].iter().map(Draw::from));
+            antenna_index = draws.len();
+            draws.extend(body.commands[body.antenna_barrier..].iter().map(Draw::from));
         }
         snakes.push(observation);
-        let start = draws.len();
-        if let Some(style) = snake.eye_geometry {
-            eyes.push((
-                start,
-                style
-                    .layout(
-                        snake.face_heading,
-                        snake.pupil,
-                        EyeLayoutInput {
-                            corrected_head: m.corrected_head,
-                            camera: view.camera,
-                            viewport_half: Point {
-                                x: view.half_width,
-                                y: view.half_height,
-                            },
-                            scale: m.scale,
-                            zoom: view.zoom,
-                            death_progress: m.death_progress,
-                        },
-                    )
-                    .map_err(|e| e.to_string())?,
-            ));
+        let input = EyeLayoutInput {
+            corrected_head: m.corrected_head,
+            camera: view.camera,
+            viewport_half: Point {
+                x: view.half_width,
+                y: view.half_height,
+            },
+            scale: m.scale,
+            zoom: view.zoom,
+            death_progress: m.death_progress,
+        };
+        let accessory = prepared_snake.accessory.and_then(|geometry| {
+            bank.cosmetics
+                .as_ref()
+                .and_then(|c| c.accessory(snake.own))
+                .map(|r| (geometry, r.asset))
+        });
+        submit_face(bank, &skin, &snake, input, accessory, &mut draws)?;
+        if let Some(antenna) = snake.antenna {
+            antennas.push((antenna_index, skin, antenna));
         }
-    }
-    drop(palettes);
-    // Insert complete pairs immediately after each snake; never regroup them across bodies.
-    for (index, e) in eyes.into_iter().rev() {
-        let mut face = Vec::new();
-        for pair in e.pairs {
-            if e.outline_width > 0. {
-                let r = e.eye_radius + e.outline_width / 2.;
-                face.push(image(
-                    bank.disk([0; 3])?,
-                    pair.eye.x - r,
-                    pair.eye.y - r,
-                    r * 2.,
-                    r * 2.,
-                    e.eye_alpha,
-                ));
-            }
-            let r = e.eye_radius;
-            face.push(image(
-                bank.disk(e.eye_color)?,
-                pair.eye.x - r,
-                pair.eye.y - r,
-                r * 2.,
-                r * 2.,
-                e.eye_alpha,
-            ));
-            let r = e.pupil_radius;
-            face.push(image(
-                bank.disk(e.pupil_color)?,
-                pair.pupil.x - r,
-                pair.pupil.y - r,
-                r * 2.,
-                r * 2.,
-                e.pupil_alpha,
-            ));
-        }
-        draws.splice(index..index, face);
     }
     draws.extend(food.late.iter().map(Draw::from));
     draws.extend(prey_plan.late.iter().map(prey));
@@ -443,6 +890,18 @@ pub fn prepare(
                 0.8,
             ));
         }
+    }
+    // Admit antennas against the complete non-antenna scene, then restore each
+    // original barrier position (including its relation to death passes).
+    let mut remaining = MAX_DRAWS.saturating_sub(draws.len() + ANTENNA_LATE_DRAW_RESERVE);
+    let mut inserted = 0;
+    for (index, skin, antenna) in antennas {
+        let mut commands = Vec::new();
+        submit_antenna(bank, &skin, &antenna, remaining, &mut commands)?;
+        remaining -= commands.len();
+        let count = commands.len();
+        draws.splice(index + inserted..index + inserted, commands);
+        inserted += count;
     }
     bank.stage_text(identity, text_resources.into_values().collect())?;
     let mut frame = Frame {
@@ -525,7 +984,7 @@ mod text_staging_tests {
     use crate::{materials::RgbaImage, scene::Resource};
     fn stage(bank: &mut Bank, identity: u64) -> Frame {
         let asset = BodyAsset {
-            handle: 0x4000_0000_0000_0000 + identity,
+            handle: crate::bank::TEXT_HANDLE_BASE + identity,
             revision: 1,
             width: 1,
             height: 1,
